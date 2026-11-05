@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # ---------------------------------------------------------------------------
 # MCP Server Dockerfile
 #
@@ -16,6 +17,9 @@ WORKDIR /app
 
 # Copy workspace root files needed for pnpm install (corepack reads packageManager from package.json)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# The workspace installs native binaries for every OS/CPU (supportedArchitectures,
+# for packaging the runner). This image only needs its own platform: drop it.
+RUN sed -i '/^supportedArchitectures:/,/^[^ ]/{/^supportedArchitectures:/d;/^ /d}' pnpm-workspace.yaml
 # pnpm-workspace.yaml declares workspace patchedDependencies (e.g. the
 # desktop-only @libsql/client patch); pnpm resolves the patch files at install
 # time even when the patched package is outside this filter's closure.
@@ -51,7 +55,14 @@ COPY packages/redis/ packages/redis/
 COPY packages/typescript-config/ packages/typescript-config/
 
 # Install dependencies (workspace mode, only for the MCP app and its deps)
-RUN pnpm install --frozen-lockfile --filter mcp... --ignore-scripts
+RUN --mount=type=cache,id=af-mcp-pnpm-store,target=/pnpm/store,sharing=locked \
+    --mount=type=cache,id=af-mcp-pnpm-cache,target=/root/.cache/pnpm,sharing=locked \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm config set fetch-retries 5 && \
+    pnpm config set fetch-retry-mintimeout 20000 && \
+    pnpm config set fetch-retry-maxtimeout 120000 && \
+    pnpm config set fetch-timeout 600000 && \
+    pnpm install --frozen-lockfile --filter mcp... --ignore-scripts
 # Generate Prisma client in clean CI checkouts where generated/ is absent.
 RUN pnpm --filter @repo/database exec prisma generate --no-hints --schema=./prisma/schema.prisma
 
@@ -73,6 +84,9 @@ WORKDIR /app
 
 # Copy workspace root files (corepack reads packageManager from package.json)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# The workspace installs native binaries for every OS/CPU (supportedArchitectures,
+# for packaging the runner). This image only needs its own platform: drop it.
+RUN sed -i '/^supportedArchitectures:/,/^[^ ]/{/^supportedArchitectures:/d;/^ /d}' pnpm-workspace.yaml
 # Workspace patchedDependencies patch files — required by pnpm install (see builder stage).
 COPY patches/ patches/
 RUN corepack prepare --activate
@@ -102,7 +116,14 @@ COPY packages/telemetry-contract/package.json packages/telemetry-contract/
 COPY --from=builder /app/packages/typescript-config/ packages/typescript-config/
 
 # Install production-only dependencies
-RUN pnpm install --frozen-lockfile --filter mcp... --prod --ignore-scripts
+RUN --mount=type=cache,id=af-mcp-pnpm-store,target=/pnpm/store,sharing=locked \
+    --mount=type=cache,id=af-mcp-pnpm-cache,target=/root/.cache/pnpm,sharing=locked \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm config set fetch-retries 5 && \
+    pnpm config set fetch-retry-mintimeout 20000 && \
+    pnpm config set fetch-retry-maxtimeout 120000 && \
+    pnpm config set fetch-timeout 600000 && \
+    pnpm install --frozen-lockfile --filter mcp... --prod --ignore-scripts
 
 # Copy MCP source so runtime tsx can resolve workspace deep imports consistently.
 COPY --from=builder /app/apps/mcp/src/ apps/mcp/src/
