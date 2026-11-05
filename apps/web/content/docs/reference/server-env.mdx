@@ -48,7 +48,8 @@ Nothing assumes AWS: any S3-compatible server works.
 |---|---|
 | `ENCRYPTION_KEY` | 32-byte base64 master key (AES-256-GCM) for secrets at rest: connection tokens and Claude API keys. Rotating it makes stored secrets unreadable |
 | `BETTER_AUTH_SECRET` | Signing secret of the sign-in sessions |
-| `AGENTFLOW_RUNNER_JWT_SECRET` | Shared secret for Agent tokens. Optional; a weak value (too short or too few different characters) fails validation |
+| `INTERNAL_API_SECRET` | Shared secret the MCP server sends in `X-Internal-Secret` on its calls to the API. Set the same value on the API and the MCP server; the MCP server does not start without it |
+| `AGENTFLOW_RUNNER_JWT_SECRET` | Shared secret for Agent tokens. Required: the api fails to start without it, or with a value shorter than 32 characters or with fewer than 8 different characters |
 
 Generate a key with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
 

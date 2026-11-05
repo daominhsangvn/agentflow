@@ -1,171 +1,173 @@
 ---
 title: "Deploy the server for production"
-description: "Run AgentFlow on its own domain: backing services, build, systemd units, HTTPS reverse proxy, upgrades and backups."
+description: "Run AgentFlow on its own domain with Docker Compose: environment, HTTPS reverse proxy, upgrades and backups."
 ---
 
-[Install the server](/docs/getting-started/install-server) starts AgentFlow in development mode (`pnpm dev`) on one machine. This page runs the same server for a team: built once, started by systemd, behind HTTPS, with backups and a way to upgrade.
+[Install the server](/docs/getting-started/install-server) starts AgentFlow in development mode (`pnpm dev`) on one machine. This page runs the same server for a team: built into Docker images on the server, started by one Compose file, behind HTTPS, with backups and a way to upgrade.
 
 ## What you deploy
 
+The Compose file is `deploy/compose/docker-compose.prod.yml` (project name `agentflow-prod`). Every published port is bound to `127.0.0.1`: only your reverse proxy reaches them.
+
 | Part | Port | Reached by | Public URL (example) |
 |---|---|---|---|
-| app (web app) | 3000 | Browsers | `https://agentflow.example.com` |
-| api | 3002 | Browsers, Agents (HTTPS and WebSocket), Jira and Azure DevOps webhooks | `https://api.agentflow.example.com` |
-| mcp | 3010 | Agents | `https://mcp.agentflow.example.com` |
-| rustfs (S3 API) | 9000 | Browsers and Agents, through presigned URLs | `https://s3.agentflow.example.com` |
-| postgres | 5432 | The api and mcp only | none |
-| rustfs console | 9001 | Administrators only | none |
-| local-git | 3300 | The api and Agents, when you use [Local Git](/docs/integrations/local-git) | optional |
+| app (web app) | 3000 | Browsers, through your proxy | `https://agentflow.example.com` |
+| api | 3002 | Browsers, Agents (HTTPS and WebSocket), Jira and Azure DevOps webhooks, through your proxy | `https://api.agentflow.example.com` |
+| mcp | 3010 | Agents, through your proxy | `https://mcp.agentflow.example.com` |
+| rustfs (S3 API) | 9000 | Browsers and Agents, through presigned URLs and your proxy | `https://s3.agentflow.example.com` |
+| rustfs console | 9001 | Administrators only, on `127.0.0.1` (use an SSH tunnel) | none |
+| postgres | 5432 | The api, mcp and migration job, inside the Compose network. Not published on the host | none |
+| local-git | 3300 | The api and Agents, when you use [Local Git](/docs/integrations/local-git). Optional profile `local-git`, off by default | optional |
+
+Two one-shot jobs run before the api starts: `migrate` (`prisma migrate deploy`) and `storage-init` (buckets and CORS rules). Both use the api image.
 
 Agents connect outwards to the API and the MCP server, so the machines they run on need no open port. `apps/relay` is not needed: Agents connect to the WebSocket the API process hosts.
 
-## 1. Backing services
+## 1. Prerequisites
 
-Use `docker-compose.yml` from the repository, with production credentials and the ports bound to localhost. In `.env` (copied from `.env.docker.example`):
+- A Linux server with Docker Engine and Compose v2.
+- At least 8 GB of RAM, or swap. The api and app builds each use up to 4 GB of Node heap (`NODE_OPTIONS=--max-old-space-size=4096` in their Dockerfiles). On a small machine build one image at a time: `build api`, then `build app`, then `build mcp` (with the `afc` alias from step 4).
+- A reverse proxy that already terminates HTTPS.
+- DNS records for the four hosts: app, api, mcp and s3.
 
-```bash
-POSTGRES_PASSWORD=<long random password>
-S3_ACCESS_KEY_ID=<access key>
-S3_SECRET_ACCESS_KEY=<long random secret>
-POSTGRES_PORT=127.0.0.1:5432
-S3_PORT=127.0.0.1:9000
-S3_CONSOLE_PORT=127.0.0.1:9001
-LOCAL_GIT_PORT=127.0.0.1:3300
-```
-
-Start everything except Mailpit, which only captures mail for development:
-
-```bash
-docker compose up -d postgres rustfs          # add local-git if you use it
-```
-
-Point `SMTP_URL` at your own mail server instead (see [Email](/docs/integrations/email)).
-
-## 2. Build
-
-On the server, as a dedicated user, with Node.js 24 and `corepack enable` (see [Prerequisites](/docs/getting-started/prerequisites)):
+## 2. Get the source
 
 ```bash
 git clone <repository> /opt/agentflow && cd /opt/agentflow
-git checkout <release tag or commit>
-pnpm install --frozen-lockfile
+git checkout <release tag>
 ```
 
-Write the environment files (next section), then build the three apps:
+## 3. Environment
 
 ```bash
-pnpm turbo build --filter=app --filter=api --filter=mcp
+cp deploy/compose/.env.prod.example deploy/compose/.env
+chmod 600 deploy/compose/.env
 ```
 
-The web app inlines every `NEXT_PUBLIC_*` variable at build time. Rebuild the app after changing one of them.
-
-## 3. Environment files
-
-Start from each app's `.env.example`. These are the values that differ from development; [Server environment variables](/docs/reference/server-env) lists all of them.
-
-`apps/api/.env.local`:
+Edit `deploy/compose/.env`. [Server environment variables](/docs/reference/server-env) lists every variable; these are the ones to set:
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | `postgresql://postgres:<password>@127.0.0.1:5432/agentflow_ai` |
-| `BETTER_AUTH_URL` | The web app origin, `https://agentflow.example.com` |
-| `BETTER_AUTH_SECRET`, `ENCRYPTION_KEY` | Long random values (`openssl rand -base64 32`). Keep `ENCRYPTION_KEY` safe: without it stored tokens cannot be read |
-| `INTERNAL_API_SECRET` | A long random value, the same one in `apps/mcp/.env.local` |
-| `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL` | The public app and API origins |
-| `API_BASE_URL`, `PUBLIC_WEBHOOK_BASE_URL` | The public API origin |
-| `AGENTFLOW_MCP_URL` | `https://mcp.agentflow.example.com/mcp` |
-| `S3_ENDPOINT` | `http://127.0.0.1:9000` |
-| `S3_PUBLIC_ENDPOINT` | `https://s3.agentflow.example.com` |
-| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | The RustFS pair from `.env` |
-| `S3_CORS_ALLOWED_ORIGINS` | `https://agentflow.example.com` |
-| `SMTP_URL`, `EMAIL_FROM` | Your mail server and sender |
-| `AUTH_ALLOW_SIGN_UP` | `false` once the first admin exists, so only invited people can sign up |
-
-`apps/app/.env.local`:
-
-| Variable | Value |
-|---|---|
-| `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL` | The public app and API origins |
+| `NEXT_PUBLIC_APP_URL` | The web app origin, `https://agentflow.example.com` |
+| `NEXT_PUBLIC_API_URL` | The API origin, `https://api.agentflow.example.com` |
 | `NEXT_PUBLIC_WEB_URL` | The marketing and docs site, or the app origin if you do not run one |
-| `AUTH_API_URL` | `http://127.0.0.1:3002`: the app's server code reaches the API directly |
+| `MCP_SERVER_URL` | `https://mcp.agentflow.example.com` (without `/mcp`) |
+| `S3_PUBLIC_ENDPOINT` | Required. `https://s3.agentflow.example.com`, baked into presigned URLs; browsers and Agents must reach it |
+| `POSTGRES_PASSWORD` | `openssl rand -hex 32` (URL-safe: it is used inside `DATABASE_URL`) |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | `openssl rand -hex 16` and `openssl rand -hex 32`. They are also the RustFS root credentials |
+| `BETTER_AUTH_SECRET` | `openssl rand -base64 32` |
+| `ENCRYPTION_KEY` | `openssl rand -base64 32`. Keep it safe: without it stored tokens cannot be read |
+| `INTERNAL_API_SECRET` | `openssl rand -hex 32`, shared by the app, api and mcp |
+| `AGENTFLOW_RUNNER_JWT_SECRET` | `openssl rand -hex 32`. Required: the api refuses to start without it. At least 32 characters with at least 8 different characters |
+| `SMTP_URL`, `EMAIL_FROM` | Your mail server and sender (see [Email](/docs/integrations/email)) |
+| `AUTH_ALLOW_SIGN_UP` | Set `false` once the first admin exists, so only invited people can sign up |
 
-`apps/mcp/.env.local`:
+Comment out variables you do not use: an empty value (`""`) fails validation. The Compose file sets these itself, so do not set them: `DATABASE_URL`, `S3_ENDPOINT`, `BETTER_AUTH_URL`, `AGENTFLOW_MCP_URL`, `AUTH_API_URL`.
 
-| Variable | Value |
-|---|---|
-| `AGENTFLOW_API_URL` | `http://127.0.0.1:3002` |
-| `INTERNAL_API_SECRET` | The same value as in the API |
-| `DATABASE_URL` | The same database as the API |
-| `MCP_SERVER_URL` | `https://mcp.agentflow.example.com` |
+Build time versus runtime. The `NEXT_PUBLIC_*` variables are baked into the app and the api images: after changing one, run `up -d --build`. Every other value is read when the container starts: after changing one, run `up -d`, which recreates the containers that use it. Only the api container receives the whole `.env` file; the app and mcp containers get just the variables the Compose file lists for them.
 
-Comment out variables you do not use: an empty value (`""`) fails validation.
+## 4. Start
 
-## 4. Database and storage
-
-```bash
-cd packages/database && pnpm prisma migrate deploy && cd ../..
-pnpm storage:init
-```
-
-`storage:init` creates the buckets and the browser CORS rules; run it again after changing the app's origin.
-
-## 5. Run with systemd
-
-One unit per app. `EnvironmentFile` loads the app's variables; the MCP server does not read `.env.local` by itself when started with `start`. Use the `pnpm` path that `which pnpm` prints.
-
-```ini title="/etc/systemd/system/agentflow-api.service"
-[Unit]
-Description=AgentFlow API
-After=network-online.target docker.service
-
-[Service]
-User=agentflow
-WorkingDirectory=/opt/agentflow
-EnvironmentFile=/opt/agentflow/apps/api/.env.local
-Environment=NODE_ENV=production PORT=3002 HOST=127.0.0.1
-ExecStart=/usr/bin/pnpm --filter api start
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`agentflow-app.service` is the same with `apps/app/.env.local`, `PORT=3000` and `ExecStart=/usr/bin/pnpm --filter app start`. `agentflow-mcp.service` uses `apps/mcp/.env.local`, `MCP_PORT=3010` and `ExecStart=/usr/bin/pnpm --filter mcp start`.
+Compose reads `.env` from the project directory, which is the directory of the first `-f` file, so `deploy/compose/.env` is picked up for variable substitution wherever you run the command. Define an alias once (add it to your shell profile):
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now agentflow-api agentflow-app agentflow-mcp
-journalctl -u agentflow-api -f
+alias afc='docker compose -f /opt/agentflow/deploy/compose/docker-compose.prod.yml'
+```
+
+The rest of this page uses `afc`. Without the alias, write the full command, for example:
+
+```bash
+docker compose -f deploy/compose/docker-compose.prod.yml up -d --build
+```
+
+Start everything:
+
+```bash
+afc up -d --build
+```
+
+What happens: Compose builds the api, app and mcp images, starts postgres and rustfs, and waits for both to be healthy. `migrate` applies the database migrations and `storage-init` creates the buckets and the browser CORS rules; both exit when done. Then the api starts. The app starts when the api is healthy, and mcp after the migration job completes and the api has started.
+
+```bash
+afc ps -a          # the two jobs show "Exited (0)"
+afc logs -f api
 ```
 
 Run one API process. It hosts the in-process scheduler and the WebSocket every Agent connects to; see [The scheduler](/docs/getting-started/install-server#the-scheduler) to move scheduling elsewhere.
 
-## 6. HTTPS reverse proxy
+## 5. HTTPS reverse proxy
 
-Any reverse proxy works. It must pass WebSocket upgrades to the API (Agents connect to `/socket.io/` with WebSocket only), and must not buffer the MCP server's streamed responses. With Caddy, which handles certificates and WebSockets by itself:
+Point each host at its local port:
 
-```text title="/etc/caddy/Caddyfile"
-agentflow.example.com {
-  reverse_proxy 127.0.0.1:3000
-}
-api.agentflow.example.com {
-  reverse_proxy 127.0.0.1:3002
-}
-mcp.agentflow.example.com {
-  reverse_proxy 127.0.0.1:3010 {
-    flush_interval -1
+| Host | Target |
+|---|---|
+| `agentflow.example.com` | `127.0.0.1:3000` |
+| `api.agentflow.example.com` | `127.0.0.1:3002` |
+| `mcp.agentflow.example.com` | `127.0.0.1:3010` |
+| `s3.agentflow.example.com` | `127.0.0.1:9000` |
+
+The proxy must:
+
+- pass WebSocket upgrades to the API (Agents connect to `/socket.io/` with WebSocket only);
+- not buffer the MCP server's streamed responses;
+- allow large request bodies on the API and on the s3 host, for attachment uploads.
+
+```nginx title="/etc/nginx/conf.d/agentflow.conf"
+# TLS directives (listen 443 ssl, certificates) omitted: add them to each server block.
+server {
+  server_name agentflow.example.com;
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
   }
 }
-s3.agentflow.example.com {
-  reverse_proxy 127.0.0.1:9000
+
+server {
+  server_name api.agentflow.example.com;
+  client_max_body_size 100m;
+  location / {
+    proxy_pass http://127.0.0.1:3002;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+
+server {
+  server_name mcp.agentflow.example.com;
+  location / {
+    proxy_pass http://127.0.0.1:3010;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+
+server {
+  server_name s3.agentflow.example.com;
+  client_max_body_size 100m;
+  location / {
+    proxy_pass http://127.0.0.1:9000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
 }
 ```
 
-With nginx, set `proxy_http_version 1.1`, `Upgrade` and `Connection "upgrade"` headers on the API, and `proxy_buffering off` on the MCP server. Raise `client_max_body_size` if attachment uploads to the API fail with 413.
+With Caddy, which handles certificates and WebSockets by itself, `reverse_proxy 127.0.0.1:3002` is enough for the API, and the MCP host needs `flush_interval -1` inside its `reverse_proxy` block. With Traefik, the published ports are bound to `127.0.0.1` on the host, so a Traefik container cannot reach them through the host IP or `host.docker.internal`. Either run Traefik on the host network and target `127.0.0.1:<port>`, or attach the Traefik container to the `agentflow-prod_default` Compose network and target the service names (`app:3000`, `api:3002`, `mcp:3010`, `rustfs:9000`).
 
-Jira Cloud and Azure DevOps call `PUBLIC_WEBHOOK_BASE_URL`, so the API host must be reachable from the internet for webhooks. If it cannot be, use poll mode on the connection.
+Jira Cloud and Azure DevOps call `PUBLIC_WEBHOOK_BASE_URL` (default: the API origin), so the API host must be reachable from the internet for webhooks. If it cannot be, use poll mode on the connection.
 
-## 7. Check it
+## 6. Check it
 
 1. Open the app URL and sign up the first admin ([First admin and organization](/docs/getting-started/first-admin)).
 2. Upload an attachment to a document: it checks `S3_PUBLIC_ENDPOINT` and the CORS rules.
@@ -175,42 +177,69 @@ Jira Cloud and Azure DevOps call `PUBLIC_WEBHOOK_BASE_URL`, so the API host must
 ## Upgrade
 
 1. Back up (below).
-2. Fetch the new version and install it:
+2. Fetch the new version and rebuild:
 
    ```bash
    cd /opt/agentflow
-   git fetch && git checkout <new tag or commit>
-   pnpm install --frozen-lockfile
-   pnpm turbo build --filter=app --filter=api --filter=mcp
-   cd packages/database && pnpm prisma migrate deploy && cd ../..
-   sudo systemctl restart agentflow-api agentflow-app agentflow-mcp
+   git fetch && git checkout <new tag>
+   afc up -d --build
    ```
+
+   The `migrate` job runs the new migrations before the api restarts. Optionally reclaim disk with `docker image prune`.
 
 3. Upgrade the Agents when they are idle: [Agent CLI and environment](/docs/reference/agent-cli). Agents reconnect to the API by themselves after it restarts, and a loop that ends while the API is down is reported when its Agent reconnects.
 
 ## Back up and restore
 
-Back up these together:
+The volumes are `agentflow-prod_postgres_data`, `agentflow-prod_rustfs_data` and `agentflow-prod_local_git_data`. Back up these together:
 
 | What | How |
 |---|---|
-| Database | `docker compose exec -T postgres pg_dump -U postgres -Fc agentflow_ai > agentflow-$(date +%F).dump` |
-| Files (RustFS) | Stop `rustfs` briefly and archive its volume: `docker run --rm -v agentflow_rustfs_data:/data -v "$PWD":/backup alpine tar czf /backup/rustfs-$(date +%F).tgz -C /data .`, or mirror the buckets with an S3 client |
-| Local Git | The `agentflow_local-git_data` volume, the same way, if you use it |
-| Secrets | `.env` and the three `.env.local` files. `ENCRYPTION_KEY` must match the database it was backed up with |
+| Database | `afc exec -T postgres pg_dump -U postgres -Fc agentflow_ai > agentflow-$(date +%F).dump` (use your `POSTGRES_USER` and `POSTGRES_DB` if you changed them) |
+| Files (RustFS) | Stop `rustfs` briefly and archive its volume: `afc stop rustfs`, then `docker run --rm -v agentflow-prod_rustfs_data:/data -v "$PWD":/backup alpine tar czf /backup/rustfs-$(date +%F).tgz -C /data .`, then `afc start rustfs`. Or mirror the buckets with an S3 client |
+| Local Git | The `agentflow-prod_local_git_data` volume, the same way, if you use it |
+| Secrets | `deploy/compose/.env`. `ENCRYPTION_KEY` must match the database it was backed up with |
 
-Restore the database with `pg_restore --clean -d agentflow_ai` and the volume by extracting the archive into an empty volume, then start the apps.
+Restore the database with the api, mcp and app stopped:
+
+```bash
+afc stop api mcp app
+afc exec -T postgres pg_restore --clean -U postgres -d agentflow_ai < agentflow-2026-01-01.dump
+afc start api mcp app
+```
+
+Restore a volume by extracting its archive into an empty volume, then start the services.
+
+## Local Git (optional)
+
+Add `--profile local-git` to every `afc` command (or set `COMPOSE_PROFILES=local-git` in `deploy/compose/.env`). Set `LOCAL_GIT_URL` in `.env` to the public URL you proxy to `127.0.0.1:3300`, then start it:
+
+```bash
+afc --profile local-git up -d
+```
+
+Create the admin account and an access token inside the container (the same calls `pnpm local-git:init` makes):
+
+```bash
+afc --profile local-git exec -T -u git local-git gitea admin user create \
+  --admin --username <admin> --email <email> --password <password> --must-change-password=false
+afc --profile local-git exec -T -u git local-git gitea admin user generate-access-token \
+  --username <admin> --token-name agentflow \
+  --scopes write:repository,write:organization,write:user,write:issue --raw
+```
+
+Put the printed token in `deploy/compose/.env` as `LOCAL_GIT_TOKEN`, with `LOCAL_GIT_SERVER_URL=http://local-git:3000` and `LOCAL_GIT_RUNNER_URL` set to the URL Agents use to reach it, then run `afc --profile local-git up -d api`. See [Local Git](/docs/integrations/local-git).
 
 ## Optional features
 
-- **Feature flags without PostHog.** Flags still being rolled out are off without PostHog. Turn them on for the whole deployment with `AGENTFLOW_FEATURE_FLAGS` in `apps/api/.env.local` and `NEXT_PUBLIC_AGENTFLOW_FEATURE_FLAGS` in `apps/app/.env.local` (comma-separated keys; `-key` forces one off). Rebuild the app after changing the second one.
+- **Feature flags without PostHog.** Flags still being rolled out are off without PostHog. Turn them on for the whole deployment with `AGENTFLOW_FEATURE_FLAGS` (runtime, `afc up -d`) and `NEXT_PUBLIC_AGENTFLOW_FEATURE_FLAGS` (build time, `afc up -d --build app`) in `deploy/compose/.env`. Comma-separated keys; `-key` forces one off.
 - **Live co-editing.** Presence and inline comment threads in the document editors use Liveblocks, a hosted service. Without `LIVEBLOCKS_SECRET` the editors show the saved version and each edit is published as a new version.
-- **Docker images.** `apps/app`, `apps/api` and `apps/mcp` each have a `Dockerfile`, built for the end-to-end test suite. The app image only takes `NEXT_PUBLIC_API_URL` and `AUTH_API_URL` as build arguments, so for a deployment on its own domain build on the host as above.
 
 ## Security checklist
 
-- [ ] Postgres, the RustFS console and Local Git listen on localhost only.
-- [ ] RustFS credentials, `POSTGRES_PASSWORD`, `INTERNAL_API_SECRET`, `BETTER_AUTH_SECRET` and `ENCRYPTION_KEY` are not the example values.
+- [ ] Every published port is bound to `127.0.0.1` (check `afc ps`); Postgres is not published at all.
+- [ ] `deploy/compose/.env` is readable only by root or the deploy user (`chmod 600`).
+- [ ] RustFS credentials, `POSTGRES_PASSWORD`, `INTERNAL_API_SECRET`, `AGENTFLOW_RUNNER_JWT_SECRET`, `BETTER_AUTH_SECRET` and `ENCRYPTION_KEY` are not the example values.
 - [ ] `AUTH_ALLOW_SIGN_UP=false` after the first admin signs up.
 - [ ] Agents run in containers or dedicated VMs, not on the server: they run code agents write from ticket content ([Agents](/docs/guides/setup/agents)).
 - [ ] Backups run on a schedule and a restore has been tried once.

@@ -37,6 +37,15 @@ self-hosting:
 | `S3_COLD_STORAGE_CLASS` | Leave unset unless the backend supports the class. |
 | `ENCRYPTION_KEY` | 32-byte base64 master key for secrets at rest. Rotating it makes stored Claude API keys and integration tokens unreadable. |
 
+## Production (Docker Compose)
+
+`deploy/compose/docker-compose.prod.yml` builds api, app and mcp from source and runs postgres, rustfs, an optional
+local-git (profile), plus the one-shot migrate and storage-init jobs. Published ports are bound to 127.0.0.1 for an
+existing reverse proxy. Configure it in `deploy/compose/.env`, copied from `.env.prod.example`. `NEXT_PUBLIC_*` values
+are build args of the app and api images. Start it with
+`docker compose -f deploy/compose/docker-compose.prod.yml up -d --build` (Compose reads `deploy/compose/.env` from the compose file's directory).
+Full guide: `apps/web/content/docs/guides/setup/production-server.mdx`.
+
 ## Authentication
 
 Accounts are local email/password accounts managed by
@@ -145,7 +154,7 @@ live Active Runs view of Sessions.
 | Clerk (auth, organizations, webhooks) | Better Auth in `apps/api` + `@repo/auth` facade |
 
 Still to port: Microsoft Entra ID sign-in, Liveblocks → Hocuspocus, Linear →
-disabled, and a full-stack compose profile for the apps themselves.
+disabled.
 
 ## Known limitations
 
