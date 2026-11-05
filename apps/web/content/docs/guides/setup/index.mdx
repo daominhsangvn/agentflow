@@ -9,7 +9,7 @@ A project that delivers tickets with AgentFlow needs seven things. Set them up i
 |---|---|---|---|
 | 1 | **Connections**: the Jira bot, the Confluence user, the Git server token | **Connections** (sidebar) | [Connections](/docs/guides/setup/connections) |
 | 2 | **Project connections and repositories**: the project's keys for those connections, its Jira projects, Confluence spaces and repositories | Project → **Connections & Repos** | [Connections](/docs/guides/setup/connections) |
-| 3 | **Agents**: automatic and personal, with their model provider | The Agent's machine; **Agents** (sidebar) → Your agents | [Agents](/docs/guides/setup/agents) |
+| 3 | **Agents**: automatic and personal, with their model provider | The Agent's machine; **Agents** (sidebar) → Your agents | [Agents](/docs/guides/setup/agents), [Personal Agent](/docs/guides/setup/personal-agent) |
 | 4 | **Agent capabilities**: the commands each Agent offers (`AGENTFLOW.md`) | A toolkit repository (automatic) or the project folder (personal) | [Agent capabilities](/docs/guides/setup/agent-capabilities) |
 | 5 | **Workflow**: triggers, the agent team, actions | Workflows → New workflow (YAML) | [Workflow YAML](/docs/guides/setup/workflow-yaml), [Triggers and actions](/docs/guides/setup/triggers-and-actions) |
 | 6 | **Process** (run-based workflows) or **rules** (orchestrated workflows) | `agent.process` or Project → Process; `agent.instructions` | [Process YAML](/docs/guides/setup/process-yaml), [Orchestrator](/docs/guides/setup/orchestrator) |
@@ -42,6 +42,6 @@ The [LeaveDesk example](/docs/guides/setup/leavedesk-example) has every file: th
 
 ## Before you start
 
-- AgentFlow runs (app, API and MCP server) and you are an **organization admin**: connections, project connections and workflows are admin-only.
+- AgentFlow runs (app, API and MCP server; for a team, see [Deploy the server for production](/docs/guides/setup/production-server)) and you are an **organization admin**: connections, project connections and workflows are admin-only.
 - The API is reachable from your Agents over HTTPS, and from Jira when Jira must send webhooks to it (Jira Cloud only calls public HTTPS URLs on an allowed port such as 443).
 - You have an account per bot in each outside system. The bot is the account AgentFlow writes as, and changes it makes are ignored as triggers.

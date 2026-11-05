@@ -52,4 +52,5 @@ agent:
     ## Questions and answers
     - A reply that answers some questions and asks new ones: answer the new ones first (ask the runner that knows), then resume the task only when every question has an answer; list the ones still open.
     - A question in any comment never stops or restarts a running task: answer it in its thread.
+    - Announce finished work (PRD ready, plan / test plan ready, pull request, test verdict) and a runner's questions in a NEW top-level comment (no replyTo), even if you said in a thread that you would post it there. Threads are only for answering the comment they reply to.
     - Default language: Vietnamese. A comment written in another language gets its answer in that language, in its thread. File names, commands and ticket keys stay as they are.

@@ -57,6 +57,10 @@ All variables: [Server environment variables](/docs/reference/server-env).
 
 The API runs a small in-process scheduler. It advances workflows every `WORKFLOW_TICK_SECONDS` (default 10, minimum 5) and ends sessions that stopped reporting after `STALE_SESSION_AGE_HOURS` (default 24). To use an external scheduler instead, set `SELF_HOSTED_CRON_DISABLED=true` and `CRON_SECRET`, then call the API's cron routes yourself.
 
+## Production
+
+This page runs AgentFlow in development mode. To run it for a team on its own domain (build, systemd, HTTPS, upgrades and backups), see [Deploy the server for production](/docs/guides/setup/production-server).
+
 ## Next
 
 [Create the first admin and organization](/docs/getting-started/first-admin).

@@ -1,8 +1,10 @@
 {
   "title": "Setup",
   "pages": [
+    "production-server",
     "connections",
     "agents",
+    "personal-agent",
     "agent-capabilities",
     "workflow-yaml",
     "triggers-and-actions",
