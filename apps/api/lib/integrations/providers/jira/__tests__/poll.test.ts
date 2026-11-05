@@ -768,8 +768,7 @@ describe("project changes scope", () => {
       total: 1,
       comments: [
         {
-          id: "c2",
-          parentId: "c1",
+          id: "10278",
           author: HUMAN_USER,
           created: "2026-10-04T11:58:00.000+0000",
           updated: "2026-10-04T11:58:00.000+0000",
@@ -777,7 +776,26 @@ describe("project changes scope", () => {
         },
       ],
     };
-    const fake = routedHttp([searchRoute({ issues: [issue] }, V2_SEARCH)]);
+    const fake = routedHttp([
+      searchRoute({ issues: [issue] }, V2_SEARCH),
+      {
+        method: HttpMethod.Get,
+        path: "/rest/api/2/issue/1001/comment",
+        respond: jsonResponse(200, {
+          total: 1,
+          comments: [
+            {
+              id: 10_278,
+              parentId: 10_276,
+              author: HUMAN_USER,
+              created: "2026-10-04T11:58:00.000+0000",
+              updated: "2026-10-04T11:58:00.000+0000",
+              body: "an answer",
+            },
+          ],
+        }),
+      },
+    ]);
     const result = await pollJira(ctxFor(fake.http), sinceFive, input);
 
     const types = result.events.map((event) => event.triggerType);
@@ -786,6 +804,7 @@ describe("project changes scope", () => {
       (event) => event.triggerType === JiraSignalType.CommentReply
     );
     expect(reply?.message?.text).toBe("an answer");
+    expect(reply?.message?.parentId).toBe("10276");
   });
 
   it("assigned_to_bot ignores the input and sends the old JQL", async () => {

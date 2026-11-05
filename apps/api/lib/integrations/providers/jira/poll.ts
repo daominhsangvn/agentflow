@@ -76,7 +76,8 @@ import {
  * by each one's `issueFilter` JQL. It reads only the last poll interval (plus
  * the overlap; older changes are skipped), follows search pages (3 x 100
  * issues per poll, then continues next poll), reads descriptions and comments
- * on REST v2 (wiki markup, like webhooks), and turns every change into the
+ * on REST v2 (wiki markup, like webhooks; the comment endpoint is read when a
+ * human comment changed in the window, since only it carries `parentId`), and turns every change into the
  * events the webhook path builds (see poll-events.ts).
  */
 
@@ -603,7 +604,7 @@ async function pollProjectChanges(
         siteUrl: ctx.connection.config.siteUrl,
         issue,
         histories: histories.value,
-        comments: await loadComments(ctx, issue),
+        comments: await loadComments(ctx, issue, { account, windowStart }),
         windowStart,
         account,
       })
@@ -725,15 +726,26 @@ async function searchScopedIssues(
   return { issues, truncated: last ? hasMoreResults(last) : false };
 }
 
-/** The comments of the issue: the ones the search returned, or the newest page when Jira returned only part. */
+/**
+ * The comments of the issue. The search returns comments without `parentId`, so
+ * when a human comment changed inside the window (or the search returned only
+ * part of them) the newest page is read from the comment endpoint, the only one
+ * that carries `parentId`. Otherwise the search comments are enough.
+ */
 async function loadComments(
   ctx: JiraContext,
-  issue: JiraIssue
+  issue: JiraIssue,
+  window: { account: IntegrationAccount; windowStart: Date }
 ): Promise<JiraComment[]> {
   const inline = issue.fields.comment;
   const comments = inline?.comments ?? [];
   const total = inline?.total ?? comments.length;
-  if (inline && total <= comments.length) {
+  const complete =
+    inline !== null && inline !== undefined && total <= comments.length;
+  if (
+    complete &&
+    !comments.some((comment) => changedByHuman(comment, window))
+  ) {
     return comments;
   }
   const page = await jiraRequest(
@@ -759,4 +771,16 @@ async function loadComments(
     byId.set(comment.id, comment);
   }
   return [...byId.values()];
+}
+
+/** A comment created or edited inside the window by someone other than the bot. */
+function changedByHuman(
+  comment: JiraComment,
+  window: { account: IntegrationAccount; windowStart: Date }
+): boolean {
+  const changedAt = parseJiraDate(comment.updated ?? comment.created);
+  if (!changedAt || changedAt < window.windowStart) {
+    return false;
+  }
+  return !isJiraBotUser(window.account, comment.author);
 }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { HttpMethod } from "../../../types";
-import { validateJiraProjectSettings } from "../project";
+import {
+  jiraProjectSettingsSchema,
+  validateJiraProjectSettings,
+} from "../project";
 import {
   dataCenterConfig,
   jsonResponse,
@@ -103,5 +106,24 @@ describe("validateJiraProjectSettings", () => {
 
     expect(result).toBeNull();
     expect(requests).toEqual([]);
+  });
+});
+
+describe("jiraProjectSettingsSchema issueFilter", () => {
+  const messages = (issueFilter: string) =>
+    jiraProjectSettingsSchema
+      .safeParse({ projectKeys: ["AB"], issueFilter })
+      .error?.issues.map((issue) => issue.message);
+
+  it("names the unclosed quote", () => {
+    expect(messages('component = "Web')).toEqual([
+      "Close every quote of the issue filter",
+    ]);
+  });
+
+  it("names the unclosed parenthesis", () => {
+    expect(messages("(component = Web")).toEqual([
+      "Close every parenthesis of the issue filter",
+    ]);
   });
 });

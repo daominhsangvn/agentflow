@@ -54,6 +54,7 @@ export const jiraProjectSettingsSchema = z.object({
         (jql) => ORDER_BY_RE.exec(jql.replaceAll(QUOTED_RE, '""')) === null,
         "Leave ORDER BY out of the issue filter"
       )
+      .refine(hasClosedQuotes, "Close every quote of the issue filter")
       .refine(
         hasBalancedParentheses,
         "Close every parenthesis of the issue filter"
@@ -183,5 +184,23 @@ function hasBalancedParentheses(jql: string): boolean {
       }
     }
   }
-  return depth === 0 && quote === null;
+  return depth === 0;
+}
+
+/** True when every quote of the JQL is closed (escaped quotes inside a string are skipped). */
+function hasClosedQuotes(jql: string): boolean {
+  let quote: string | null = null;
+  for (let index = 0; index < jql.length; index++) {
+    const char = jql.charAt(index);
+    if (quote === null) {
+      if (char === '"' || char === "'") {
+        quote = char;
+      }
+    } else if (char === "\\") {
+      index++;
+    } else if (char === quote) {
+      quote = null;
+    }
+  }
+  return quote === null;
 }
