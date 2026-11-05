@@ -34,6 +34,7 @@ import {
  * the thread to be quiet (debounce), then a turn takes it (advance.ts). A change of the
  * ticket itself (event.itemChange: status, labels) is recorded as a status_changed /
  * label_added / label_removed message on the item conversation (ticket-change.ts).
+ * A workflow with mentionOnly drops thread replies that only continue a channel conversation.
  */
 
 const PRISMA_UNIQUE_VIOLATION = "P2002";
@@ -65,6 +66,8 @@ type RouteTarget = {
   projectId: string;
   conversationId: string | null;
   caseId: string | null;
+  /** It only continues a channel conversation: no trigger, no anchor. */
+  continued: boolean;
 };
 
 type KnownConversation = {
@@ -98,6 +101,13 @@ export async function routeToOrchestrator(
         workflowId: target.workflowId,
         dedupKey: event.dedupKey,
       });
+      continue;
+    }
+    if (target.continued && workflow.mentionOnly) {
+      log.info(
+        `${LOG_PREFIX} mention-only workflow: a thread reply does not wake it`,
+        { workflowId: target.workflowId, dedupKey: event.dedupKey }
+      );
       continue;
     }
     results.push(
@@ -142,7 +152,7 @@ async function resolveTargets(
     : null;
   const targets: RouteTarget[] = [];
   if (anchored) {
-    targets.push(toKnownTarget(anchored.conversation));
+    targets.push(toKnownTarget(anchored.conversation, false));
   }
   const seen = new Set(targets.map((target) => target.workflowId));
   for (const workflow of input.workflows) {
@@ -153,6 +163,7 @@ async function resolveTargets(
         projectId: workflow.projectId,
         conversationId: null,
         caseId: null,
+        continued: false,
       });
     }
   }
@@ -176,15 +187,19 @@ async function resolveTargets(
       take: CONTINUED_MAX,
     })
   );
-  return continued.map(toKnownTarget);
+  return continued.map((conversation) => toKnownTarget(conversation, true));
 }
 
-function toKnownTarget(conversation: KnownConversation): RouteTarget {
+function toKnownTarget(
+  conversation: KnownConversation,
+  continued: boolean
+): RouteTarget {
   return {
     workflowId: conversation.case.workflowId,
     projectId: conversation.projectId,
     conversationId: conversation.id,
     caseId: conversation.case.id,
+    continued,
   };
 }
 

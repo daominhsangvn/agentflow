@@ -25,6 +25,9 @@ describe("workflow orchestrator config", () => {
         OrchestratorTicketChange.StatusChanged,
         OrchestratorTicketChange.LabelRemoved,
       ],
+      mentionOnly: false,
+      caseLookup: false,
+      caseHandoff: false,
       connections: {},
     });
   });
@@ -53,7 +56,20 @@ describe("workflow orchestrator config", () => {
         OrchestratorTicketChange.StatusChanged,
         OrchestratorTicketChange.LabelRemoved,
       ],
+      mentionOnly: false,
+      caseLookup: false,
+      caseHandoff: false,
       connections: {},
     });
+  });
+
+  it("parses the side-conversation switches", () => {
+    const parsed = workflowOrchestratorConfigSchema.parse({
+      mentionOnly: true,
+      caseHandoff: true,
+    });
+    expect(parsed.mentionOnly).toBe(true);
+    expect(parsed.caseHandoff).toBe(true);
+    expect(parsed.caseLookup).toBe(false);
   });
 });

@@ -249,6 +249,7 @@ async function settleSuperseded(
             OrchestratorMessageKind.Reply,
             OrchestratorMessageKind.ToolRefused,
             OrchestratorMessageKind.Document,
+            OrchestratorMessageKind.HandoffSent,
           ],
         },
       },
@@ -465,6 +466,7 @@ async function failTurn(
           notIn: [
             OrchestratorMessageKind.ToolRefused,
             OrchestratorMessageKind.Document,
+            OrchestratorMessageKind.HandoffSent,
           ],
         },
       },
@@ -582,6 +584,11 @@ async function startTurnIfDue(
     ),
     continuing: conversation._count.turns > 0 && !!conversation.sessionId,
     cancelOn: settings.cancelOn,
+    sideConversations: {
+      mentionOnly: settings.mentionOnly,
+      caseLookup: settings.caseLookup,
+      caseHandoff: settings.caseHandoff,
+    },
   });
   try {
     const commandId = await dispatchOrchestratorTurn({

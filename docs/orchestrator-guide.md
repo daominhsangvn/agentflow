@@ -22,6 +22,7 @@ A full ticket, To Do to Done, step by step with LikeC4 diagrams:
 | **Decision** | An approval asked with `request_decision`, given with the button in AgentFlow or recorded from the thread with `record_decision`. |
 | **Ticket change** | A status move or label change, stored as a message of the item conversation (`Status changed: A → B (by X)`). |
 | **supersede / queue** | What a new message does to a running turn of the same thread: `supersede` stops it (its write tools are refused at once), `queue` lets it finish. |
+| **Side conversation** | A thread about another item (e.g. a Teams thread about LD-6). It stays its own case. With `caseLookup` the orchestrator can read the other item's case; with `caseHandoff` it can send people-approved text there as a `handoff` message. |
 | **debounce** | `debounceSeconds`: a thread stays quiet this long before a turn starts, so a burst (three status flips, a comment and its edit) is one turn. |
 
 ## 2. The four layers
@@ -188,7 +189,8 @@ ticket keys stay as they are.
   runner after a toolkit change; check problems and warnings. A personal runner
   uploads its file when it starts.
 - [ ] **The workflow**: `agent.mode: orchestrated`, the orchestrator's runner,
-  the rules, `concurrency`, `debounceSeconds`, `cancelOn`. Triggers
+  the rules, `concurrency`, `debounceSeconds`, `cancelOn`; optionally
+  `mentionOnly`, `caseLookup` and `caseHandoff`. Triggers
   `jira.issue_mentioned` and `jira.issue_status_changed` (and
   `jira.issue_labeled` if the flow uses labels) with `projectKeys`.
 - [ ] **Jira**: the statuses of the flow; a webhook per bot connection with

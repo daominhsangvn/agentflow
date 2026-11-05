@@ -46,6 +46,8 @@ import { loadOrchestratorWorkflows } from "@/lib/orchestrator/workflow-settings"
 import { scrubProviderError } from "@/lib/workflows/engine/errors";
 import { REPLY_ATTACHMENTS_MAX } from "./service/attachments";
 import { recordRefusedCall } from "./service/audit";
+import { caseHandoffInputSchema, handOffCase } from "./service/case-handoff";
+import { caseLookupInputSchema, lookupCases } from "./service/case-lookup";
 import { caseNotifyInputSchema, notifyCase } from "./service/case-notify";
 import {
   NOTES_MAX,
@@ -166,8 +168,8 @@ export const orchestratorToolService = {
       return Result.err(Status.Unauthorized);
     }
     return Result.ok({
-      instructions: buildInstructions(context.grants),
-      tools: visibleTools(context.grants),
+      instructions: buildInstructions(context.grants, context.features),
+      tools: visibleTools(context.grants, context.features),
     });
   },
 
@@ -256,6 +258,10 @@ async function authenticate(token: string | null): Promise<TurnContext | null> {
     grants: resolveOrchestratorGrants(workflow?.connections),
     workflowId: turn.conversation.case.workflowId,
     workflowName: workflow?.name ?? "",
+    features: {
+      caseLookup: workflow?.caseLookup ?? false,
+      caseHandoff: workflow?.caseHandoff ?? false,
+    },
   };
 }
 
@@ -375,6 +381,24 @@ const HANDLERS: Record<string, Handler> = {
       );
     }
     return await notifyCase(context, parsed.data);
+  },
+
+  [OrchestratorToolName.CaseLookup]: async (context, input) => {
+    const parsed = caseLookupInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused("itemKey: the other item's key, e.g. LD-6.");
+    }
+    return await lookupCases(context, parsed.data);
+  },
+
+  [OrchestratorToolName.CaseHandoff]: async (context, input) => {
+    const parsed = caseHandoffInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        "decisionId (an approved decision of this case), itemKey (the other item's key), optional caseId (when several cases are about it)."
+      );
+    }
+    return await handOffCase(context, parsed.data);
   },
 
   [OrchestratorToolName.Reply]: async (context, input) => {
@@ -798,4 +822,5 @@ const SUPERSEDABLE_TOOLS: ReadonlySet<string> = new Set<string>([
   OrchestratorToolName.SourceItemLabel,
   OrchestratorToolName.SourceItemLink,
   OrchestratorToolName.CaseNotify,
+  OrchestratorToolName.CaseHandoff,
 ]);

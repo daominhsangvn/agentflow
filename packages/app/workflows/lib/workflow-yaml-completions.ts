@@ -120,6 +120,9 @@ const BOOLEAN_KEYS: readonly string[] = [
   "enabled",
   "continueOnError",
   "stopOnOpenQuestions",
+  "mentionOnly",
+  "caseLookup",
+  "caseHandoff",
 ];
 
 const BlockKind = { Map: "map", List: "list", Text: "text" } as const;

@@ -1,4 +1,5 @@
 import {
+  OrchestratorMessageKind,
   OrchestratorMessageVia,
   OrchestratorTaskStatus,
 } from "@repo/api/src/types/orchestrator";
@@ -181,5 +182,61 @@ describe("renderCase task lines", () => {
       decisions: [],
     });
     expect(await renderCase("c1")).toContain("Sang (AgentFlow) (message)");
+  });
+
+  it("renders tasks and decisions before conversations", async () => {
+    mocks.findUnique.mockResolvedValue({
+      organizationId: "org-1",
+      title: "LD-7",
+      status: "open",
+      sourceKey: null,
+      notes: "",
+      conversations: [
+        {
+          channelKey: "jira:LD-7:item",
+          status: "idle",
+          channel: null,
+          messages: [],
+        },
+      ],
+      tasks: [],
+      decisions: [
+        { id: "d1", question: "ok?", status: "pending", decidedBy: null },
+      ],
+    });
+    const out = await renderCase("c1");
+    expect(out.indexOf("## Tasks")).toBeLessThan(out.indexOf("## Decisions"));
+    expect(out.indexOf("## Decisions")).toBeLessThan(
+      out.indexOf("## Conversations")
+    );
+  });
+
+  it("shows a handoff message with its kind", async () => {
+    mocks.findUnique.mockResolvedValue({
+      organizationId: "org-1",
+      title: "LD-7",
+      status: "open",
+      sourceKey: null,
+      notes: "",
+      conversations: [
+        {
+          channelKey: "jira:LD-7:item",
+          status: "idle",
+          channel: null,
+          messages: [
+            {
+              actor: "An",
+              kind: OrchestratorMessageKind.Handoff,
+              text: "change it",
+              payload: null,
+              createdAt: new Date("2026-10-23T08:00:00.000Z"),
+            },
+          ],
+        },
+      ],
+      tasks: [],
+      decisions: [],
+    });
+    expect(await renderCase("c1")).toContain("(handoff):");
   });
 });

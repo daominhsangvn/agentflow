@@ -67,6 +67,10 @@ export const OrchestratorMessageKind = {
   Document: "document",
   /** Another case of this workflow notified this one (case_notify); wakes a turn. */
   CaseNotify: "case_notify",
+  /** A change request people confirmed in a side conversation about this item (case_handoff); wakes a turn. */
+  Handoff: "handoff",
+  /** The side conversation's record that it sent a confirmed summary (case_handoff; audit, never wakes a turn). */
+  HandoffSent: "handoff_sent",
 } as const;
 export type OrchestratorMessageKind =
   (typeof OrchestratorMessageKind)[keyof typeof OrchestratorMessageKind];
@@ -232,6 +236,8 @@ export const OrchestratorToolName = {
   SourceItemLabel: "source_item_label",
   SourceItemLink: "source_item_link",
   CaseNotify: "case_notify",
+  CaseLookup: "case_lookup",
+  CaseHandoff: "case_handoff",
 } as const;
 export type OrchestratorToolName =
   (typeof OrchestratorToolName)[keyof typeof OrchestratorToolName];

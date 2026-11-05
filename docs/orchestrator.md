@@ -42,6 +42,9 @@ Set in the workflow (editor or YAML) with `agent.mode: orchestrated`.
 | `agent.orchestrator.turnTimeoutMinutes` | Minutes one turn may take (default 10). |
 | `agent.orchestrator.connections` | What the orchestrator may write ("Write grants" below). Default `{}`: it only reads the ticket. `source`: `comment`, `attach`, `transition`, `label`, `link`; a Confluence connection key: `read` or `[publish]`; `pull_requests`: `[open]`. Only with `agent.mode: orchestrated`. |
 | `agent.orchestrator.cancelOn` | Ticket-change kinds whose turn may cancel tasks with `task_cancel`: `status_changed`, `label_added`, `label_removed`. Default `[status_changed, label_removed]`; `[]` = the orchestrator never cancels. |
+| `agent.orchestrator.mentionOnly` | `true` or `false`, default false. A reply in a thread the orchestrator talks in wakes it only when it mentions the bot (or replies to the bot's message). Other replies are not recorded; the orchestrator reads the thread when it needs it. |
+| `agent.orchestrator.caseLookup` | `true` or `false`, default false. Adds `case_lookup`: the orchestrator may read the case of another item of this project (read only), e.g. a Teams thread asking about LD-6. |
+| `agent.orchestrator.caseHandoff` | `true` or `false`, default false. Adds `case_handoff`: after people approve a summary (`request_decision`), the orchestrator sends it to another item's case, whose orchestrator acts on it. |
 
 ```yaml
 agent:
@@ -107,13 +110,16 @@ asked where it belongs:
 | A Jira comment replying to another comment | that comment thread: `jira:<KEY>:comment:<parent id>` |
 | A Jira mention on the issue | the issue's top level: `jira:<KEY>:item` |
 | A Jira status or label change (`jira.issue_status_changed`, `jira.issue_labeled`) | the issue's top level: `jira:<KEY>:item` |
+| A thread reply no trigger matched, workflow with `mentionOnly` | not recorded (dropped) |
 
 A ticket change (`InboundEvent.itemChange`, turned into a message by
 `ticket-change.ts`) is stored as an external message of kind `status_changed`
 (text `Status changed: A → B (by X)`, payload `{from, to, actor}`), `label_added`
 (`Label added: x (by X)`) or `label_removed` (`Label removed: x (by X)`);
 the label payload is `{added, removed, actor}`. A `case_notify` from another case is
-an internal message of kind `case_notify`.
+an internal message of kind `case_notify`. A `case_handoff` writes an internal
+message of kind `handoff` on the target case, and the sending conversation gets a
+`handoff_sent` message as an audit record (it never wakes a turn).
 
 A conversation belongs to the **case** of its source item (`jira:LD-7`: one
 case per item per workflow: unique on `workflowId, sourceKey`; conversations are unique per case and channel). The event's comment or message (`InboundEvent.
@@ -160,7 +166,7 @@ turn that finished before the stop arrived settles as usual.
 In a `supersede` conversation, from the moment a newer external message
 waits (or a stop was requested for the turn), the running turn's write
 tools (`reply`, `edit_reply`, `task_run`, `task_cancel`, `request_decision`,
-`record_decision`, `case_notify`, `source_item_transition`, `source_item_label`,
+`record_decision`, `case_notify`, `case_handoff`, `source_item_transition`, `source_item_label`,
 `source_item_link`, `close_case`) are refused with `superseded: a newer message
 arrived; end the turn`. Reads, `case_update_notes`, `wait_for` and `wait_human`
 stay allowed (`lib/orchestrator/supersede.ts`).
@@ -173,6 +179,22 @@ connection): a Teams reply in a thread the orchestrator talks in arrives as
 with ChannelMessage.Read.Group; a new post without a mention is still
 ignored), a Jira reply in a comment thread it talks in as
 `jira.comment_reply`.
+
+With `agent.orchestrator.mentionOnly: true` these events are dropped: a reply
+wakes the orchestrator only when it replies to a message the orchestrator
+posted (an anchor) or a trigger matched it (a mention). They are dropped, not
+stored, because one Jira comment raises a reply event and a mention event that
+are deduplicated to one message; storing the unmatched one would record the
+comment without waking the case.
+
+**Side conversations.** A thread about another item (a Teams thread about LD-6)
+stays its own case; it is not merged into LD-6. The bot answers there when it
+is mentioned, and with `caseLookup` it can read LD-6 with `case_lookup`. On
+"record this in LD-6" the orchestrator reads the thread, posts the summary as a
+decision (`request_decision`), and after people approve it calls `case_handoff`.
+LD-6's orchestrator receives a `handoff` message and acts on it per its rules.
+
+CASE.md (`case-render.ts`) lists Tasks and Decisions before Conversations.
 
 **Tools** (`apps/api/app/orchestrator-tools/service.ts`). The runner
 exchanges the turn for an `ost_…` token (`POST /desktop/orchestrator-sessions`,
@@ -200,12 +222,15 @@ tools for that token from `GET /orchestrator-tools/session` and
 | `page_publish` | (grant: the Confluence key `[publish]`) Publishes a task's Markdown file as a Confluence page, with attachments ("Confluence documents" below) |
 | `page_get` | (grant: the Confluence key `read` or `[publish]`) Reads a Confluence page as Markdown, with its version and last editor |
 | `pull_request_open` | (grant `pull_requests: [open]`) Opens the pull requests for the branches an auto-runner task pushed ("Pull requests of auto-runner tasks" below) |
+| `case_lookup` | (setting `caseLookup`) `{ itemKey }`: CASE.md of the cases of another item in the same project (any workflow), read only |
+| `case_handoff` | (setting `caseHandoff`) `{ decisionId, itemKey, caseId? }`: sends an approved summary to another item's case. Checked on the server: the decision is this case's own and approved, and is sent once (`handoff:<decisionId>`); the text is the decision's question, not the model's; the target is in the same project, any workflow, its item conversation else the latest; several cases without `caseId` are refused with a list. The target gets a `handoff` message, wakes after its debounce and is reopened if closed |
 | `edit_reply` | Replaces the text of a message this conversation posted (provider `editOnItem`: Jira `PUT comment/{id}`, Teams activity update); `version` moves the anchor's version |
 | `wait_human` | Ends the turn waiting for people |
 | `close_case` | Ends the turn and closes the case (a new message reopens it) |
 
-Tools whose grant is missing are not listed to the turn
-(`visibleTools`, `service/tools.ts`).
+Tools whose grant or setting is missing are not listed to the turn
+(`visibleTools`, `service/tools.ts`); `case_lookup` and `case_handoff` are hidden
+unless their setting is on.
 
 ## Write grants
 

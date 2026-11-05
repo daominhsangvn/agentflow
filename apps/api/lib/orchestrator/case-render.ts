@@ -16,6 +16,8 @@ import { isTicketChangeKind } from "./ticket-change";
  * prompt and `case_get` (docs/orchestrator.md). The orchestrator's session is
  * a cache; this is the record a turn trusts. Each task line says what started
  * it (a status, a label or a message), so task_cancel can stop the right ones.
+ * Tasks and Decisions come before the conversations so that the prompt's
+ * CASE_MAX slice (turn-prompt.ts) cuts conversations first.
  */
 
 const RECENT_MESSAGES = 5;
@@ -104,18 +106,6 @@ export async function renderCase(caseId: string): Promise<string> {
       `- ${DOCUMENT_KIND_LABELS[document.kind]} "${document.title}" → ${document.url} (v${document.version}, page ${document.pageId})`
     );
   }
-  lines.push("", "## Conversations");
-  for (const conversation of found.conversations) {
-    const channel = readChannel(conversation.channel);
-    lines.push(
-      `### ${conversation.channelKey} (${conversation.status})${channel?.item.url ? ` ${channel.item.url}` : ""}`
-    );
-    for (const message of [...conversation.messages].reverse()) {
-      lines.push(
-        `- ${message.createdAt.toISOString()} ${messageActor(message)} (${message.kind}): ${preview(message.text)}`
-      );
-    }
-  }
   lines.push("", "## Tasks");
   if (found.tasks.length === 0) {
     lines.push("(none)");
@@ -133,6 +123,18 @@ export async function renderCase(caseId: string): Promise<string> {
     lines.push(
       `- ${decision.id} ${decision.status}${decision.decidedBy ? ` by ${decision.decidedBy}` : ""}: ${preview(decision.question)}`
     );
+  }
+  lines.push("", "## Conversations");
+  for (const conversation of found.conversations) {
+    const channel = readChannel(conversation.channel);
+    lines.push(
+      `### ${conversation.channelKey} (${conversation.status})${channel?.item.url ? ` ${channel.item.url}` : ""}`
+    );
+    for (const message of [...conversation.messages].reverse()) {
+      lines.push(
+        `- ${message.createdAt.toISOString()} ${messageActor(message)} (${message.kind}): ${preview(message.text)}`
+      );
+    }
   }
   return lines.join("\n");
 }

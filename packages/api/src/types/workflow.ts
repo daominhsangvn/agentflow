@@ -453,6 +453,12 @@ export const workflowOrchestratorConfigSchema = z.object({
     .max(3)
     .default([...ORCHESTRATOR_CANCEL_ON_DEFAULT])
     .transform((values) => [...new Set(values)]),
+  /** A thread reply that no trigger matched (no mention) does not wake a turn. */
+  mentionOnly: z.boolean().default(false),
+  /** The case_lookup tool, which reads another item's case in the project. */
+  caseLookup: z.boolean().default(false),
+  /** The case_handoff tool, which sends an approved summary to another item's case. */
+  caseHandoff: z.boolean().default(false),
   /**
    * What the orchestrator may write; default {}: it only reads the ticket
    * (docs/orchestrator.md).

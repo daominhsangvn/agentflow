@@ -103,6 +103,9 @@ export const WORKFLOW_YAML_KEYS = {
     "turnTimeoutMinutes",
     "connections",
     "cancelOn",
+    "mentionOnly",
+    "caseLookup",
+    "caseHandoff",
   ],
   /** An item of `agent.runners`. */
   runnerRule: ["runner", "condition"],

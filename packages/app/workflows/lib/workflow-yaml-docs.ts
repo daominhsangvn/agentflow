@@ -128,7 +128,7 @@ export const WORKFLOW_YAML_KEY_DOCS: Record<string, WorkflowYamlKeyDoc> = {
   },
   orchestrator: {
     detail: "mapping, orchestrated mode",
-    info: "How the orchestrator takes a thread's messages: concurrency, debounceSeconds, turnTimeoutMinutes, connections (what it may write) and cancelOn. Left out: the defaults.",
+    info: "How the orchestrator takes a thread's messages: concurrency, debounceSeconds, turnTimeoutMinutes, connections (what it may write), cancelOn, and the opt-in switches mentionOnly, caseLookup and caseHandoff. Left out: the defaults.",
   },
   process: {
     detail: "mapping",
@@ -394,5 +394,17 @@ export const WORKFLOW_ORCHESTRATOR_KEY_DOCS: Record<
     detail:
       "list of status_changed | label_added | label_removed, default [status_changed, label_removed]",
     info: "Which ticket changes may cancel the tasks of the status or label the ticket left (task_cancel). [] means the orchestrator never cancels. A comment, question or reply never cancels; they are not options.",
+  },
+  mentionOnly: {
+    detail: "true | false, default false",
+    info: "A reply in a thread the orchestrator talks in wakes it only when it mentions the bot (or replies to the bot's message). Other replies are not recorded; the orchestrator reads the thread when it needs it.",
+  },
+  caseLookup: {
+    detail: "true | false, default false",
+    info: "Adds case_lookup: the orchestrator may read the case of another item of this project (read only), e.g. a Teams thread asking about LD-6.",
+  },
+  caseHandoff: {
+    detail: "true | false, default false",
+    info: "Adds case_handoff: after people approve a summary (request_decision), the orchestrator sends it to another item's case, whose orchestrator acts on it.",
   },
 };

@@ -27,6 +27,12 @@ export type OrchestratorWorkflow = {
   debounceSeconds: number;
   turnTimeoutMinutes: number;
   cancelOn: OrchestratorTicketChange[];
+  /** agent.orchestrator.mentionOnly */
+  mentionOnly: boolean;
+  /** agent.orchestrator.caseLookup */
+  caseLookup: boolean;
+  /** agent.orchestrator.caseHandoff */
+  caseHandoff: boolean;
   /** What the orchestrator may write (agent.orchestrator.connections). */
   connections: OrchestratorConnectionGrants;
 };
@@ -70,6 +76,9 @@ export async function loadOrchestratorWorkflows(
       debounceSeconds: settings.debounceSeconds,
       turnTimeoutMinutes: settings.turnTimeoutMinutes,
       cancelOn: settings.cancelOn,
+      mentionOnly: settings.mentionOnly,
+      caseLookup: settings.caseLookup,
+      caseHandoff: settings.caseHandoff,
       connections: settings.connections,
     });
   }

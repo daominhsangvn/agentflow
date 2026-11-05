@@ -86,6 +86,8 @@ const MESSAGE_KIND_LABELS: Record<OrchestratorMessageKind, string> = {
   [OrchestratorMessageKind.ToolRefused]: "Refused",
   [OrchestratorMessageKind.Document]: "Document",
   [OrchestratorMessageKind.CaseNotify]: "Case notice",
+  [OrchestratorMessageKind.Handoff]: "Change request",
+  [OrchestratorMessageKind.HandoffSent]: "Handed off",
 };
 const CLAMP_CHARS = 600;
 const SHORT_ID_CHARS = 8;

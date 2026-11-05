@@ -588,6 +588,9 @@ describe("workflowToYaml", () => {
       turnTimeoutMinutes: 3,
       connections: {},
       cancelOn: [OrchestratorTicketChange.StatusChanged],
+      mentionOnly: true,
+      caseLookup: false,
+      caseHandoff: true,
     };
     const custom = makeWorkflow({
       agent: {

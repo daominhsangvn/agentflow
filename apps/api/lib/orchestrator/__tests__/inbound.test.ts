@@ -303,6 +303,83 @@ describe("routeToOrchestrator", () => {
       "and for interns?",
     ]);
   });
+  it("drops an unmentioned thread reply when the workflow is mention-only", async () => {
+    const mentionOnly = "0199a5f0-0000-7000-8000-0000000000f3";
+    fake.addWorkflow(mentionOnly, "Mention only", {
+      agentConfig: { orchestrator: { debounceSeconds: 20, mentionOnly: true } },
+    });
+    const workflows = [{ workflowId: mentionOnly, projectId: PROJECT_ID }];
+    const thread = {
+      item: {
+        provider: IntegrationProviderKey.MicrosoftTeams,
+        externalId: "team|channel|root|msg",
+        key: "teams-abc123",
+        url: null,
+        title: "Can part-timers take half a day?",
+        container: "channel",
+      },
+    };
+    await routeToOrchestrator({
+      connection: connection(),
+      event: mention({
+        ...thread,
+        triggerType: "microsoft_teams.bot_mentioned",
+        message: { id: "m1", parentId: null, text: "@bot hello" },
+      }),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows,
+    });
+
+    const replies = await routeToOrchestrator({
+      connection: connection(),
+      event: mention({
+        ...thread,
+        triggerType: "microsoft_teams.thread_reply",
+        dedupKey: "thread:reply:m2",
+        message: { id: "m2", parentId: "m1", text: "and for interns?" },
+      }),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: [],
+    });
+
+    expect(replies).toEqual([]);
+    expect(fake.messages.map((message) => message.text)).toEqual([
+      "@bot hello",
+    ]);
+  });
+
+  it("still takes a reply to its own message when mention-only", async () => {
+    const mentionOnly = "0199a5f0-0000-7000-8000-0000000000f3";
+    fake.addWorkflow(mentionOnly, "Mention only", {
+      agentConfig: { orchestrator: { debounceSeconds: 20, mentionOnly: true } },
+    });
+    const [first] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention(),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: [{ workflowId: mentionOnly, projectId: PROJECT_ID }],
+    });
+    fake.addAnchor(
+      first?.conversationId ?? "",
+      IntegrationProviderKey.Jira,
+      "900"
+    );
+
+    const [reply] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention({
+        triggerType: "jira.comment_reply",
+        dedupKey: "LD-7:reply:901",
+        message: { id: "901", parentId: "900", text: "ok, change step 2" },
+      }),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: [],
+    });
+
+    expect(reply?.conversationId).toBe(first?.conversationId);
+    expect(fake.messages).toHaveLength(2);
+  });
+
   it("opens a case and a conversation per orchestrated workflow that matched", async () => {
     const other = "0199a5f0-0000-7000-8000-0000000000f2";
     fake.addWorkflow(other, "Second orchestrator");

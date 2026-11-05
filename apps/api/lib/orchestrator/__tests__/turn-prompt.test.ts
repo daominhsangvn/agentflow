@@ -67,6 +67,11 @@ const BASE = {
     OrchestratorTicketChange.StatusChanged,
     OrchestratorTicketChange.LabelRemoved,
   ],
+  sideConversations: {
+    mentionOnly: false,
+    caseLookup: false,
+    caseHandoff: false,
+  },
 };
 
 describe("buildTurnPrompt", () => {
@@ -240,5 +245,45 @@ describe("buildTurnPrompt writes", () => {
     });
     expect(prompt).toContain('via="agentflow"');
     expect(prompt).toContain("(AgentFlow)");
+  });
+
+  it("adds no side-conversation section when all switches are off", () => {
+    expect(buildTurnPrompt(BASE)).not.toContain("Other items' cases");
+  });
+
+  it("explains the handoff steps when caseHandoff is on", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      sideConversations: { ...BASE.sideConversations, caseHandoff: true },
+    });
+    expect(prompt).toContain(OrchestratorToolName.CaseHandoff);
+    expect(prompt).toContain(OrchestratorToolName.RequestDecision);
+    expect(prompt).toContain("Never send without an approved decision");
+  });
+
+  it("mentions only case_lookup when only caseLookup is on", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      sideConversations: { ...BASE.sideConversations, caseLookup: true },
+    });
+    expect(prompt).toContain(OrchestratorToolName.CaseLookup);
+    expect(prompt).not.toContain(OrchestratorToolName.CaseHandoff);
+  });
+
+  it("explains a handoff message only when the turn has one", () => {
+    expect(buildTurnPrompt(BASE)).not.toContain("Confirmed change requests");
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          origin: OrchestratorMessageOrigin.Internal,
+          kind: OrchestratorMessageKind.Handoff,
+          actor: "Ana",
+          text: "Change LD-6",
+          createdAt: new Date("2026-10-23T08:00:00.000Z"),
+        },
+      ],
+    });
+    expect(prompt).toContain("Confirmed change requests");
   });
 });

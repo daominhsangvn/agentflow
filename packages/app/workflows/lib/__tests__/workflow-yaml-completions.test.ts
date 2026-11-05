@@ -239,10 +239,20 @@ describe("workflowYamlCompletions", () => {
       "turnTimeoutMinutes",
       "connections",
       "cancelOn",
+      "mentionOnly",
+      "caseLookup",
+      "caseHandoff",
     ]);
     expect(at("agent:\n  orchestrator:\n    concurrency: §").labels).toEqual([
       "supersede",
       "queue",
+    ]);
+  });
+
+  it("offers true or false for mentionOnly", () => {
+    expect(at("agent:\n  orchestrator:\n    mentionOnly: §").labels).toEqual([
+      "true",
+      "false",
     ]);
   });
 

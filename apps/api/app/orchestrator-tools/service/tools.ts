@@ -31,6 +31,7 @@ import {
   WAIT_TASKS_MAX,
   WAIT_TIMEOUT_MAX_MINUTES,
 } from "./limits";
+import type { OrchestratorToolFeatures } from "./turn";
 
 const INSTRUCTIONS =
   "Tools of the project orchestrator for one turn of one conversation. reply posts in the conversation's thread; case_get and case_update_notes read and keep the case; runners_list shows what each runner can do; source_item_get reads the conversation's item; case_notify wakes the case of another item of this workflow (e.g. the items this one blocks); task_run sends a runner one of its commands, task_get reads a task and task_cancel stops one, only in a turn that handles a ticket change the workflow's cancelOn lists. A task's files come back with its result; reply attaches them (attachments) and task_run hands them to a later task (files). End the turn with wait_for (the tasks you started), wait_human or close_case. A write refused as superseded means a newer message arrived: end the turn with wait_human and a one-line note; the next turn answers both. Refused calls are recorded on the case.";
@@ -404,6 +405,38 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     },
     annotations: POSTS,
   },
+  {
+    name: OrchestratorToolName.CaseLookup,
+    title: "Read another item's case",
+    description:
+      "The CASE.md of each case of this project about itemKey (any workflow), read only: notes, tasks, decisions, conversations. Use it to answer questions about another item in this conversation; it changes nothing and links nothing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        itemKey: { type: "string", minLength: 1, maxLength: 200 },
+      },
+      required: ["itemKey"],
+      additionalProperties: false,
+    },
+    annotations: READS,
+  },
+  {
+    name: OrchestratorToolName.CaseHandoff,
+    title: "Send an approved summary to another item's case",
+    description:
+      "Writes the summary people approved in this conversation (the question of an approved decision of this case, copied by AgentFlow) into the case of itemKey in this project, where its orchestrator acts on it. Only after request_decision with that summary was approved. Each decision is sent once. Refused when several cases are about the item and caseId is missing (the refusal lists them).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        decisionId: { type: "string" },
+        itemKey: { type: "string", minLength: 1, maxLength: 200 },
+        caseId: { type: "string" },
+      },
+      required: ["decisionId", "itemKey"],
+      additionalProperties: false,
+    },
+    annotations: POSTS,
+  },
 ];
 
 /** The tools whose grant is on the source item, by the operation they need. */
@@ -415,13 +448,17 @@ const SOURCE_TOOL_OPERATIONS: Record<string, OrchestratorSourceOperation> = {
 };
 
 /** The instructions of a turn: the base text and the writes it was granted. */
-export function buildInstructions(grants: OrchestratorGrantSet): string {
-  return `${INSTRUCTIONS} ${describeGrants(grants)} A tool that is not granted is refused.`;
+export function buildInstructions(
+  grants: OrchestratorGrantSet,
+  features: OrchestratorToolFeatures
+): string {
+  return `${INSTRUCTIONS} ${describeGrants(grants)} A tool that is not granted is refused.${describeFeatures(features)}`;
 }
 
 /** The tools a turn may use: the ones whose grant is absent are left out. */
 export function visibleTools(
-  grants: OrchestratorGrantSet
+  grants: OrchestratorGrantSet,
+  features: OrchestratorToolFeatures
 ): IntegrationToolDescriptor[] {
   const canRead = pageKeysWith(grants, OrchestratorPageAccess.Read).length > 0;
   const canPublish =
@@ -438,6 +475,10 @@ export function visibleTools(
         return canPublish;
       case OrchestratorToolName.PullRequestOpen:
         return grants.pullRequestOpen;
+      case OrchestratorToolName.CaseLookup:
+        return features.caseLookup;
+      case OrchestratorToolName.CaseHandoff:
+        return features.caseHandoff;
       default:
         return true;
     }
@@ -470,4 +511,19 @@ function describeGrants(grants: OrchestratorGrantSet): string {
     return "Granted writes: none, you only read the ticket.";
   }
   return `Granted writes: ${parts.join("; ")}.`;
+}
+
+function describeFeatures(features: OrchestratorToolFeatures): string {
+  const parts: string[] = [];
+  if (features.caseLookup) {
+    parts.push(
+      `${OrchestratorToolName.CaseLookup} reads the case of another item of this project (read only).`
+    );
+  }
+  if (features.caseHandoff) {
+    parts.push(
+      `${OrchestratorToolName.CaseHandoff} sends a summary people approved (${OrchestratorToolName.RequestDecision}) to another item's case.`
+    );
+  }
+  return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }

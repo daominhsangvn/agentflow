@@ -18,6 +18,7 @@ export type TurnContext = {
   grants: OrchestratorGrantSet;
   workflowId: string;
   workflowName: string;
+  features: OrchestratorToolFeatures;
 };
 
 export type ToolOutcome = IntegrationToolCallResponse;
@@ -56,3 +57,9 @@ export function notGranted(what: string): ToolOutcome {
     `${what} is not granted: add it under agent.orchestrator.connections (docs/orchestrator.md).`
   );
 }
+
+/** The opt-in side-conversation tools of the turn's workflow (agent.orchestrator). */
+export type OrchestratorToolFeatures = {
+  caseLookup: boolean;
+  caseHandoff: boolean;
+};
