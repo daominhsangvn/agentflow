@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # ---------------------------------------------------------------------------
 # apps/app production image for the containerized, Vercel-independent E2E
-# target (FEA-2091).
+# target (FEA-2091) and the production compose (deploy/compose/docker-compose.prod.yml).
 #
 # apps/app builds with Next `output: "standalone"` for this image (gated behind
 # E2E_STANDALONE_BUILD in apps/app/next.config.ts, so Vercel deploys are
@@ -9,8 +9,10 @@
 # (.next/standalone) + .next/static + public — not the full workspace
 # node_modules/source. (FEA-2133)
 #
-# NEXT_PUBLIC_* are inlined by Next at BUILD time, so the browser-facing api
-# origin must be passed as a build arg (not runtime env). The browser (host
+# NEXT_PUBLIC_* are inlined by Next at BUILD time, so every NEXT_PUBLIC_* value
+# is a build arg (not runtime env). The production compose
+# (deploy/compose/docker-compose.prod.yml) passes the public origins this way.
+# For the E2E target the browser (host
 # Playwright) reaches the api at the published port localhost:3002, which
 # `getApiBaseUrl()` (e2e/helpers/api-url.ts) already agrees with.
 #
@@ -60,6 +62,28 @@ ARG TURBO_TEAM=""
 ARG TURBO_API=""
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV AUTH_API_URL=$AUTH_API_URL
+# Required origins have localhost defaults; optional ones default to empty, which
+# every keys.ts treats as unset (emptyStringAsUndefined).
+ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
+ARG NEXT_PUBLIC_WEB_URL=http://localhost:3001
+ARG NEXT_PUBLIC_DOCS_URL=""
+ARG NEXT_PUBLIC_MCP_SERVER_URL=""
+ARG NEXT_PUBLIC_AGENTFLOW_FEATURE_FLAGS=""
+ARG NEXT_PUBLIC_APP_ENVIRONMENT=""
+ARG NEXT_PUBLIC_LOGO_URL=""
+ARG NEXT_PUBLIC_GITHUB_APP_SLUG=""
+ARG NEXT_PUBLIC_POSTHOG_KEY=""
+ARG NEXT_PUBLIC_POSTHOG_HOST=""
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_WEB_URL=$NEXT_PUBLIC_WEB_URL
+ENV NEXT_PUBLIC_DOCS_URL=$NEXT_PUBLIC_DOCS_URL
+ENV NEXT_PUBLIC_MCP_SERVER_URL=$NEXT_PUBLIC_MCP_SERVER_URL
+ENV NEXT_PUBLIC_AGENTFLOW_FEATURE_FLAGS=$NEXT_PUBLIC_AGENTFLOW_FEATURE_FLAGS
+ENV NEXT_PUBLIC_APP_ENVIRONMENT=$NEXT_PUBLIC_APP_ENVIRONMENT
+ENV NEXT_PUBLIC_LOGO_URL=$NEXT_PUBLIC_LOGO_URL
+ENV NEXT_PUBLIC_GITHUB_APP_SLUG=$NEXT_PUBLIC_GITHUB_APP_SLUG
+ENV NEXT_PUBLIC_POSTHOG_KEY=$NEXT_PUBLIC_POSTHOG_KEY
+ENV NEXT_PUBLIC_POSTHOG_HOST=$NEXT_PUBLIC_POSTHOG_HOST
 # next build's TypeScript phase is memory-hungry; lift the heap cap (mirrors the
 # repo's loops-setup NODE_OPTIONS).
 ENV NODE_OPTIONS=--max-old-space-size=4096

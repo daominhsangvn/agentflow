@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 # ---------------------------------------------------------------------------
 # apps/api production image for the containerized, Vercel-independent E2E
-# target (FEA-2091).
+# target (FEA-2091) and the production compose
+# (deploy/compose/docker-compose.prod.yml), which also runs `prisma migrate
+# deploy` from this image (packages/database/node_modules/.bin/prisma).
 #
 # apps/api does NOT use Next `output: "standalone"`; it serves via a custom
 # `tsx server.ts` (node:http + Next request handler + desktop-gateway socket
@@ -43,6 +45,15 @@ FROM base AS builder
 WORKDIR /app
 ARG TURBO_TEAM=""
 ARG TURBO_API=""
+# Next inlines NEXT_PUBLIC_* into the api's server bundle at build time (trusted
+# CORS origins, auth email links, OAuth redirect URIs). The defaults equal the
+# code fallbacks, so builds without these args are unchanged.
+ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
+ARG NEXT_PUBLIC_WEB_URL=http://localhost:3001
+ARG NEXT_PUBLIC_API_URL=http://localhost:3002
+ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_WEB_URL=$NEXT_PUBLIC_WEB_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 # next build's TypeScript phase is memory-hungry; lift the heap cap (mirrors the
 # repo's loops-setup NODE_OPTIONS).
 ENV NODE_OPTIONS=--max-old-space-size=4096
@@ -99,6 +110,9 @@ ENV PORT=3002
 # These apps are not standalone, so `tsx server.ts` needs the runtime
 # node_modules + built .next + source. Carry the built workspace wholesale.
 COPY --from=builder /app/ ./
+# Lets `node scripts/storage-init.mjs` create buckets + CORS from this image
+# (production compose job); it resolves @aws-sdk/client-s3 through packages/storage.
+COPY scripts/storage-init.mjs ./scripts/storage-init.mjs
 EXPOSE 3002
 # api `start` = `NODE_ENV=production tsx server.ts` (cwd = apps/api).
 CMD ["pnpm", "--filter", "api", "start"]
