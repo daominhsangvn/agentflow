@@ -191,6 +191,18 @@ describe("case_lookup", () => {
     });
   });
 
+  it("keeps only an exact key match when `_` matched as a LIKE wildcard", async () => {
+    mocks.cases = [
+      row("case-2", "Dev"),
+      { ...row("case-3", "QC"), sourceKey: "jira:LD_6" },
+    ];
+    const outcome = await lookup({ itemKey: "ld_6" });
+    expect(outcome).toMatchObject({
+      ok: true,
+      output: { cases: [{ caseId: "case-3", workflow: "QC" }] },
+    });
+  });
+
   it("returns no cases as ok", async () => {
     const outcome = await lookup({ itemKey: "LD-6" });
     expect(outcome).toMatchObject({ ok: true, output: { cases: [] } });

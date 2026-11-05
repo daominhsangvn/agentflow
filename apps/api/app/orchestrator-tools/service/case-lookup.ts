@@ -52,7 +52,12 @@ export async function findItemCases(
       take: ITEM_CASES_MAX,
     })
   );
-  return rows.map((row) => ({
+  // LIKE treats `_` as a wildcard: keep the exact (case-insensitive) suffix.
+  const suffix = `:${itemKey}`.toLowerCase();
+  const exact = rows.filter((row) =>
+    row.sourceKey?.toLowerCase().endsWith(suffix)
+  );
+  return exact.map((row) => ({
     id: row.id,
     status: row.status,
     title: row.title,
