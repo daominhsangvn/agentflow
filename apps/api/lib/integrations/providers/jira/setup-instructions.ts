@@ -1,15 +1,16 @@
 import { IntegrationDeliveryMode } from "@repo/api/src/types/integration";
 import { INBOUND_TOKEN_HEADER_DISPLAY } from "../../inbound-auth";
 import type { InboundSetupContext, IntegrationAccount } from "../../types";
-import { JiraDeployment } from "./constants";
+import { JiraDeployment, JiraPollScope } from "./constants";
 import { jiraBotJqlIdentifier } from "./identity";
-import type { JiraConnectionConfig } from "./schemas";
+import { type JiraConnectionConfig, jiraPollScopeOf } from "./schemas";
 
 /**
  * Markdown shown to the admin next to the inbound URL and secret. Webhook
  * mode offers two setups: a Jira admin webhook (HMAC-signed with the secret)
  * or a Jira Automation rule (static token header). Poll mode needs no setup
- * in Jira but only detects assignments.
+ * in Jira: scope `assigned_to_bot` (default) detects assignments only, scope
+ * `project_changes` detects every trigger like the webhooks.
  */
 
 export function buildJiraSetupInstructions(
@@ -51,7 +52,7 @@ function webhookInstructions(
     `2. **URL**: \`${context.inboundUrl}\``,
     `3. **Secret**: \`${context.inboundSecret}\``,
     "4. **Events**: under *Issue* select **created** and **updated**. For **Bot mentioned** triggers, and **Issue matches conditions** triggers that use mentions, also select *Comment* **created** and **updated**.",
-    `5. **JQL filter**: \`assignee = "${bot.jql}"\` so only issues assigned to the bot account (${bot.label}) are sent. For **Issue labeled**, **Bot mentioned** or **Issue matches conditions** triggers that react to issues not (yet) assigned to the bot, widen the filter (e.g. \`assignee = "${bot.jql}" OR labels = ai-ready\`) or leave it empty.`,
+    `5. **JQL filter**: \`assignee = "${bot.jql}"\` so only issues assigned to the bot account (${bot.label}) are sent (or the project connection's issue filter). For **Issue labeled**, **Bot mentioned** or **Issue matches conditions** triggers that react to issues not (yet) assigned to the bot, widen the filter (e.g. \`assignee = "${bot.jql}" OR labels = ai-ready\`) or leave it empty.`,
     "6. Leave **Exclude body** unchecked and save.",
     "",
     "### Option 2: Jira Automation rule",
@@ -70,19 +71,42 @@ function webhookInstructions(
     "",
     "### No public URL?",
     "",
-    "If Jira cannot reach this server (for example it runs behind NAT without a tunnel or reverse proxy), switch this connection's delivery mode to **Poll**. AgentFlow then asks Jira for newly assigned issues on every poll interval; no Jira configuration is needed.",
+    "If Jira cannot reach this server (for example it runs behind NAT without a tunnel or reverse proxy), switch this connection's delivery mode to **Poll**. AgentFlow then asks Jira for newly assigned issues on every poll interval; no Jira configuration is needed. Set `pollScope: project_changes` in the connection YAML to detect all events, not only assignments.",
   ].join("\n");
 }
 
 function pollInstructions(
   context: InboundSetupContext<JiraConnectionConfig>
 ): string {
+  if (
+    jiraPollScopeOf(context.connection.config) === JiraPollScope.ProjectChanges
+  ) {
+    return projectChangesPollInstructions(context);
+  }
   const bot = describeBot(context.connection.account);
   return [
     `AgentFlow polls Jira on every poll interval for issues assigned to the bot account (${bot.label}) that changed recently (JQL \`assignee = currentUser() AND updated >= …\`, signed in with the connection's credentials). No configuration is needed in Jira and this server does not need a public URL.`,
     ...missingBotNote(context.connection.account),
     "",
     "Polling detects **Issue assigned** triggers (an issue created with, or changed to, the bot as assignee) and **Issue matches conditions** triggers on issues assigned to the bot (their assignment and label changes). **Issue labeled** and **Bot mentioned** triggers, and mentions in conditions, need **Webhook** delivery: Jira search cannot tell when a label was added or who was mentioned.",
+    "",
+    "Set `pollScope: project_changes` in the connection YAML to detect every trigger without any Jira configuration.",
+  ].join("\n");
+}
+
+function projectChangesPollInstructions(
+  context: InboundSetupContext<JiraConnectionConfig>
+): string {
+  const bot = describeBot(context.connection.account);
+  return [
+    `AgentFlow polls the Jira projects of the project connections that use this connection (their project keys, narrowed by each project connection's **Issue filter (JQL)**, e.g. \`filter = 10042\` for one board) on every poll interval, signed in as the bot account (${bot.label}). No configuration is needed in Jira and this server does not need a public URL.`,
+    ...missingBotNote(context.connection.account),
+    "",
+    "Polling detects every trigger, with the same events as webhooks: **Issue assigned**, **Issue labeled** (including removals), **Issue status changed**, **Bot mentioned** (in comments and descriptions) and **Issue matches conditions**, plus replies in comment threads. The bot's own changes are ignored.",
+    "",
+    "- Each poll reads only the last **poll interval** (plus 2 minutes of overlap). Changes older than that, for example while AgentFlow was down, are skipped.",
+    "- At least one project connection with Jira project keys must use this connection; otherwise the poll fails with an error that says so.",
+    "- Events arrive up to one poll interval after the change, and each poll reads up to 300 issues.",
   ].join("\n");
 }
 

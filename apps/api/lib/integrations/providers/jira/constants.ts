@@ -54,6 +54,9 @@ export const JiraChangelogField = {
   Assignee: "assignee",
   Labels: "labels",
   Status: "status",
+  Description: "description",
+  Summary: "summary",
+  IssueType: "issuetype",
 } as const;
 export type JiraChangelogField =
   (typeof JiraChangelogField)[keyof typeof JiraChangelogField];
@@ -125,3 +128,10 @@ export const JiraLabelChange = {
 } as const;
 export type JiraLabelChange =
   (typeof JiraLabelChange)[keyof typeof JiraLabelChange];
+
+/** Which Jira changes a Poll delivery connection detects. */
+export const JiraPollScope = {
+  AssignedToBot: "assigned_to_bot",
+  ProjectChanges: "project_changes",
+} as const;
+export type JiraPollScope = (typeof JiraPollScope)[keyof typeof JiraPollScope];

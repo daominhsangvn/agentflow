@@ -1,10 +1,18 @@
 import { IntegrationProviderKey } from "@repo/api/src/types/integration";
 import { describe, expect, it } from "vitest";
+import type { PollInput, PollScope } from "../../../types";
 import { HttpMethod } from "../../../types";
-import { JiraEventAttribute, JiraTriggerType } from "../constants";
 import {
+  JiraEventAttribute,
+  JiraPollScope,
+  JiraSignalType,
+  JiraTriggerType,
+} from "../constants";
+import {
+  buildJiraPollJql,
   JIRA_POLL_BOT_UNKNOWN_ERROR,
   JIRA_POLL_MAX_ISSUES,
+  JIRA_POLL_NO_SCOPES_ERROR,
   pollJira,
 } from "../poll";
 import {
@@ -14,13 +22,16 @@ import {
 import {
   assigneeItem,
   BOT_USER,
+  HUMAN_USER,
   history,
   labelsItem,
   searchIssue,
+  statusItem,
 } from "./jira.test-fixtures";
 import {
   BOT_ACCOUNT_ID,
   CLOUD_SITE_URL,
+  cloudConfig,
   DC_BOT_ACCOUNT,
   dataCenterConfig,
   type HttpRoute,
@@ -30,6 +41,7 @@ import {
   NOW,
   requestQuery,
   routedHttp,
+  silentLog,
 } from "./jira.test-helpers";
 
 const SEARCH_PATH = "/rest/api/3/search/jql";
@@ -518,4 +530,307 @@ describe("pollJira", () => {
     );
     expect(result.cursor).toEqual({ since: "2026-10-04T11:59:00.000Z" });
   });
+});
+
+describe("project changes scope", () => {
+  const SCOPES: PollScope[] = [
+    {
+      projectConnectionId: "pc1",
+      containers: ["PROJ"],
+      settings: { projectKeys: ["PROJ"] },
+    },
+  ];
+  const input: PollInput = {
+    intervalSeconds: 300,
+    loadScopes: async () => SCOPES,
+  };
+  const config = { ...cloudConfig(), pollScope: JiraPollScope.ProjectChanges };
+  const V2_SEARCH = "/rest/api/2/search/jql";
+  const sinceFive = { since: "2026-10-04T11:55:00.000Z" };
+
+  function ctxFor(http: ReturnType<typeof routedHttp>["http"], extra = {}) {
+    return makeJiraContext({ http, config, ...extra });
+  }
+
+  it("sends the scoped JQL on REST v2 with description and comment fields", async () => {
+    const fake = routedHttp([searchRoute({ issues: [] }, V2_SEARCH)]);
+    await pollJira(ctxFor(fake.http), sinceFive, input);
+
+    const query = requestQuery(fake.requests[0]);
+    expect(query.get("jql")).toBe(
+      '(project in ("PROJ")) AND updated >= "-8m" ORDER BY updated ASC'
+    );
+    expect(query.get("fields")).toContain("description");
+    expect(query.get("fields")).toContain("comment");
+    expect(new URL(fake.requests[0]?.url ?? "").pathname).toBe(V2_SEARCH);
+  });
+
+  it("uses /jira/rest/api/2/search on Data Center", async () => {
+    const fake = routedHttp([
+      searchRoute({ issues: [] }, "/jira/rest/api/2/search"),
+    ]);
+    const ctx = makeJiraContext({
+      http: fake.http,
+      config: {
+        ...dataCenterConfig(),
+        pollScope: JiraPollScope.ProjectChanges,
+      },
+      account: DC_BOT_ACCOUNT,
+    });
+    await pollJira(ctx, sinceFive, input);
+    expect(new URL(fake.requests[0]?.url ?? "").pathname).toBe(
+      "/jira/rest/api/2/search"
+    );
+  });
+
+  it("builds one clause per scope, with issue filters and quoting", () => {
+    const scopes: PollScope[] = [
+      {
+        projectConnectionId: "a",
+        containers: ["PROJ", "OPS"],
+        settings: { projectKeys: ["PROJ", "OPS"] },
+      },
+      {
+        projectConnectionId: "b",
+        containers: ["WEB"],
+        settings: { projectKeys: ["WEB"], issueFilter: "filter = 10042" },
+      },
+      { projectConnectionId: "c", containers: [], settings: {} },
+    ];
+    expect(buildJiraPollJql(scopes, 8)).toBe(
+      '((project in ("PROJ", "OPS")) OR (project in ("WEB") AND (filter = 10042))) AND updated >= "-8m" ORDER BY updated ASC'
+    );
+    expect(
+      buildJiraPollJql(
+        [
+          {
+            projectConnectionId: "q",
+            containers: ['A"B', "C\\D"],
+            settings: { projectKeys: ["AB"] },
+          },
+        ],
+        1
+      )
+    ).toContain('project in ("A\\"B", "C\\\\D")');
+    expect(buildJiraPollJql([], 1)).toBeNull();
+  });
+
+  it("throws without scopes and sends nothing", async () => {
+    const fake = routedHttp([]);
+    await expect(
+      pollJira(ctxFor(fake.http), null, {
+        ...input,
+        loadScopes: async () => [],
+      })
+    ).rejects.toThrow(JIRA_POLL_NO_SCOPES_ERROR);
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it("limits an old cursor to the poll interval", async () => {
+    const fake = routedHttp([searchRoute({ issues: [] }, V2_SEARCH)]);
+    const log = silentLog();
+    await pollJira(
+      ctxFor(fake.http, { log }),
+      { since: "2026-10-04T09:00:00.000Z" },
+      input
+    );
+    // Cursor limited to now - 300 s - 1 min - 2 min = 8 min; minus the 2 min
+    // overlap = 10 min, +1 minute margin.
+    expect(requestQuery(fake.requests[0]).get("jql")).toContain('"-11m"');
+    expect(log.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a cursor one interval and a few seconds old without warning", async () => {
+    const fake = routedHttp([searchRoute({ issues: [] }, V2_SEARCH)]);
+    const log = silentLog();
+    // now (12:00:00) - 300 s - 1 min - 10 s: the normal gap between two polls.
+    await pollJira(
+      ctxFor(fake.http, { log }),
+      { since: "2026-10-04T11:53:50.000Z" },
+      input
+    );
+    expect(log.warn).not.toHaveBeenCalled();
+    // since 11:53:50 - 2 min overlap = 8 min 10 s, rounded up, +1 minute margin.
+    expect(requestQuery(fake.requests[0]).get("jql")).toContain('"-10m"');
+  });
+
+  it("starts a first poll with a 5-minute window", async () => {
+    const fake = routedHttp([searchRoute({ issues: [] }, V2_SEARCH)]);
+    const result = await pollJira(ctxFor(fake.http), null, input);
+    expect(requestQuery(fake.requests[0]).get("jql")).toContain('"-8m"');
+    expect(result.cursor).toEqual({ since: "2026-10-04T11:59:00.000Z" });
+  });
+
+  it("follows Cloud nextPageToken and stops at 3 pages", async () => {
+    let call = 0;
+    const fake = routedHttp([
+      {
+        method: HttpMethod.Get,
+        path: V2_SEARCH,
+        respond: () => {
+          call += 1;
+          return jsonResponse(200, {
+            issues: [pagedIssue(`${call}`)],
+            nextPageToken: `t${call}`,
+            isLast: false,
+          });
+        },
+      },
+      issueRoute("1"),
+      issueRoute("2"),
+      issueRoute("3"),
+    ]);
+    const result = await pollJira(ctxFor(fake.http), sinceFive, input);
+
+    const searches = fake.requests.filter((r) => r.url.includes("search/jql"));
+    expect(searches).toHaveLength(3);
+    expect(requestQuery(searches[1]).get("nextPageToken")).toBe("t1");
+    expect(requestQuery(searches[2]).get("nextPageToken")).toBe("t2");
+    expect(result.cursor).toEqual({ since: "2026-10-04T11:58:00.000Z" });
+  });
+
+  it("pages Data Center with startAt", async () => {
+    let call = 0;
+    const fake = routedHttp([
+      {
+        method: HttpMethod.Get,
+        path: "/jira/rest/api/2/search",
+        respond: () => {
+          call += 1;
+          return jsonResponse(200, {
+            issues: [pagedIssue(`${call}`)],
+            startAt: call - 1,
+            total: 2,
+          });
+        },
+      },
+    ]);
+    const ctx = makeJiraContext({
+      http: fake.http,
+      config: {
+        ...dataCenterConfig(),
+        pollScope: JiraPollScope.ProjectChanges,
+      },
+      account: DC_BOT_ACCOUNT,
+    });
+    await pollJira(ctx, sinceFive, input);
+    const searches = fake.requests.filter((r) => r.url.includes("/search?"));
+    expect(searches).toHaveLength(2);
+    expect(requestQuery(searches[1]).get("startAt")).toBe("1");
+  });
+
+  it("reads the newest comment page when the search returned part of them", async () => {
+    const fake = routedHttp([
+      searchRoute(
+        { issues: [issueWithComments({ total: 120, ids: ["c1", "c2"] })] },
+        V2_SEARCH
+      ),
+      {
+        method: HttpMethod.Get,
+        path: "/rest/api/2/issue/1001/comment",
+        respond: jsonResponse(200, { comments: [], total: 120, startAt: 20 }),
+      },
+    ]);
+    await pollJira(ctxFor(fake.http), sinceFive, input);
+    const request = fake.requests.find((r) => r.url.includes("/comment"));
+    expect(request?.url).toContain(
+      "/rest/api/2/issue/1001/comment?startAt=20&maxResults=100"
+    );
+  });
+
+  it("makes no comment request when the list is complete", async () => {
+    const fake = routedHttp([
+      searchRoute(
+        { issues: [issueWithComments({ total: 2, ids: ["c1", "c2"] })] },
+        V2_SEARCH
+      ),
+    ]);
+    await pollJira(ctxFor(fake.http), sinceFive, input);
+    expect(fake.requests.some((r) => r.url.includes("/comment"))).toBe(false);
+  });
+
+  it("emits status change and comment reply events", async () => {
+    const issue = searchIssue({
+      id: "1001",
+      key: "PROJ-1",
+      created: "2026-10-01T09:00:00.000+0000",
+      updated: "2026-10-04T11:58:00.000+0000",
+      histories: [
+        history({
+          id: "h1",
+          created: "2026-10-04T11:57:00.000+0000",
+          items: [statusItem("To Do", "Done")],
+        }),
+      ],
+    });
+    (issue.fields as Record<string, unknown>).status = { name: "Done" };
+    (issue.fields as Record<string, unknown>).comment = {
+      total: 1,
+      comments: [
+        {
+          id: "c2",
+          parentId: "c1",
+          author: HUMAN_USER,
+          created: "2026-10-04T11:58:00.000+0000",
+          updated: "2026-10-04T11:58:00.000+0000",
+          body: "an answer",
+        },
+      ],
+    };
+    const fake = routedHttp([searchRoute({ issues: [issue] }, V2_SEARCH)]);
+    const result = await pollJira(ctxFor(fake.http), sinceFive, input);
+
+    const types = result.events.map((event) => event.triggerType);
+    expect(types).toContain(JiraTriggerType.IssueStatusChanged);
+    const reply = result.events.find(
+      (event) => event.triggerType === JiraSignalType.CommentReply
+    );
+    expect(reply?.message?.text).toBe("an answer");
+  });
+
+  it("assigned_to_bot ignores the input and sends the old JQL", async () => {
+    const fake = routedHttp([searchRoute({ issues: [] })]);
+    await pollJira(makeJiraContext({ http: fake.http }), sinceFive, input);
+    expect(requestQuery(fake.requests[0]).get("jql")).toContain(
+      "assignee = currentUser()"
+    );
+  });
+
+  function pagedIssue(id: string) {
+    const issue = searchIssue({
+      id,
+      key: `PROJ-${id}`,
+      created: "2026-10-01T09:00:00.000+0000",
+      updated: `2026-10-04T11:5${5 + Number(id)}:00.000+0000`,
+    });
+    (issue.fields as Record<string, unknown>).comment = {
+      total: 0,
+      comments: [],
+    };
+    return issue;
+  }
+
+  function issueRoute(id: string): HttpRoute {
+    return searchRoute({}, `/rest/api/2/issue/${id}`);
+  }
+
+  function issueWithComments(options: { total: number; ids: string[] }) {
+    const issue = searchIssue({
+      id: "1001",
+      key: "PROJ-1",
+      created: "2026-10-01T09:00:00.000+0000",
+      updated: "2026-10-04T11:58:00.000+0000",
+    });
+    (issue.fields as Record<string, unknown>).comment = {
+      total: options.total,
+      comments: options.ids.map((id) => ({
+        id,
+        author: HUMAN_USER,
+        created: "2026-10-01T10:00:00.000+0000",
+        updated: "2026-10-01T10:00:00.000+0000",
+        body: "old",
+      })),
+    };
+    return issue;
+  }
 });

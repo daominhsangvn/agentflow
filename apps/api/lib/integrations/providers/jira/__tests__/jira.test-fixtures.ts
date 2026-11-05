@@ -431,3 +431,72 @@ export function searchIssue(options: {
         }),
   };
 }
+
+/** An issue as a project poll reads it: the current state, no changelog. */
+export function polledIssue(
+  overrides: {
+    assignee?: unknown;
+    labels?: string[];
+    status?: string;
+    description?: unknown;
+    created?: string;
+    creator?: unknown;
+  } = {}
+) {
+  return {
+    id: "10001",
+    key: "PROJ-1",
+    fields: {
+      summary: "Polled issue",
+      issuetype: { id: "10001", name: "Story" },
+      project: { id: "10000", key: "PROJ", name: "Project" },
+      labels: overrides.labels ?? [],
+      status: { id: "10001", name: overrides.status ?? "To Do" },
+      assignee: overrides.assignee === undefined ? null : overrides.assignee,
+      creator: overrides.creator ?? HUMAN_USER,
+      reporter: HUMAN_USER,
+      description: overrides.description ?? "Plain description",
+      created: overrides.created ?? "2026-10-04T09:00:00.000+0000",
+      updated: "2026-10-04T11:59:00.000+0000",
+    },
+  };
+}
+
+/** A REST comment (wiki markup body unless `body` says otherwise). */
+export function polledComment(options: {
+  id: string;
+  created: string;
+  body?: unknown;
+  parentId?: string;
+  author?: unknown;
+  updated?: string;
+  updateAuthor?: unknown;
+}) {
+  return {
+    id: options.id,
+    ...(options.parentId ? { parentId: options.parentId } : {}),
+    author: options.author ?? HUMAN_USER,
+    body: options.body ?? "plain comment",
+    created: options.created,
+    updated: options.updated ?? options.created,
+    updateAuthor: options.updateAuthor ?? options.author ?? HUMAN_USER,
+  };
+}
+
+/** Wiki markup that mentions the bot. */
+export const BOT_MENTION_WIKI = `[~accountid:${BOT_ACCOUNT_ID}] please look`;
+
+/** An ADF document that mentions the bot. */
+export const BOT_MENTION_ADF = {
+  type: "doc",
+  version: 1,
+  content: [
+    {
+      type: "paragraph",
+      content: [
+        { type: "mention", attrs: { id: BOT_ACCOUNT_ID, text: "@bot" } },
+        { type: "text", text: " please look" },
+      ],
+    },
+  ],
+};

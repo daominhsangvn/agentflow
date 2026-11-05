@@ -4,15 +4,18 @@ import {
   HttpMethod,
   type InboundEvent,
   type IntegrationAccount,
+  type PollInput,
   type PollResult,
+  type PollScope,
 } from "../../types";
+import { JiraRestVersion } from "./auth";
 import {
   type JiraContext,
   type JiraError,
   jiraIssuePath,
   jiraRequest,
 } from "./client";
-import { JiraDeployment } from "./constants";
+import { JiraDeployment, JiraPollScope } from "./constants";
 import { parseJiraDate } from "./dates";
 import { isJiraBotIdentity, isJiraBotUser, jiraUserActor } from "./identity";
 import {
@@ -31,13 +34,18 @@ import {
   jiraIssueState,
   labelTokens,
 } from "./issue-events";
+import { jiraPollIssueEvents } from "./poll-events";
+import { jiraProjectSettingsSchema } from "./project";
 import {
+  type JiraComment,
   type JiraHistory,
   type JiraIssue,
   type JiraSearchResult,
   jiraChangelogPageSchema,
+  jiraCommentPageSchema,
   jiraIssueSchema,
   jiraPollCursorSchema,
+  jiraPollScopeOf,
   jiraSearchResultSchema,
 } from "./schemas";
 
@@ -62,6 +70,14 @@ import {
  *   label changes of the polled issues (so only issues assigned to the bot),
  *   each with the issue state right after that change, replayed from the
  *   changelog. Mentions are not polled.
+ *
+ * Poll scope `project_changes` (connection config `pollScope`) polls instead
+ * the Jira projects claimed by the connection's project connections, narrowed
+ * by each one's `issueFilter` JQL. It reads only the last poll interval (plus
+ * the overlap; older changes are skipped), follows search pages (3 x 100
+ * issues per poll, then continues next poll), reads descriptions and comments
+ * on REST v2 (wiki markup, like webhooks), and turns every change into the
+ * events the webhook path builds (see poll-events.ts).
  */
 
 export const JIRA_POLL_MAX_ISSUES = 50;
@@ -91,16 +107,26 @@ const POLL_FIELDS = [
   "updated",
 ].join(",");
 
+export const JIRA_POLL_NO_SCOPES_ERROR =
+  'Poll scope "Every change" has no Jira projects: add this connection to a project (Project settings → Integrations) with Jira project keys.';
+
 export const JIRA_POLL_BOT_UNKNOWN_ERROR =
   "The bot account of this Jira connection is unknown. Test the connection to look it up.";
 
 export async function pollJira(
   ctx: JiraContext,
-  cursor: JsonValue | null
+  cursor: JsonValue | null,
+  pollInput?: PollInput
 ): Promise<PollResult> {
   const account = ctx.connection.account;
   if (!account) {
     throw new Error(JIRA_POLL_BOT_UNKNOWN_ERROR);
+  }
+  if (jiraPollScopeOf(ctx.connection.config) === JiraPollScope.ProjectChanges) {
+    if (!pollInput) {
+      throw new Error("Polling project changes needs the poll interval");
+    }
+    return await pollProjectChanges(ctx, cursor, pollInput, account);
   }
   const now = ctx.now();
   const since = resolveSince(cursor, now);
@@ -190,7 +216,8 @@ async function searchAssignedIssues(
  */
 async function loadHistories(
   ctx: JiraContext,
-  issue: JiraIssue
+  issue: JiraIssue,
+  restVersion?: JiraRestVersion
 ): Promise<Result<JiraHistory[], JiraError>> {
   let changelog = issue.changelog;
   if (!changelog?.histories) {
@@ -200,6 +227,7 @@ async function loadHistories(
         method: HttpMethod.Get,
         path: jiraIssuePath(issue.id),
         query: { fields: "assignee", expand: "changelog" },
+        restVersion,
       },
       jiraIssueSchema
     );
@@ -216,14 +244,15 @@ async function loadHistories(
   ) {
     return Result.ok(histories);
   }
-  return await loadNewestHistories(ctx, issue, histories, total);
+  return await loadNewestHistories(ctx, issue, histories, total, restVersion);
 }
 
 async function loadNewestHistories(
   ctx: JiraContext,
   issue: JiraIssue,
   partial: JiraHistory[],
-  total: number
+  total: number,
+  restVersion?: JiraRestVersion
 ): Promise<Result<JiraHistory[], JiraError>> {
   const page = await jiraRequest(
     ctx,
@@ -234,6 +263,7 @@ async function loadNewestHistories(
         startAt: Math.max(0, total - CHANGELOG_PAGE_SIZE),
         maxResults: CHANGELOG_PAGE_SIZE,
       },
+      restVersion,
     },
     jiraChangelogPageSchema
   );
@@ -327,11 +357,16 @@ function occurrence(
   };
 }
 
-function resolveSince(cursor: JsonValue | null, now: Date): Date {
-  const oldest = new Date(now.getTime() - MAX_LOOKBACK_MS);
+function resolveSince(
+  cursor: JsonValue | null,
+  now: Date,
+  maxLookbackMs = MAX_LOOKBACK_MS,
+  firstLookbackMs = FIRST_POLL_LOOKBACK_MS
+): Date {
+  const oldest = new Date(now.getTime() - maxLookbackMs);
   const parsed = jiraPollCursorSchema.safeParse(cursor);
   if (!parsed.success) {
-    return new Date(now.getTime() - FIRST_POLL_LOOKBACK_MS);
+    return new Date(now.getTime() - firstLookbackMs);
   }
   const since = new Date(parsed.data.since);
   if (since < oldest) {
@@ -517,4 +552,211 @@ function undoHistory(
     }
   }
   return { assignedToBot, labels };
+}
+
+/** Cloud REST v2 returns wiki markup like webhooks, so snapshots match webhook events. */
+const PROJECT_CHANGES_REST_VERSION = JiraRestVersion.DataCenter;
+const PROJECT_CHANGES_FIELDS = `${POLL_FIELDS},description,comment`;
+const JIRA_POLL_PAGE_SIZE = 100;
+const JIRA_POLL_MAX_PAGES = 3;
+const COMMENT_PAGE_SIZE = 100;
+
+async function pollProjectChanges(
+  ctx: JiraContext,
+  cursor: JsonValue | null,
+  input: PollInput,
+  account: IntegrationAccount
+): Promise<PollResult> {
+  const now = ctx.now();
+  const oldestMs =
+    input.intervalSeconds * 1000 + INDEX_LAG_MS + WINDOW_OVERLAP_MS;
+  const since = resolveSince(
+    cursor,
+    now,
+    oldestMs,
+    Math.min(FIRST_POLL_LOOKBACK_MS, oldestMs)
+  );
+  warnWhenCursorSkipped(ctx, cursor, since, now, oldestMs);
+  const windowStart = new Date(since.getTime() - WINDOW_OVERLAP_MS);
+  const jql = buildJiraPollJql(
+    await input.loadScopes(),
+    windowMinutes(windowStart, now)
+  );
+  if (!jql) {
+    throw new Error(JIRA_POLL_NO_SCOPES_ERROR);
+  }
+  const page = await searchScopedIssues(ctx, jql);
+  const events: InboundEvent[] = [];
+  for (const issue of page.issues) {
+    const histories = await loadHistories(
+      ctx,
+      issue,
+      PROJECT_CHANGES_REST_VERSION
+    );
+    if (!histories.ok) {
+      throw new Error(
+        `Could not read the changelog of ${issue.key}: ${histories.error.message}`
+      );
+    }
+    events.push(
+      ...jiraPollIssueEvents({
+        siteUrl: ctx.connection.config.siteUrl,
+        issue,
+        histories: histories.value,
+        comments: await loadComments(ctx, issue),
+        windowStart,
+        account,
+      })
+    );
+  }
+  if (page.truncated) {
+    ctx.log.warn("Jira poll returned a full page; continuing next poll", {
+      connectionId: ctx.connection.id,
+      issues: page.issues.length,
+    });
+  }
+  const next = nextSince({
+    since,
+    now,
+    issues: page.issues,
+    truncated: page.truncated,
+  });
+  return { events, cursor: { since: next.toISOString() } };
+}
+
+function warnWhenCursorSkipped(
+  ctx: JiraContext,
+  cursor: JsonValue | null,
+  since: Date,
+  now: Date,
+  oldestMs: number
+): void {
+  const parsed = jiraPollCursorSchema.safeParse(cursor);
+  if (
+    parsed.success &&
+    new Date(parsed.data.since) < new Date(now.getTime() - oldestMs)
+  ) {
+    ctx.log.warn("Jira poll skipped changes older than the poll interval", {
+      connectionId: ctx.connection.id,
+      cursor: parsed.data.since,
+      since: since.toISOString(),
+    });
+  }
+}
+
+function windowMinutes(windowStart: Date, now: Date): number {
+  return Math.max(
+    1,
+    Math.ceil((now.getTime() - windowStart.getTime()) / MINUTE_MS) + 1
+  );
+}
+
+function jqlString(value: string): string {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+/** JQL of the project connections' Jira projects (and issue filters) changed in the last `minutes`; null without projects. */
+export function buildJiraPollJql(
+  scopes: readonly PollScope[],
+  minutes: number
+): string | null {
+  const clauses: string[] = [];
+  for (const scope of scopes) {
+    if (scope.containers.length === 0) {
+      continue;
+    }
+    const settings = jiraProjectSettingsSchema.safeParse(scope.settings);
+    if (!settings.success) {
+      continue;
+    }
+    const projects = `project in (${scope.containers.map(jqlString).join(", ")})`;
+    const filter = settings.data.issueFilter;
+    clauses.push(filter ? `(${projects} AND (${filter}))` : `(${projects})`);
+  }
+  if (clauses.length === 0) {
+    return null;
+  }
+  const where = clauses.length === 1 ? clauses[0] : `(${clauses.join(" OR ")})`;
+  return `${where} AND updated >= "-${minutes}m" ORDER BY updated ASC`;
+}
+
+/** Follows the search pages (Cloud `nextPageToken`, Data Center `startAt`) up to the page cap. */
+async function searchScopedIssues(
+  ctx: JiraContext,
+  jql: string
+): Promise<SearchPage> {
+  const cloud = ctx.connection.config.deployment === JiraDeployment.Cloud;
+  const issues: JiraIssue[] = [];
+  let pageToken: string | undefined;
+  let last: JiraSearchResult | null = null;
+  for (let pageNo = 0; pageNo < JIRA_POLL_MAX_PAGES; pageNo++) {
+    const result = await jiraRequest(
+      ctx,
+      {
+        method: HttpMethod.Get,
+        path: cloud ? "search/jql" : "search",
+        query: {
+          jql,
+          fields: PROJECT_CHANGES_FIELDS,
+          expand: "changelog",
+          maxResults: JIRA_POLL_PAGE_SIZE,
+          ...(cloud
+            ? { nextPageToken: pageToken }
+            : { startAt: issues.length }),
+        },
+        restVersion: PROJECT_CHANGES_REST_VERSION,
+      },
+      jiraSearchResultSchema
+    );
+    if (!result.ok) {
+      throw new Error(`Jira search failed: ${result.error.message}`);
+    }
+    last = result.value;
+    const returned = last.issues ?? [];
+    issues.push(...returned);
+    pageToken = last.nextPageToken ?? undefined;
+    if (returned.length === 0 || !hasMoreResults(last)) {
+      return { issues, truncated: false };
+    }
+    if (cloud && !pageToken) {
+      return { issues, truncated: false };
+    }
+  }
+  return { issues, truncated: last ? hasMoreResults(last) : false };
+}
+
+/** The comments of the issue: the ones the search returned, or the newest page when Jira returned only part. */
+async function loadComments(
+  ctx: JiraContext,
+  issue: JiraIssue
+): Promise<JiraComment[]> {
+  const inline = issue.fields.comment;
+  const comments = inline?.comments ?? [];
+  const total = inline?.total ?? comments.length;
+  if (inline && total <= comments.length) {
+    return comments;
+  }
+  const page = await jiraRequest(
+    ctx,
+    {
+      method: HttpMethod.Get,
+      path: jiraIssuePath(issue.id, "comment"),
+      query: {
+        startAt: Math.max(0, total - COMMENT_PAGE_SIZE),
+        maxResults: COMMENT_PAGE_SIZE,
+      },
+      restVersion: PROJECT_CHANGES_REST_VERSION,
+    },
+    jiraCommentPageSchema
+  );
+  if (!page.ok) {
+    throw new Error(
+      `Could not read the comments of ${issue.key}: ${page.error.message}`
+    );
+  }
+  const byId = new Map(comments.map((comment) => [comment.id, comment]));
+  for (const comment of page.value.comments ?? []) {
+    byId.set(comment.id, comment);
+  }
+  return [...byId.values()];
 }

@@ -15,7 +15,7 @@ import {
   JiraErrorKind,
   jiraRequest,
 } from "./client";
-import { JiraDeployment } from "./constants";
+import { JiraDeployment, JiraPollScope } from "./constants";
 import { accountFromMyself } from "./identity";
 import {
   type JiraConnectionConfig,
@@ -71,6 +71,25 @@ export const JIRA_CONNECTION_FIELDS: IntegrationFieldDescriptor[] = [
     required: true,
     description:
       "Jira Cloud: an API token of the bot account (id.atlassian.com > Security > API tokens). Both kinds work: a token without scopes, or a token with scopes (app Jira) that has read:jira-user, read:jira-work and write:jira-work. Data Center: a personal access token of the bot account (Profile > Personal Access Tokens). The bot needs Browse projects, Add comments and Transition issues permissions.",
+  },
+  {
+    key: "pollScope",
+    label: "Poll scope",
+    kind: IntegrationFieldKind.Select,
+    required: false,
+    defaultValue: JiraPollScope.AssignedToBot,
+    options: [
+      {
+        value: JiraPollScope.AssignedToBot,
+        label: "Issues assigned to the bot",
+      },
+      {
+        value: JiraPollScope.ProjectChanges,
+        label: "Every change in the project connections' Jira projects",
+      },
+    ],
+    description:
+      "Poll delivery only; ignored with Webhook. Issues assigned to the bot: detects assignments (and conditions on them). Every change: searches the Jira projects of the project connections using this connection (narrowed by their issue filter) and detects every trigger the webhook detects; reads only the last poll interval.",
   },
 ];
 

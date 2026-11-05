@@ -12,6 +12,7 @@ import {
   JIRA_WEBHOOK_IDENTIFIER_HEADER,
   JiraEventAttribute,
   JiraIgnoredReason,
+  JiraPollScope,
   JiraTriggerType,
   JiraWebhookEvent,
 } from "../constants";
@@ -671,6 +672,24 @@ describe("buildJiraSetupInstructions", () => {
     });
     expect(markdown).toContain("Issue labeled");
     expect(markdown).toContain("**Webhook** delivery");
+    expect(markdown).not.toContain(SECRET);
+  });
+
+  it("explains the project changes poll scope", () => {
+    const markdown = buildJiraSetupInstructions({
+      ...base,
+      connection: {
+        ...base.connection,
+        config: {
+          ...base.connection.config,
+          pollScope: JiraPollScope.ProjectChanges,
+        },
+      },
+      deliveryMode: IntegrationDeliveryMode.Poll,
+    });
+    expect(markdown).toContain("Issue status changed");
+    expect(markdown).toContain("Issue filter");
+    expect(markdown).toContain("poll interval");
     expect(markdown).not.toContain(SECRET);
   });
 

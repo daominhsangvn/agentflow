@@ -341,6 +341,21 @@ export type PollResult = {
   cursor: JsonValue;
 };
 
+export type PollScope = {
+  projectConnectionId: string;
+  /** Normalized containers (Jira project keys). */
+  containers: string[];
+  /** Parsed project settings. */
+  settings: JsonObject;
+};
+
+export type PollInput = {
+  /** The connection's poll interval. */
+  intervalSeconds: number;
+  /** Containers claimed by this connection's project connections (one DB query; call only when needed). */
+  loadScopes(): Promise<PollScope[]>;
+};
+
 export type IntegrationInboundDefinition<TConfig, TSecrets> = {
   /** Supported modes besides "none". */
   deliveryModes: IntegrationDeliveryMode[];
@@ -361,10 +376,14 @@ export type IntegrationInboundDefinition<TConfig, TSecrets> = {
     request: InboundRequest,
     context: ProviderContext<TConfig, TSecrets>
   ): Promise<InboundParseResult>;
-  /** Required for poll mode. A null cursor means first poll: return no backlog older than a few minutes. */
+  /**
+   * Required for poll mode. A null cursor means first poll: return no backlog older than a few minutes.
+   * The input carries the poll interval and a lazy loader of the project connection scopes.
+   */
   poll?(
     context: ProviderContext<TConfig, TSecrets>,
-    cursor: JsonValue | null
+    cursor: JsonValue | null,
+    input: PollInput
   ): Promise<PollResult>;
 };
 
@@ -680,7 +699,7 @@ export type IntegrationProviderDefinition<
    * settings and claims no source items (Teams, repository providers).
    */
   // biome-ignore lint/suspicious/noExplicitAny: settings types are heterogeneous; each definition is typed where it is written
-  project?: IntegrationProjectDefinition<TConfig, any>;
+  project?: IntegrationProjectDefinition<TConfig, any, TSecrets>;
   inbound?: IntegrationInboundDefinition<TConfig, TSecrets>;
   source?: IntegrationSourceDefinition<TConfig, TSecrets>;
   /**
@@ -765,7 +784,11 @@ export function defineAction<
  * project; its project connections (one per connection, i.e. per account)
  * may share it.
  */
-export type IntegrationProjectDefinition<TConfig, TSettings> = {
+export type IntegrationProjectDefinition<
+  TConfig,
+  TSettings,
+  TSecrets = JsonObject,
+> = {
   settingsSchema: z.ZodType<TSettings>;
   settingsFields: IntegrationFieldDescriptor[];
   /** The containers the settings claim, normalized like normalizeContainer. */
@@ -780,6 +803,15 @@ export type IntegrationProjectDefinition<TConfig, TSettings> = {
    * connection; empty means all of them.
    */
   triggerContainersField: string;
+  /**
+   * Checks the parsed settings against the source system before a project
+   * connection is saved (no side effects). Returns a user-facing error, or
+   * null.
+   */
+  validateSettings?(
+    context: ProviderContext<TConfig, TSecrets>,
+    settings: TSettings
+  ): Promise<string | null>;
 };
 
 /** A repository as its provider describes it, including how to clone it over HTTPS. */

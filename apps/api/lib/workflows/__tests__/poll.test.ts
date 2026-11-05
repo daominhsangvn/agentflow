@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   recordConnectionPollResult: vi.fn(),
   ingestEvents: vi.fn(),
   poll: vi.fn(),
+  loadConnectionPollScopes: vi.fn(),
 }));
 
 vi.mock("@repo/database", () => ({
@@ -39,6 +40,9 @@ vi.mock("@/lib/integrations/connection-service", () => ({
   loadConnectionRuntime: mocks.loadConnectionRuntime,
   recordConnectionPollResult: mocks.recordConnectionPollResult,
   createProviderContext: (runtime: unknown) => ({ connection: runtime }),
+}));
+vi.mock("@/lib/integrations/project-connections", () => ({
+  loadConnectionPollScopes: mocks.loadConnectionPollScopes,
 }));
 vi.mock("@/lib/workflows/engine/ingest", () => ({
   ingestEvents: mocks.ingestEvents,
@@ -103,9 +107,18 @@ describe("pollDueConnections", () => {
       where: { id: "conn-1", nextPollAt: { lte: NOW } },
       data: { nextPollAt },
     });
-    expect(mocks.poll).toHaveBeenCalledWith(expect.anything(), {
-      since: "2026-10-01T11:58:00.000Z",
-    });
+    expect(mocks.poll).toHaveBeenCalledWith(
+      expect.anything(),
+      { since: "2026-10-01T11:58:00.000Z" },
+      { intervalSeconds: 120, loadScopes: expect.any(Function) }
+    );
+    mocks.loadConnectionPollScopes.mockResolvedValue([]);
+    await mocks.poll.mock.calls[0][2].loadScopes();
+    expect(mocks.loadConnectionPollScopes).toHaveBeenCalledWith(
+      "org-1",
+      "conn-1",
+      expect.anything()
+    );
     expect(mocks.ingestEvents).toHaveBeenCalledTimes(2);
     expect(mocks.ingestEvents.mock.calls[0][0]).toMatchObject({
       source: IntegrationDeliverySource.Poll,
@@ -166,6 +179,10 @@ describe("pollDueConnections", () => {
 
     await pollDueConnections(NOW);
 
-    expect(mocks.poll).toHaveBeenCalledWith(expect.anything(), null);
+    expect(mocks.poll).toHaveBeenCalledWith(
+      expect.anything(),
+      null,
+      expect.objectContaining({ intervalSeconds: 60 })
+    );
   });
 });

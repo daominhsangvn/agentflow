@@ -121,7 +121,8 @@ Another project claiming the same Jira projects is still refused (409).
 
 - Each connection has its own webhook URL: configure one Jira webhook per bot
   (a JQL filter such as `project = ABC` keeps it to the project), or use poll
-  mode (assignments only). Each delivery is heard by that connection's bot
+  mode (assignments only by default; every event with
+  `pollScope: project_changes`). Each delivery is heard by that connection's bot
   alone.
 - A label one workflow's bot adds starts another workflow's run: only the bot
   that made the change ignores it (cross-workflow chaining, e.g. BA adds
@@ -499,7 +500,7 @@ service can call.
 
 For connections with `deliveryMode = poll`, every scheduler tick polls the
 connections whose `nextPollAt` is due (bounded concurrency), calling
-`provider.inbound.poll(ctx, cursor)`. The returned events go through the same
+`provider.inbound.poll(ctx, cursor, { intervalSeconds, loadScopes })`. The returned events go through the same
 `ingest` path, one delivery per event (`deliveryId = "poll:" + dedupKey`),
 then `pollCursor`, `lastPolledAt` and `nextPollAt = now + pollIntervalSeconds`
 are saved. A failed poll records `lastError` and backs off to the next
@@ -1609,23 +1610,23 @@ Triggers:
   creation). Manual run with an issue key.
 - `jira.issue_labeled` — a configured label added (`fieldId == "labels"`).
   `change: added` (default) `| removed | both` picks which side fires; removed
-  labels are computed from the same changelog item as added ones. Removals are
-  webhook only (poll never emits label events). If both the admin webhook and a Jira
+  labels are computed from the same changelog item as added ones. Removals need
+  a webhook or `pollScope: project_changes`. If both the admin webhook and a Jira
   Automation rule deliver the same change, each delivery has its own dedup key
   and starts its own run.
 - `jira.issue_status_changed` — the `status` changelog item (`fromString` /
   `toString` names) of an admin webhook, or an Automation body with
   `changelog.items`. Filters: `from`, `to` (any of, case-insensitive),
   `projectKeys`, `issueTypes`. `dedupKey = {key}:status:{changelogId |
-  automation-{deliveryId}}`. Webhook only; the bot's own transitions are
+  automation-{deliveryId}}`. Webhook, or poll with `project_changes`; the bot's own transitions are
   ignored; no manual run. A process-mode workflow gets one run per change; an
   orchestrated one gets a `status_changed` message on `jira:<KEY>:item`.
 - `jira.issue_mentioned` — a comment (`comment_created` / `comment_updated`
   webhooks) or the description (on creation, or edited to newly mention it)
   mentions the bot: `[~accountid:…]` / `[~username]` wiki markup or ADF
   mention nodes. `dedupKey = {key}:mention:comment-{commentId}` or
-  `{key}:mention:{changelogId}`. Webhook delivery only (Jira search cannot
-  find mentions); select the Comment events on the admin webhook. The issue
+  `{key}:mention:{changelogId}`. Webhook delivery (select the Comment events on the admin webhook) or poll
+  with `project_changes`. The issue
   of a comment webhook carries only a few fields (no labels), so a comment
   that mentions the bot is followed by one `GET /issue/{id}?fields=…` for
   the filters (the webhook's fields are used if that read fails).
@@ -1685,10 +1686,26 @@ delivery). Changing `siteUrl` or `deployment` requires re-entering the API
 token. Rate limits, 5xx and timeouts while loading the issue raise
 `RetryableSourceError`, so the import is retried.
 
-Events caused by the bot itself are dropped (loop prevention). Poll uses JQL
-`assignee = currentUser() AND updated >= "-Nm"` (`expand=changelog`), so it
-only sees issues assigned to the bot: it emits `jira.issue_assigned` and
-`jira.issue_conditions` events, never `jira.issue_labeled` or mentions. The
+Events caused by the bot itself are dropped (loop prevention). Poll has two
+scopes, set with `pollScope` in the connection YAML:
+
+- `assigned_to_bot` (default): JQL `assignee = currentUser() AND updated >=
+  "-Nm"` (`expand=changelog`). It only sees issues assigned to the bot and
+  emits `jira.issue_assigned` and `jira.issue_conditions` events, never
+  `jira.issue_labeled` or mentions.
+- `project_changes`: searches the Jira projects of the project connections
+  using the connection (`project in (...)`, narrowed by each project
+  connection's `issueFilter` JQL, validated against Jira on save), over REST
+  v2 on Cloud so wiki markup matches the webhooks. Paging 100 issues, up to 3
+  pages. The window is the poll interval (plus 2 minutes of overlap); older
+  changes are skipped. Issues are replayed to their state at each change
+  (changelog and comments), so the events equal the webhook events
+  (`jira.issue_assigned`, `jira.issue_labeled` incl. removals,
+  `jira.issue_status_changed`, `jira.issue_mentioned`, `jira.issue_conditions`,
+  `jira.comment_reply`), within the documented limits. Without a project
+  connection with Jira project keys the poll records a `lastError`.
+
+The
 item is re-fetched with `expand=renderedFields`; HTML is converted to
 markdown.
 

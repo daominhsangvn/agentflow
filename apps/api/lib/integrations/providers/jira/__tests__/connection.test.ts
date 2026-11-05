@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HttpMethod, ValidateConnectionReason } from "../../../types";
 import { JIRA_CLOUD_CREDENTIALS_REJECTED } from "../client";
 import { JIRA_CONNECTION_FIELDS, validateJiraConnection } from "../connection";
-import { JiraDeployment } from "../constants";
+import { JiraDeployment, JiraPollScope } from "../constants";
 import { JiraAccountDetail } from "../identity";
 import { jiraConnectionConfigSchema, jiraSecretsSchema } from "../schemas";
 import { CLOUD_MYSELF, DC_MYSELF } from "./jira.test-fixtures";
@@ -132,6 +132,34 @@ describe("jiraConnectionConfigSchema", () => {
   });
 });
 
+describe("pollScope", () => {
+  const base = { siteUrl: CLOUD_SITE_URL, email: BOT_EMAIL };
+
+  it("is not stored by default or for assigned_to_bot", () => {
+    expect(jiraConnectionConfigSchema.parse(base)).not.toHaveProperty(
+      "pollScope"
+    );
+    expect(
+      jiraConnectionConfigSchema.parse({
+        ...base,
+        pollScope: JiraPollScope.AssignedToBot,
+      })
+    ).not.toHaveProperty("pollScope");
+  });
+
+  it("keeps project_changes and rejects unknown values", () => {
+    expect(
+      jiraConnectionConfigSchema.parse({
+        ...base,
+        pollScope: JiraPollScope.ProjectChanges,
+      }).pollScope
+    ).toBe(JiraPollScope.ProjectChanges);
+    expect(
+      jiraConnectionConfigSchema.safeParse({ ...base, pollScope: "x" }).success
+    ).toBe(false);
+  });
+});
+
 describe("JIRA_CONNECTION_FIELDS", () => {
   it("declares deployment, site, Cloud-only email and the secret token", () => {
     expect(
@@ -141,6 +169,7 @@ describe("JIRA_CONNECTION_FIELDS", () => {
       ["siteUrl", IntegrationFieldKind.Url],
       ["email", IntegrationFieldKind.Email],
       ["apiToken", IntegrationFieldKind.Secret],
+      ["pollScope", IntegrationFieldKind.Select],
     ]);
     const email = JIRA_CONNECTION_FIELDS.find((field) => field.key === "email");
     expect(email?.showWhen).toEqual({
@@ -151,6 +180,28 @@ describe("JIRA_CONNECTION_FIELDS", () => {
 });
 
 describe("validateJiraConnection", () => {
+  it("keeps pollScope project_changes in the validated config", async () => {
+    const fake = routedHttp([
+      {
+        method: HttpMethod.Get,
+        path: "/rest/api/3/myself",
+        respond: jsonResponse(200, CLOUD_MYSELF),
+      },
+    ]);
+    const ctx = makeJiraContext({
+      http: fake.http,
+      account: null,
+      config: { ...cloudConfig(), pollScope: JiraPollScope.ProjectChanges },
+    });
+    const result = await validateJiraConnection(
+      ctx,
+      ValidateConnectionReason.Save
+    );
+    expect(result.ok && result.config?.pollScope).toBe(
+      JiraPollScope.ProjectChanges
+    );
+  });
+
   it("identifies the Cloud bot with Basic auth against REST v3", async () => {
     const fake = routedHttp([
       {

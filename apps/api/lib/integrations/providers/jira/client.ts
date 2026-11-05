@@ -7,7 +7,11 @@ import {
   type ProviderHttpRequest,
   type ProviderHttpResponse,
 } from "../../types";
-import { buildJiraAuthorization, jiraRestBaseUrl } from "./auth";
+import {
+  buildJiraAuthorization,
+  type JiraRestVersion,
+  jiraRestBaseUrl,
+} from "./auth";
 import { JiraDeployment } from "./constants";
 import {
   type JiraConnectionConfig,
@@ -57,6 +61,8 @@ export type JiraRequest = {
   /** Sent besides the authorization header. */
   headers?: Record<string, string>;
   timeoutMs?: number;
+  /** Overrides the deployment's REST version (Cloud v2 returns wiki markup like webhooks). */
+  restVersion?: JiraRestVersion;
 };
 
 export const JIRA_CLOUD_CREDENTIALS_REJECTED =
@@ -128,9 +134,10 @@ export async function jiraDownloadText(
 export function buildJiraUrl(
   config: JiraConnectionConfig,
   path: string,
-  query: Record<string, JiraQueryValue> | undefined
+  query: Record<string, JiraQueryValue> | undefined,
+  restVersion?: JiraRestVersion
 ): string {
-  const base = `${jiraRestBaseUrl(config)}/${path}`;
+  const base = `${jiraRestBaseUrl(config, restVersion)}/${path}`;
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined) {
@@ -164,7 +171,7 @@ function sendJiraRequest(
   const { config, secrets } = ctx.connection;
   return ctx.http.request({
     method: request.method,
-    url: buildJiraUrl(config, request.path, request.query),
+    url: buildJiraUrl(config, request.path, request.query, request.restVersion),
     headers: {
       ...request.headers,
       authorization: buildJiraAuthorization(config, secrets),

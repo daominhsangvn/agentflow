@@ -44,8 +44,10 @@ export function jiraRestVersion(deployment: JiraDeployment): JiraRestVersion {
  * `https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3` for a Cloud token
  * with scopes; without a trailing slash.
  */
-export function jiraRestBaseUrl(config: JiraConnectionConfig): string {
-  const version = jiraRestVersion(config.deployment);
+export function jiraRestBaseUrl(
+  config: JiraConnectionConfig,
+  version: JiraRestVersion = jiraRestVersion(config.deployment)
+): string {
   if (config.deployment === JiraDeployment.Cloud && config.cloudId) {
     return `${atlassianGatewayUrl(AtlassianProduct.Jira, config.cloudId)}/rest/api/${version}`;
   }

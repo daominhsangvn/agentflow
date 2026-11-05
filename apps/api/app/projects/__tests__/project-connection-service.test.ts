@@ -9,6 +9,7 @@ import { defineIntegrationProvider } from "@/lib/integrations/types";
 
 const mocks = vi.hoisted(() => ({
   loadConnectionRuntime: vi.fn(),
+  validateSettings: vi.fn(),
   currentProcess: { kind: "none" } as Record<string, unknown>,
 }));
 
@@ -30,6 +31,7 @@ vi.mock("@/app/projects/project-process-service", () => ({
 }));
 vi.mock("@/lib/integrations/connection-service", () => ({
   loadConnectionRuntime: mocks.loadConnectionRuntime,
+  createProviderContext: vi.fn(() => ({})),
 }));
 vi.mock("@repo/observability/log", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -66,6 +68,7 @@ const trackerProvider = defineIntegrationProvider({
     normalizeContainer: (container: string) => container.toUpperCase(),
     origin: (config: { siteUrl: string }) => config.siteUrl,
     triggerContainersField: "keys",
+    validateSettings: mocks.validateSettings,
   },
   triggers: [],
   actions: [],
@@ -94,6 +97,7 @@ const CONNECTION_NAMES: Record<string, string> = {
 beforeEach(() => {
   vi.clearAllMocks();
   projectConnectionDbFake.reset();
+  mocks.validateSettings.mockResolvedValue(null);
   projectConnectionDbFake.addProject({
     id: PROJECT_ID,
     organizationId: ORG_ID,
@@ -331,6 +335,57 @@ describe("projectConnectionService.add", () => {
         'AB already belongs to "tracker" in project Payments. Remove it there first.',
     });
     expect(projectConnectionDbFake.projectConnections.size).toBe(1);
+  });
+});
+
+describe("provider settings validation", () => {
+  it("refuses add with the provider's error and writes nothing", async () => {
+    mocks.validateSettings.mockResolvedValue(
+      "Jira rejected the issue filter: bad"
+    );
+
+    const result = await addTracker({ key: "tracker-dev", keys: ["AB"] });
+
+    expect(result.ok ? null : result.error).toEqual({
+      status: Status.BadRequest,
+      message: "Jira rejected the issue filter: bad",
+    });
+    expect(scopeKeys()).toEqual([]);
+    expect(projectConnectionDbFake.locks).toEqual([]);
+  });
+
+  it("refuses update with the provider's error and keeps the settings", async () => {
+    const id = await addedId({ key: "tracker", keys: ["AB"] });
+    mocks.validateSettings.mockResolvedValue("nope");
+
+    const result = await projectConnectionService.update(
+      ORG_ID,
+      PROJECT_ID,
+      id,
+      { settings: { keys: ["CD"] } }
+    );
+
+    expect(result.ok ? null : result.error).toEqual({
+      status: Status.BadRequest,
+      message: "nope",
+    });
+    expect(scopeKeys()).toEqual([`tracker:${SITE_URL}:AB`]);
+  });
+
+  it("maps a throwing check to a retry message", async () => {
+    mocks.validateSettings.mockRejectedValue(new Error("boom"));
+
+    const result = await addTracker({ key: "tracker-dev", keys: ["AB"] });
+
+    expect(result.ok ? null : result.error.message).toBe(
+      "The project settings could not be checked. Try again."
+    );
+  });
+
+  it("saves when the check passes", async () => {
+    const result = await addTracker({ key: "tracker-dev", keys: ["AB"] });
+
+    expect(result.ok).toBe(true);
   });
 });
 

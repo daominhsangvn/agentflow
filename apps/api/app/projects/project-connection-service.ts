@@ -13,6 +13,8 @@ import {
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { workflowAgentConfigSchema } from "@repo/api/src/types/workflow";
 import { type Prisma, type TransactionClient, withDb } from "@repo/database";
+import { parseError } from "@repo/observability/error";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 import {
   CurrentProcessKind,
@@ -21,6 +23,7 @@ import {
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import { toJsonObject } from "@/lib/integrations/connection/stored-json";
 import {
+  createProviderContext,
   type LoadedConnection,
   loadConnectionRuntime,
 } from "@/lib/integrations/connection-service";
@@ -154,7 +157,7 @@ export const projectConnectionService = {
     let settings: JsonObject | null = null;
     let scopes: string[] | null = null;
     if (input.settings !== undefined) {
-      const parsed = parseSettings(loaded.value, input.settings);
+      const parsed = await checkSettings(loaded.value, input.settings);
       if (!parsed.ok) {
         return parsed;
       }
@@ -262,6 +265,8 @@ export const projectConnectionService = {
   },
 };
 
+const LOG_PREFIX = "[projects/project-connections]";
+
 /** Bound of the organization-wide listing (projects × connections stays small). */
 const PROJECT_CONNECTIONS_LIST_MAX = 1000;
 
@@ -345,7 +350,7 @@ async function prepareEntries(
   let settings: JsonObject = {};
   const entries: PreparedEntry[] = [];
   for (const item of loaded) {
-    const parsed = parseSettings(item.connection, input.settings);
+    const parsed = await checkSettings(item.connection, input.settings);
     if (!parsed.ok) {
       return parsed;
     }
@@ -355,13 +360,17 @@ async function prepareEntries(
   return Result.ok({ settings, entries });
 }
 
-function parseSettings(
+async function checkSettings(
   loaded: LoadedConnection,
   input: Record<string, unknown>
-): ServiceResult<{ settings: JsonObject; scopes: string[] }> {
+): Promise<ServiceResult<{ settings: JsonObject; scopes: string[] }>> {
   const parsed = parseProjectSettings(loaded.provider, input);
   if (!parsed.ok) {
     return serviceError(Status.BadRequest, parsed.error);
+  }
+  const error = await runSettingsValidation(loaded, parsed.value);
+  if (error !== null) {
+    return serviceError(Status.BadRequest, error);
   }
   return Result.ok({
     settings: parsed.value,
@@ -616,3 +625,28 @@ function grantsList(config: unknown, key: string): boolean {
 const GRANTED_CONFIG_SCHEMA = z.object({
   connections: z.record(z.string(), z.unknown()).optional(),
 });
+
+/** The provider's check of parsed settings against its source system; null when fine. */
+async function runSettingsValidation(
+  loaded: LoadedConnection,
+  settings: JsonObject
+): Promise<string | null> {
+  const hook = loaded.provider.project?.validateSettings;
+  if (!hook) {
+    return null;
+  }
+  try {
+    return await hook.call(
+      loaded.provider.project,
+      createProviderContext(loaded.runtime, LOG_PREFIX),
+      settings
+    );
+  } catch (error) {
+    log.warn(`${LOG_PREFIX} Settings validation failed`, {
+      organizationId: loaded.runtime.organizationId,
+      connectionId: loaded.runtime.id,
+      error: parseError(error),
+    });
+    return "The project settings could not be checked. Try again.";
+  }
+}

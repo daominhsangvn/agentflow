@@ -3,9 +3,11 @@ import type {
   InboundEvent,
   InboundEventAttributeValue,
   InboundItemChange,
+  InboundMessage,
   IntegrationAccount,
   SourceItemRef,
 } from "../../types";
+import { adfToPlainText } from "../atlassian/adf";
 import { jiraIssueBrowseUrl } from "./client";
 import {
   JiraChangelogField,
@@ -253,11 +255,11 @@ export function isAssignedToBot(
 }
 
 export function isAssigneeChange(item: JiraChangeItem): boolean {
-  return changedField(item) === JiraChangelogField.Assignee;
+  return jiraChangedField(item) === JiraChangelogField.Assignee;
 }
 
 export function isLabelsChange(item: JiraChangeItem): boolean {
-  return changedField(item) === JiraChangelogField.Labels;
+  return jiraChangedField(item) === JiraChangelogField.Labels;
 }
 
 /**
@@ -304,7 +306,7 @@ export function removedLabels(item: JiraChangeItem): string[] {
 }
 
 export function isStatusChange(item: JiraChangeItem): boolean {
-  return changedField(item) === JiraChangelogField.Status;
+  return jiraChangedField(item) === JiraChangelogField.Status;
 }
 
 /** The first status change of the items (status names, not ids), else null. */
@@ -383,7 +385,7 @@ export function jiraDedupKey(
 
 const WHITESPACE_RE = /\s+/;
 
-function changedField(item: JiraChangeItem): string {
+export function jiraChangedField(item: JiraChangeItem): string {
   return (item.fieldId ?? item.field ?? "").trim().toLowerCase();
 }
 
@@ -506,4 +508,20 @@ export function jiraAnswerReply(event: InboundEvent): string | null {
   }
   const repliedTo = event.attributes[JiraEventAttribute.RepliedTo];
   return typeof repliedTo === "string" ? repliedTo : null;
+}
+
+/** A comment as the message of its events: wiki markup as written, ADF as plain text. */
+export function jiraCommentMessage(comment: {
+  id: string;
+  parentId?: string | null;
+  body?: unknown;
+}): InboundMessage {
+  return {
+    id: comment.id,
+    parentId: comment.parentId ?? null,
+    text:
+      typeof comment.body === "string"
+        ? comment.body
+        : adfToPlainText(comment.body),
+  };
 }

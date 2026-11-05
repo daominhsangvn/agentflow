@@ -45,6 +45,45 @@ describe("project settings and scopes", () => {
     ]);
   });
 
+  it("trims the Jira issue filter and drops an empty one", () => {
+    expect(
+      parseProjectSettings(jiraProvider, {
+        projectKeys: ["AB"],
+        issueFilter: "  filter = 10042 ",
+      })
+    ).toEqual({
+      ok: true,
+      value: { projectKeys: ["AB"], issueFilter: "filter = 10042" },
+    });
+    expect(
+      parseProjectSettings(jiraProvider, {
+        projectKeys: ["AB"],
+        issueFilter: "",
+      })
+    ).toEqual({ ok: true, value: { projectKeys: ["AB"] } });
+  });
+
+  it.each([
+    "x".repeat(2001),
+    "project = AB ORDER BY created",
+    "a) OR (b",
+    "(a",
+  ])("refuses the Jira issue filter %#", (issueFilter) => {
+    expect(
+      parseProjectSettings(jiraProvider, { projectKeys: ["AB"], issueFilter })
+        .ok
+    ).toBe(false);
+  });
+
+  it("accepts parentheses inside quoted strings of the issue filter", () => {
+    expect(
+      parseProjectSettings(jiraProvider, {
+        projectKeys: ["AB"],
+        issueFilter: 'summary ~ "a)"',
+      }).ok
+    ).toBe(true);
+  });
+
   it("refuses Jira settings without a valid key", () => {
     expect(parseProjectSettings(jiraProvider, { projectKeys: [] }).ok).toBe(
       false
