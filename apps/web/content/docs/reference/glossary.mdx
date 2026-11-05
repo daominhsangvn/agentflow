@@ -1,0 +1,60 @@
+---
+title: "Glossary"
+description: "The terms used in the AgentFlow docs and app, each with a short definition and a link to the page that explains it."
+---
+
+## Agent
+
+A computer that runs Claude Code for AgentFlow. An **automatic** Agent is a container or server that clones the project's repositories and works with AgentFlow's credentials; a **personal** Agent runs on a person's machine, in their project folder, with their own credentials. In YAML an Agent is named with the key `runner`, and some environment variables and tool names keep the word `runner`. See [Install an Agent](/docs/getting-started/install-agent) and [Agents](/docs/guides/setup/agents).
+
+## Orchestrator Agent
+
+The Agent of an orchestrated workflow that reads each request, follows your rules in plain language and sends commands to the other Agents (BA, Dev, QC). It works in turns, with its own tools. See [How AgentFlow works](/docs/concepts/how-agentflow-works) and [Orchestrator tools](/docs/reference/orchestrator-tools).
+
+## Workflow
+
+Triggers (what starts work), an agent section (how it is done) and actions (what is written back). Found under **Workflows** (sidebar). See [Workflow YAML](/docs/guides/setup/workflow-yaml).
+
+## Orchestrated workflow
+
+A workflow with `agent.mode: orchestrated`. It starts no run: every request goes to the Orchestrator Agent and a case. See [Orchestrated or run-based](/docs/concepts/orchestrated-vs-process).
+
+## Process
+
+The ordered steps of a run-based workflow: AgentFlow plan or implement steps, your own Agent steps and approvals. See [Process YAML](/docs/guides/setup/process-yaml).
+
+## Run
+
+One execution of a run-based workflow, started by a trigger. It ends `succeeded`, `failed` or `cancelled`. Found under **Runs** (sidebar). See [Runs](/docs/guides/operate/runs).
+
+## Case
+
+What an orchestrated workflow keeps for one ticket: conversations, turns, tasks, decisions and the Confluence pages it published. It is `open` or `closed`, and a new message reopens it. Found under **Cases** (sidebar). See [Cases](/docs/guides/operate/cases).
+
+## Task
+
+The Orchestrator Agent's command to one Agent: a command that Agent declares, with a prompt and files. It is `queued`, `running`, `succeeded`, `failed` or `cancelled`. See [Blocked tasks](/docs/guides/recipes/blocked-tasks).
+
+## Turn
+
+One pass of the Orchestrator Agent over the messages that arrived together: it reads the case, acts with its tools, then waits for tasks or people, or closes the case. See [Writing orchestrator rules](/docs/guides/recipes/orchestrator-rules).
+
+## Decision
+
+An approval the Orchestrator Agent asks for with `request_decision`, such as a plan or a go to implement. An admin approves or rejects it on the case page, or someone answers in the thread. See [People in the loop](/docs/concepts/people-in-the-loop).
+
+## Connection and project connection
+
+A **connection** is one account in an outside system (a Jira bot, a Confluence user, a Git server token) and the only place credentials live. A **project connection** is a project's use of it, under a short key that workflow YAML names. See [Connections and repositories](/docs/guides/setup/connections) and [Integrations](/docs/integrations).
+
+## Connection grant
+
+What a workflow lets an Agent or the Orchestrator Agent do through a project connection, written as `connections:`. Without a grant, a call is refused. See [Connection grants](/docs/guides/setup/connection-grants) and [Agent tools](/docs/reference/agent-tools).
+
+## Capabilities (AGENTFLOW.md)
+
+The file in which an Agent declares the commands it offers, what each needs and produces, and its skills. The Orchestrator Agent may only start declared commands. See [Agent capabilities](/docs/guides/setup/agent-capabilities).
+
+## Session
+
+One Claude Code conversation an Agent ran for AgentFlow, with its tokens, cost and transcript. Found under **Sessions** (sidebar). See [Sessions](/docs/guides/operate/sessions).

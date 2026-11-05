@@ -1,6 +1,5 @@
 import "fumadocs-ui/style.css";
 import "fumadocs-ui/css/shadcn.css";
-import "fumadocs-openapi/css/preset.css";
 import "./docs-theme.css";
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import type { ReactNode } from "react";

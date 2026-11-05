@@ -9,7 +9,11 @@ import { ProviderIcon } from "@repo/app/integrations/components/provider-icon";
 // Cross-slice: same retryable error block as the repositories list.
 import { QueryErrorMessage } from "@repo/app/integrations/components/query-error-message";
 import { formatRelativeTime } from "@repo/app/shared/lib/date-utils";
-import { formatCostPrecise } from "@repo/app/shared/lib/format-utils";
+import { formatActiveTime } from "@repo/app/shared/lib/format-active-time";
+import {
+  formatCostPrecise,
+  formatTokenCount,
+} from "@repo/app/shared/lib/format-utils";
 import { Badge } from "@repo/design-system/components/ui/badge";
 import { EmptyState } from "@repo/design-system/components/ui/empty-state";
 import { Skeleton } from "@repo/design-system/components/ui/skeleton";
@@ -29,6 +33,9 @@ import {
   useWorkflowOrchestratorCases,
 } from "../hooks/use-orchestrator-cases";
 import { caseSourceProvider } from "../lib/case-source";
+
+const ACTIVE_TIME_HINT =
+  "Summed duration of the agent sessions and orchestrator turns of the case";
 
 export type OrchestratorCaseListProps = {
   workflowId: string;
@@ -84,6 +91,8 @@ export function OrchestratorCaseList({
             <TableHead>Last activity</TableHead>
             <TableHead>Tasks</TableHead>
             <TableHead>Turns</TableHead>
+            <TableHead title={ACTIVE_TIME_HINT}>Active time</TableHead>
+            <TableHead>Tokens</TableHead>
             <TableHead>Cost</TableHead>
           </TableRow>
         </TableHeader>
@@ -136,6 +145,12 @@ function CaseRow({
         ) : null}
       </TableCell>
       <TableCell className="tabular-nums">{item.turnCount}</TableCell>
+      <TableCell className="whitespace-nowrap tabular-nums">
+        {formatActiveTime(item.activeMs)}
+      </TableCell>
+      <TableCell className="whitespace-nowrap tabular-nums">
+        {formatTokenCount(item.inputTokens + item.outputTokens)}
+      </TableCell>
       <TableCell className="whitespace-nowrap tabular-nums">
         <CaseCost costUsd={item.costUsd} />
       </TableCell>

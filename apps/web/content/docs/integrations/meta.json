@@ -1,1 +1,14 @@
-{ "title": "Integrations", "pages": ["overview", "github", "google", "linear"] }
+{
+  "title": "Integrations",
+  "pages": [
+    "jira",
+    "confluence",
+    "local-git",
+    "bitbucket",
+    "github",
+    "azure-devops",
+    "microsoft-teams",
+    "webhook",
+    "email"
+  ]
+}

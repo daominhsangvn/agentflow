@@ -1,0 +1,42 @@
+---
+title: "Questions and answers"
+description: "Post a task's questions as one comment, take answers by reply, answer new questions first and resume the task when every question has an answer."
+---
+
+Agents ask questions and people answer them in the ticket or on the case page. The rules decide where each reply goes and when a task resumes.
+
+## The pattern
+
+1. A task (for example the BA writing a PRD) ends with questions. The rule: "Post its questions as one numbered comment."
+2. People answer by replying in the thread. Each comment is its own conversation, so an answer lands in the thread it belongs to.
+3. The orchestrator reads the answers. If a reply answers some questions and asks new ones, it answers the new ones first (with a reading task if needed), lists the questions still open, and does **not** resume the task yet.
+4. When every question has an answer, it resumes the task with all the answers and the current page.
+
+LD-6 case 1: the admin answered questions 1 to 4 and asked about privacy. The orchestrator answered the privacy question with a reading task, noted that 5 to 8 were open and waited. After 5 to 8 were answered, the PRD task resumed: PRD v2 on the same page.
+
+## Rule text
+
+```text
+## Questions and answers (every status)
+- Answer each comment in its own thread (replyTo). A question about the PRD, the plan, the test plan or the results: read the page, ask the agent that wrote it when needed, answer in the thread with the page link.
+- A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+- A confirmed answer is a decision: pass it in the prompt of later tasks.
+- A question never stops or restarts a running task.
+```
+
+## What the platform does
+
+- `reply` posts in the conversation's thread. With `replyTo` (the ref of the message answered) the answer lands in that comment's thread. Without it, a ticket change is answered with a new comment.
+- `task_run` also takes `replyTo`, so an answer that waits for a task is posted in the thread it answers.
+- `wait_human` ends the turn waiting for people. An answer, a decision or the next request wakes the conversation.
+- Several comments in the debounce window: with `concurrency: supersede` (the default), the running turn is superseded and its writes are refused. The next turn sees all messages, each with its comment reference, and answers each in its own thread.
+
+## Answer on the case page
+
+Anyone in the organization can answer a task's questions on the case page (**Send answers**) or message the orchestrator. The orchestrator answers on the case page and posts on the ticket only when the rules say so ([Cases](/docs/guides/operate/cases#answer-questions)).
+
+## See also
+
+- [Writing orchestrator rules](/docs/guides/recipes/orchestrator-rules)
+- [Blocked tasks](/docs/guides/recipes/blocked-tasks)
+- [Cases](/docs/guides/operate/cases)

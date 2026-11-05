@@ -1,0 +1,199 @@
+---
+title: "Process YAML"
+description: "The steps of a run (AgentFlow plan and implement steps, your own Agent steps, approvals), with every key of each step type, step roles, questions, review loops, documents, files and retries."
+---
+
+A **process** is the list of steps a run goes through, in order, one at a time. It is written in Project → **Process** (the project's process, versioned; the project page shows no button for this tab yet, so open the project URL with `?tab=process`) or inside a workflow as `agent.process` (that workflow's own). Without either, a run follows the workflow's `agent.mode`. Only org admins save a process.
+
+```yaml
+toolkit:
+  repository: workshop/leavedesk-superpowers
+  mounts: [.claude/skills]
+  instructions: Keep ticket work in work/<KEY>/.
+steps:
+  - type: agent
+    id: plan
+    name: Plan
+    role: plan
+    instruction: Use the writing-plans skill for {{issue.key}} ({{issue.file}}).
+    questions: ask
+    review:
+      approve: { labels: [plan-approved] }
+      feedback: { labels: [replan], mention: true }
+  - type: agent
+    id: implement
+    name: Implement
+    role: implement
+    instruction: Implement the approved plan with TDD. Commit per task.
+    retry: { attempts: 2 }
+```
+
+## Top level
+
+| Key | Type | What it does |
+|---|---|---|
+| `toolkit` | mapping, optional | A project repository whose directories (skills, commands) every Agent step loads. |
+| `steps` | list, 1 to 20, required | The steps, in order. Step ids are unique. |
+
+### `toolkit`
+
+| Key | Type | What it does |
+|---|---|---|
+| `repository` | `owner/name`, required | One of the project's repositories. |
+| `mounts` | list of paths, at least one | Its directories linked into the workspace root, e.g. `.claude/commands`, `.claude/skills`, `.claude/agents`, `.specify`. A directory the workspace already has keeps its own entries. |
+| `instructions` | text, up to 16,000 | Added to the workspace `CLAUDE.md`, e.g. where the kit's scripts run from. |
+
+A toolkit applies to automatic Agents. A personal Agent uses the commands of its own folder.
+
+## Step types
+
+| `type` | What it does | Events it reports |
+|---|---|---|
+| `agentflow.plan` | AgentFlow's planning agents write the run's implementation plan. At most one plan step per process. | `plan.started`, `plan.completed`; `input.needed` with open questions |
+| `agentflow.execute` | Approves the plan and implements it, pushing a branch to every repository it changed. Needs an `agentflow.plan` step before it. | `execute.started`, `execute.completed` |
+| `agent` | One instruction (plain text or a toolkit command) run by the Agent in the run's workspace. | `input.needed` with questions or a review; `execute.*` when it pushes; `plan.*` with `role: plan` |
+| `approval` | The run waits until an org admin approves or rejects on the run page (or a label approves it). A rejection fails the run. | `input.needed`; `workflow.failed` on rejection |
+
+Every step has `type`, `id` (lowercase letters, digits, `-` and `_`, starting with a letter, up to 64; used by `show` and `{{steps.<id>.reply}}`) and `name` (shown on the run page, up to 80).
+
+### `agentflow.plan`
+
+| Key | Values | Default | What it does |
+|---|---|---|---|
+| `questions` | `ask` or `continue` | `ask` | `ask`: open questions the planning agents leave stop the run (`input.needed`). `continue`: go on and decide. |
+| `recommendations` | `accept` or `suggest` | `accept` | `accept`: a question the agents recommend an answer for is settled with that answer, so only questions without one stop the run. `suggest`: the recommendation is only a hint and the question stays open for people. |
+
+### `agentflow.execute`
+
+| Key | Values | Default | What it does |
+|---|---|---|---|
+| `review` | `full` or `fast` | `full` | `full`: evaluate, critic-review and finalize the approved plan before implementing it, then check the result against it. `fast`: implement the plan as it is (tests, simplification and build checks still run); saves roughly 10 to 20 minutes. |
+| `releaseNotes` | `true` or `false` | `true` | Write release notes when done, published as a project document and as `{{releaseNotes}}`. |
+
+### `agent`
+
+| Key | Type | Default | What it does |
+|---|---|---|---|
+| `instruction` | text with variables, up to 8000, required | | What the Agent does. One that starts with `/` (a toolkit skill or command) is passed to Claude Code as the prompt, so it expands: `/ba-requirement analyze {{issue.key}}`. |
+| `questions` | `ask` or `continue` | `continue` | `ask`: when the Agent writes questions to `.agentflow-ai/work/questions.json`, the run stops (`input.needed`) and the answers resume the same session. `continue`: decide and go on. |
+| `role` | `plan` or `implement` | none | What the step is to AgentFlow (below). |
+| `finish` | `none` or `push` | `none` | `push`: commit and push every repository with changes, like implementation (`execute.started`, `execute.completed`); a create pull request action then opens the pull requests. `none`: keep the changes for the next step. Refused on a personal Agent, whose commands push themselves. |
+| `artifacts` | list of globs, up to 20 | none | Files (from the workspace root) shown on the run once the step ends (at most 20 files, 200 KB each, 1 MB in all). |
+| `reply` | path | none | A file the step writes for people outside AgentFlow, e.g. `.agentflow-ai/work/answer.md`. Post actions get it as `{{reply}}` (the latest step's) and `{{steps.<id>.reply}}`, up to 30,000 characters. |
+| `document` | `{ type, path, title }` | none | Publish one of the step's files as a project document when the step ends (below). |
+| `connections` | grant map | read the source item only | What the step's Agent may read and write through the project's connections ([Connection grants](/docs/guides/setup/connection-grants)). |
+| `review` | mapping | none | People review the step's work before the run goes on (below). |
+| `releaseNotes` | `true` or `false` | `true` | Only with `role: implement`: write release notes. |
+| `timeoutMinutes` | 5 to 1440 | the phase timeout | How long the step may run. |
+| `retry` | `{ attempts: 1 to 5 }` | none | Retry automatically when the Agent fails on the model provider (an expired token, a quota, an overload): after a backoff the failed session goes on in a fork. Without it the run fails (an admin can still retry the step from the run page). |
+
+### `approval`
+
+| Key | Type | What it does |
+|---|---|---|
+| `show` | list of step ids or file globs, up to 20 | What the approver reviews next to the decision. |
+| `approve` | `{ labels: [...] }` | Labels (Jira) or tags (Azure DevOps) that approve when added to the ticket, besides Approve in AgentFlow. Up to 10. |
+
+## Step roles
+
+`role` lets a toolkit command do only the work while AgentFlow keeps its plan and implementation features. The role's contract is added to the step's section of the workspace `CLAUDE.md`, so the instruction need not repeat it.
+
+| Role | What AgentFlow does |
+|---|---|
+| `plan` | Tells the Agent to write the final plan to `.agentflow-ai/work/plan.md`, keeps it as a new version of the run's implementation plan, and reports `plan.started` and `plan.completed`. A step that ends without a plan and without questions is resumed once to write it, then fails. Counts as the process's one plan step. Cannot also publish an `IMPLEMENTATION_PLAN` document. |
+| `implement` | Approves the plan when the step starts and writes its latest version (people may have edited it in AgentFlow) to `.agentflow-ai/work/plan.md`. Always pushes (`finish` is ignored), reports `execute.started` and `execute.completed`, and writes release notes to `.agentflow-ai/work/release-notes.md` unless `releaseNotes: false`. Needs a plan step before it. |
+
+## Documents
+
+```yaml
+document:
+  type: PRD                       # PRD, DOC or IMPLEMENTATION_PLAN
+  path: .agentflow-ai/work/prd.md # one of the step's files
+  title: "PRD: {{issue.key}} {{issue.title}}"
+```
+
+| Key | What it does |
+|---|---|
+| `type` | `PRD` (a product requirement), `DOC` (a bug analysis, a change request's impact, ...), `IMPLEMENTATION_PLAN`. |
+| `path` | The file whose content becomes the document. |
+| `title` | Up to 200, with `{{issue.key}}` and `{{issue.title}}`; empty: the Issue's title. |
+
+The document is created as a draft of the project, produced by the run's Issue. Later rounds of the step (after answers, feedback, a new cycle) add versions to the same document. Post actions link it as `{{steps.<id>.document.url}}`.
+
+## Review loops
+
+An `agent` step with `review` stops the run after its work until people decide, in AgentFlow or on the ticket.
+
+```yaml
+review:
+  approve:  { labels: [prd-approved] }       # role: plan only
+  complete: { labels: [done] }               # any other step
+  feedback: { labels: [prd-revise], mention: true }
+  instruction: |
+    Revise with: {{feedback.text}} (round {{review.round}}).
+  session: resume
+  consumeLabels: true
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `approve` | none | A `role: plan` step only: labels that approve the plan; the next step starts. |
+| `complete` | none | Any other step: labels that end the review; the next step starts. |
+| `feedback.labels` | `[]` | Labels that run the step again with the feedback (the ticket's comments since the last decision, without the bot's). |
+| `feedback.mention` | `false` | A comment that mentions the bot is feedback; its text is the feedback. |
+| `instruction` | the feedback itself | Added to a feedback round's prompt. Variables: `{{feedback.text}}`, `{{feedback.author}}`, `{{feedback.via}}`, `{{review.round}}` and the issue's. |
+| `session` | `resume` | `resume`: continue the step's session with the feedback. `fresh`: a new session with the step's instruction and the feedback. |
+| `consumeLabels` | `true` | Remove a feedback label from the ticket once acted on, so it can be added again. Approve labels stay. |
+
+A label signals one thing only (approve, complete or feedback). In AgentFlow the run page offers Approve or Replan on a plan step, Done or Request changes on any other, and Reject (admins), which fails the run. A pushing step under feedback pushes to the same branches, so its pull requests update.
+
+## Questions and answers
+
+- A step with `questions: ask` writes `.agentflow-ai/work/questions.json` (a JSON array of `{ id, question, options? }`; at most 30 questions of 2,000 characters, 10 options of 500) and stops. The run waits in `input.needed`; post actions post the questions (`{{step.questions}}`, `{{summary}}`).
+- **Answers** come from the run page (any member), or from the ticket: a reply in the thread of the comment that asked resumes exactly that run, without a trigger. Other comments after the question count when the ticket triggers the run again. Comments the run posted itself are never answers.
+- The answers resume the same session on the same Agent, in the same workspace.
+
+## Instruction variables
+
+| Variable | Value |
+|---|---|
+| `{{issue.key}}` | Key of the source item, e.g. `LD-6` |
+| `{{issue.title}}` | Its title |
+| `{{issue.url}}` | Its link |
+| `{{issue.body}}` | The run's Issue document: description, sections, comments |
+| `{{issue.file}}` | Path of the Issue as Markdown in the workspace (`.agentflow-ai/work/issue.md`), for long issues |
+
+## How steps run
+
+- The run's first step chooses the Agent (`agent.runner`, or an Agent rule); every later step runs on the same Agent, in the same workspace and branches.
+- The workspace holds every project repository and a `CLAUDE.md` with the project's agent instructions, the toolkit's instructions and the step's section. The work directory is `.agentflow-ai/work/` (the Issue, the plan, questions, the step's files).
+- A failed or cancelled plan, implement or agent step can be retried from the run page.
+- After the last step the run ends with `workflow.completed`.
+
+## Example: BA analysis with review on Jira
+
+```yaml
+toolkit:
+  repository: workshop/leavedesk-knowledge
+  mounts: [.claude/agents, .claude/skills]
+steps:
+  - type: agent
+    id: analyze
+    name: Analyse and write the PRD
+    instruction: /ba-requirement analyze {{issue.key}}
+    questions: ask
+    document:
+      type: PRD
+      path: .agentflow-ai/work/ba/prd.md   # a fixed path the command writes
+      title: "PRD: {{issue.key}} {{issue.title}}"
+    review:
+      complete: { labels: [prd-approved] }
+      feedback: { labels: [prd-revise] }
+  - type: agent
+    id: archive
+    name: Archive
+    instruction: /ba-requirement archive {{issue.key}}
+    finish: push
+    connections:
+      source: [comment]
+```

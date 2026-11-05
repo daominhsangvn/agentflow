@@ -1,0 +1,48 @@
+---
+title: "Cancelling"
+description: "When the orchestrator may cancel tasks, what cancelling does, and how to stop a turn or close a case."
+---
+
+Only a ticket change cancels tasks. A comment, a question or a reply never does.
+
+## The guard
+
+`task_cancel` is accepted only in a turn that took a ticket change listed in the workflow's `agent.orchestrator.cancelOn`. The default is `status_changed` and `label_removed`; `label_added` can be added; `[]` means the orchestrator never cancels. In any other turn the call is refused, the refusal names the setting, and the task keeps running. A refusal shows as a **Refused** message on the case ([Cases](/docs/guides/operate/cases)). The orchestrator's own status move or label does not count as a change.
+
+## What cancelling does
+
+| Task state | Result |
+|---|---|
+| Running | Its loop is stopped |
+| Queued | Never dispatched |
+| Finished | Closed, so it cannot be resumed |
+
+A cancelled task is never resumed: a resume is refused with "do not resume it; start a new task if the work is still needed." A wait on it wakes at once with "cancelled: *reason*".
+
+## Rule text
+
+LD-6:
+
+```text
+## Cancelling
+- Only a status change cancels tasks. Moving forward in the flow keeps running tasks (say they are still running).
+- Moving backward or to a status outside the flow: cancel the tasks started for the statuses being left and say so on the ticket.
+- Several changes in one turn: act on the final status only.
+```
+
+Forward moves often happen while a task still runs (the admin approves early), so the rules keep those tasks. The case records which status, label or message started each task ("started for"), so only the tasks of the status left are cancelled. `debounceSeconds` merges a burst of changes into one turn that sees the final status ([Status flows](/docs/guides/recipes/status-flows)).
+
+## Stop a turn or close a case
+
+These are admin buttons on the case page, separate from `task_cancel`:
+
+- **Stop turn** asks the Agent to stop a running turn. Its messages are not retried.
+- **Close case** keeps running turns and tasks going. A new message in the thread reopens the case.
+
+See [Cases](/docs/guides/operate/cases#stop-a-turn-close-a-case).
+
+## See also
+
+- [Status flows](/docs/guides/recipes/status-flows)
+- [Workflow YAML](/docs/guides/setup/workflow-yaml#agentorchestrator)
+- [Writing orchestrator rules](/docs/guides/recipes/orchestrator-rules)

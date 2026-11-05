@@ -162,6 +162,14 @@ export type SourceItemComment = {
 
 export type SourceItemLink = { url: string; title: string | null };
 
+/** Another item this one is linked to by a blocking relation. */
+export type SourceItemRelation = {
+  key: string;
+  title: string | null;
+  status: string | null;
+  url: string | null;
+};
+
 export type SourceItemAttachment = {
   name: string;
   url: string | null;
@@ -196,6 +204,16 @@ export type SourceItem = SourceItemRef & {
    * provider has none or they could not be read.
    */
   links?: SourceItemLink[];
+  /**
+   * Items that must be resolved before this one (Jira "is blocked by",
+   * Azure DevOps predecessors); absent when the provider has none (Teams, webhook).
+   */
+  blockedBy?: SourceItemRelation[];
+  /**
+   * Items waiting for this one (Jira "blocks", Azure DevOps successors);
+   * absent when the provider has none (Teams, webhook).
+   */
+  blocks?: SourceItemRelation[];
 };
 
 /** What an occurrence on a source item signals to a waiting run. */

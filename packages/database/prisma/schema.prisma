@@ -430,6 +430,7 @@ model Organization {
   projectConnections                   ProjectConnection[]
   projectConnectionScopes              ProjectConnectionScope[]
   orchestratorCases                    OrchestratorCase[]
+  workflowEvents                       WorkflowEvent[]
   orchestratorConversations            OrchestratorConversation[]
   orchestratorMessages                 OrchestratorMessage[]
   orchestratorTurns                    OrchestratorTurn[]
@@ -676,26 +677,29 @@ model ComputeTargetCapabilities {
 // come from and answers go (`channelKey`: a comment thread, a Teams thread,
 // a ticket). Statuses hold the const values of packages/api orchestrator.ts.
 model OrchestratorCase {
-  id             String   @id @default(uuid(7)) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
-  projectId      String   @map("project_id") @db.Uuid
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  projectId      String    @map("project_id") @db.Uuid
   // The orchestrated workflow whose trigger opened the case.
-  workflowId     String   @map("workflow_id") @db.Uuid
+  workflowId     String    @map("workflow_id") @db.Uuid
   // The source item the case is about ("jira:LD-7", "microsoft_teams:teams-…").
-  sourceKey      String?  @map("source_key") @db.VarChar(255)
-  title          String   @db.VarChar(255)
-  status         String   @default("open") @db.VarChar(16)
+  sourceKey      String?   @map("source_key") @db.VarChar(255)
+  title          String    @db.VarChar(255)
+  status         String    @default("open") @db.VarChar(16)
+  // When the case was last closed (close_case or an admin); null while open.
+  closedAt       DateTime? @map("closed_at")
   // The orchestrator's own notes (case_update_notes).
-  notes          String   @default("") @db.Text
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  notes          String    @default("") @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  organization  Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  project       Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  workflow      Workflow                   @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  conversations OrchestratorConversation[]
-  tasks         OrchestratorTask[]
-  decisions     OrchestratorDecision[]
+  organization   Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workflow       Workflow                   @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  conversations  OrchestratorConversation[]
+  tasks          OrchestratorTask[]
+  decisions      OrchestratorDecision[]
+  workflowEvents WorkflowEvent[]
 
   // A message about a source item joins its case: one per item per workflow.
   @@unique([workflowId, sourceKey])
@@ -5104,13 +5108,53 @@ model IntegrationDelivery {
   payload        Json?
   receivedAt     DateTime @default(now()) @map("received_at")
 
-  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  connection   IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  runs         WorkflowRun[]
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connection     IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  runs           WorkflowRun[]
+  workflowEvents WorkflowEvent[]
 
   @@unique([connectionId, deliveryId])
   @@index([organizationId, receivedAt])
+  // Retention sweep deletes across all organizations by receivedAt.
+  @@index([receivedAt])
   @@map("integration_deliveries")
+}
+
+// One inbound event as one workflow saw it (webhook, poll or manual) and
+// what ingest did with it (apps/api/lib/workflows/engine/workflow-events.ts).
+// The payload stays on the delivery. Pruned after 30 days with the deliveries.
+model WorkflowEvent {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  workflowId     String    @map("workflow_id") @db.Uuid
+  deliveryId     String    @map("delivery_id") @db.Uuid
+  triggerId      String?   @map("trigger_id") @db.Uuid
+  // Trigger type key of the event, e.g. "jira.issue_assigned".
+  triggerType    String    @map("trigger_type") @db.VarChar(64)
+  // "<provider>:<item key>", as WorkflowRun.sourceKey.
+  sourceKey      String?   @map("source_key") @db.VarChar(255)
+  // WorkflowEventResult (packages/api/src/types/workflow-event.ts).
+  result         String    @db.VarChar(16)
+  runId          String?   @map("run_id") @db.Uuid
+  caseId         String?   @map("case_id") @db.Uuid
+  detail         String?   @db.Text
+  occurredAt     DateTime? @map("occurred_at")
+  receivedAt     DateTime  @default(now()) @map("received_at")
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow     Workflow            @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  delivery     IntegrationDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  trigger      WorkflowTrigger?    @relation(fields: [triggerId], references: [id], onDelete: SetNull)
+  run          WorkflowRun?        @relation(fields: [runId], references: [id], onDelete: SetNull)
+  case         OrchestratorCase?   @relation(fields: [caseId], references: [id], onDelete: SetNull)
+
+  // Events tab: newest first per workflow.
+  @@index([workflowId, receivedAt(sort: Desc)])
+  // FK cascade when the retention sweep deletes deliveries.
+  @@index([deliveryId])
+  // Retention sweep deletes across all organizations by receivedAt.
+  @@index([receivedAt])
+  @@map("workflow_events")
 }
 
 model Workflow {
@@ -5138,6 +5182,7 @@ model Workflow {
   actions           WorkflowAction[]
   runs              WorkflowRun[]
   orchestratorCases OrchestratorCase[]
+  workflowEvents    WorkflowEvent[]
   /**
    * Built-in HTTP endpoint of the workflow (see IntegrationConnection.managedByWorkflowId).
    */
@@ -5170,6 +5215,7 @@ model WorkflowTrigger {
   projectConnection ProjectConnection?    @relation(fields: [projectConnectionId], references: [id], onDelete: Restrict)
   connection        IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   runs              WorkflowRun[]
+  workflowEvents    WorkflowEvent[]
 
   @@index([workflowId])
   @@index([connectionId, type])
@@ -5292,6 +5338,7 @@ model WorkflowRun {
   actionRuns        WorkflowActionRun[]
   toolSessions      IntegrationToolSession[]
   toolCalls         IntegrationToolCall[]
+  workflowEvents    WorkflowEvent[]
 
   @@unique([workflowId, dedupKey])
   @@index([organizationId, createdAt])

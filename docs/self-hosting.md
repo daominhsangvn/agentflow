@@ -76,7 +76,7 @@ Set `AGENTFLOW_PLUGINS_DIR` to point the desktop at a different copy.
 ## Workflows and integrations
 
 Jira, Azure DevOps, Microsoft Teams and generic HTTPS webhooks are connected
-under Settings → Compute & Integrations → Connections, and **Workflows**
+under Connections (sidebar), and **Workflows**
 (sidebar) turn their events into agent-team runs with optional post actions
 (comment back on the ticket, transition it, post to Teams, call a URL). See
 [workflows.md](workflows.md) for the architecture and per-provider setup.

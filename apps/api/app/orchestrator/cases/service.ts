@@ -1,6 +1,9 @@
 import {
   type OrchestratorCaseDetail,
+  type OrchestratorCaseListItem,
+  type OrchestratorCaseListQuery,
   type OrchestratorCaseLoops,
+  OrchestratorCaseStatus,
   type OrchestratorCaseSummary,
   OrchestratorDecisionStatus,
   OrchestratorTaskStatus,
@@ -14,11 +17,19 @@ import {
   toCaseSummary,
 } from "@/app/orchestrator/cases/case-mappers";
 import { loadCaseLoops } from "@/app/orchestrator/cases/service/case-loops";
+import { postCaseMessage } from "@/app/orchestrator/cases/service/case-messages";
 import {
   type CaseStats,
   loadCaseStats,
 } from "@/app/orchestrator/cases/service/case-stats";
+import {
+  deriveCaseWaitingFor,
+  loadCaseWaitState,
+  loadOrgCaseRows,
+  toCaseListItem,
+} from "@/app/orchestrator/cases/service/org-case-list";
 import { dispatchOrchestratorTurnCancel } from "@/lib/loops/loop-desktop";
+import { listCaseDocuments } from "@/lib/orchestrator/case-documents";
 import { readTurnTimeoutMs } from "@/lib/orchestrator/turn-usage";
 import { displayUserName } from "@/lib/user-display-name";
 
@@ -37,6 +48,8 @@ const WAITS_MAX = 100;
 const DECISIONS_MAX = 100;
 
 export const orchestratorCaseService = {
+  postMessage: postCaseMessage,
+
   /** Null when the organization has no such workflow. */
   async listForWorkflow(
     organizationId: string,
@@ -65,6 +78,7 @@ export const orchestratorCaseService = {
           status: true,
           createdAt: true,
           updatedAt: true,
+          closedAt: true,
           _count: {
             select: {
               conversations: true,
@@ -94,6 +108,42 @@ export const orchestratorCaseService = {
     return rows.map((row) =>
       toCaseSummary(row, running.has(row.id), stats.get(row.id) ?? EMPTY_STATS)
     );
+  },
+
+  /** The 100 most recently updated cases of the organization. */
+  async listForOrg(
+    organizationId: string,
+    query: OrchestratorCaseListQuery
+  ): Promise<OrchestratorCaseListItem[]> {
+    const rows = await loadOrgCaseRows(organizationId, query);
+    const ids = rows.map((row) => row.id);
+    const [running, stats, waitState] = await Promise.all([
+      runningCaseIds(organizationId, ids),
+      loadCaseStats(organizationId, ids),
+      loadCaseWaitState(organizationId, ids),
+    ]);
+    return rows.map((row) => {
+      const turnRunning = running.has(row.id);
+      const summary = toCaseSummary(
+        row,
+        turnRunning,
+        stats.get(row.id) ?? EMPTY_STATS
+      );
+      const waitingFor = deriveCaseWaitingFor({
+        status: summary.status,
+        turnRunning,
+        pendingDecisionCount: summary.pendingDecisionCount,
+        activeTaskCount: summary.activeTaskCount,
+        hasOpenWait: waitState.openWait.has(row.id),
+        hasWaitingConversation: waitState.waitingConversation.has(row.id),
+      });
+      return toCaseListItem(
+        summary,
+        row,
+        waitingFor,
+        waitState.agents.get(row.id) ?? []
+      );
+    });
   },
 
   async get(
@@ -148,14 +198,16 @@ export const orchestratorCaseService = {
     if (!row) {
       return null;
     }
-    const [running, stats] = await Promise.all([
+    const [running, stats, documents] = await Promise.all([
       runningCaseIds(organizationId, [row.id]),
       loadCaseStats(organizationId, [row.id]),
+      listCaseDocuments(organizationId, row.id),
     ]);
     return toCaseDetail(
       row,
       running.has(row.id),
-      stats.get(row.id) ?? EMPTY_STATS
+      stats.get(row.id) ?? EMPTY_STATS,
+      documents
     );
   },
 
@@ -187,7 +239,11 @@ export const orchestratorCaseService = {
     const updated = await withDb((db) =>
       db.orchestratorCase.updateMany({
         where: { id: caseId, organizationId },
-        data: { status: input.status },
+        data: {
+          status: input.status,
+          closedAt:
+            input.status === OrchestratorCaseStatus.Closed ? new Date() : null,
+        },
       })
     );
     if (updated.count === 0) {
@@ -284,4 +340,11 @@ async function runningCaseIds(
   return new Set(turns.map((turn) => turn.conversation.caseId));
 }
 
-const EMPTY_STATS: CaseStats = { taskCount: 0, turnCount: 0, costUsd: null };
+const EMPTY_STATS: CaseStats = {
+  taskCount: 0,
+  turnCount: 0,
+  costUsd: null,
+  inputTokens: 0,
+  outputTokens: 0,
+  activeMs: 0,
+};

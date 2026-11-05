@@ -1,0 +1,48 @@
+---
+title: "How AgentFlow works"
+description: "The parts of AgentFlow: workflows, the Orchestrator Agent, Agents, cases, runs, tasks and sessions, and where each shows in the app."
+---
+
+AgentFlow turns an event in an outside system (a Jira status change, a mention) into work that Agents do, and writes the results back for people to review.
+
+```
+Jira ──event──▶ Workflow ──▶ Orchestrator Agent ──tasks──▶ BA / Dev / QC Agents
+                                  │                              │
+                    replies, pages, pull requests         Claude Code sessions
+                                  ▼
+                 Jira comments · Confluence pages · Git pull requests
+```
+
+## Workflow
+
+A workflow says which events matter and what answers them. It has **triggers** (events of a connection, such as `jira.issue_status_changed`), an **agent** section and optional **actions**. `agent.mode` is one of:
+
+- `plan`: generate an implementation plan.
+- `plan_and_execute`: generate the plan, approve it and implement it.
+- `orchestrated`: start no run; hand each request to the Orchestrator Agent.
+
+A workflow can also follow a **process**: your own list of steps. See [Orchestrated or run-based](/docs/concepts/orchestrated-vs-process). Find workflows under **Workflows** (sidebar).
+
+## Orchestrator
+
+The Orchestrator Agent belongs to an orchestrated workflow and follows the rules you write in plain language (`agent.instructions`). Each request becomes a **message** on a conversation, usually one conversation per ticket thread. Messages are held for `debounceSeconds`, so a burst (three status flips, a comment and its edit) is one **turn**. In a turn it uses tools: it reads the case, starts tasks, replies on the ticket, publishes Confluence pages and opens pull requests. Then it waits for tasks or for people. See [Orchestrator tools](/docs/reference/orchestrator-tools).
+
+## Agent
+
+An Agent is a computer that runs Claude Code. It is **automatic** (a container or server that clones the project's repositories) or **personal** (a person's machine and project folder). In `AGENTFLOW.md` it declares the commands it offers. The Orchestrator Agent may only start commands an Agent declares. See **Agents** (sidebar) and [Install an Agent](/docs/getting-started/install-agent).
+
+## Case
+
+An orchestrated workflow keeps one **case** per ticket. It holds the conversations, turns, tasks, waits, decisions and the Confluence documents of that ticket. A case is `open` or `closed`; a new message reopens a closed case. See **Cases** (sidebar) and [Cases](/docs/guides/operate/cases).
+
+## Run
+
+A run-based workflow starts a **run** for each trigger. The run follows the process steps (or plan and implement) and ends `succeeded`, `failed` or `cancelled`. See **Runs** (sidebar) and [Runs](/docs/guides/operate/runs).
+
+## Task
+
+A task is the Orchestrator Agent's command to one Agent. Its status is `queued` (a personal Agent that runs one task at a time), `running`, `succeeded`, `failed` or `cancelled`. A task whose answer starts with `BLOCKED:` did nothing; the rules say what to do then ([Blocked tasks](/docs/guides/recipes/blocked-tasks)).
+
+## Session
+
+A session is a Claude Code session an Agent reports: tokens, cost and the transcript. See **Sessions** (sidebar) and [Sessions](/docs/guides/operate/sessions).

@@ -1,24 +1,35 @@
 import { withDb } from "@repo/database";
-import { readTurnUsage } from "@/app/orchestrator/cases/case-mappers";
+import type { UsageTotals } from "@/lib/usage/loop-usage";
+import {
+  addUsage,
+  emptyUsage,
+  loadLoopUsage,
+  turnUsage,
+} from "@/lib/usage/loop-usage";
 
 /**
- * Per-case task and turn counts and cost for the case list and page: three
- * bounded queries for all asked cases, no per-case fan-out.
+ * Per-case task and turn counts, tokens, cost and active agent time for the
+ * case list and page: bounded queries for all asked cases, no per-case
+ * fan-out. A task's session numbers win over its loop's, and turns are added.
  */
 
 export type CaseStats = {
   taskCount: number;
   turnCount: number;
-  /** Known turn + task loop cost; null when none is known. */
-  costUsd: number | null;
-};
+} & UsageTotals;
 
-type TurnRow = { usage: unknown; conversation: { caseId: string } };
+type TurnRow = {
+  usage: unknown;
+  startedAt: Date;
+  finishedAt: Date | null;
+  conversation: { caseId: string };
+};
 type TaskRow = { caseId: string; loopId: string | null };
 
 export async function loadCaseStats(
   organizationId: string,
-  caseIds: string[]
+  caseIds: string[],
+  now: Date = new Date()
 ): Promise<Map<string, CaseStats>> {
   if (caseIds.length === 0) {
     return new Map();
@@ -27,7 +38,12 @@ export async function loadCaseStats(
     withDb((db) =>
       db.orchestratorTurn.findMany({
         where: { organizationId, conversation: { caseId: { in: caseIds } } },
-        select: { usage: true, conversation: { select: { caseId: true } } },
+        select: {
+          usage: true,
+          startedAt: true,
+          finishedAt: true,
+          conversation: { select: { caseId: true } },
+        },
       })
     ),
     withDb((db) =>
@@ -42,60 +58,42 @@ export async function loadCaseStats(
       tasks.flatMap((task) => (task.loopId === null ? [] : [task.loopId]))
     ),
   ];
-  const loopCostById = new Map<string, number | null>();
-  if (loopIds.length > 0) {
-    const loops = await withDb((db) =>
-      db.loop.findMany({
-        where: { organizationId, id: { in: loopIds } },
-        select: { id: true, estimatedCost: true },
-      })
-    );
-    for (const loop of loops) {
-      loopCostById.set(
-        loop.id,
-        loop.estimatedCost === null ? null : Number(loop.estimatedCost)
-      );
-    }
-  }
-  return foldCaseStats(caseIds, turns, tasks, loopCostById);
+  const loopUsageById = await loadLoopUsage(organizationId, loopIds, now);
+  return foldCaseStats(caseIds, turns, tasks, loopUsageById, now);
 }
 
 export function foldCaseStats(
   caseIds: string[],
   turns: TurnRow[],
   tasks: TaskRow[],
-  loopCostById: Map<string, number | null>
+  loopUsageById: Map<string, UsageTotals>,
+  now: Date = new Date()
 ): Map<string, CaseStats> {
   const stats = new Map<string, CaseStats>();
   for (const id of caseIds) {
-    stats.set(id, { taskCount: 0, turnCount: 0, costUsd: null });
+    stats.set(id, { taskCount: 0, turnCount: 0, ...emptyUsage() });
   }
   for (const turn of turns) {
     const current = stats.get(turn.conversation.caseId);
     if (current) {
-      current.turnCount += 1;
-      current.costUsd = addCost(
-        current.costUsd,
-        readTurnUsage(turn.usage)?.costUsd ?? null
-      );
+      stats.set(turn.conversation.caseId, {
+        ...current,
+        ...addUsage(current, turnUsage(turn, now)),
+        turnCount: current.turnCount + 1,
+      });
     }
   }
   for (const task of tasks) {
     const current = stats.get(task.caseId);
     if (current) {
-      current.taskCount += 1;
-      current.costUsd = addCost(
-        current.costUsd,
-        task.loopId === null ? null : (loopCostById.get(task.loopId) ?? null)
-      );
+      const loopUsage =
+        task.loopId === null ? undefined : loopUsageById.get(task.loopId);
+      stats.set(task.caseId, {
+        ...current,
+        ...(loopUsage ? addUsage(current, loopUsage) : {}),
+        taskCount: current.taskCount + 1,
+      });
     }
   }
   return stats;
-}
-
-function addCost(total: number | null, part: number | null): number | null {
-  if (part === null) {
-    return total;
-  }
-  return (total ?? 0) + part;
 }

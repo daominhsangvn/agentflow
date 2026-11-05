@@ -118,7 +118,7 @@ describe("ProjectRunnerCapabilities refresh", () => {
     render(<ProjectRunnerCapabilities isAdmin projectId={PROJECT_ID} />);
     await open();
     await userEvent.click(
-      screen.getByRole("button", { name: "Read from a runner's toolkit" })
+      screen.getByRole("button", { name: "Read from an agent's toolkit" })
     );
     expect(screen.getByRole("button", { name: "Read" })).toBeDisabled();
   });

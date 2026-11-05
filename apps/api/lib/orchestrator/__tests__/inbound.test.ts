@@ -91,6 +91,7 @@ describe("routeToOrchestrator", () => {
     });
 
     expect(routed?.created).toBe(true);
+    expect(routed?.caseId).toBe(fake.cases[0]?.id);
     expect(fake.cases).toMatchObject([
       {
         projectId: PROJECT_ID,
@@ -139,6 +140,7 @@ describe("routeToOrchestrator", () => {
     });
 
     expect(second?.conversationId).toBe(first?.conversationId);
+    expect(second?.caseId).toBe(first?.caseId);
     expect(fake.cases).toHaveLength(1);
     expect(fake.messages).toHaveLength(2);
   });
@@ -186,6 +188,7 @@ describe("routeToOrchestrator", () => {
     });
 
     expect(reply?.conversationId).toBe(first?.conversationId);
+    expect(reply?.caseId).toBe(first?.caseId);
     expect(fake.conversations).toHaveLength(1);
   });
 

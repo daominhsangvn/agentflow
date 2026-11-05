@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { SESSION_STATUS_FILTER_VALUES } from "@repo/api/src/agent-session-filters.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -17,40 +14,6 @@ import {
  * instead of being silently skipped by a stricter pattern.
  */
 const QUOTED_VALUE_PATTERN = /"([^"]+)"/g;
-
-/**
- * The PUBLISHED reference for this tool — the page an external agent reads
- * instead of the wire description (ISS-5641). It is `.mdx`, so nothing
- * typechecks it; the guard below is the only thing holding it to the SSOT.
- */
-const DOCS_PAGE_PATH = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-  "..",
-  "apps",
-  "web",
-  "content",
-  "docs",
-  "mcp",
-  "agent-sessions.mdx"
-);
-
-/**
- * The `list-agent-sessions(...)` signature block on that page. Tolerates CRLF
- * line endings and trailing whitespace after the closing `)` so a checkout with
- * `core.autocrlf=true` cannot fail the guard on an unmodified tree.
- */
-const LIST_TOOL_SIGNATURE_PATTERN =
-  /\r?\nlist-agent-sessions\(\r?\n([\s\S]*?)\r?\n\)[ \t]*\r?\n/;
-
-/**
- * Separates the documented `status` union from the prose gloss after it. The
- * gloss quotes a member name of its own, so the union must be sliced off ahead
- * of the quoted-value scan — see `documentedStatusFilterLine`.
- */
-const UNION_GLOSS_SEPARATOR = "—";
 
 describe("buildAgentSessionListQuery", () => {
   it("maps provided filters and stringifies pagination params", () => {
@@ -227,54 +190,7 @@ describe("list-agent-sessions status filter contract (ISS-4858)", () => {
     expect(quoted.length).toBeGreaterThan(0);
     expect(new Set(quoted)).toEqual(new Set(SESSION_STATUS_FILTER_VALUES));
   });
-
-  it("publishes the same vocabulary in the MCP reference docs", () => {
-    // ISS-5641: the tool renders its description from the SSOT, but the
-    // published page hand-typed the union and kept the pre-ISS-5366 four —
-    // `stale` and `unknown` were filterable and undiscoverable. Nothing
-    // typechecks an `.mdx`, so this is the guard that keeps the two agreeing.
-    const documented = [
-      ...documentedStatusFilterLine().matchAll(QUOTED_VALUE_PATTERN),
-    ].map((match) => match[1]);
-
-    expect(new Set(documented)).toEqual(new Set(SESSION_STATUS_FILTER_VALUES));
-  });
 });
-
-/**
- * The `status` line of the published `list-agent-sessions(...)` signature.
- * Throws rather than returning nothing when the block cannot be found, so a
- * renamed tool or a restructured code fence fails loudly instead of quietly
- * turning the guard above into a no-op.
- */
-function documentedStatusFilterLine(): string {
-  const page = readFileSync(DOCS_PAGE_PATH, "utf8");
-  const signature = LIST_TOOL_SIGNATURE_PATTERN.exec(page)?.[1];
-  if (!signature) {
-    throw new Error(
-      `no list-agent-sessions(...) signature block in ${DOCS_PAGE_PATH}`
-    );
-  }
-  const statusLine = signature
-    .split("\n")
-    .find((line) => line.trimStart().startsWith("status?:"));
-  if (!statusLine) {
-    throw new Error(`no status filter documented in ${DOCS_PAGE_PATH}`);
-  }
-  // Scan the UNION only, never the gloss that follows it. That gloss names
-  // `"inactive"` in its own double quotes, so scanning the whole line let a
-  // union which had DROPPED `"inactive"` still satisfy the set comparison —
-  // the guard went green on precisely the drift it exists to catch, for the
-  // one value the page emphasises most. Require the separator so a reworded
-  // line fails loudly rather than silently widening what is scanned again.
-  const [union] = statusLine.split(UNION_GLOSS_SEPARATOR);
-  if (union === statusLine) {
-    throw new Error(
-      `no "${UNION_GLOSS_SEPARATOR}" separating the status union from its gloss in ${DOCS_PAGE_PATH}`
-    );
-  }
-  return union;
-}
 
 // ---------------------------------------------------------------------------
 // Registered-handler coverage: the list-agent-sessions tool handler logic

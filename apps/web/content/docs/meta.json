@@ -4,14 +4,9 @@
     "index",
     "getting-started",
     "concepts",
-    "mechanisms",
-    "mcp",
-    "workflows",
+    "guides",
     "integrations",
-    "collaboration",
-    "mcp",
-    "api-reference",
-    "resources",
-    "glossary"
+    "reference",
+    "resources"
   ]
 }

@@ -55,6 +55,10 @@ vi.mock("../workflow-runs-table", () => ({
   WorkflowRunHistory: () => <div data-testid="run-history" />,
 }));
 
+vi.mock("../workflow-events-table", () => ({
+  WorkflowEventHistory: () => <div data-testid="event-history" />,
+}));
+
 vi.mock("@repo/app/integrations/hooks/use-integrations", () => ({
   useIntegrationProviders: () => ({ data: PROVIDERS }),
 }));
@@ -110,6 +114,34 @@ describe("WorkflowDetailView", () => {
 
     expect(screen.getByRole("tab", { name: "Cases" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Runs" })).not.toBeInTheDocument();
+  });
+
+  it("offers an Events tab in both modes without mounting it until selected", () => {
+    const base = makeWorkflow();
+    mocks.workflow = {
+      ...base,
+      agent: { ...base.agent, mode: WorkflowAgentMode.Orchestrated },
+    };
+    const { unmount } = render(
+      <WorkflowDetailView
+        computeTargets={COMPUTE_TARGETS}
+        isAdmin
+        workflowId={WORKFLOW_ID}
+      />
+    );
+    expect(screen.getByRole("tab", { name: "Events" })).toBeInTheDocument();
+    unmount();
+
+    mocks.workflow = base;
+    render(
+      <WorkflowDetailView
+        computeTargets={COMPUTE_TARGETS}
+        isAdmin
+        workflowId={WORKFLOW_ID}
+      />
+    );
+    expect(screen.queryByTestId("event-history")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Events" })).toBeInTheDocument();
   });
 
   it("shows case counts for an orchestrated workflow and runs otherwise", () => {

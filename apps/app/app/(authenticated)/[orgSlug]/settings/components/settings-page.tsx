@@ -6,6 +6,7 @@ import { APPROVER_ROLE_OPTIONS, ApproverRole } from "@repo/api/src/types/user";
 import { AgentComplianceSettingsTab } from "@repo/app/agents/components/agent-compliance-settings-tab";
 import { CustomFieldsSettingsTab } from "@repo/app/custom-fields/components/custom-fields-settings-tab";
 import { githubKeys } from "@repo/app/github/hooks/use-github-integration";
+import { INTEGRATION_CONNECTIONS_ANCHOR } from "@repo/app/integrations/lib/integration-anchors";
 import {
   FeatureFlagPending,
   useFeatureFlagSettleDeadline,
@@ -51,11 +52,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "@repo/design-system/components/ui/tabs";
+import { Link } from "@repo/navigation/link";
 import { useSearchParamsValue } from "@repo/navigation/use-search-params-value";
 import { useQueryClient } from "@tanstack/react-query";
 import { TriangleAlertIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useFeatureFlagsSettledForUser } from "@/components/feature-flags-settled";
+import { useOrgSlug } from "@/hooks/use-org-slug";
 import {
   DEFAULT_SETTINGS_TAB,
   SETTINGS_TAB_PARAM,
@@ -64,7 +67,6 @@ import {
 import { ApiKeysSettingsPanel } from "./api-keys-settings-panel";
 import { CloudComputeModeCard } from "./cloud-compute-mode-card";
 import { GoogleIntegrationCard } from "./google-integration-card";
-import { IntegrationConnectionsSection } from "./integration-connections-section";
 import { LocalComputeTargetsCard } from "./local-compute-targets-card";
 import { OrganizationSlugSettings } from "./organization-slug-settings";
 import { SessionFrustrationCard } from "./session-frustration-card";
@@ -81,6 +83,7 @@ export function SettingsPage({
 }: Readonly<SettingsPageProperties>) {
   const searchParams = useSearchParamsValue();
   const queryClient = useQueryClient();
+  const orgSlug = useOrgSlug();
   // The Tags trigger and content only render on `enabled === true`
   // (`<FeatureFlagged>`), so an unresolved flag looks exactly like a disabled
   // one, and `?tab=tags` is server-allowlisted regardless because the flag is
@@ -346,7 +349,20 @@ export function SettingsPage({
           <FeatureFlagged flag="google-drive">
             <GoogleIntegrationCard />
           </FeatureFlagged>
-          <IntegrationConnectionsSection isAdmin={isAdmin} />
+          {/* Keeps old `#integration-connections` bookmarks landing on a card. */}
+          <Card id={INTEGRATION_CONNECTIONS_ANCHOR} tabIndex={-1}>
+            <CardHeader>
+              <CardTitle>Connections</CardTitle>
+              <CardDescription>
+                Connections moved to their own page.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline">
+                <Link href={`/${orgSlug}/connections`}>Open Connections</Link>
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent className="mt-3 space-y-6" value={SettingsTab.ApiKeys}>

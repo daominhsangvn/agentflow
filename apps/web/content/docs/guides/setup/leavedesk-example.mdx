@@ -1,0 +1,350 @@
+---
+title: "Example: LeaveDesk (LD-6)"
+description: "The complete setup behind ticket LD-6 going from To Do to Done with a BA, a Dev and a QC Agent under an Orchestrator Agent, with Confluence documents and Local Git pull requests. Every file, in setup order."
+---
+
+LeaveDesk is a leave management app for a fictional company. Its ticket **LD-6** ("As a manager I want a calendar of who in my team is off") went from To Do to Done with three Agents and the people who own the work:
+
+| Where | What LD-6 produced |
+|---|---|
+| Confluence | `LD-6 · Team calendar` (ticket page) with `LD-6 · PRD` (v1 → v4), `LD-6 · Implementation plan`, `LD-6 · Test plan` (v1 → v2), `LD-6 · Test run 1` (32/33) and `LD-6 · Test run 2` (33/33) |
+| Git | `leavedesk-app` pull request (the feature), `leavedesk-qa` pull request (33 Playwright cases and results), `leavedesk-knowledge` pull request (the archived PRD) |
+| Jira | Short comments with links, each in the thread it answers |
+
+This page lists everything that was set up for it, in the order of the [setup overview](/docs/guides/setup).
+
+## 1. Connections
+
+**Connections** (sidebar):
+
+| Connection | Provider | Settings |
+|---|---|---|
+| Jira | `jira` | `deployment: cloud`, `siteUrl`, `email` of the bot; `apiToken`; inbound `webhook` |
+| Confluence | `confluence` | `siteUrl`, `email`; `apiToken`. The bot can view, add pages, comment and attach in space `LD` |
+| Local Git | `local_git` | Provided by the server (`pnpm local-git:init`): Gitea on `http://localhost:3300`, Agents reach it on `http://host.docker.internal:3300` |
+
+Jira → System → WebHooks: the Jira connection's inbound URL and secret, JQL `project = LD`, events Issue created and updated, Comment created and updated.
+
+Jira statuses of project `LD`: To Do → PRD → Planning → Implement → Testing → Review → Done. The bot can browse, comment, attach files and edit issues.
+
+## 2. Project, project connections and repositories
+
+Project **LeaveDesk** (key `PRO-1`) → **Connections & Repos**:
+
+| Key | Connection | Settings |
+|---|---|---|
+| `jira` | Jira | `projectKeys: [LD]` |
+| `confluence` | Confluence | `spaceKeys: [LD]` |
+
+Repositories (all from Local Git): `workshop/leavedesk-app` (the code), `workshop/leavedesk-knowledge` (BA toolkit and knowledge base), `workshop/leavedesk-qa` (QC toolkit, Playwright tests and results), `workshop/leavedesk-superpowers` (Dev skills).
+
+## 3. Agents
+
+| Agent (`runner` name) | Kind | Image or machine | Role |
+|---|---|---|---|
+| `runner-orch` | automatic | `agentflow-runner:base` | The Orchestrator Agent of the workflow |
+| `runner-1` | automatic | `agentflow-runner:base` | BA (toolkit `leavedesk-knowledge`) |
+| `runner-qc` | automatic | `agentflow-runner:qc` (base + Playwright Chromium) | QC (toolkit `leavedesk-qa`) |
+| `an-PRO-1` | personal, project `PRO-1` | The developer's own machine, folder `~/work/leavedesk`, their Git (`tea`) and Jira CLI credentials | Dev |
+
+Each one has a model provider set in AgentFlow (**Agents** (sidebar) → Your agents → the Agent → Model provider) and is shared with the organization.
+
+## 4. AGENTFLOW.md of each Agent
+
+### BA: `leavedesk-knowledge/AGENTFLOW.md`
+
+````markdown
+---
+runner: BA (LeaveDesk)
+toolkit:
+  repository: workshop/leavedesk-knowledge
+  mounts:
+    - .claude/agents
+    - .claude/skills
+  instructions: |
+    The LeaveDesk BA team of `leavedesk-knowledge/` is linked into this workspace's
+    `.claude/agents` and `.claude/skills`. The knowledge base is `leavedesk-knowledge/`
+    (its README rules apply; the policy is the source of truth); the app as built is
+    `leavedesk-app/` (read only).
+commands:
+  - name: /leavedesk-research
+    args: <question>
+    description: Answer a question about the leave policy, decisions, change requests, meetings, earlier requirements or the app, with citations
+    mode: read
+    produces: answer
+  - name: /ba-requirement
+    args: analyze <KEY>
+    description: Analyse a ticket into questions and a reviewed PRD; ask again with answers or review feedback to revise
+    mode: write
+    produces: prd
+    asks: true
+    attach: ["PRD-*.md"]
+  - name: /ba-archive
+    args: <KEY>
+    description: Archive an approved PRD with its answers, decisions and change requests in the knowledge base; opens a pull request
+    mode: write
+    produces: archive
+    needs: [prd]
+    push: true
+skills: [leavedesk-research, requirement-analysis, prd-writing, prd-review, ba-archive]
+---
+
+# BA Agent — LeaveDesk
+
+## /leavedesk-research <question>
+Researches `leavedesk-knowledge/` (policy v3.1, decisions D-001..D-005, change requests,
+meetings, system docs, earlier requirements) and `leavedesk-app/`, and answers with
+citations (file and section). Use it for any question about what LeaveDesk must do or
+does today. Changes nothing.
+
+## /ba-requirement analyze <KEY>
+Runs the BA agent team on ticket <KEY>: research, analysis, stakeholder questions
+(questions.json), a PRD reviewed by a critic, and a short ticket comment, all in
+`.agentflow-ai/work/ba/`. Ask it again with answers or review feedback to revise.
+The full PRD is also left as
+`.agentflow-ai/work/PRD-<KEY>.md` every round (declared in `attach`): the orchestrator attaches it to the
+ticket.
+
+## /ba-archive <KEY>
+Writes the approved requirement, its answers and decisions into `leavedesk-knowledge/`
+(`requirements/<KEY>/`, `decisions/`, `change-requests/`; never `policies/`).
+AgentFlow commits them and opens a pull request in `workshop/leavedesk-knowledge`;
+the admin merges it. Stops with a `BLOCKED: missing PRD-<KEY>.md …` reply when no PRD
+from an analyze round exists (pass `PRD-<KEY>.md` with task_run `files`).
+````
+
+### QC: `leavedesk-qa/AGENTFLOW.md`
+
+````markdown
+---
+runner: QC (LeaveDesk)
+toolkit:
+  repository: workshop/leavedesk-qa
+  mounts:
+    - .claude/agents
+    - .claude/skills
+  instructions: |
+    The LeaveDesk QC team of `leavedesk-qa/` is linked into this workspace's
+    `.claude/agents` and `.claude/skills`. Test cases are in `leavedesk-qa/test-cases/`,
+    specs in `leavedesk-qa/e2e/`, results in `leavedesk-qa/results/`.
+commands:
+  - name: /qa-review
+    args: <KEY>
+    description: Review or answer questions about a ticket's test cases and specs (coverage of each AC and rule, expected results)
+    mode: read
+    produces: answer
+  - name: /qa-test
+    args: <KEY> design
+    description: Design the test cases of a ticket from its PRD (no run)
+    mode: write
+    produces: testcases
+    asks: true
+    needs: [prd]
+    attach: ["TESTCASES-*.md"]
+  - name: /qa-run
+    args: <KEY> [fresh | rerun | report]
+    description: Run the designed tests of a ticket on its Dev branch (or main once merged); AgentFlow pushes the results, the orchestrator opens the pull request
+    mode: write
+    produces: results
+    needs: [testcases]
+    push: true
+    attach: ["RESULTS-*.md", "evidence-*/*.png"]
+skills: [qa-test, qa-run, qa-ticket-analysis, qa-test-design, qa-e2e-automation, qa-run-triage, qa-reporting]
+---
+
+# QC Agent — LeaveDesk
+
+## /qa-review <KEY>
+Read-only: checks the ticket's test cases (`test-cases/<KEY>.md`) and specs against the
+PRD and the CLAUDE.md rules, and answers questions about what is covered and how.
+Pass `PRD-<KEY>.md` with files when the question is about PRD coverage.
+
+## /qa-test <KEY> design
+Test design from the PRD: reads `.agentflow-ai/work/inputs/PRD-<KEY>.md` (and
+`PLAN-<KEY>.md` when given), which the orchestrator passes with task_run `files`,
+writes `test-cases/<KEY>.md` and leaves `TESTCASES-<KEY>.md` in `.agentflow-ai/work/`.
+Stops with `BLOCKED: missing PRD-<KEY>.md (needs prd: produced by /ba-requirement analyze <KEY> on BA (LeaveDesk))`
+when no PRD exists. Pushes nothing.
+
+## /qa-run <KEY> [fresh | rerun | report]
+Playwright automation, a review gate, a run on the Dev branch `<KEY>` of `leavedesk-app` (main once merged), triage
+and the report in `results/<KEY>/`. Uses the test cases as designed (never
+rewrites them; doubts go to the report's Notes) from `inputs/TESTCASES-<KEY>.md` (the
+test plan page, wins when both exist) or `test-cases/<KEY>.md`. Leaves `RESULTS-<KEY>.md` (verdict, counts,
+failures) and `evidence-<KEY>/` (at most 6 screenshots) in `.agentflow-ai/work/`.
+AgentFlow commits the specs and results and pushes the branch (never the agent); the orchestrator opens the pull request and people merge it in Review.
+First checks its inputs (the test cases and the ticket's code: the Dev branch `<KEY>`, else merged on main)
+and stops with one `BLOCKED: missing … (needs …: produced by …)` reply line when one is missing.
+````
+
+### Dev: `~/work/leavedesk/AGENTFLOW.md` on the developer's machine
+
+````markdown
+---
+runner: Dev (LeaveDesk, An)
+commands:
+  - name: /writing-plans
+    args: <ticket-key>
+    description: Write the implementation plan of a ticket from its PRD
+    mode: write
+    produces: plan
+    needs: [prd]
+    asks: true
+    attach: ["PLAN-*.md"]
+  - name: /executing-plans
+    args: <ticket-key>
+    description: Implement an approved plan with TDD, commit, push and open the PR
+    mode: write
+    produces: code
+    needs: [approved-plan]
+    push: true
+    attach: ["pr-body-*.md"]
+  - name: /systematic-debugging
+    description: Find the root cause of a bug in leavedesk-app before changing code
+    mode: read
+    produces: answer
+skills:
+  - test-driven-development
+  - verification-before-completion
+  - requesting-code-review
+---
+
+# Dev Agent — LeaveDesk (An's machine)
+
+Works in `~/work/leavedesk` with An's own credentials (git/Gitea `an`, `jira` CLI).
+Repositories: `leavedesk-app/` (Node 24, Express 5 + node:sqlite, React 19) and
+`leavedesk-superpowers/` (the skills).
+Each command first checks its inputs and stops with one `BLOCKED: missing … (needs …: produced by …)` reply line when one is missing.
+
+## /writing-plans <ticket-key>
+Creates branch `<KEY>` from `main` in both repositories, reads the PRD from
+`$AGENTFLOW_WORKDIR/inputs/PRD-<KEY>.md` (pass it with task_run files) or else downloads `PRD-<KEY>.md`
+from the ticket with `jira attachment`, writes the plan to `work/<KEY>/plan.md` and leaves a copy as
+`$AGENTFLOW_WORKDIR/PLAN-<KEY>.md` (attach: the orchestrator attaches it). Open questions go to
+questions.json. To answer questions about a plan, resume the
+session of the run that wrote it.
+
+## /executing-plans <ticket-key>
+Implements the approved plan with TDD, commits as An, pushes and opens the PR with
+`tea`. Leaves the PR description as `$AGENTFLOW_WORKDIR/pr-body-<KEY>.md` (attach: the
+orchestrator attaches it). Never merges: the admin merges the PR.
+
+## /systematic-debugging
+Reads the code and the tests to explain a bug or a behaviour; changes nothing.
+````
+
+After a toolkit change: Project → **Agents** → Commands → Refresh the automatic Agent. The personal Agent uploads its file when it starts and when the file changes.
+
+## 5. The workflow
+
+Workflows → New workflow → YAML:
+
+````yaml
+name: LeaveDesk · Questions
+description: >-
+  People move LD tickets through the flow and mention the bot to ask about the
+  requirement, the plan, the tests or the project; the orchestrator runs the BA,
+  Dev and QC Agents and answers in the thread.
+project: LeaveDesk
+triggers:
+  - connection: jira
+    type: jira.issue_mentioned
+    config:
+      projectKeys: [LD]
+  - connection: jira
+    type: jira.issue_status_changed
+    config:
+      projectKeys: [LD]
+agent:
+  runAs: admin@agentflow.local
+  runner: runner-orch
+  mode: orchestrated
+  orchestrator:
+    concurrency: supersede
+    debounceSeconds: 20
+    turnTimeoutMinutes: 10
+    cancelOn: [status_changed, label_removed]
+    connections:
+      source: [comment, attach]          # reply and attach files on the ticket; people move it
+      confluence: [publish]              # the project connection key from step 2
+      pull_requests: [open]
+  instructions: |
+    ## Roles
+    - BA: writes the PRD of a ticket, archives the approved PRD in the knowledge base (a branch AgentFlow pushes) and answers questions about requirements.
+    - Dev: writes the implementation plan, implements it and opens its own pull request (never merges); answers questions about the plan and the code.
+    - QC: designs the test plan (test cases); separately, automates and runs the approved test plan and reports each test round with evidence screenshots (a branch AgentFlow pushes); answers questions about tests.
+    - People (BA, Dev, QC, admin) review the documents on Confluence and the pull requests, ask questions as Jira comments, merge the pull requests and move the ticket.
+    - The agents list says which agent does what; follow what each command declares (needs, produces, files).
+
+    ## The ticket
+    - Agents do not see the Jira ticket: their files only hold the case. Before the first task of a ticket (and whenever the ticket's description changed), read the ticket with source_item_get and put it in the task prompt as people wrote it: key, title, description, acceptance criteria, and the names of its attachments. Later tasks of the same ticket get it again in their prompt.
+
+    ## Documents on Confluence
+    - Every ticket has one page "<KEY> · <summary>" under the project's parent page (kind ticket): the ticket link, a one-line summary, and the links to its child pages. Create it the first time a document of the ticket is published, and update it when a child page is added.
+    - Child pages of the ticket page: "<KEY> · PRD" (kind prd), "<KEY> · Implementation plan" (kind plan), "<KEY> · Test plan" (kind test_plan). Each test round is a child page of the test plan: "<KEY> · Test run <N> · <YYYY-MM-DD>" (kind test_run; N counts the rounds in the case's Documents), with the results file as the body and the evidence screenshots as attachments.
+    - Publish with page_publish from the newest succeeded task that produced the file. Later versions update the SAME page: pass page (the page id from the case's Documents).
+    - Before a task works from a document, hand it the page's CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence): PRD-<KEY>.md, PLAN-<KEY>.md, TESTCASES-<KEY>.md.
+    - If page_publish refuses because people edited the page: run the task again with that page in its files so their edits are kept, then publish. Use overwrite only when a person asked to replace the page.
+    - On Jira, write short comments with the page title, its link, its version and one or two lines on what changed. Do not attach files to Jira comments.
+    - To answer a question about a document, read the page first (page_get).
+
+    ## Flow (Jira status order)
+    To Do → PRD → Planning → Implement → Testing → Review → Done
+    - To Do: nothing.
+    - PRD: BA writes the PRD from the ticket. Post its questions as one numbered comment. When the PRD is ready, publish the ticket page and the PRD page, comment the link and ask people to review the PRD on Confluence and to ask their questions here; they move the ticket to Planning when it is approved. When people ask for changes, resume the BA task with their feedback and the current PRD page in its files, publish the same page and comment what changed.
+    - Planning: at the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-<KEY>.md in their files. When the archive is done, open its pull request (pull_request_open with that task) and comment the link for Review. Post each one's questions in its own comment. When each is done, publish its page, update the ticket page and comment the links; ask people to review both. When people ask for changes, resume that task with the feedback and the current page in its files, publish the same page and comment what changed. People move the ticket to Implement when both are approved.
+    - Implement: Dev implements from the plan page (PLAN-<KEY>.md in its files) and opens its pull request itself. Post its questions. When done, comment the pull request link with its summary (from the pull request body file) and say the ticket can move to Testing. Nobody merges yet.
+    - Testing: QC automates and runs the approved tests from the test plan page (TESTCASES-<KEY>.md) with the PRD page (PRD-<KEY>.md) in its files and the prompt "Automate and run the approved test cases against the Dev branch <KEY> (its pull request is not merged yet); do not redesign them." When done, publish the test round as a child page of the test plan with the results file and the evidence screenshots as attachments, open the pull request of the QC test code (pull_request_open with that task), then comment: verdict, passed/failed counts, each failure with its reason, the test run page link and the pull request link. If tests failed, ask people what to do (back to Implement for a fix, then Testing again as a new test round, or accept).
+    - Review: start nothing new. People (Dev and QC) review the pull requests of the ticket (Dev code, QC tests, BA archive) and ask questions here: answer in the thread from the agent that knows (Dev: resume its implementation task with fork, or its read-only command; QC: its review command; BA: its research command). People merge the pull requests themselves and move the ticket to Done.
+    - Done: close the case.
+
+    ## Questions and answers (every status)
+    - Answer each comment in its own thread (replyTo). A question about the PRD, the plan, the test plan or the results: read the page, ask the agent that wrote it when needed, answer in the thread with the page link.
+    - A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+    - A confirmed answer is a decision: pass it in the prompt of later tasks.
+    - A question never stops or restarts a running task.
+
+    ## Blocked tasks
+    - A task answer that starts with "BLOCKED:" did nothing. Comment what is missing and who produces it (from that line). If the missing document exists on Confluence or from an earlier task, pass it in the task's files and run the task again (once); otherwise wait for it.
+
+    ## Blockers
+    - Before starting tasks for a status, read the item (source_item_get). If any item in blockedBy is not yet in Review or Done, start nothing and comment which items it waits for.
+    - When this item moves to Review or Done, call case_notify for each item in blocks with what changed.
+    - On a case_notify message, read the item again; if no blocker remains, act on its current status as if it had just moved there.
+    - A comment on the ticket also re-checks blockers.
+
+    ## Work belongs to its status
+    - Start a writing task only for the work of the ticket's CURRENT status (PRD: the PRD; Planning: archive, plan, test plan; Implement: code and fixes; Testing: test rounds). If someone asks in a comment for work of another status (e.g. "fix the code" while in Testing), do not start it: answer that the ticket must move to that status first, and do it when it is there. Reading tasks (questions, research, reviews) are allowed in every status.
+
+    ## Coming back to a status
+    - When the ticket moves back to a status whose work was already done in this case (e.g. Testing → Implement after a failed test round, Planning → PRD), start NOTHING on your own. Comment what that status already produced (pages, pull request, last results) and ask what to change. Start the work only when a person says what to do in a comment (e.g. "fix D-1"), then resume the task that did that work with their instruction.
+    - The first time the ticket enters a status, follow the Flow as written.
+
+    ## Cancelling
+    - Only a status change cancels tasks. Moving forward in the flow keeps running tasks (say they are still running).
+    - Moving backward or to a status outside the flow: cancel the tasks started for the statuses being left and say so on the ticket.
+    - Several changes in one turn: act on the final status only.
+
+    ## Language
+    - Default language: Vietnamese. A comment written in another language is answered in that language. Page titles, file names, ticket keys and code stay as they are.
+````
+
+Which section of the rules does what, and the tools each one relies on, are explained in [Orchestrator](/docs/guides/setup/orchestrator#capabilities-and-the-rule-text-to-copy).
+
+## 6. What happened on LD-6
+
+| Case | What the orchestrator did |
+|---|---|
+| PRD: v1 → v4 on the same page | Read the ticket, started the BA Agent, published the ticket page and `LD-6 · PRD` v1, posted 8 questions as one comment. Answered a new question from a reply first (a read task), resumed the PRD task only when all 8 had answers, with the current page: v2 on the same page. The BA edited the page on Confluence; the next revision started from the edited page, so v4 kept the edit. |
+| Planning: three Agents in parallel | One turn started the archive (BA), the implementation plan (Dev) and the test plan (QC), each with the PRD page as `PRD-LD-6.md`, and waited for all three. Then it opened the archive pull request and published both pages. |
+| Implement | The Dev Agent implemented on the developer's machine from the plan page and opened its own pull request. Nobody merged yet. |
+| Testing: round 1 fails, fix, round 2 passes | QC ran the tests against the unmerged Dev branch: 32/33. The orchestrator published `Test run 1` with 6 screenshots, opened the QC pull request and asked: fix or accept? The ticket went back to Implement: the orchestrator reported what existed and started nothing until "fix D-1", then resumed the Dev task with that instruction. Round 2: 33/33. |
+| Review → Done | Listed the three pull requests, answered questions with read tasks; people merged and moved the ticket to Done; the case closed with a summary. |
+| Several comments at once | Two questions and two replies within seconds: the running turn was superseded, the next turn answered each comment in its own thread. |
+| Accidental status flip | Implement → Planning → Testing within ten seconds: debounce made it one turn, acting on Testing only. |
+
+The case study in the repository (`docs/case-studies/ld-6-team-calendar`) replays each case step by step as LikeC4 diagrams.
+
+## Run-based variant
+
+Before the orchestrated workflow, LeaveDesk ran four run-based workflows started by labels: BA analysis (`ba-analyze`), Dev implementation (`ready-for-dev`), QC design (`qc-design`) and QC run (`ready-for-qc`), each with its own process and toolkit, a review loop on the PRD (`prd-approved`, `prd-revise`), answers by replying to the question's comment, and files handed over as Jira attachments (`PRD-<KEY>.md`, `PLAN-<KEY>.md`, `TESTCASES-<KEY>.md`). The YAML files are in `docs/workshop/leavedesk/` of the repository; their keys are explained in [Workflow YAML](/docs/guides/setup/workflow-yaml) and [Process YAML](/docs/guides/setup/process-yaml).

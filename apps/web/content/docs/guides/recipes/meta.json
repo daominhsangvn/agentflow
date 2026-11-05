@@ -1,0 +1,12 @@
+{
+  "title": "Recipes",
+  "pages": [
+    "orchestrator-rules",
+    "files-and-pages",
+    "status-flows",
+    "questions-and-answers",
+    "blocked-tasks",
+    "waiting-for-blockers",
+    "cancelling"
+  ]
+}

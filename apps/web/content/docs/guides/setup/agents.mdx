@@ -1,0 +1,119 @@
+---
+title: "Agents"
+description: "Install automatic and personal Agents, give them a model provider and a Claude Code version, share them, and assign them to projects. Every setting of the Agent's runner.env."
+---
+
+An **Agent** is a computer that runs Claude Code for AgentFlow. It connects outwards to the AgentFlow API (it needs no open port), registers as a compute target of its API key's owner, and runs the loops AgentFlow sends it. In workflow and process YAML an Agent is named with the key `runner` (its compute target name).
+
+| | **Automatic** Agent (mode `auto`, default) | **Personal** Agent (mode `personal`) |
+|---|---|---|
+| Runs on | A container, a server or a VM | A person's own computer |
+| Projects | Any | One, by its AgentFlow project key (the project's slug, e.g. `PRO-1`) |
+| Where loops work | Clones of the project's repositories in its workspace, one worktree per loop | The person's project folder itself: no clone, no worktree |
+| Credentials | Short-lived Git credentials from AgentFlow per loop; AgentFlow's integration tools for Jira, Confluence, ... | Everything on the computer: the person's git config, ssh, `gh`, `~/.claude` (plugins, commands, MCP servers). Only the model provider comes from AgentFlow |
+| Commits and pushes | AgentFlow commits as the loop's user (`finish: push`, or `push: true` on an orchestrator command) | The person's commands commit, push and open pull requests themselves; `finish: push` steps are refused |
+| Loops | Plan, implement, process steps | Process steps and orchestrator tasks only |
+| Claude Code | The version set in AgentFlow, installed per loop | The `claude` on `PATH`; a loop fails when the provider pins another version |
+| Commands it offers | From the toolkit repository's `AGENTFLOW.md` | From `AGENTFLOW.md` in the project folder |
+
+LeaveDesk runs three automatic Agents (`runner-orch` for the Orchestrator Agent, `runner-1` for BA, `runner-qc` for QC with Playwright) and one personal Agent for the developer (`an-PRO-1`).
+
+## Before you install
+
+1. **An API URL** the Agent reaches over HTTPS. Plain HTTP is refused except for localhost and the hosts in `AGENTFLOW_ALLOW_HTTP_HOSTS`.
+2. **An API key**: Settings → API Keys, with the `write` scope. The Agent becomes a compute target of the key's owner; a dedicated bot user is a good owner.
+3. **Claude credentials**: preferably the Agent's **model provider** in AgentFlow (below), or `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY` on the Agent. A model provider set in AgentFlow wins for that computer's loops.
+
+## Install an automatic Agent (Docker)
+
+Build the base image from the repository root, then run one container per Agent:
+
+```bash
+docker buildx build -f deploy/runner/Dockerfile -t agentflow-runner:base .
+
+docker run -d --name agentflow-runner-1 --restart unless-stopped \
+  -e AGENTFLOW_API_URL=https://agentflow.example.com \
+  -e AGENTFLOW_API_KEY=sk_live_... \
+  -e AGENTFLOW_RUNNER_NAME=runner-1 \
+  -v agentflow-runner-1-workspace:/workspace \
+  -v agentflow-runner-1-data:/home/runner/.agentflow-runner \
+  -v agentflow-runner-1-claude:/home/runner/.claude \
+  -v agentflow-runner-1-learnings:/home/runner/.agentflow-ai \
+  -v agentflow-runner-1-claude-versions:/home/runner/.local/share/claude \
+  agentflow-runner:base
+```
+
+| Volume | Keep it because |
+|---|---|
+| `/workspace` | Cloned repositories and loop worktrees: not cloned again on every restart |
+| `/home/runner/.agentflow-runner` | The Agent's identity, job store and sealed loop tokens: it stays the same compute target across restarts |
+| `/home/runner/.claude` | Claude Code sessions: needed to resume a task's session |
+| `/home/runner/.agentflow-ai` | Learnings |
+| `/home/runner/.local/share/claude` | Installed Claude Code versions |
+
+With Docker Desktop and the API on the same machine: `-e AGENTFLOW_API_URL=http://host.docker.internal:3002 -e AGENTFLOW_ALLOW_HTTP_HOSTS=host.docker.internal`, and `AGENTFLOW_MCP_URL=http://host.docker.internal:3010/mcp` so instruction and step agents reach the integration tools.
+
+**Project toolchains.** Agents build and test what they change, so the image needs the project's toolchain. Extend the base image (`FROM agentflow-runner:base`), one image per set of toolchains. The QC Agent of LeaveDesk uses `agentflow-runner:qc`, the base image plus Playwright's Chromium. A tool installed outside `/usr/bin` needs a script in `/etc/profile.d/`, because Agents take `PATH` from a login shell.
+
+Other ways to install (Ubuntu with systemd, the bundle on macOS or WSL2, Windows) run the same Agent; `node runner.mjs setup` asks the questions and writes `runner.env`.
+
+## Install a personal Agent
+
+On the person's computer, from the Agent bundle:
+
+```bash
+node runner.mjs setup                    # choose mode personal
+node runner.mjs --project PRO-1          # start it (Windows: start-runner.cmd --project PRO-1)
+node runner.mjs setup --project PRO-1    # ask that Agent's questions again
+```
+
+Setup asks for the API URL and key, the project key, the project folder (it must exist), whether several tasks may run in the folder at once (default no), whether the agent may use any tool without a permission prompt (default no), the Agent's name (default `<user name>-<project key>`) and the local gateway port. The answers go to `<data dir>/personal/<project key>/runner.env`.
+
+A personal Agent:
+
+- Runs only loops of its project, only process steps (STEP loops) and orchestrator tasks.
+- Runs one task at a time by default. Other tasks wait (`runner_busy`, tried again every minute). With `AGENTFLOW_RUNNER_PARALLEL=true` each run gets its own work directory, `.agentflow-ai/runs/<run id>` (its `AGENTFLOW_WORKDIR`), and the project's commands must keep their own work apart (a worktree or a branch per ticket).
+- Writes nothing into the folder except `.agentflow-ai/` (added to `.git/info/exclude`). The step's instructions go to the system prompt.
+- Gets no AgentFlow integration tools; it uses the person's own (a Jira MCP server, `gh`, `tea`). Tools beyond the loop's allowed tools need the command's `allowed-tools`, the person's `permissions.allow`, or `AGENTFLOW_RUNNER_SKIP_PERMISSIONS=true` (nobody is at the terminal to approve a prompt).
+
+How to write commands that run unattended: [Agent capabilities](/docs/guides/setup/agent-capabilities#writing-commands-that-run-unattended).
+
+## After installing
+
+1. The Agent appears online under **Agents** (sidebar) → **Your agents**, under its key owner's account.
+2. **Share it with the organization** there when workflows run as other users. A workflow may name an Agent its run-as user owns or one shared with the organization.
+3. Set its **Model provider**: "Anthropic-compatible API" with base URL, token, default model and other Claude Code variables, or paste a Claude `settings.json` and Import. The token is stored sealed and sent with every loop; nothing is written to the Agent's disk, and changing it needs no restart.
+4. Set its **Claude Code version**: `latest` (default) or an exact release such as `2.1.296`. An automatic Agent installs that version before a loop (`claude install <version>`) and fails the loop if an exact version cannot be installed (if the `latest` lookup fails, it uses the newest installed version); a personal Agent never installs, and fails the loop with the `claude install` command to run when its version differs from a pinned one.
+5. **Assign it to projects** (Project → **Agents**) when a project should use its own Agents: a new loop goes to the least busy of them. A personal Agent named by a workflow or an Agent rule is always used.
+6. Run the **System Check** of the Agent: it reports the tools it finds (`git`, `claude`, `gh`, `python3`, ...) and the Claude credential.
+
+## runner.env settings
+
+Set in the environment or in `<data dir>/runner.env` (`NAME=value` per line; the environment wins).
+
+| Variable | Default | What it does |
+|---|---|---|
+| `AGENTFLOW_API_URL` | required | Origin of the AgentFlow API. |
+| `AGENTFLOW_API_KEY` | required | `sk_live_` key with the `write` scope. |
+| `AGENTFLOW_RUNNER_NAME` | hostname | The Agent's name, as YAML writes it (`runner: runner-1`). Set it: a container's hostname changes on every run. |
+| `AGENTFLOW_RUNNER_MODE` | `auto` | `personal` for a personal Agent. |
+| `AGENTFLOW_RUNNER_PROJECT_KEY` | none | Personal: the project key (slug) whose steps it runs. |
+| `AGENTFLOW_RUNNER_PROJECT_DIR` | none | Personal: the project folder loops run in. |
+| `AGENTFLOW_RUNNER_PARALLEL` | `false` | Personal: `true` lets several loops run in the folder at once. |
+| `AGENTFLOW_RUNNER_SKIP_PERMISSIONS` | `false` | Personal: `true` runs Claude Code with `--permission-mode bypassPermissions`: the agent may do anything the account can. |
+| `AGENTFLOW_RUNNER_MAX_CONCURRENT` | `2` | Commands executed at once (automatic). |
+| `AGENTFLOW_RUNNER_WORKSPACE` | `/workspace` | Where repositories are cloned (automatic). |
+| `AGENTFLOW_RUNNER_DATA_DIR` | `~/.agentflow-runner` | Identity, job store, loop tokens. Keep it private; one per Agent. |
+| `AGENTFLOW_MCP_URL` | the API's | Where instruction and step agents reach the integration tools, when the Agent sees the MCP server under another address. |
+| `AGENTFLOW_WEB_APP_URL` | API URL | Web app origin, for links. |
+| `AGENTFLOW_RUNNER_GATEWAY_PORT` | any free port | Local gateway port, loopback only. |
+| `AGENTFLOW_RUNNER_REWRITE_CALLBACK_URL` | `true` | Send loop callbacks to `AGENTFLOW_API_URL`. |
+| `AGENTFLOW_RUNNER_REPORT_SESSIONS` | `true` | Report every loop as an agent session. |
+| `AGENTFLOW_ALLOW_HTTP_HOSTS` | none | Hosts allowed over plain HTTP besides localhost. |
+| `GH_TOKEN`, `GITHUB_TOKEN` | none | `gh` and Git over HTTPS, where AgentFlow's per-loop credentials do not apply. |
+| `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` | `AgentFlow Runner` | Fallback Git identity; loops commit as the loop's user. |
+| `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_*` | none | Claude credentials on the Agent, when no model provider is set in AgentFlow. |
+
+## The Orchestrator Agent
+
+An orchestrated workflow needs an Agent of its own for the Orchestrator Agent: an automatic Agent whose turns run in an empty folder with only the orchestrator's tools (no files, no shell, no web). It never clones the project. A small model is enough while you try the flow. Name it in the workflow as `agent.runner` ([Orchestrator](/docs/guides/setup/orchestrator)).

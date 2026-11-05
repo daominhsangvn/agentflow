@@ -269,16 +269,12 @@ describe("WorkflowEditor (YAML)", () => {
     ).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("explains the configuration above the YAML and lists the actions in run order below it", async () => {
-    const user = userEvent.setup();
+  it("hides the configuration guide on a saved workflow and lists the actions in run order below the YAML", async () => {
     await renderEditor({ workflow: makeWorkflow() });
 
-    const guide = screen.getByRole("button", { name: "Configuration guide" });
-    expect(guide).toHaveAttribute("aria-expanded", "false");
-    await user.click(guide);
     expect(
-      screen.getByRole("tab", { name: "Connections" })
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Configuration guide" })
+    ).toBeNull();
 
     const preview = screen.getByRole("region", {
       name: "Actions in run order",

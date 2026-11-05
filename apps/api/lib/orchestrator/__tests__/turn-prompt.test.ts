@@ -1,9 +1,11 @@
 import {
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
+  OrchestratorMessageVia,
   OrchestratorTicketChange,
   OrchestratorToolName,
 } from "@repo/api/src/types/orchestrator";
+import { resolveOrchestratorGrants } from "@repo/api/src/types/orchestrator-grants";
 import {
   RunnerCapabilitiesSource,
   RunnerCommandMode,
@@ -16,6 +18,7 @@ const BASE = {
   workflowName: "Questions on tickets",
   workflowDescription: "",
   rules: "Ask the BA runner first.",
+  grants: resolveOrchestratorGrants({}),
   channel: {
     item: {
       provider: "jira",
@@ -84,6 +87,13 @@ describe("buildTurnPrompt", () => {
     const prompt = buildTurnPrompt(BASE);
     expect(prompt).toContain("attachments [{taskId, name}]");
     expect(prompt).toContain("files [{taskId, name}]");
+  });
+
+  it("tells the turn how to use Confluence pages", () => {
+    const prompt = buildTurnPrompt(BASE);
+    expect(prompt).toContain("page_publish");
+    expect(prompt).toContain("page_get");
+    expect(prompt).toContain("files [{page, name}]");
   });
 
   it("tells the turn to pass a comment's ref as task_run replyTo", () => {
@@ -199,5 +209,36 @@ describe("buildTurnPrompt", () => {
         "none: you never cancel"
       );
     });
+  });
+});
+
+describe("buildTurnPrompt writes", () => {
+  it("says the orchestrator only reads with no grants", () => {
+    expect(buildTurnPrompt(BASE)).toContain("You only read the ticket.");
+  });
+
+  it("lists the granted tools", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      grants: resolveOrchestratorGrants({
+        source: ["comment", "transition"],
+      }),
+    });
+    expect(prompt).toContain(OrchestratorToolName.SourceItemTransition);
+    expect(prompt).not.toContain("You only read the ticket.");
+  });
+
+  it("marks a message written in AgentFlow", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          ...BASE.messages[0],
+          payload: { via: OrchestratorMessageVia.AgentFlow },
+        },
+      ],
+    });
+    expect(prompt).toContain('via="agentflow"');
+    expect(prompt).toContain("(AgentFlow)");
   });
 });

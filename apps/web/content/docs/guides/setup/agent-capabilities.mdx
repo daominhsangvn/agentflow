@@ -1,0 +1,151 @@
+---
+title: "Agent capabilities (AGENTFLOW.md)"
+description: "Declare what each Agent can do in AGENTFLOW.md, with every front matter field, how AgentFlow checks it, and how to write commands that run unattended and hand files to the next Agent."
+---
+
+An Agent tells AgentFlow what it can do in an `AGENTFLOW.md`: the Claude Code commands it offers, what each needs and produces, and the files it leaves for the ticket. The Orchestrator Agent reads every Agent's file on every turn (`runners_list`) and may only start commands an Agent declares.
+
+| Agent | Where `AGENTFLOW.md` is read from | When it is read |
+|---|---|---|
+| Automatic | The root of the default branch of its **toolkit repository** (a project repository) | Refresh in Project → Agents → Commands, a daily refresh of files older than 20 hours, and when a project process's `toolkit` changes |
+| Personal | The project folder | When the Agent connects and whenever the file changes |
+
+Project → **Agents** → **Commands** shows each Agent's commands, problems and warnings, and the file.
+
+## The file
+
+Markdown with a YAML front matter. The front matter is what AgentFlow reads and checks; the body is free text the Orchestrator Agent reads as it is: describe each command there (when to use it, what it reads, what it writes).
+
+```markdown
+---
+runner: QC (LeaveDesk)
+toolkit:
+  repository: workshop/leavedesk-qa
+  mounts: [.claude/agents, .claude/skills]
+  instructions: Run the app with scripts/run-e2e.sh.
+commands:
+  - name: /qa-test
+    args: <KEY> design
+    description: Design the test cases of a ticket from its PRD (no run)
+    mode: write
+    produces: testcases
+    needs: [prd]
+    asks: true
+    attach: ["TESTCASES-*.md"]
+  - name: /qa-run
+    args: <KEY> [fresh | rerun | report]
+    description: Run the designed tests of a ticket on its Dev branch; AgentFlow pushes the results
+    mode: write
+    produces: results
+    needs: [testcases]
+    push: true
+    attach: ["RESULTS-*.md", "evidence-*/*.png"]
+  - name: /qa-review
+    args: <KEY>
+    description: Answer questions about a ticket's test cases and specs
+    mode: read
+    produces: answer
+skills: [qa-test-design, qa-e2e-automation, qa-reporting]
+---
+
+# QC Agent (LeaveDesk)
+
+## /qa-test
+Reads PRD-<KEY>.md from its inputs, designs the test cases and writes
+TESTCASES-<KEY>.md. Asks when an acceptance criterion cannot be decided.
+...
+```
+
+## Front matter fields
+
+### Top level
+
+| Field | Type | Required | What it does |
+|---|---|---|---|
+| `runner` | text, up to 120 characters | no | The Agent's **role** as people and the rules name it, e.g. `BA (LeaveDesk)`, `Dev (LeaveDesk, An)`. The orchestrator can pick an Agent by its name, this role or its id; write rules with roles ("BA writes the PRD"). |
+| `toolkit` | mapping | automatic Agents | Where an automatic Agent's commands and skills come from (below). A personal Agent ignores it. |
+| `commands` | list, up to 100 | no | The commands the Agent offers (below). An Agent without commands gets no tasks. |
+| `skills` | list, up to 100 | no | Skill names (`tdd`), or `{ name, description }`. Shown to the orchestrator; AgentFlow warns when a skill is not found. |
+
+### `toolkit` (automatic Agents)
+
+| Field | Type | What it does |
+|---|---|---|
+| `repository` | `owner/name` | One of the project's repositories, e.g. `workshop/leavedesk-qa`. |
+| `mounts` | list of paths, at least one | Directories of that repository linked into the task's workspace root, e.g. `.claude/agents`, `.claude/skills`, `.claude/commands`. |
+| `instructions` | text | Added to the workspace `CLAUDE.md` of the Agent's tasks, e.g. where the kit's scripts run from. |
+
+### A command
+
+| Field | Type | Required | What it does |
+|---|---|---|---|
+| `name` | slash command | yes | As typed in Claude Code: `/qa-test`, `/speckit.plan`, `/ns:cmd`. Must exist in `.claude/commands` or `.claude/skills` (of the toolkit, the project folder or `~/.claude`); otherwise a warning. |
+| `args` | text, up to 200 | no | How its arguments are written, e.g. `<KEY> design`. The orchestrator passes `args` to `task_run`. |
+| `description` | text, up to 500 | no | One line on what it is for. The orchestrator chooses commands by this line and by `produces` and `needs`: make it precise. |
+| `mode` | `read` or `write` | yes | `read`: changes nothing. A read task cannot edit files, commit or push (Edit, MultiEdit, NotebookEdit, `git commit`, `git push` are denied); its answer file is still written. `write`: may change files and systems. A write task of a read command is refused; a read task of a write command is allowed. |
+| `produces` | tag | no | What it produces, as a lowercase word: `prd`, `plan`, `testcases`, `results`, `code`, `answer`, `archive`. Other commands `need` it. |
+| `needs` | list of tags, up to 10 | no | What must exist before it runs, e.g. `[prd]`, `[approved-plan]`. Checked by AgentFlow before the task starts (below) and by the command itself. |
+| `asks` | `true` or `false` | no | It may stop with questions for people (`questions.json`). Its task comes back with the questions; the orchestrator posts them and resumes the task with the answers. |
+| `push` | `true` or `false` | no | It commits and pushes. On an **automatic** Agent, AgentFlow pushes the task's branches when a write task of a `push: true` command succeeds; the orchestrator then opens the pull request (`pull_request_open`). On a **personal** Agent the command pushes and opens its pull request itself. A `read` command that declares `push` gets a warning. |
+| `attach` | list of globs, up to 10 | no | Files it writes for the ticket, relative to the task's work directory (`.agentflow-ai/work/` on an automatic Agent, `$AGENTFLOW_WORKDIR` on a personal one), e.g. `PRD-*.md`, `evidence-*/*.png`. They are collected when the task ends (at most 20 files, 4 MB each, 5 MB together) and come back with the result. The orchestrator attaches them to a reply, publishes them to Confluence or hands them to the next task. Only orchestrator tasks use `attach`; process steps use `artifacts`. |
+
+Tags (`produces`, `needs`) are free words (lowercase letters, digits and `-`, up to 40 characters): agree on them across the project's Agents.
+
+## What AgentFlow checks
+
+When the orchestrator calls `task_run`, AgentFlow refuses the task before it starts when:
+
+| Guard | Refused when |
+|---|---|
+| **Declared** | The command is not in the Agent's `AGENTFLOW.md` (a file that does not parse refuses every command). A queued task is checked again when it starts. |
+| **Mode** | `mode: write` is asked for a command declared `mode: read`. |
+| **Needs** | A `needs` tag has producers (commands whose `produces` is that tag) with `attach` globs, and neither the files passed to the task, nor its Confluence page inputs, nor the ticket's attachments match one of them by file name. A tag nobody produces, or whose producers attach nothing, is not checked; resumed tasks are not checked. |
+
+Every refused call is recorded on the case as "Refused". On upload AgentFlow also warns (never blocks) on a line that looks like a secret and a read command with `push`. **Never put a secret in `AGENTFLOW.md`**: every admin and the orchestrator see it.
+
+## Writing commands for the orchestrator
+
+A command an Agent offers runs without a person at the terminal, from files, and hands files to the next Agent. Follow this contract:
+
+1. **Check inputs first**, before any branch, clone or skill. When one is missing, write one line as the first line of the reply file and stop:
+   `BLOCKED: missing PRD-LD-6.md (needs prd: produced by /ba-requirement analyze <KEY> on BA (LeaveDesk))`.
+   The orchestrator's rules then say what to do with a blocked task.
+2. **Read inputs** from `inputs/` of the work directory: `.agentflow-ai/work/inputs/` (automatic) or `$AGENTFLOW_WORKDIR/inputs/` (personal). The orchestrator writes there the files of earlier tasks and the current content of Confluence pages it hands over.
+3. **Use fixed output names** that match the `attach` globs: `<KIND>-<KEY>.md` (`PRD-LD-6.md`, `PLAN-LD-6.md`, `TESTCASES-LD-6.md`, `RESULTS-LD-6.md`). Name them in the command's body text.
+4. **Write the answer** to `.agentflow-ai/work/orchestrator-reply.md` (`$AGENTFLOW_WORKDIR/orchestrator-reply.md` on a personal Agent): what was done, in a few lines. The orchestrator reads it as the task's answer (up to 30,000 characters).
+5. **Ask through the file**, when the command declares `asks: true`: write the questions to `questions.json` in the work directory and stop. The answers come back as the next prompt of the same session.
+6. **Leave ticket files in the work directory**. Do not attach them to the ticket or post comments yourself; the orchestrator does that.
+7. **Never merge.** An automatic Agent's `push: true` command lets AgentFlow push and the orchestrator open the pull request; a personal Agent's command pushes and opens it with the person's credentials. People merge.
+8. **A run never redesigns.** A command that executes an approved artifact (test cases, a plan) uses it as is and reports doubts in its answer.
+9. **Split commands whose modes differ.** `push` is per command: design and run, analyse and archive are separate commands, so only the one that changes the repository pushes.
+
+## Writing commands that run unattended
+
+Commands written for a person at a terminal need small changes to run on a personal Agent (or in any process step):
+
+1. **Never ask in the terminal.** Where the command would ask, write the questions and stop:
+
+   ```markdown
+   When you need a decision you cannot make from the ticket or the code:
+   - If `$AGENTFLOW_WORKDIR` is set (an AgentFlow run), write the questions to
+     `$AGENTFLOW_WORKDIR/questions.json` as a JSON array, e.g.
+     `[{"id": "q1", "question": "Export CSV or XLSX?", "options": ["CSV", "XLSX"]}]`,
+     then stop. Do not ask in the terminal.
+   - Otherwise ask the user as usual.
+   ```
+
+   At most 30 questions of 2,000 characters, 10 options of 500 characters each.
+2. **Never wait for a confirmation.** Decide with a stated default, or ask through the file. An `--auto` flag the step's instruction passes is the simplest switch.
+3. **Keep a run's own files in `$AGENTFLOW_WORKDIR`** (it holds the ticket as `issue.md`), or under a path named after the ticket. Another run may use the same folder at the same time when the Agent runs in parallel.
+4. **Allow the tools it needs** in its front matter (`allowed-tools: Bash(git:*), mcp__jira__*`), or set `AGENTFLOW_RUNNER_SKIP_PERMISSIONS=true` on the Agent.
+5. **Report through files** the step or task collects (a process step's `artifacts` and `reply`, a command's `attach`).
+
+## LeaveDesk's three Agents
+
+| Agent | Kind | Commands (`mode`, `needs` → `produces`, files) |
+|---|---|---|
+| BA (LeaveDesk) | automatic, toolkit `leavedesk-knowledge` | `/ba-requirement analyze <KEY>` (write, → `prd`, asks, `PRD-*.md`) · `/ba-archive <KEY>` (write, `prd` → `archive`, push) · `/leavedesk-research <question>` (read, → `answer`) |
+| Dev (LeaveDesk, An) | personal, the developer's machine | `/writing-plans <ticket-key>` (write, `prd` → `plan`, asks, `PLAN-*.md`) · `/executing-plans <ticket-key>` (write, `approved-plan` → `code`, push, `pr-body-*.md`) · `/systematic-debugging` (read, → `answer`) |
+| QC (LeaveDesk) | automatic, toolkit `leavedesk-qa` | `/qa-test <KEY> design` (write, `prd` → `testcases`, asks, `TESTCASES-*.md`) · `/qa-run <KEY>` (write, `testcases` → `results`, push, `RESULTS-*.md`, `evidence-*/*.png`) · `/qa-review <KEY>` (read, → `answer`) |
+
+The full files are in the [LeaveDesk example](/docs/guides/setup/leavedesk-example#4-agentflowmd-of-each-agent).

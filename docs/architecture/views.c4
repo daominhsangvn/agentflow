@@ -1,0 +1,100 @@
+// Views: the components, the deployment, and three orchestrator flows.
+
+views {
+  view index {
+    title "AgentFlow: orchestrator components"
+    description "How a request moves between AgentFlow's components. External systems are roles, not products."
+
+    include *
+    include agentflow.*
+    include agentflow.orchestrator.*
+  }
+
+  deployment view deployment {
+    title "Deployment"
+
+    include selfHosted.**
+  }
+
+  dynamic view turnLifecycle {
+    title "Flow 1: one turn"
+    description "A message arrives, the agent decides, the Core acts."
+
+    person -> channel "asks in a thread"
+    channel -> agentflow.integration "event"
+    agentflow.integration -> agentflow.orchestrator.core "message" {
+      notes "Attached to the case of its source item and to the thread's conversation. The conversation waits for the quiet time (default 20 s), so a burst of messages is one turn."
+    }
+    agentflow.orchestrator.core -> agentflow.database "store message"
+    agentflow.orchestrator.core -> agentflow.orchestrator.agent "turn: rules, CASE.md, new messages" {
+      notes "Started by the workflow tick when the conversation is due. One turn per conversation at a time; conversations run in parallel. Resumes the conversation's session."
+    }
+    agentflow.orchestrator.agent -> agentflow.mcp "case_get, runners_list"
+    agentflow.mcp -> agentflow.orchestrator.core "read the case and the runners' commands"
+    agentflow.orchestrator.agent -> agentflow.mcp "reply"
+    agentflow.mcp -> agentflow.orchestrator.core "reply"
+    agentflow.orchestrator.core -> agentflow.integration "post the reply"
+    agentflow.integration -> channel "reply in the thread"
+    agentflow.orchestrator.agent -> agentflow.mcp "wait_human, wait_for or close_case" {
+      notes "Ends the turn. A turn that declared nothing waits for people."
+    }
+    agentflow.orchestrator.agent -> agentflow.orchestrator.core "turn result: session, usage"
+  }
+
+  dynamic view taskAndWait {
+    title "Flow 2: delegate work and wait"
+    description "The agent gives a command to a worker runner and ends its turn; the Core wakes it when the work is done."
+
+    agentflow.orchestrator.agent -> agentflow.mcp "task_run: runner, command, prompt"
+    agentflow.mcp -> agentflow.orchestrator.core "task_run" {
+      notes "Guards: the command is declared in the runner's AGENTFLOW.md, the mode is allowed, the needed inputs exist; a refusal is recorded on the conversation. Offline runner: the task fails. Queued when a one-at-a-time runner is running another loop, or the case already has a task running on that runner; the tick tries again."
+    }
+    agentflow.orchestrator.agent -> agentflow.mcp "wait_for: all or any, timeout" {
+      notes "Ends the turn. No model call while the conversation waits."
+    }
+    agentflow.orchestrator.core -> agentflow.workers "STEP loop on the case's Issue"
+    agentflow.workers -> codeHost "clone, push branches"
+    agentflow.workers -> llm "model calls"
+    agentflow.workers -> agentflow.objectStorage "result files"
+    agentflow.workers -> agentflow.orchestrator.core "loop finished: answer, questions"
+    agentflow.orchestrator.core -> agentflow.orchestrator.agent "new turn with the task results" {
+      notes "The Core evaluates the wait in code each time a task settles, and its deadline on the tick. Once it holds, one internal message carries every task's result."
+    }
+    agentflow.orchestrator.agent -> agentflow.mcp "reply, page_publish, pull_request_open" {
+      notes "Publishing and pull requests are optional: the workflow's rules decide."
+    }
+    agentflow.mcp -> agentflow.orchestrator.core "forward"
+    agentflow.orchestrator.core -> agentflow.integration "reply, publish, open pull request"
+    agentflow.integration -> channel "reply with the files"
+    agentflow.integration -> documentStore "publish the page"
+    agentflow.integration -> codeHost "open pull requests for the pushed branches"
+  }
+
+  dynamic view decision {
+    title "Flow 3: a decision by people"
+    description "Only when the workflow's rules ask for one. Decided once, either in AgentFlow or in the thread."
+
+    agentflow.orchestrator.agent -> agentflow.mcp "request_decision"
+    agentflow.mcp -> agentflow.orchestrator.core "store a pending decision"
+    agentflow.orchestrator.core -> agentflow.integration "post the question with the case link"
+    agentflow.integration -> channel "question in the thread"
+    agentflow.orchestrator.agent -> agentflow.mcp "wait_human" {
+      notes "Ends the turn."
+    }
+    admin -> agentflow.app "approve or reject" {
+      notes "Way A: an org admin decides on the case page."
+    }
+    agentflow.app -> agentflow.orchestrator.core "decision" {
+      notes "Recorded in the admin's name; an internal message wakes the conversation."
+    }
+    person -> channel "answers in the thread" {
+      notes "Way B: someone answers in the thread instead."
+    }
+    channel -> agentflow.integration "event"
+    agentflow.integration -> agentflow.orchestrator.core "message"
+    agentflow.orchestrator.core -> agentflow.orchestrator.agent "new turn"
+    agentflow.orchestrator.agent -> agentflow.mcp "record_decision" {
+      notes "Way B only: the agent records what was said."
+    }
+  }
+}

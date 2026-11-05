@@ -32,6 +32,7 @@ vi.mock("@repo/database", () => {
             projectId: "project-1",
             caseId: "case-1",
             projectConnectionId: "0199a5f0-0000-7000-8000-0000000000e1",
+            case: { workflowId: "workflow-1" },
             channel: {
               item: {
                 provider: "jira",
@@ -57,6 +58,12 @@ vi.mock("@repo/database", () => {
     organization: { findUnique: () => Promise.resolve({ slug: "agentflow" }) },
   };
   return { withDb: (fn: (client: unknown) => unknown) => fn(db) };
+});
+vi.mock("@/lib/orchestrator/workflow-settings", async () => {
+  const { FULL_GRANTS, workflowsWith } = await import(
+    "@/__tests__/support/orchestrator-tools/grants.test-fixtures"
+  );
+  return { loadOrchestratorWorkflows: () => workflowsWith(FULL_GRANTS) };
 });
 vi.mock("@/lib/orchestrator/supersede", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/orchestrator/supersede")>()),

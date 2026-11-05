@@ -1,11 +1,7 @@
 "use client";
 
-import { FeatureFlagged } from "@repo/analytics/components/feature-flagged";
-import { DocumentType } from "@repo/api/src/types/document";
-import type { ProjectWithDetails } from "@repo/api/src/types/project";
 import { ProjectStatus } from "@repo/api/src/types/project";
 import type { ProjectTreeResponse } from "@repo/api/src/types/project-tree";
-import { TagEntityType } from "@repo/api/src/types/tag";
 import { ActiveFiltersBar } from "@repo/app/documents/components/table/active-filters-bar";
 import type { FilterCategory } from "@repo/app/documents/components/table/filter-category";
 import { FilterPopover } from "@repo/app/documents/components/table/filter-popover";
@@ -18,14 +14,6 @@ import { useGroupBy } from "@repo/app/documents/hooks/use-group-by";
 import { useProjectFilters } from "@repo/app/documents/hooks/use-project-filters";
 import { collectDocumentRowsFromTree } from "@repo/app/documents/lib/artifact-row-adapter";
 import { treeHasRenderableArtifacts } from "@repo/app/documents/lib/table-view-pipeline";
-import { EditableProjectDescription } from "@repo/app/projects/components/editable-project-description";
-import { EditableProjectTitle } from "@repo/app/projects/components/editable-project-title";
-import { ProjectAgentInstructionsPanel } from "@repo/app/projects/components/project-agent-instructions-panel";
-import { ProjectConnectionsPanel } from "@repo/app/projects/components/project-connections-panel";
-import { ProjectProcessPanel } from "@repo/app/projects/components/project-process-panel";
-import { ProjectRepositoriesPanel } from "@repo/app/projects/components/project-repositories-panel";
-import { ProjectRunnerCapabilities } from "@repo/app/projects/components/project-runner-capabilities";
-import { ProjectRunnersPanel } from "@repo/app/projects/components/project-runners-panel";
 import { useProjectTreeWithDetails } from "@repo/app/projects/hooks/use-project-tree";
 import {
   useDeleteProject,
@@ -46,14 +34,11 @@ import { useScrollRestore } from "@repo/app/shared/hooks/use-scroll-restore";
 import { useTabParam } from "@repo/app/shared/hooks/use-tab-param";
 import { useViewStatePersistence } from "@repo/app/shared/hooks/use-view-state-persistence";
 import { PROJECT_ARTIFACTS_PAGINATION_FEATURE_FLAG_KEY } from "@repo/app/shared/lib/feature-flags";
-import { isAdminRole } from "@repo/app/shared/lib/role-utils";
 import { transformApiUserToSelectUser } from "@repo/app/shared/lib/user-utils";
-import { TagPicker } from "@repo/app/tags/components/tag-picker";
 import {
   useCurrentUser,
   useOrganizationUsers,
 } from "@repo/app/users/hooks/use-users";
-import { useOrganization } from "@repo/auth/client";
 import { Button } from "@repo/design-system/components/ui/button";
 import {
   DropdownMenu,
@@ -73,10 +58,6 @@ import { useRouteParams } from "@repo/navigation/use-route-params";
 import { useSearchParamsValue } from "@repo/navigation/use-search-params-value";
 import {
   ArchiveIcon,
-  BoxIcon,
-  ChevronDownIcon,
-  FileCode2Icon,
-  FileIcon,
   Loader2Icon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -84,13 +65,14 @@ import {
   TrashIcon,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
-import { WORKFLOW_CONNECTIONS_SETTINGS_PATH } from "@/app/(authenticated)/[orgSlug]/workflows/components/workflow-connections-path";
 import { Header } from "@/app/(authenticated)/components/header";
 import { useOrgSlug } from "@/hooks/use-org-slug";
-import { CreateDocumentModal } from "./components/create-document-modal";
-import { CreateIssueModal } from "./components/create-issue-modal";
 import { DocumentsView } from "./components/documents-view";
 import { ProjectActiveSessionsStatus } from "./components/project-active-sessions-status";
+import {
+  PROJECT_PANEL_TABS,
+  ProjectPanelTab,
+} from "./components/project-panel-tab";
 import { ProjectRenameDialog } from "./components/project-rename-dialog";
 import { useProjectArtifactsPagination } from "./hooks/use-project-artifacts-pagination";
 import { useStackRankReset } from "./hooks/use-stack-rank-reset";
@@ -113,8 +95,11 @@ const COLUMN_ORDER_KEY = "table:column-order:project-artifacts";
 // document-table filter/query contract is unchanged.
 const PROJECT_TABS = [
   "overview",
+  "workflows",
+  "agents",
   "repositories",
   "process",
+  "instructions",
   "all",
   "documents",
   "issues",
@@ -122,11 +107,7 @@ const PROJECT_TABS = [
 ] as const;
 
 // Tabs that show a project panel instead of the artifact table.
-const PANEL_TABS = new Set<(typeof PROJECT_TABS)[number]>([
-  "overview",
-  "repositories",
-  "process",
-]);
+const PANEL_TABS = new Set<(typeof PROJECT_TABS)[number]>(PROJECT_PANEL_TABS);
 
 // Legacy `?tab=<old>` values kept working as compat aliases (FEA-4137).
 const PROJECT_TAB_ALIASES: Readonly<
@@ -143,17 +124,13 @@ export default function ProjectDetailPage() {
 
   const { activeTab, setActiveTab } = useTabParam({
     validTabs: PROJECT_TABS,
-    defaultTab: "all",
+    defaultTab: "overview",
     tabAliases: PROJECT_TAB_ALIASES,
   });
   // Overview and Repositories have no table; the remaining tab values are
   // FilterCategory values.
   const isOverview = PANEL_TABS.has(activeTab);
   const filterCategory = toFilterCategory(activeTab);
-  const [createArtifactOpen, setCreateArtifactOpen] = useState(false);
-  const [createFeatureOpen, setCreateFeatureOpen] = useState(false);
-  const [selectedDocumentType, setSelectedDocumentType] =
-    useState<DocumentType>(DocumentType.Prd);
   const [filterText, setFilterText, clearSearch] =
     useViewStatePersistence<string>(
       `table:search:project-artifacts:${projectId}`,
@@ -327,11 +304,6 @@ export default function ProjectDetailPage() {
   // Type-scoped delete dispatch (branch vs document endpoint) lives in the
   // shared hook (PLN-874 Task 3.5).
   const handleDeleteArtifact = useDeleteRowItem();
-
-  const handleCreateArtifact = (type: DocumentType) => {
-    setSelectedDocumentType(type);
-    setCreateArtifactOpen(true);
-  };
 
   const handleUpdateProjectStatus = (status: ProjectStatus) => {
     if (!project) {
@@ -538,36 +510,7 @@ export default function ProjectDetailPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         }
-      >
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button>
-              Actions
-              <ChevronDownIcon className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onClick={() => handleCreateArtifact(DocumentType.Prd)}
-            >
-              <FileIcon className="h-4 w-4" />
-              Create PRD
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setCreateFeatureOpen(true)}>
-              <BoxIcon className="h-4 w-4" />
-              Create Issue
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() =>
-                handleCreateArtifact(DocumentType.ImplementationPlan)
-              }
-            >
-              <FileCode2Icon className="h-4 w-4" />
-              Create Implementation Plan
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </Header>
+      />
       <div className="flex flex-1 flex-col gap-0 overflow-hidden">
         <div className="border-b">
           <div className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -583,14 +526,16 @@ export default function ProjectDetailPage() {
               variant="outline"
             >
               <ToggleGroupItem value="overview">Overview</ToggleGroupItem>
-              <ToggleGroupItem value="repositories">
-                Integrations
+              <ToggleGroupItem value="workflows">
+                Workflows & Cases
               </ToggleGroupItem>
-              <ToggleGroupItem value="process">Process</ToggleGroupItem>
-              <ToggleGroupItem value="all">All Artifacts</ToggleGroupItem>
-              <ToggleGroupItem value="documents">PRDs</ToggleGroupItem>
-              <ToggleGroupItem value="issues">Issues</ToggleGroupItem>
-              <ToggleGroupItem value="plans">Plans</ToggleGroupItem>
+              <ToggleGroupItem value="agents">Agents</ToggleGroupItem>
+              <ToggleGroupItem value="repositories">
+                Connections & Repos
+              </ToggleGroupItem>
+              <ToggleGroupItem value="instructions">
+                Instructions
+              </ToggleGroupItem>
             </ToggleGroup>
             {showArtifactControls && (
               <div className="flex items-center gap-2">
@@ -681,17 +626,6 @@ export default function ProjectDetailPage() {
           />
         )}
       </div>
-      <CreateDocumentModal
-        documentType={selectedDocumentType}
-        onOpenChange={setCreateArtifactOpen}
-        open={createArtifactOpen}
-        projectId={projectId}
-      />
-      <CreateIssueModal
-        onOpenChange={setCreateFeatureOpen}
-        open={createFeatureOpen}
-        projectId={projectId}
-      />
       <ProjectRenameDialog
         currentName={project.name}
         onOpenChange={setRenameDialogOpen}
@@ -732,7 +666,10 @@ function hasAnyArtifactFilter(
 }
 
 function toFilterCategory(tab: (typeof PROJECT_TABS)[number]): FilterCategory {
-  if (tab === "overview" || tab === "repositories" || tab === "process") {
+  if (tab === "all" || tab === "documents" || tab === "plans") {
+    return tab;
+  }
+  if (PANEL_TABS.has(tab)) {
     return "all";
   }
   // FEA-4137: the URL-facing `issues` tab drives the unchanged `features`
@@ -740,79 +677,7 @@ function toFilterCategory(tab: (typeof PROJECT_TABS)[number]): FilterCategory {
   if (tab === "issues") {
     return "features";
   }
-  return tab;
-}
-
-// The non-table tabs: the integrations, repositories and runners, the process, or the
-// overview (which holds the project's agent instructions). Org admins change
-// them; the API refuses everyone else, who get a read-only view.
-function ProjectPanelTab({
-  project,
-  tab,
-}: {
-  project: ProjectWithDetails;
-  tab: (typeof PROJECT_TABS)[number];
-}) {
-  const { membership } = useOrganization();
-  const isAdmin = isAdminRole(membership?.role);
-
-  if (tab === "repositories") {
-    return (
-      <div className="mx-auto flex max-w-[950px] flex-col gap-8 p-6">
-        <ProjectConnectionsPanel
-          connectionsSettingsPath={WORKFLOW_CONNECTIONS_SETTINGS_PATH}
-          isAdmin={isAdmin}
-          projectId={project.id}
-        />
-        <ProjectRepositoriesPanel
-          connectionsSettingsPath={WORKFLOW_CONNECTIONS_SETTINGS_PATH}
-          isAdmin={isAdmin}
-          projectId={project.id}
-        />
-        <ProjectRunnersPanel isAdmin={isAdmin} projectId={project.id} />
-        <ProjectRunnerCapabilities isAdmin={isAdmin} projectId={project.id} />
-      </div>
-    );
-  }
-  if (tab === "process") {
-    return (
-      <div className="mx-auto flex max-w-[950px] flex-col gap-8 p-6">
-        <ProjectProcessPanel isAdmin={isAdmin} projectId={project.id} />
-      </div>
-    );
-  }
-  return <ProjectOverviewPanel isAdmin={isAdmin} project={project} />;
-}
-
-function ProjectOverviewPanel({
-  project,
-  isAdmin,
-}: {
-  project: ProjectWithDetails;
-  isAdmin: boolean;
-}) {
-  return (
-    <div className="mx-auto mt-0 flex max-w-[950px] flex-col gap-10 p-6">
-      <div className="flex flex-col gap-2">
-        <EditableProjectTitle
-          initialTitle={project.name}
-          projectId={project.id}
-        />
-        <EditableProjectDescription
-          initialDescription={project.description ?? ""}
-          projectId={project.id}
-        />
-      </div>
-      <FeatureFlagged flag="artifact-tags">
-        <TagPicker
-          appliedTags={project.tags ?? []}
-          entityId={project.id}
-          entityType={TagEntityType.Project}
-        />
-      </FeatureFlagged>
-      <ProjectAgentInstructionsPanel isAdmin={isAdmin} projectId={project.id} />
-    </div>
-  );
+  return "all";
 }
 
 function getFavoriteButtonLabel(status: ProjectStatus, isFavorite: boolean) {

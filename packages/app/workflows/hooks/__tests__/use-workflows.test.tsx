@@ -5,6 +5,7 @@ import {
   WorkflowRunStatus,
   type WorkflowRunsResponse,
 } from "@repo/api/src/types/workflow";
+import type { WorkflowEventsResponse } from "@repo/api/src/types/workflow-event";
 import { ApiError } from "@repo/app/shared/api/api-error";
 import { makeQueryClient } from "@repo/app/shared/query/query-client";
 import {
@@ -36,9 +37,12 @@ import {
   useStartWorkflowRun,
   useUpdateWorkflow,
   useWorkflow,
+  useWorkflowEventPayload,
+  useWorkflowEvents,
   useWorkflowRun,
   useWorkflowRuns,
   useWorkflows,
+  WORKFLOW_EVENTS_PAGE_SIZE,
   WORKFLOW_RUN_ACTIONS_POLL_INTERVAL_MS,
   WORKFLOW_RUN_POLL_INTERVAL_MS,
   WORKFLOW_RUNS_PAGE_SIZE,
@@ -160,6 +164,49 @@ describe("workflow queries", () => {
     expect(result.current.hasNextPage).toBe(false);
   });
 
+  it("pages a workflow's event history by cursor", async () => {
+    const firstPage: WorkflowEventsResponse = {
+      events: [],
+      nextCursor: "cursor 2",
+    };
+    mockApiClient.get
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce({ events: [], nextCursor: null });
+    const { wrapper } = setup();
+    const { result } = renderHook(() => useWorkflowEvents(WORKFLOW_ID), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenLastCalledWith(
+      `${WORKFLOW_PATH}/events?limit=${WORKFLOW_EVENTS_PAGE_SIZE}`
+    );
+
+    await act(() => result.current.fetchNextPage());
+    expect(mockApiClient.get).toHaveBeenLastCalledWith(
+      `${WORKFLOW_PATH}/events?limit=${WORKFLOW_EVENTS_PAGE_SIZE}&cursor=cursor%202`
+    );
+  });
+
+  it("fetches an event payload only once an event is selected", async () => {
+    mockApiClient.get.mockResolvedValue({ id: "event-1", payload: null });
+    const { wrapper } = setup();
+    const idle = renderHook(() => useWorkflowEventPayload(WORKFLOW_ID, null), {
+      wrapper,
+    });
+    expect(idle.result.current.fetchStatus).toBe("idle");
+    expect(mockApiClient.get).not.toHaveBeenCalled();
+
+    const active = renderHook(
+      () => useWorkflowEventPayload(WORKFLOW_ID, "event-1"),
+      { wrapper }
+    );
+    await waitFor(() => expect(active.result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      `${WORKFLOW_PATH}/events/event-1`
+    );
+  });
+
   it("reads the org-wide run history with a status filter", async () => {
     mockApiClient.get.mockResolvedValue({ runs: [], nextCursor: null });
     const { wrapper } = setup();
@@ -171,6 +218,23 @@ describe("workflow queries", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockApiClient.get).toHaveBeenCalledWith(
       `/workflow-runs?limit=10&status=${WorkflowRunStatus.Failed}`
+    );
+  });
+});
+
+describe("org run list project and workflow filters", () => {
+  it("serializes projectId and workflowId", async () => {
+    mockApiClient.get.mockResolvedValue({ runs: [], nextCursor: null });
+    const { wrapper } = setup();
+    const { result } = renderHook(
+      () =>
+        useOrgWorkflowRuns({ projectId: "p1", workflowId: "w1", limit: 10 }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      "/workflow-runs?limit=10&projectId=p1&workflowId=w1"
     );
   });
 });

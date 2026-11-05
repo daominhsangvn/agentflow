@@ -586,6 +586,7 @@ describe("workflowToYaml", () => {
       concurrency: OrchestratorConcurrency.Queue,
       debounceSeconds: 5,
       turnTimeoutMinutes: 3,
+      connections: {},
       cancelOn: [OrchestratorTicketChange.StatusChanged],
     };
     const custom = makeWorkflow({
@@ -631,6 +632,19 @@ describe("workflowToYaml", () => {
     );
 
     expect(problemsOf(text).length).toBeGreaterThan(0);
+  });
+
+  it("reports connections outside an orchestrated workflow", () => {
+    const text = VALID_YAML.replace(
+      "  mode: plan\n",
+      "  mode: plan_and_execute\n  orchestrator:\n    connections:\n      source: [comment]\n"
+    );
+
+    expect(
+      problemsOf(text).some((problem) =>
+        problem.message.includes("only an orchestrated workflow")
+      )
+    ).toBe(true);
   });
 
   it("reads the status and labeled trigger options", () => {

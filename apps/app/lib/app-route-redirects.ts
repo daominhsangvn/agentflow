@@ -66,6 +66,11 @@ const AUTHENTICATED_ROUTE_DIRECTORIES = new Set<string>([
   "organization",
   "sessions",
   "workflows",
+  "cases",
+  "runs",
+  "connections",
+  "skills",
+  "orchestrator",
   ...DOCUMENT_ROUTE_DIRECTORIES,
 ]);
 

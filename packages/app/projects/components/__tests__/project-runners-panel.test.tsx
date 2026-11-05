@@ -73,7 +73,7 @@ beforeEach(() => {
 });
 
 describe("ProjectRunnersPanel", () => {
-  it("lists each runner with its status, load, owner and tools", () => {
+  it("lists each agent with its status, load, owner and tools", () => {
     render(<ProjectRunnersPanel isAdmin projectId={PROJECT_ID} />);
 
     const [dotnet, node] = screen.getAllByTestId("project-runner-row");
@@ -87,7 +87,7 @@ describe("ProjectRunnersPanel", () => {
     expect(node).toHaveTextContent("Not shared with the organization");
   });
 
-  it("removes a runner by saving the others", async () => {
+  it("removes an agent by saving the others", async () => {
     const user = userEvent.setup();
     render(<ProjectRunnersPanel isAdmin projectId={PROJECT_ID} />);
 
@@ -96,11 +96,11 @@ describe("ProjectRunnersPanel", () => {
     expect(mocks.saveMutate).toHaveBeenCalledWith({ runnerIds: [NODE] });
   });
 
-  it("offers only computers that are not runners yet", async () => {
+  it("offers only computers that are not agents yet", async () => {
     const user = userEvent.setup();
     render(<ProjectRunnersPanel isAdmin projectId={PROJECT_ID} />);
 
-    await user.click(screen.getByRole("button", { name: "Add runner" }));
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
     await user.click(screen.getByRole("combobox", { name: "Computer" }));
 
     expect(
@@ -109,23 +109,23 @@ describe("ProjectRunnersPanel", () => {
     expect(screen.queryByRole("option", { name: "runner-c1" })).toBeNull();
   });
 
-  it("explains where loops run without runners", () => {
+  it("explains where loops run without agents", () => {
     mocks.runners = [];
     render(<ProjectRunnersPanel isAdmin projectId={PROJECT_ID} />);
 
     expect(
       screen.getByText(
-        "No runners yet: loops run on the computer each user picks."
+        "No agents yet: loops run on the computer each user picks."
       )
     ).toBeVisible();
   });
 
-  it("shows members the runners without add or remove", () => {
+  it("shows members the agents without add or remove", () => {
     render(<ProjectRunnersPanel isAdmin={false} projectId={PROJECT_ID} />);
 
     expect(screen.getAllByTestId("project-runner-row")).toHaveLength(2);
     expect(
-      screen.queryByRole("button", { name: "Add runner" })
+      screen.queryByRole("button", { name: "Add agent" })
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Remove runner-c1" })

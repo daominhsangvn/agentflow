@@ -1,4 +1,5 @@
 import {
+  OrchestratorCaseStatus,
   OrchestratorMessageKind,
   OrchestratorTaskStatus,
   OrchestratorToolName,
@@ -78,6 +79,12 @@ vi.mock("@repo/database", () => {
         mocks.messageQueries.push(args.where);
         return Promise.resolve(mocks.latestMessage);
       },
+      findMany: (args: { where: Row }) => {
+        mocks.messageQueries.push(args.where);
+        return Promise.resolve(
+          mocks.latestMessage ? [mocks.latestMessage] : []
+        );
+      },
     },
     orchestratorTask: {
       count: () => Promise.resolve(mocks.taskCount),
@@ -128,6 +135,12 @@ vi.mock("@/lib/loops/loop-state", () => ({
 vi.mock("@/lib/orchestrator/case-render", () => ({
   renderCase: () => Promise.resolve("# LD-7"),
 }));
+vi.mock("@/lib/orchestrator/workflow-settings", async () => {
+  const { FULL_GRANTS, workflowsWith } = await import(
+    "@/__tests__/support/orchestrator-tools/grants.test-fixtures"
+  );
+  return { loadOrchestratorWorkflows: () => workflowsWith(FULL_GRANTS) };
+});
 vi.mock("@/lib/orchestrator/supersede", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/orchestrator/supersede")>()),
   turnSuperseded: mocks.turnSuperseded,
@@ -175,6 +188,7 @@ beforeEach(() => {
       caseId: "case-1",
       projectConnectionId: "0199a5f0-0000-7000-8000-0000000000e1",
       channel: { item: ITEM, parentId: null, extras: null },
+      case: { workflowId: "workflow-1" },
     },
   };
   mocks.replyOnItem.mockResolvedValue({ ok: true, externalRef: "900" });
@@ -220,6 +234,10 @@ describe("orchestratorToolService", () => {
       OrchestratorToolName.EditReply,
       OrchestratorToolName.WaitHuman,
       OrchestratorToolName.CloseCase,
+      OrchestratorToolName.PagePublish,
+      OrchestratorToolName.PageGet,
+      OrchestratorToolName.PullRequestOpen,
+      OrchestratorToolName.CaseNotify,
     ]);
   });
 
@@ -482,7 +500,9 @@ describe("orchestratorToolService", () => {
       summary: "Answered.",
     });
     expect(mocks.turnUpdates).toEqual([{ ended: OrchestratorTurnEnd.Close }]);
-    expect(mocks.caseUpdates).toEqual([{ status: "closed" }]);
+    expect(mocks.caseUpdates).toEqual([
+      { status: OrchestratorCaseStatus.Closed, closedAt: expect.any(Date) },
+    ]);
   });
 
   it("saves the case's notes", async () => {
@@ -550,6 +570,7 @@ describe("orchestratorToolService", () => {
       resumeTaskId: null,
       fork: false,
       files: [],
+      pageInputs: [],
       replyTo: null,
     });
     expect(result.ok && result.value).toMatchObject({
@@ -806,9 +827,10 @@ describe("orchestratorToolService", () => {
 
     // The thread is found over the whole conversation, not the turn's own
     // messages: a turn woken by task results took no message from people.
-    expect(mocks.messageQueries).toEqual([
-      { conversationId: "conversation-1", origin: "external" },
-    ]);
+    expect(mocks.messageQueries).toContainEqual({
+      conversationId: "conversation-1",
+      origin: "external",
+    });
     expect(mocks.replyOnItem.mock.calls[0]?.[1].parentId).toBe("500");
   });
 

@@ -44,7 +44,7 @@ alpine tar czf /backup/local-git.tgz /data` backs it up).
 
 Local Git is the default git hosting, so nobody adds its connection: when the
 API has `LOCAL_GIT_TOKEN`, every organization has a **Local Git** connection
-(Settings → Integrations → Connections lists it as *Default*, and Add
+(Connections (sidebar) lists it as *Default*, and Add
 connection no longer offers Local Git). The API creates each organization's
 connection the first time its connections are listed, and refreshes it when
 these values change (`apps/api/lib/integrations/server-connections.ts`):
@@ -66,7 +66,7 @@ advisory lock, so concurrent requests never create two.
 
 ## Use it in a project
 
-Project → Integrations → **Add repository** → choose the Local Git connection:
+Project → Connections & Repos → **Add repository** → choose the Local Git connection:
 
 - **Add** an existing repository from the list, or
 - **Create and add**: a new private repository with a first commit on `main`

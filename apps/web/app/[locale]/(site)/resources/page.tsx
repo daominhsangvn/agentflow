@@ -15,7 +15,7 @@ type ResourcesPageProps = {
 export const generateMetadata = async () =>
   createPageMetadata(
     "Resources",
-    "Comparison pages, templates, and workflow references for high-intent readers."
+    "Guides and examples for setting up AgentFlow."
   );
 
 const ResourcesPage = async ({ params }: ResourcesPageProps) => {
@@ -23,25 +23,22 @@ const ResourcesPage = async ({ params }: ResourcesPageProps) => {
 
   const items = [
     {
-      href: localize(
-        locale,
-        "/docs/resources/agentflow-vs-chat-based-workflows"
-      ),
-      title: "AgentFlow vs chat-based workflows",
+      href: localize(locale, "/docs/getting-started/quickstart"),
+      title: "Quickstart",
       description:
-        "Explain why artifact-bound execution changes how teams ship.",
+        "One Jira ticket, an orchestrated workflow and your first case.",
     },
     {
-      href: localize(locale, "/docs/resources/prd-template"),
-      title: "PRD template",
+      href: localize(locale, "/docs/guides/setup/leavedesk-example"),
+      title: "LeaveDesk example",
       description:
-        "A lightweight template to move from idea to implementation plan faster.",
+        "Every file of a real setup: connections, Agents, workflow and rules.",
     },
     {
-      href: localize(locale, "/docs/resources/implementation-plan-template"),
-      title: "Implementation plan template",
+      href: localize(locale, "/docs/guides/recipes/orchestrator-rules"),
+      title: "Writing orchestrator rules",
       description:
-        "Define scope, checkpoints, risks, and outputs before loops begin.",
+        "How to write the plain-language rules the Orchestrator Agent follows.",
     },
   ];
 
@@ -52,11 +49,10 @@ const ResourcesPage = async ({ params }: ResourcesPageProps) => {
           Resources
         </p>
         <h1 className="font-semibold text-4xl tracking-tight">
-          High-intent pages for evaluation and adoption.
+          Guides and examples to get started.
         </h1>
         <p className="max-w-2xl text-muted-foreground">
-          Resources are wired back into the docs graph so comparisons and
-          templates stay versioned and easy to expand.
+          Start with the quickstart, then follow a real setup end to end.
         </p>
       </div>
 

@@ -45,6 +45,11 @@ import {
 import { parseDocument, stringify } from "yaml";
 import { z } from "zod";
 import {
+  ORCHESTRATOR_GRANTS_PATH,
+  orchestratorGrantKeys,
+  orchestratorGrantValues,
+} from "./orchestrator-grant-completions";
+import {
   WORKFLOW_AGENT_MODE_DESCRIPTIONS,
   WORKFLOW_AGENT_MODE_LABELS,
   WORKFLOW_RUN_EVENT_DESCRIPTIONS,
@@ -188,6 +193,9 @@ function keyCandidates(
   if (where === "agent/orchestrator") {
     return keyed(WORKFLOW_YAML_KEYS.orchestrator);
   }
+  if (where === ORCHESTRATOR_GRANTS_PATH) {
+    return orchestratorGrantKeys(data.projectConnections, cursor.existingKeys);
+  }
   if (where === RUNNER_RULE_PATH) {
     return keyed(WORKFLOW_YAML_KEYS.runnerRule);
   }
@@ -305,6 +313,9 @@ function agentValueCandidates(
       default:
         return [];
     }
+  }
+  if (where === ORCHESTRATOR_GRANTS_PATH) {
+    return orchestratorGrantValues(key);
   }
   if (where === "agent/orchestrator" && key === "cancelOn") {
     return ticketChangeValues();

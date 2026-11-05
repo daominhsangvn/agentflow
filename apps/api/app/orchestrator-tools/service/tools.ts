@@ -1,19 +1,29 @@
 import { LOOP_STEP_INPUTS_MAX } from "@agentflow-ai/loops-api/loop-step";
 import type { IntegrationToolDescriptor } from "@repo/api/src/types/integration-tools";
 import {
+  OrchestratorDocumentKind,
+  OrchestratorReplyTarget,
   OrchestratorToolName,
   OrchestratorWaitKind,
 } from "@repo/api/src/types/orchestrator";
+import {
+  type OrchestratorGrantSet,
+  OrchestratorPageAccess,
+  OrchestratorSourceOperation,
+  pageKeysWith,
+} from "@repo/api/src/types/orchestrator-grants";
 import { RunnerCommandMode } from "@repo/api/src/types/runner-capabilities";
 import {
   KEEPS,
   NO_ARGUMENTS,
+  PAGE_FILE_REF,
   POSTS,
   READS,
   STOPS,
   TASK_FILE_REF,
 } from "./annotations";
 import { REPLY_ATTACHMENTS_MAX } from "./attachments";
+import { NOTIFY_MESSAGE_MAX } from "./case-notify";
 import {
   NOTES_MAX,
   REPLY_MAX,
@@ -22,8 +32,8 @@ import {
   WAIT_TIMEOUT_MAX_MINUTES,
 } from "./limits";
 
-export const INSTRUCTIONS =
-  "Tools of the project orchestrator for one turn of one conversation. reply posts in the conversation's thread; case_get and case_update_notes read and keep the case; runners_list shows what each runner can do; source_item_get reads the conversation's item; task_run sends a runner one of its commands, task_get reads a task and task_cancel stops one, only in a turn that handles a ticket change the workflow's cancelOn lists. A task's files come back with its result; reply attaches them (attachments) and task_run hands them to a later task (files). End the turn with wait_for (the tasks you started), wait_human or close_case. A write refused as superseded means a newer message arrived: end the turn with wait_human and a one-line note; the next turn answers both. Refused calls are recorded on the case.";
+const INSTRUCTIONS =
+  "Tools of the project orchestrator for one turn of one conversation. reply posts in the conversation's thread; case_get and case_update_notes read and keep the case; runners_list shows what each runner can do; source_item_get reads the conversation's item; case_notify wakes the case of another item of this workflow (e.g. the items this one blocks); task_run sends a runner one of its commands, task_get reads a task and task_cancel stops one, only in a turn that handles a ticket change the workflow's cancelOn lists. A task's files come back with its result; reply attaches them (attachments) and task_run hands them to a later task (files). End the turn with wait_for (the tasks you started), wait_human or close_case. A write refused as superseded means a newer message arrived: end the turn with wait_human and a one-line note; the next turn answers both. Refused calls are recorded on the case.";
 
 export const TOOLS: IntegrationToolDescriptor[] = [
   {
@@ -59,20 +69,72 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.SourceItemGet,
     title: "Read the item",
     description:
-      "The conversation's source item (the ticket, the Teams thread): title, status, description, latest comments, attachment names.",
+      "The conversation's source item (the ticket, the Teams thread): title, status, description, latest comments, attachment names, and its blocking relations: blockedBy (items it waits for) and blocks (items waiting for it), each with key, title, status and url.",
     inputSchema: NO_ARGUMENTS,
     annotations: READS,
+  },
+  {
+    name: OrchestratorToolName.SourceItemTransition,
+    title: "Move the item",
+    description:
+      "Moves this case's own item to another status: transitionName is the transition's name (Jira) or the state (Azure DevOps). Refused when the transition is not available from the item's current status. The change is recorded on the case.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        transitionName: { type: "string", minLength: 1, maxLength: 128 },
+      },
+      required: ["transitionName"],
+      additionalProperties: false,
+    },
+    annotations: POSTS,
+  },
+  {
+    name: OrchestratorToolName.SourceItemLabel,
+    title: "Label the item",
+    description:
+      "Adds and removes labels (Jira) or tags (Azure DevOps) on this case's own item. The change is recorded on the case.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        add: { type: "array", maxItems: 20, items: { type: "string" } },
+        remove: { type: "array", maxItems: 20, items: { type: "string" } },
+      },
+      additionalProperties: false,
+    },
+    annotations: POSTS,
+  },
+  {
+    name: OrchestratorToolName.SourceItemLink,
+    title: "Add a link to the item",
+    description:
+      "Adds a web link with a title to this case's own item, e.g. the Confluence page of a plan.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        title: { type: "string", minLength: 1, maxLength: 255 },
+      },
+      required: ["url", "title"],
+      additionalProperties: false,
+    },
+    annotations: POSTS,
   },
   {
     name: OrchestratorToolName.Reply,
     title: "Reply in the thread",
     description:
-      "Posts a markdown message in this conversation's thread (a comment on the ticket, a Teams reply). A reply to it comes back to this conversation. replyTo: the ref of the <message> you answer, so the answer lands in that comment's thread (answer each comment in its own thread; omit it for a ticket change, which is answered with a new comment). attachments: files of this case's tasks (task_get, wait results) to attach to the item first and show under the message (Jira); refused where the thread takes no files (Teams).",
+      "Posts a markdown message in this conversation's thread (a comment on the ticket, a Teams reply), or on the case page with where: case_page (the default for a message written on the case page). A reply to it comes back to this conversation. replyTo: the ref of the <message> you answer, so the answer lands in that comment's thread (answer each comment in its own thread; omit it for a ticket change, which is answered with a new comment). attachments: files of this case's tasks (task_get, wait results) to attach to the item first and show under the message (Jira); refused where the thread takes no files (Teams).",
     inputSchema: {
       type: "object",
       properties: {
         text: { type: "string", minLength: 1, maxLength: REPLY_MAX },
         replyTo: { type: "string", minLength: 1, maxLength: 255 },
+        where: {
+          type: "string",
+          enum: Object.values(OrchestratorReplyTarget),
+          description:
+            "thread (a comment on the item) or case_page (shown on the case page in AgentFlow only; no files). Default: where the message you answer came from (a message from AgentFlow is answered on the case page).",
+        },
         attachments: {
           type: "array",
           maxItems: REPLY_ATTACHMENTS_MAX,
@@ -119,9 +181,9 @@ export const TOOLS: IntegrationToolDescriptor[] = [
         files: {
           type: "array",
           maxItems: LOOP_STEP_INPUTS_MAX,
-          items: TASK_FILE_REF,
+          items: { oneOf: [TASK_FILE_REF, PAGE_FILE_REF] },
           description:
-            "Text files of earlier tasks of this case (e.g. PRD-LD-5.md) the runner finds in its work directory's inputs/.",
+            "Text files of earlier tasks of this case (e.g. PRD-LD-5.md), or {page, name}: the page's current content as that file, the runner finds them in its work directory's inputs/.",
         },
         replyTo: {
           type: "string",
@@ -262,4 +324,150 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     },
     annotations: KEEPS,
   },
+  {
+    name: OrchestratorToolName.PagePublish,
+    title: "Publish a Confluence page",
+    description:
+      "Creates or updates a Confluence page of the project's spaces from a task's Markdown file. With page it updates that page, else it finds the page with that title under the parent (default the project's parent page, \"root\" for the top of the space) or creates it. attachments (screenshots) are uploaded to the page and images are shown in it. It refuses to replace people's edits unless overwrite. Returns pageId, url, version; the case records it under Documents.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: TASK_FILE_REF,
+        title: { type: "string", minLength: 1, maxLength: 255 },
+        kind: {
+          type: "string",
+          enum: Object.values(OrchestratorDocumentKind),
+        },
+        page: { type: "string", description: "A page id or URL to update." },
+        parent: {
+          type: "string",
+          description: 'A page id or URL, or "root".',
+        },
+        space: { type: "string" },
+        attachments: { type: "array", maxItems: 10, items: TASK_FILE_REF },
+        overwrite: { type: "boolean" },
+        connection: { type: "string" },
+      },
+      required: ["file", "title"],
+      additionalProperties: false,
+    },
+    annotations: POSTS,
+  },
+  {
+    name: OrchestratorToolName.PageGet,
+    title: "Read a Confluence page",
+    description:
+      "Reads a page of the project's spaces: its current Markdown, version, url and last editor.",
+    inputSchema: {
+      type: "object",
+      properties: { page: { type: "string" }, connection: { type: "string" } },
+      required: ["page"],
+      additionalProperties: false,
+    },
+    annotations: READS,
+  },
+  {
+    name: OrchestratorToolName.PullRequestOpen,
+    title: "Open the pull request of a task",
+    description:
+      "Opens the pull request of each branch a succeeded task pushed (a command with push on an auto runner); reuses an open one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string" },
+        title: { type: "string", minLength: 1 },
+        description: { type: "string" },
+        draft: { type: "boolean" },
+      },
+      required: ["taskId", "title"],
+      additionalProperties: false,
+    },
+    annotations: POSTS,
+  },
+  {
+    name: OrchestratorToolName.CaseNotify,
+    title: "Notify another case",
+    description:
+      "Sends a message to the case of another item in this workflow (itemKey, e.g. a key from blocks of source_item_get) and wakes its orchestrator, which re-reads its item and acts on its current status. Use it when this item reaches a status the other item waits for (a blocker resolved). Refused when no case of this workflow is about that item, or for this case's own item. Needs no grant.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        itemKey: { type: "string", minLength: 1, maxLength: 255 },
+        message: {
+          type: "string",
+          minLength: 1,
+          maxLength: NOTIFY_MESSAGE_MAX,
+        },
+      },
+      required: ["itemKey", "message"],
+      additionalProperties: false,
+    },
+    annotations: POSTS,
+  },
 ];
+
+/** The tools whose grant is on the source item, by the operation they need. */
+const SOURCE_TOOL_OPERATIONS: Record<string, OrchestratorSourceOperation> = {
+  [OrchestratorToolName.SourceItemTransition]:
+    OrchestratorSourceOperation.Transition,
+  [OrchestratorToolName.SourceItemLabel]: OrchestratorSourceOperation.Label,
+  [OrchestratorToolName.SourceItemLink]: OrchestratorSourceOperation.Link,
+};
+
+/** The instructions of a turn: the base text and the writes it was granted. */
+export function buildInstructions(grants: OrchestratorGrantSet): string {
+  return `${INSTRUCTIONS} ${describeGrants(grants)} A tool that is not granted is refused.`;
+}
+
+/** The tools a turn may use: the ones whose grant is absent are left out. */
+export function visibleTools(
+  grants: OrchestratorGrantSet
+): IntegrationToolDescriptor[] {
+  const canRead = pageKeysWith(grants, OrchestratorPageAccess.Read).length > 0;
+  const canPublish =
+    pageKeysWith(grants, OrchestratorPageAccess.Publish).length > 0;
+  return TOOLS.filter((tool) => {
+    const operation = SOURCE_TOOL_OPERATIONS[tool.name];
+    if (operation) {
+      return grants.source.has(operation);
+    }
+    switch (tool.name) {
+      case OrchestratorToolName.PageGet:
+        return canRead;
+      case OrchestratorToolName.PagePublish:
+        return canPublish;
+      case OrchestratorToolName.PullRequestOpen:
+        return grants.pullRequestOpen;
+      default:
+        return true;
+    }
+  });
+}
+
+function describeGrants(grants: OrchestratorGrantSet): string {
+  const parts: string[] = [];
+  if (grants.source.size > 0) {
+    parts.push(`on the ticket: ${[...grants.source].join(", ")}`);
+  }
+  const publish = pageKeysWith(grants, OrchestratorPageAccess.Publish);
+  const readOnly = pageKeysWith(grants, OrchestratorPageAccess.Read).filter(
+    (key) => !publish.includes(key)
+  );
+  if (readOnly.length > 0) {
+    parts.push(
+      `Confluence read: ${readOnly.join(", ")} (${OrchestratorToolName.PageGet})`
+    );
+  }
+  if (publish.length > 0) {
+    parts.push(
+      `Confluence publish: ${publish.join(", ")} (${OrchestratorToolName.PageGet}, ${OrchestratorToolName.PagePublish})`
+    );
+  }
+  if (grants.pullRequestOpen) {
+    parts.push(`pull requests: open (${OrchestratorToolName.PullRequestOpen})`);
+  }
+  if (parts.length === 0) {
+    return "Granted writes: none, you only read the ticket.";
+  }
+  return `Granted writes: ${parts.join("; ")}.`;
+}

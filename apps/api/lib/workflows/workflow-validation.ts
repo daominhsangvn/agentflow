@@ -3,6 +3,10 @@ import {
   IntegrationOperationTarget,
   IntegrationProviderKey,
 } from "@repo/api/src/types/integration";
+import {
+  OrchestratorSourceOperation,
+  resolveOrchestratorGrants,
+} from "@repo/api/src/types/orchestrator-grants";
 import type { ProjectProcess } from "@repo/api/src/types/project-process";
 import { ProcessStepType } from "@repo/api/src/types/project-process";
 import { Result } from "@repo/api/src/types/result";
@@ -35,6 +39,7 @@ import {
   type ProjectConnectionCatalog,
   type ProjectConnectionEntry,
   resolveKey,
+  sourceGrantDefinitions,
 } from "@/lib/integrations/connection-grants";
 import { triggerContainersOutside } from "@/lib/integrations/project-connections";
 import { WebhookTriggerType } from "@/lib/integrations/providers/webhook/inbound-event";
@@ -214,6 +219,10 @@ export async function validateWorkflowInput(
   const processError = checkProcessGrants(input.agent.process, checks);
   if (processError) {
     return Result.err(processError);
+  }
+  const orchestratorGrantError = checkOrchestratorGrants(input, checks);
+  if (orchestratorGrantError) {
+    return Result.err(orchestratorGrantError);
   }
   return Result.ok({
     name: input.name,
@@ -862,6 +871,9 @@ function providerName(provider: string): string {
  */
 function checkOrchestrated(input: SaveWorkflowInput): string | null {
   if (input.agent.mode !== WorkflowAgentMode.Orchestrated) {
+    if (Object.keys(input.agent.orchestrator?.connections ?? {}).length > 0) {
+      return "agent.orchestrator.connections: only an orchestrated workflow (agent.mode: orchestrated) has orchestrator grants.";
+    }
     return null;
   }
   if (input.agent.process) {
@@ -869,6 +881,68 @@ function checkOrchestrated(input: SaveWorkflowInput): string | null {
   }
   if (input.agent.runners.length > 0) {
     return "A workflow handled by the orchestrator runs on one runner (agent.runner): remove agent.runners.";
+  }
+  return null;
+}
+
+const ORCHESTRATOR_GRANT_PREFIX = "agent.orchestrator.";
+
+/**
+ * The orchestrator's grants name things that exist: a source operation some
+ * trigger's provider offers, and Confluence connections of the project.
+ */
+function checkOrchestratorGrants(
+  input: SaveWorkflowInput,
+  checks: ActionChecks
+): string | null {
+  if (input.agent.mode !== WorkflowAgentMode.Orchestrated) {
+    return null;
+  }
+  const grants = input.agent.orchestrator?.connections ?? {};
+  const set = resolveOrchestratorGrants(grants);
+  const sourceError = checkOrchestratorSourceGrant(set.source, checks);
+  if (sourceError) {
+    return `${ORCHESTRATOR_GRANT_PREFIX}${sourceError}`;
+  }
+  for (const key of set.pages.keys()) {
+    const pageError = checkOrchestratorPageKey(key, checks);
+    if (pageError) {
+      return `${ORCHESTRATOR_GRANT_PREFIX}${pageError}`;
+    }
+  }
+  return null;
+}
+
+function checkOrchestratorSourceGrant(
+  source: ReadonlySet<OrchestratorSourceOperation>,
+  checks: ActionChecks
+): string | null {
+  for (const op of source) {
+    if (op === OrchestratorSourceOperation.Comment) {
+      continue;
+    }
+    const offered = checks.sourceProviders.some((provider) =>
+      op === OrchestratorSourceOperation.Attach
+        ? provider !== IntegrationProviderKey.MicrosoftTeams
+        : sourceGrantDefinitions(provider, [op]).length > 0
+    );
+    if (!offered) {
+      return `connections.source: no trigger's connection can ${op} its items (a Teams thread takes only comment).`;
+    }
+  }
+  return null;
+}
+
+function checkOrchestratorPageKey(
+  key: string,
+  checks: ActionChecks
+): string | null {
+  const resolved = resolveKey(checks.catalog, checks.projectIds, key);
+  if (!resolved.ok) {
+    return `connections.${key}: ${resolved.error}`;
+  }
+  if (resolved.value.provider !== IntegrationProviderKey.Confluence) {
+    return `connections.${key}: the orchestrator writes only Confluence pages; ${key} is ${providerName(resolved.value.provider)}.`;
   }
   return null;
 }

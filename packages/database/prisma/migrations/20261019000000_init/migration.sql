@@ -2034,7 +2034,8 @@ CREATE TABLE public.orchestrator_cases (
     notes text DEFAULT ''::text NOT NULL,
     created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) without time zone NOT NULL,
-    workflow_id uuid NOT NULL
+    workflow_id uuid NOT NULL,
+    closed_at timestamp(3) without time zone
 );
 
 CREATE TABLE public.orchestrator_conversations (
@@ -2669,6 +2670,22 @@ CREATE TABLE public.workflow_actions (
     connection_key character varying(40)
 );
 
+CREATE TABLE public.workflow_events (
+    id uuid NOT NULL,
+    organization_id uuid NOT NULL,
+    workflow_id uuid NOT NULL,
+    delivery_id uuid NOT NULL,
+    trigger_id uuid,
+    trigger_type character varying(64) NOT NULL,
+    source_key character varying(255),
+    result character varying(16) NOT NULL,
+    run_id uuid,
+    case_id uuid,
+    detail text,
+    occurred_at timestamp(3) without time zone,
+    received_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE public.workflow_run_loops (
     id uuid NOT NULL,
     organization_id uuid NOT NULL,
@@ -3150,6 +3167,9 @@ ALTER TABLE ONLY public.workflow_action_runs
 
 ALTER TABLE ONLY public.workflow_actions
     ADD CONSTRAINT workflow_actions_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY public.workflow_events
+    ADD CONSTRAINT workflow_events_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.workflow_run_loops
     ADD CONSTRAINT workflow_run_loops_pkey PRIMARY KEY (id);
@@ -3641,6 +3661,8 @@ CREATE UNIQUE INDEX integration_deliveries_connection_id_delivery_id_key ON publ
 
 CREATE INDEX integration_deliveries_organization_id_received_at_idx ON public.integration_deliveries USING btree (organization_id, received_at);
 
+CREATE INDEX integration_deliveries_received_at_idx ON public.integration_deliveries USING btree (received_at);
+
 CREATE INDEX integration_tool_calls_action_run_id_created_at_idx ON public.integration_tool_calls USING btree (action_run_id, created_at);
 
 CREATE UNIQUE INDEX integration_tool_calls_idempotency_key_key ON public.integration_tool_calls USING btree (idempotency_key);
@@ -3920,6 +3942,12 @@ CREATE INDEX workflow_action_runs_status_next_attempt_at_idx ON public.workflow_
 CREATE INDEX workflow_actions_connection_id_idx ON public.workflow_actions USING btree (connection_id);
 
 CREATE INDEX workflow_actions_workflow_id_idx ON public.workflow_actions USING btree (workflow_id);
+
+CREATE INDEX workflow_events_delivery_id_idx ON public.workflow_events USING btree (delivery_id);
+
+CREATE INDEX workflow_events_received_at_idx ON public.workflow_events USING btree (received_at);
+
+CREATE INDEX workflow_events_workflow_id_received_at_idx ON public.workflow_events USING btree (workflow_id, received_at DESC);
 
 CREATE UNIQUE INDEX workflow_run_loops_loop_id_key ON public.workflow_run_loops USING btree (loop_id);
 
@@ -4680,6 +4708,24 @@ ALTER TABLE ONLY public.workflow_actions
 
 ALTER TABLE ONLY public.workflow_actions
     ADD CONSTRAINT workflow_actions_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES public.workflows(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.workflow_events
+    ADD CONSTRAINT workflow_events_case_id_fkey FOREIGN KEY (case_id) REFERENCES public.orchestrator_cases(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+ALTER TABLE ONLY public.workflow_events
+    ADD CONSTRAINT workflow_events_delivery_id_fkey FOREIGN KEY (delivery_id) REFERENCES public.integration_deliveries(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.workflow_events
+    ADD CONSTRAINT workflow_events_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.workflow_events
+    ADD CONSTRAINT workflow_events_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.workflow_runs(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+ALTER TABLE ONLY public.workflow_events
+    ADD CONSTRAINT workflow_events_trigger_id_fkey FOREIGN KEY (trigger_id) REFERENCES public.workflow_triggers(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+ALTER TABLE ONLY public.workflow_events
+    ADD CONSTRAINT workflow_events_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES public.workflows(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 ALTER TABLE ONLY public.workflow_run_loops
     ADD CONSTRAINT workflow_run_loops_loop_id_fkey FOREIGN KEY (loop_id) REFERENCES public.loops(id) ON UPDATE CASCADE ON DELETE CASCADE;

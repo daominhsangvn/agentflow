@@ -59,6 +59,10 @@ function summary(
     taskCount: 2,
     turnCount: 3,
     costUsd: 0.42,
+    inputTokens: 1000,
+    outputTokens: 500,
+    activeMs: 5_400_000,
+    closedAt: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -95,7 +99,24 @@ describe("OrchestratorCaseList", () => {
 
     expect(
       screen.getAllByRole("columnheader").map((h) => h.textContent)
-    ).toEqual(["Case", "Status", "Last activity", "Tasks", "Turns", "Cost"]);
+    ).toEqual([
+      "Case",
+      "Status",
+      "Last activity",
+      "Tasks",
+      "Turns",
+      "Active time",
+      "Tokens",
+      "Cost",
+    ]);
+  });
+
+  it("shows the active time and the token total", () => {
+    mocks.cases.data = [summary({})];
+    render(<OrchestratorCaseList workflowId="w1" />);
+
+    expect(screen.getByText("1h 30m")).toBeTruthy();
+    expect(screen.getByText("1.50k")).toBeTruthy();
   });
 
   it("shows the cost, or a dash when unknown", () => {

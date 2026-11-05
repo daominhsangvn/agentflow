@@ -54,6 +54,10 @@ let mockDistinctId: string | undefined = CLERK_USER_ID;
 // Library's effect flush produces anyway.
 let mockFeatureFlaggedMounted = true;
 
+vi.mock("@/hooks/use-org-slug", () => ({
+  useOrgSlug: () => "acme",
+}));
+
 vi.mock("@repo/analytics/components/feature-flagged", () => ({
   FeatureFlagged: ({
     flag,

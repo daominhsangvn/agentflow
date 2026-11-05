@@ -1,8 +1,12 @@
 import {
+  DOCUMENT_KIND_LABELS,
   OrchestratorMessageOrigin,
+  OrchestratorMessageVia,
   OrchestratorTaskStatus,
+  readOrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
 import { withDb } from "@repo/database";
+import { listCaseDocuments } from "./case-documents";
 import { readChannel } from "./channel";
 import { readTaskResult } from "./task-result";
 import { isTicketChangeKind } from "./ticket-change";
@@ -24,6 +28,7 @@ export async function renderCase(caseId: string): Promise<string> {
     db.orchestratorCase.findUnique({
       where: { id: caseId },
       select: {
+        organizationId: true,
         title: true,
         status: true,
         sourceKey: true,
@@ -37,7 +42,13 @@ export async function renderCase(caseId: string): Promise<string> {
             messages: {
               orderBy: { createdAt: "desc" },
               take: RECENT_MESSAGES,
-              select: { actor: true, kind: true, text: true, createdAt: true },
+              select: {
+                actor: true,
+                kind: true,
+                text: true,
+                payload: true,
+                createdAt: true,
+              },
             },
           },
         },
@@ -82,8 +93,18 @@ export async function renderCase(caseId: string): Promise<string> {
     "## Notes",
     found.notes.trim() || "(none yet)",
     "",
-    "## Conversations",
+    "## Documents",
   ];
+  const documents = await listCaseDocuments(found.organizationId, caseId);
+  if (documents.length === 0) {
+    lines.push("(none yet)");
+  }
+  for (const document of documents) {
+    lines.push(
+      `- ${DOCUMENT_KIND_LABELS[document.kind]} "${document.title}" → ${document.url} (v${document.version}, page ${document.pageId})`
+    );
+  }
+  lines.push("", "## Conversations");
   for (const conversation of found.conversations) {
     const channel = readChannel(conversation.channel);
     lines.push(
@@ -91,7 +112,7 @@ export async function renderCase(caseId: string): Promise<string> {
     );
     for (const message of [...conversation.messages].reverse()) {
       lines.push(
-        `- ${message.createdAt.toISOString()} ${message.actor ?? "AgentFlow"} (${message.kind}): ${preview(message.text)}`
+        `- ${message.createdAt.toISOString()} ${messageActor(message)} (${message.kind}): ${preview(message.text)}`
       );
     }
   }
@@ -175,4 +196,15 @@ function startedFor(task: StartedForTask): string {
     return `message in ${channelKey}: "${preview(last.text)}"`;
   }
   return channelKey;
+}
+
+function messageActor(message: {
+  actor: string | null;
+  payload: unknown;
+}): string {
+  const actor = message.actor ?? "AgentFlow";
+  return readOrchestratorMessageVia(message.payload) ===
+    OrchestratorMessageVia.AgentFlow
+    ? `${actor} (AgentFlow)`
+    : actor;
 }

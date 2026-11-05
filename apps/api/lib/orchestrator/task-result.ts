@@ -23,6 +23,8 @@ export type TaskResult = {
   inputs?: TaskInputFile[];
   /** The ref of the message (comment) this task's answer replies to (task_run replyTo). */
   replyTo?: string | null;
+  /** Confluence pages read when task_run ran, written to `inputs/` at launch. */
+  pageInputs?: TaskPageInput[];
 };
 
 /**
@@ -45,6 +47,17 @@ export type TaskInputFile = {
   size: number;
 };
 
+/** A Confluence page's Markdown, read when task_run ran and handed to the task as an input file. */
+export type TaskPageInput = {
+  pageId: string;
+  title: string;
+  url: string;
+  version: number;
+  name: string;
+  content: string;
+  size: number;
+};
+
 const taskFileSchema = z.object({
   name: z.string(),
   size: z.number(),
@@ -56,6 +69,16 @@ const taskInputFileSchema = z.object({
   taskId: z.string(),
   name: z.string(),
   storageKey: z.string(),
+  size: z.number(),
+});
+
+const taskPageInputSchema = z.object({
+  pageId: z.string(),
+  title: z.string(),
+  url: z.string(),
+  version: z.number(),
+  name: z.string(),
+  content: z.string(),
   size: z.number(),
 });
 
@@ -78,6 +101,7 @@ const taskResultSchema = z.object({
   filesOmitted: z.number().optional(),
   inputs: z.array(taskInputFileSchema).optional(),
   replyTo: z.string().nullish(),
+  pageInputs: z.array(taskPageInputSchema).optional(),
 });
 
 export function readTaskResult(value: unknown): TaskResult | null {
@@ -91,6 +115,7 @@ const KEPT_FIELDS = [
   "cancelled",
   "cancelledFrom",
   "replyTo",
+  "pageInputs",
 ] as const;
 
 /**

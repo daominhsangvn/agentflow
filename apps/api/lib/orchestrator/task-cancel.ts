@@ -1,4 +1,7 @@
-import { OrchestratorTaskStatus } from "@repo/api/src/types/orchestrator";
+import {
+  OrchestratorMessageOrigin,
+  OrchestratorTaskStatus,
+} from "@repo/api/src/types/orchestrator";
 import { Result } from "@repo/api/src/types/result";
 import { type Prisma, withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
@@ -51,7 +54,11 @@ export async function cancelTask(
   }
   const changes = await withDb((db) =>
     db.orchestratorMessage.count({
-      where: { turnId, kind: { in: [...cancelOn] } },
+      where: {
+        turnId,
+        origin: OrchestratorMessageOrigin.External,
+        kind: { in: [...cancelOn] },
+      },
     })
   );
   if (changes === 0) {

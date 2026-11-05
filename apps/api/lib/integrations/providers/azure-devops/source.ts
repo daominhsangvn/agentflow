@@ -27,6 +27,7 @@ import {
 } from "./constants";
 import { splitAdoTags, workItemAttributes, workItemRef } from "./events";
 import { adoIdentityEmail, adoIdentityLabel } from "./identity";
+import { fetchAdoDependencies } from "./relations";
 import {
   type AdoComment,
   type AdoRelation,
@@ -74,6 +75,11 @@ export async function fetchAdoSourceItem(
     fields,
     ref.container
   );
+  const dependencies = await fetchAdoDependencies(
+    ctx,
+    workItem.relations,
+    project
+  );
   return {
     ...itemRef,
     title: fields[AdoField.Title] ?? ref.title ?? `Work item #${workItemId}`,
@@ -90,6 +96,7 @@ export async function fetchAdoSourceItem(
     comments,
     attachments: buildAttachments(workItem.relations),
     links: buildLinks(workItem.relations),
+    ...dependencies,
   };
 }
 

@@ -112,6 +112,24 @@ export const jiraAttachmentSchema = z.looseObject({
 });
 export type JiraAttachment = z.infer<typeof jiraAttachmentSchema>;
 
+const jiraLinkedIssueSchema = z.looseObject({
+  key: z.string(),
+  fields: z
+    .looseObject({
+      summary: optionalTextSchema,
+      status: optionalNamedValueSchema,
+    })
+    .nullish()
+    .catch(null),
+});
+
+export const jiraIssueLinkSchema = z.looseObject({
+  type: z.looseObject({ name: optionalTextSchema }).nullish().catch(null),
+  inwardIssue: jiraLinkedIssueSchema.nullish().catch(null),
+  outwardIssue: jiraLinkedIssueSchema.nullish().catch(null),
+});
+export type JiraIssueLink = z.infer<typeof jiraIssueLinkSchema>;
+
 export const jiraCommentSchema = z.looseObject({
   id: idSchema,
   /** Set on a reply in a comment thread: the comment it replies to. */
@@ -152,6 +170,7 @@ export const jiraIssueFieldsSchema = z.looseObject({
     .nullish()
     .catch(null),
   attachment: z.array(jiraAttachmentSchema).nullish().catch(null),
+  issuelinks: z.array(jiraIssueLinkSchema).nullish().catch(null),
   /** Search results and issue reads carry the newest page of comments. */
   comment: z
     .looseObject({ comments: jiraCommentsSchema, total: optionalCountSchema })

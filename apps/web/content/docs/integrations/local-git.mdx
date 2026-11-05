@@ -1,0 +1,66 @@
+---
+title: "Local Git"
+description: "Git hosting that runs next to AgentFlow (Gitea): the default for projects without a remote, with pull requests you review in its web UI."
+---
+
+## What it does
+
+Local Git is the `local-git` service of `docker-compose.yml`: [Gitea](https://about.gitea.com), a complete Git server with a web UI. Projects add or create repositories from it, Agents clone and push with the connection's token, and the `local_git.create_pull_request` action opens pull requests you review and merge in the Local Git web UI.
+
+## Start it
+
+```bash
+docker compose up -d local-git
+pnpm local-git:init --org my-team
+# restart the API (pnpm dev) so it reads the new values
+```
+
+`pnpm local-git:init` is safe to run again. It creates the admin account (`agentflow`; `LOCAL_GIT_ADMIN_USER`, `LOCAL_GIT_ADMIN_PASSWORD` and `LOCAL_GIT_ADMIN_EMAIL` in `.env` override it, and a password is generated and printed once when none is set), creates the organization named by `--org`, and issues an access token written, with the addresses, to `apps/api/.env.local` (`--no-env` prints them instead). Every run issues another token; revoke old ones in Local Git → Settings → Applications.
+
+The web UI is at `http://localhost:3300` (`LOCAL_GIT_PORT`). Sign-in is required and new repositories are private. Data lives in the `local_git_data` volume.
+
+## The default connection
+
+Nobody adds this connection. When the API has `LOCAL_GIT_TOKEN`, every organization gets a **Local Git** connection, listed as *Default* in **Connections** (sidebar), and Add connection no longer offers Local Git. It is read-only there (Test still works): change it through these variables in `apps/api/.env.local` and restart the API.
+
+| Variable | Value |
+|---|---|
+| `LOCAL_GIT_SERVER_URL` | Where the API reaches it. Default `http://localhost:3300` |
+| `LOCAL_GIT_RUNNER_URL` | Where Agents reach it, when that differs: `http://host.docker.internal:3300` for Agent containers on the same machine, the machine's network address for Agents elsewhere. Empty: the server URL. Repositories added before a change keep their old clone URL: remove and add them again |
+| `LOCAL_GIT_TOKEN` | The token `pnpm local-git:init` issued. Without it there is no default connection, and an admin can add a Local Git connection by hand |
+| `LOCAL_GIT_OWNER` | The organization (or user) whose repositories projects can add and where new ones are created. Empty: every repository the token sees; new ones go to the token's account |
+
+A Local Git connection an admin added earlier for the same server is adopted as the default and keeps its id.
+
+A hand-added connection uses the settings `serverUrl`, `runnerUrl`, `owner` and the secret `token` (scopes `write:repository`, `write:organization`, `write:user`, `write:issue`).
+
+## Repositories
+
+Project → **Connections & Repos** → add a repository → choose the Local Git connection:
+
+- **Add** an existing repository from the list, or
+- **Create and add**: a new private repository with a first commit on `main`, added to the project right away.
+
+A project has at most 20 repositories. A repository stores no token. Each repository row links to its page in Local Git. Clone it like any remote:
+
+```bash
+git clone http://localhost:3300/my-team/my-repo.git
+```
+
+## Pull requests
+
+Pull requests are never implicit. A run-based workflow adds `local_git.create_pull_request` as an action; an orchestrated workflow uses the `pull_request_open` tool, when `agent.orchestrator.connections` grants `pull_requests: [open]`. A draft opens with Gitea's `WIP:` title prefix, and a second request for the same branches reuses the open one.
+
+## Moving to a remote later
+
+Local Git is a normal Git server. Push everything to the new remote, add the repository from the new provider's connection, and remove the Local Git one from the project.
+
+```bash
+git clone --mirror http://localhost:3300/my-team/my-repo.git
+cd my-repo.git && git push --mirror https://github.com/my-org/my-repo.git
+```
+
+## Limits
+
+- Merging or closing a pull request in Local Git is not reported back to AgentFlow. There are no triggers.
+- No SSH: Git runs over HTTP(S).

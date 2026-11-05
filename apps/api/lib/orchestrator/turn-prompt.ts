@@ -1,8 +1,17 @@
 import {
+  OrchestratorMessageKind,
   OrchestratorMessageOrigin,
+  OrchestratorMessageVia,
   OrchestratorTicketChange,
   OrchestratorToolName,
+  readOrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
+import {
+  type OrchestratorGrantSet,
+  OrchestratorPageAccess,
+  OrchestratorSourceOperation,
+  pageKeysWith,
+} from "@repo/api/src/types/orchestrator-grants";
 import type { ComputeTargetCapabilities } from "@repo/api/src/types/runner-capabilities";
 import { WORKFLOW_INSTRUCTIONS_MAX } from "@repo/api/src/types/workflow";
 import type { ConversationChannel } from "./channel";
@@ -35,6 +44,8 @@ export type TurnPromptInput = {
   workflowName: string;
   workflowDescription: string;
   rules: string;
+  /** What the orchestrator may write (agent.orchestrator.connections). */
+  grants: OrchestratorGrantSet;
   channel: ConversationChannel | null;
   caseMarkdown: string;
   messages: TurnPromptMessage[];
@@ -59,6 +70,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "Your rules",
       input.rules.trim().slice(0, WORKFLOW_INSTRUCTIONS_MAX) || "(none)"
     ),
+    section("Your writes", describeWrites(input.grants)),
     section("This conversation", describeChannel(input.channel)),
     section("The case", input.caseMarkdown.slice(0, CASE_MAX)),
     section("Runners", describeRunners(input.runners)),
@@ -90,11 +102,13 @@ ${intro}People ask you things where they work (a ticket, a comment thread, a Tea
 - The project work is done by runners: each declares its commands in its AGENTFLOW.md (${OrchestratorToolName.RunnersList} shows them). Send a runner a command with ${OrchestratorToolName.TaskRun}; never claim results you did not get.
 - When a request needs several runners (requirements from BA, tests from QC), start their tasks in the same turn, then ${OrchestratorToolName.WaitFor} all of them and answer once with what they found.
 - To ask about work an earlier task did (its plan, its findings), run a task with resumeTaskId and fork: true: its session answers with all it knew, and stays as it was. To answer the questions a task asked, resume it (without fork) with the answers.
-- ${OrchestratorToolName.Reply} posts in this conversation's thread. Be brief and concrete; say what you are doing when work will take a while.
+- ${OrchestratorToolName.Reply} posts in this conversation's thread (when comment is granted; see Your writes). Be brief and concrete; say what you are doing when work will take a while.
 - Answer each comment in its own thread: pass the <message> ref as replyTo. When a comment's answer needs a task, pass that comment's ref as ${OrchestratorToolName.TaskRun} replyTo: the wait results, ${OrchestratorToolName.TaskGet} and the case show it, and you reply with that replyTo when the result comes (several comments answered by tasks: each answer to its own ref). A ticket change (no ref) is answered with a new comment: no replyTo.
-- A task's files (what its command declares with attach in AGENTFLOW.md, e.g. PRD-<KEY>.md) come back with its result: name and size in ${OrchestratorToolName.TaskGet}, the wait results and the case. Attach them to a ${OrchestratorToolName.Reply} with attachments [{taskId, name}] (they go on the ticket and show under the comment); hand text files to a later task with ${OrchestratorToolName.TaskRun} files [{taskId, name}]. Never paste a file into a comment, and say so when a file you expected is missing or was not collected.
+- A task's files (what its command declares with attach in AGENTFLOW.md, e.g. PRD-<KEY>.md) come back with its result: name and size in ${OrchestratorToolName.TaskGet}, the wait results and the case. When attach is granted, attach them to a ${OrchestratorToolName.Reply} with attachments [{taskId, name}] (they go on the ticket and show under the comment); hand text files to a later task with ${OrchestratorToolName.TaskRun} files [{taskId, name}]. Never paste a file into a comment, and say so when a file you expected is missing or was not collected.
+- Documents live on Confluence when your rules say so and the page grants allow it: ${OrchestratorToolName.PagePublish} a task's file (the case lists Documents with their page ids; pass page to update the same page), ${OrchestratorToolName.PageGet} to read a page before answering about it, and hand a page's current content (people may have edited it) to a task with ${OrchestratorToolName.TaskRun} files [{page, name}]. Comment the link instead of attaching the file.
 - Keep what matters for later in the case's notes (${OrchestratorToolName.CaseUpdateNotes}): decisions, open questions, what was asked of whom.
 - Tasks are stopped only with ${OrchestratorToolName.TaskCancel}, and only in a turn that handles a ticket change this workflow's cancelOn lists (${cancelOn.length > 0 ? cancelOn.join(", ") : "none: you never cancel"}); a comment, question or reply never stops a task.
+- A message of kind ${OrchestratorMessageKind.CaseNotify} comes from the case of another item of this workflow (e.g. a blocker that was resolved): read your item with ${OrchestratorToolName.SourceItemGet} and act on its current status as your rules say. ${OrchestratorToolName.CaseNotify} sends such a message to another item's case.
 - When a request is about another case (another ticket), say so instead of guessing.`;
 }
 
@@ -175,16 +189,115 @@ function describeRunners(runners: ComputeTargetCapabilities[]): string {
 }
 
 function formatMessage(message: TurnPromptMessage): string {
-  const from =
-    message.origin === OrchestratorMessageOrigin.Internal
-      ? "AgentFlow"
-      : (message.actor ?? "someone");
+  const viaAgentFlow =
+    readOrchestratorMessageVia(message.payload) ===
+    OrchestratorMessageVia.AgentFlow;
+  const from = messageSender(message, viaAgentFlow);
+  const via = viaAgentFlow ? ` via="${OrchestratorMessageVia.AgentFlow}"` : "";
   const ref = message.externalRef
     ? ` ref="${escapeAttribute(message.externalRef)}"`
     : "";
-  return `<message from="${escapeAttribute(from)}" kind="${message.kind}"${ref} at="${message.createdAt.toISOString()}">\n${message.text.slice(0, MESSAGE_MAX)}\n</message>`;
+  return `<message from="${escapeAttribute(from)}" kind="${message.kind}"${via}${ref} at="${message.createdAt.toISOString()}">\n${message.text.slice(0, MESSAGE_MAX)}\n</message>`;
 }
 
 function escapeAttribute(value: string): string {
   return value.replaceAll('"', "'").replaceAll("<", "").replaceAll(">", "");
+}
+
+function messageSender(
+  message: TurnPromptMessage,
+  viaAgentFlow: boolean
+): string {
+  if (message.origin === OrchestratorMessageOrigin.Internal) {
+    return "AgentFlow";
+  }
+  const actor = message.actor ?? "someone";
+  return viaAgentFlow ? `${actor} (AgentFlow)` : actor;
+}
+
+function describeWrites(grants: OrchestratorGrantSet): string {
+  const granted = [
+    ...describeSourceWrites(grants),
+    ...describePageWrites(grants),
+    ...(grants.pullRequestOpen
+      ? [`- Open pull requests: ${OrchestratorToolName.PullRequestOpen}.`]
+      : []),
+  ];
+  const notGranted = notGrantedWrites(grants);
+  const lines: string[] = [];
+  if (granted.length === 0) {
+    lines.push("You only read the ticket.");
+  } else {
+    lines.push("You may write:", ...granted);
+  }
+  if (notGranted.length > 0) {
+    lines.push(
+      "",
+      `Not granted: ${notGranted.join(", ")} — a call is refused; ask people to do it, e.g. move the ticket.`
+    );
+  }
+  lines.push(
+    "",
+    `A message from AgentFlow (the case page) is answered with ${OrchestratorToolName.Reply} on the case page; it needs no grant. Post it on the ticket too only when your rules say so (${OrchestratorToolName.Reply} where: thread).`
+  );
+  return lines.join("\n");
+}
+
+function describeSourceWrites(grants: OrchestratorGrantSet): string[] {
+  const { source } = grants;
+  const lines: string[] = [];
+  if (source.has(OrchestratorSourceOperation.Comment)) {
+    lines.push(
+      `- Comment on the ticket: ${OrchestratorToolName.Reply}, ${OrchestratorToolName.EditReply}, ${OrchestratorToolName.RequestDecision}.`
+    );
+  }
+  if (source.has(OrchestratorSourceOperation.Attach)) {
+    lines.push(
+      `- Attach task files to a comment: ${OrchestratorToolName.Reply} attachments.`
+    );
+  }
+  if (source.has(OrchestratorSourceOperation.Transition)) {
+    lines.push(
+      `- Change the ticket's status: ${OrchestratorToolName.SourceItemTransition}.`
+    );
+  }
+  if (source.has(OrchestratorSourceOperation.Label)) {
+    lines.push(
+      `- Add or remove labels: ${OrchestratorToolName.SourceItemLabel}.`
+    );
+  }
+  if (source.has(OrchestratorSourceOperation.Link)) {
+    lines.push(`- Add links: ${OrchestratorToolName.SourceItemLink}.`);
+  }
+  return lines;
+}
+
+function describePageWrites(grants: OrchestratorGrantSet): string[] {
+  const lines: string[] = [];
+  const readable = pageKeysWith(grants, OrchestratorPageAccess.Read);
+  const publishable = pageKeysWith(grants, OrchestratorPageAccess.Publish);
+  if (readable.length > 0) {
+    lines.push(
+      `- Read pages (${readable.join(", ")}): ${OrchestratorToolName.PageGet}, and page files for ${OrchestratorToolName.TaskRun}.`
+    );
+  }
+  if (publishable.length > 0) {
+    lines.push(
+      `- Publish pages (${publishable.join(", ")}): ${OrchestratorToolName.PagePublish}.`
+    );
+  }
+  return lines;
+}
+
+function notGrantedWrites(grants: OrchestratorGrantSet): string[] {
+  const missing: string[] = [];
+  for (const operation of Object.values(OrchestratorSourceOperation)) {
+    if (!grants.source.has(operation)) {
+      missing.push(operation);
+    }
+  }
+  if (!grants.pullRequestOpen) {
+    missing.push("pull request open");
+  }
+  return missing;
 }

@@ -122,6 +122,8 @@ describe("fetchJiraIssue", () => {
           size: 48_213,
         },
       ],
+      blockedBy: [],
+      blocks: [],
     });
     const issueQuery = requestQuery(fake.requests[0]);
     expect(issueQuery.get("fields")).toBe("*all,-comment");

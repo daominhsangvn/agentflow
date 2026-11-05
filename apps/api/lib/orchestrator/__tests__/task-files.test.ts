@@ -29,6 +29,7 @@ import {
   inputFileName,
   taskFilesFromStep,
 } from "../task-files";
+import { mergeTaskResult } from "../task-result";
 
 const TASK_ID = "11111111-1111-4111-8111-111111111111";
 const GOOD_KEY = "org-1/loops/loop-1/step-attachments/0-a.md";
@@ -109,5 +110,27 @@ describe("inputFileName", () => {
   it("never returns a dots-only name", () => {
     expect(inputFileName("a/..")).toBe("file");
     expect(inputFileName("")).toBe("file");
+  });
+});
+
+describe("mergeTaskResult", () => {
+  it("keeps the page inputs a later write would erase", () => {
+    const pageInputs = [
+      {
+        pageId: "1",
+        title: "T",
+        url: "u",
+        version: 1,
+        name: "PRD-LD-6.md",
+        content: "# PRD",
+        size: 5,
+      },
+    ];
+    const merged = mergeTaskResult(
+      { reply: null, questions: [], error: null, pageInputs },
+      { reply: "done", questions: [], error: null }
+    );
+    expect(merged.pageInputs).toEqual(pageInputs);
+    expect(merged.reply).toBe("done");
   });
 });

@@ -11,7 +11,7 @@ import { createUniqueName } from "./helpers/utils";
 import { expect, test } from "./test";
 
 /**
- * Adding a project connection (Project → Integrations). Regression: a Jira
+ * Adding a project connection (Project → Connections & Repos). Regression: a Jira
  * project key typed without Enter is kept when the input loses focus; that
  * used to put a chip above the input on mousedown of "Add connection",
  * pushing the button down so the click never landed and nothing was saved.
@@ -58,7 +58,7 @@ test("project connections: a project key typed without Enter is saved", {
     });
 
     await page.goto(`/${orgSlug}/projects/${project.id}`);
-    await page.getByRole("radio", { name: "Integrations" }).click();
+    await page.getByRole("radio", { name: "Connections & Repos" }).click();
     await expect(page).toHaveURL(INTEGRATIONS_TAB_RE);
     await page.getByRole("button", { name: "Add connection" }).click();
     await page.getByRole("combobox", { name: "Connection" }).click();

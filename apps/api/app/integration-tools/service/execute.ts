@@ -14,6 +14,7 @@ import {
   type ReadResult,
   RetryableSourceError,
   type SourceItem,
+  type SourceItemRelation,
 } from "@/lib/integrations/types";
 import { isRecord } from "@/lib/type-guards";
 import { scrubProviderError } from "@/lib/workflows/engine/errors";
@@ -353,5 +354,16 @@ export function toItemOutput(item: SourceItem): JsonObject {
       contentType: attachment.mimeType,
       size: attachment.size,
     })),
+    blockedBy: (item.blockedBy ?? []).map(toRelationOutput),
+    blocks: (item.blocks ?? []).map(toRelationOutput),
+  };
+}
+
+function toRelationOutput(relation: SourceItemRelation): JsonObject {
+  return {
+    key: relation.key,
+    title: relation.title,
+    status: relation.status,
+    url: relation.url,
   };
 }

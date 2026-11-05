@@ -108,3 +108,9 @@ export const ADO_ATTACHMENT_RELATION = "AttachedFile";
 
 /** Relation type of a web link on a work item. */
 export const ADO_HYPERLINK_RELATION = "Hyperlink";
+
+/** Relation to a predecessor: the work item this one waits for. */
+export const ADO_PREDECESSOR_RELATION = "System.LinkTypes.Dependency-Reverse";
+
+/** Relation to a successor: the work item waiting for this one. */
+export const ADO_SUCCESSOR_RELATION = "System.LinkTypes.Dependency-Forward";

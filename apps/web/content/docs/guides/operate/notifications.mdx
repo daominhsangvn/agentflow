@@ -1,0 +1,51 @@
+---
+title: "Email notifications"
+description: "Email people when a run needs input or ends, with the agentflow.email action. There is no in-app inbox."
+---
+
+AgentFlow notifies by email. The **Send email** action (`agentflow.email`) in a workflow's `actions` sends a run event through the server's mail relay. There is no in-app Inbox.
+
+Actions belong to runs, so this works for workflows that start runs. An orchestrated workflow starts no runs and its actions never run: have its rules ask the orchestrator to reply on the ticket instead ([Orchestrator](/docs/guides/setup/orchestrator)).
+
+## Example
+
+```yaml
+actions:
+  - on: input.needed                   # a step's questions, an approval, a review
+    type: agentflow.email
+    config:
+      to: [ada@acme.dev, ops@acme.dev] # required, at most 20
+      cc: [lead@acme.dev]              # optional
+      subject: "[AgentFlow] {{source.key}} needs you"   # optional template
+      body: |                          # optional template, plain text
+        {{summary}}
+
+        Answer in AgentFlow: {{run.url}}
+```
+
+## Options
+
+| Key | Required | Meaning |
+|---|---|---|
+| `to` | yes | Email addresses, 1 to 20 |
+| `cc` | no | Email addresses, up to 20 |
+| `subject` | no | Template, up to 300 characters. Default: what the event asks for ("Your answer is needed", "Approval needed", "Review needed") and the item key |
+| `body` | no | Plain-text template, up to 20,000 characters. Default `{{summary}}` (the questions or the approval asked for, with the run link), then the workflow, item and run links |
+
+`{{variable}}` placeholders work as in other actions ([Triggers and actions](/docs/guides/setup/triggers-and-actions)).
+
+## Events
+
+`input.needed` fires when a run waits for people: a plan or step with open questions, an approval step, or a review round. Any other run event works too, for example `workflow.failed`.
+
+## When nothing arrives
+
+- Without `SMTP_URL` the action is **skipped**, with the reason on the run's Actions card. The sender is `EMAIL_FROM`. The same relay sends invitations and password resets.
+- A relay that cannot be reached or answers 4xx is retried like any action. A 5xx refusal fails it. Retries keep the same `Message-ID`.
+
+SMTP setup: [Email](/docs/integrations/email).
+
+## See also
+
+- [Runs](/docs/guides/operate/runs)
+- [Triggers and actions](/docs/guides/setup/triggers-and-actions)

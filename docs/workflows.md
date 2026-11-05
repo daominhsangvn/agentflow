@@ -64,8 +64,9 @@ in the workflow. See "Project repositories" below.
 |---|---|---|
 | Provider | `apps/api/lib/integrations/providers/<key>/provider.ts` | Implements `IntegrationProviderDefinition` (`apps/api/lib/integrations/types.ts`). Declares connection fields, inbound handling (webhook / poll), source item fetching, trigger types and action types. Never touches the database. |
 | Connection | `integration_connections` | An authenticated account in a provider (a Jira site + bot API token, an ADO org + PAT, a Teams Workflows URL, a webhook endpoint). Secrets sealed with AES-256-GCM. One connection serves any number of workflows. |
-| Project connection | `project_connections`, `project_connection_scopes` | A project's use of an organization connection under a `key` (slug, unique per project, never changes): what workflow and process YAML name. `settings` narrow what the project works on (Jira `projectKeys`, Azure DevOps `projects`); each such container belongs to one project (scope `<provider>:<origin>:<container>`), whose project connections may share it, one connection each ("One bot per workflow"). The account is always the connection's: an organization connection is one account (one Jira bot) and is added to a project at most once. Org admins only (Project → Integrations). |
+| Project connection | `project_connections`, `project_connection_scopes` | A project's use of an organization connection under a `key` (slug, unique per project, never changes): what workflow and process YAML name. `settings` narrow what the project works on (Jira `projectKeys`, Azure DevOps `projects`); each such container belongs to one project (scope `<provider>:<origin>:<container>`), whose project connections may share it, one connection each ("One bot per workflow"). The account is always the connection's: an organization connection is one account (one Jira bot) and is added to a project at most once. Org admins only (Project → Connections & Repos). |
 | Delivery | `integration_deliveries` | A verified inbound event batch (webhook request, poll result, manual run). Unique per `(connection, deliveryId)`, so provider retries are absorbed. |
+| Workflow event | `workflow_events` | What ingest did with one inbound event for one workflow (result, run or case); the payload stays on the delivery. Kept 30 days. |
 | Workflow | `workflows` | Name, project, run-as user, agent config, ≥1 trigger, ≥0 actions. |
 | Trigger | `workflow_triggers` | `(project, project connection, type, config)`; the built-in HTTP endpoint has no project connection. `type` is a provider trigger key such as `jira.issue_assigned`. A workflow may have several triggers on different connections. |
 | Action | `workflow_actions` | `(connection key?, type, config, stage, events[], continueOnError, position)`; the key is resolved in the run's project. `type` is a provider action key such as `jira.add_comment`, or `agentflow.instruction` (`config.instruction`, carried out by an agent: "Actions" below). Stage `pre`: runs on `workflow.triggered`, in order, before the agent team. Stage `post`: runs on the subscribed run events. `position` is the action's place in the workflow's one action list. No key: the run chooses the connection ("Actions" below); `connection_id` is set only for the workflow's built-in HTTPS call. |
@@ -80,7 +81,7 @@ Shared wire contracts: `packages/api/src/types/integration.ts` and
 ## Project connections and how a connection is chosen
 
 Workflows never name organization connections. An org admin adds them to a
-project (Project → Integrations, `POST /projects/{id}/connections`) under a
+project (Project → Connections & Repos, `POST /projects/{id}/connections`) under a
 key; the YAML names that key. Three rules decide every connection a run uses
 (`engine/action-connection.ts`, `engine/instruction-action.ts`):
 
@@ -113,8 +114,8 @@ outside the trigger's project connection.
 
 An organization connection is one account. For one Jira bot per workflow
 (BA, Dev, QC), an admin adds one Jira connection per bot (same site, each
-with its own email and API token) in Settings → Integrations, then adds them
-to the project together (Project → Integrations → Add connection, several
+with its own email and API token) in Connections (sidebar), then adds them
+to the project together (Project → Connections & Repos → Add connection, several
 checked) with the same Jira project keys, each under its own key
 (`jira-ba`, `jira-dev`, `jira-qc`). Each workflow's trigger names its key.
 Another project claiming the same Jira projects is still refused (409).
@@ -304,7 +305,7 @@ actions:                               # optional; one list, run in order
 
 ### Connection configuration (YAML)
 
-Connections (Settings → Compute & Integrations → Connections) are written as
+Connections (Connections (sidebar)) are written as
 YAML too, in the same editor
 (`packages/app/integrations/components/integration-connection-dialog.tsx`,
 `integrations/lib/connection-yaml.ts`, `connection-yaml-completions.ts`):
@@ -568,7 +569,15 @@ returned to the caller right away as a 400; nothing is retried.
      treat as existing).
 4. Update the delivery: outcome `accepted` with `runCount`, or `ignored` with
    the reason; `lastDeliveryAt` on the connection.
-5. `waitUntil(advanceRun(runId))` for every created or resumed run.
+5. Record the events: per event and workflow, one `workflow_events` row with
+   result `created | resumed | duplicate | active | signaled | replied |
+   case_message | filtered` (one `createMany` after the delivery update; a
+   failure is logged and never fails ingest). `filtered` means a trigger of
+   that type exists but its config or `matches` rejected the event; a workflow
+   with no trigger of that type gets no row. Replies, signals and orchestrator
+   threads are recorded regardless of trigger matching.
+   Code: `lib/workflows/engine/workflow-events.ts`.
+6. `waitUntil(advanceRun(runId))` for every created or resumed run.
 
 ## Run state machine
 
@@ -1457,6 +1466,7 @@ every other request), never overlapping a job with itself:
 | `GET /cron/workflows` | `WORKFLOW_TICK_SECONDS` (default 10 s) |
 | `GET /cron/timeout-loops` | 5 min (existing reaper; also releases BLOCKED loops) |
 | `GET /cron/reconcile-stale-sessions` | 1 h (ends agent sessions a machine stopped reporting, see self-hosting.md) |
+| `GET /cron/prune-inbound-history` | 24 h (deletes `workflow_events` and `integration_deliveries` older than 30 days) |
 
 If `CRON_SECRET` is unset the runner generates an ephemeral one for the
 process. `SELF_HOSTED_CRON_DISABLED=true` turns the runner off (for example
@@ -1519,6 +1529,8 @@ create/update responses are admin-only and always full).
 | PATCH | `/workflows/{id}` | `SetWorkflowEnabledInput` (`{enabled}`) → `Workflow`. `false` always succeeds, without any dependency check; `true` re-validates the stored workflow as the caller (400 with the reason) |
 | DELETE | `/workflows/{id}` | → `{deleted: true}` |
 | GET | `/workflows/{id}/runs?cursor=&limit=` | → `WorkflowRunsResponse` |
+| GET | `/workflows/{id}/events?cursor=&limit=` | → `WorkflowEventsResponse` (newest first, any member, limit ≤ 100; shown in the workflow's Events tab) |
+| GET | `/workflows/{id}/events/{eventId}` | → `WorkflowEventPayload` (org admins) |
 | POST | `/workflows/{id}/runs` | `StartWorkflowRunInput` → `WorkflowRunSummary` |
 | GET | `/workflow-runs?cursor=&limit=&status=` | → `WorkflowRunsResponse` (all workflows) |
 | GET | `/workflow-runs/{runId}` | → `WorkflowRunDetail` |
@@ -1895,6 +1907,14 @@ connection, nothing is allowed.
 | `confluence.comment` | write | A comment below the page, or a reply (`replyTo`) to a footer or inline comment of that page. |
 | `confluence.resolve_comment` | write | Resolves an inline comment of the page (its body is sent back unchanged); a resolved one is not an error. |
 
+Attachments: a page's files are uploaded with `PUT
+/wiki/rest/api/content/{id}/child/attachment` (multipart; an existing file of
+the same name gets a new version), and the page body shows images with ADF
+media blocks. This needs the scopes `read:attachment:confluence` and
+`write:attachment:confluence` on a scoped token. It is used by the
+orchestrator's `page_publish` (see `orchestrator.md`, "Confluence documents"),
+not by an action or an agent tool.
+
 Reads are agent tools on any granted key (`wiki: read`); writes are granted by
 name (`wiki: [confluence.update_page, confluence.comment]`) and are typed
 workflow actions too, e.g. publish a plan with `confluence.create_page` on
@@ -1953,7 +1973,7 @@ to Teams Bot Connector hosts (`smba.trafficmanager.net`,
 
 ### Webhook (`webhook`)
 
-Built in, not an integration: it is not offered in Settings → Connections.
+Built in, not an integration: it is not offered in Connections (sidebar).
 Every workflow can use it as its **HTTP request** trigger and as an **HTTPS
 request** pre/post action, both written `connection: http` in the workflow
 YAML. Saving the workflow creates one webhook
@@ -1998,7 +2018,7 @@ failed delivery).
 
 ## Project repositories
 
-Project → Integrations (a tab on the project page) lists the project's
+Project → Connections & Repos (a tab on the project page) lists the project's
 repositories and adds new ones: pick a connection whose provider has the
 `repositories` capability, search the repositories it can access, add.
 Adding and removing repositories are org-admin
@@ -2030,7 +2050,7 @@ post actions after it (e.g. a Jira comment with `{{pr.url}}` or
 A loop on a document of a project with project repositories works in all of
 those repositories, as equals (`apps/api/app/projects/project-repository-checkouts.ts`):
 
-- **Agent instructions.** Project → Overview holds the project's agent
+- **Agent instructions.** Project → Instructions holds the project's agent
   instructions (`PUT /projects/{id}/agent-instructions`, org admins; stored
   as `agentInstructions` in the project's `settings`). They are project-wide
   context, not only about repositories: the project's goal, domain terms,
@@ -2072,7 +2092,7 @@ those repositories, as equals (`apps/api/app/projects/project-repository-checkou
   for that loop's repositories only, and refuses once the loop has finished
   (`apps/api/lib/loops/loop-git-credential.ts`,
   `apps/desktop/src/server/operations/loop-git-access.ts`).
-- **Runners.** Project → Integrations → Runners lists the computers the
+- **Runners.** Project → Agents → Agents lists the computers the
   project's loops run on (`settings.runnerIds`, `GET/PUT
   /projects/{id}/runners`, org admins). Every runner of a project needs the
   toolchains of all its repositories; headless runners report the ones they

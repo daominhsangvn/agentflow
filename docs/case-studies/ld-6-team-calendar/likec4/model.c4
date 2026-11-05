@@ -1,0 +1,526 @@
+// The LD-6 case study model: people, the systems they use, and AgentFlow inside out.
+// Levels: L1 context → L2 AgentFlow → L3 Orchestrator Agent / API / Agents → L4 one agent.
+
+model {
+
+  // ── People ────────────────────────────────────────────────────────────────
+  team = person 'Team' {
+    description 'BA, Dev, QC and the admin: they move the ticket, answer, review and merge'
+  }
+  admin = person 'Admin' {
+    description 'Moves the ticket through its statuses and answers the questions'
+  }
+  ba = person 'BA' {
+    description 'Reviews the PRD on Confluence, answers requirement questions'
+  }
+  dev = person 'Dev' {
+    description 'Reviews the implementation plan and the code pull request, merges it'
+  }
+  qc = person 'QC' {
+    description 'Reviews the test plan, the test runs and the test pull request, merges it'
+  }
+
+  // ── Tools the team already uses ───────────────────────────────────────────
+  jira = system 'Jira' {
+    description 'Ticket LD-6 "As a manager I want a calendar of who in my team is off": statuses, comment threads'
+    link https://shawn-team.atlassian.net/browse/LD-6
+  }
+  confluence = system 'Confluence' {
+    description 'Space LD: the ticket page and its PRD, Implementation plan, Test plan and Test run pages'
+
+    ticketPage = document 'LD-6 · Team calendar' {
+      description 'The ticket page: links to every document of the ticket'
+    }
+    prdPage = document 'LD-6 · PRD' {
+      description 'Written by the BA Agent; versions v1 → v4; people edit it too'
+    }
+    planPage = document 'LD-6 · Implementation plan' {
+      description 'Written by the Dev Agent from the PRD page'
+    }
+    testPlanPage = document 'LD-6 · Test plan' {
+      description 'Written by the QC Agent from the PRD page; v1 → v2'
+    }
+    testRunPages = document 'LD-6 · Test run N' {
+      description 'One child page of the Test plan per test round, results + screenshots'
+    }
+  }
+  git = system 'Local Git' {
+    description 'Repositories and pull requests (Gitea)'
+
+    appRepo = store 'leavedesk-app' {
+      description 'The application; branch LD-6 → PR #6'
+    }
+    qaRepo = store 'leavedesk-qa' {
+      description 'QC toolkit, Playwright specs and results → PR #10'
+    }
+    knowledgeRepo = store 'leavedesk-knowledge' {
+      description 'BA toolkit and the knowledge base; archived PRD → PR #6'
+    }
+  }
+
+  // ── AgentFlow ─────────────────────────────────────────────────────────────
+  agentflow = system 'AgentFlow' {
+    description 'Human-governed delivery: an Orchestrator Agent coordinates the BA, Dev and QC Agents; people review at milestones'
+
+    project = container 'Project LeaveDesk (PRO-1)' {
+      description 'What the team sets up once: connections, the Jira statuses, the agents and the workflow'
+
+      connJira = component 'Jira connection' {
+        description 'Project key LD · webhook for status changes and comments · bot account'
+      }
+      connConfluence = component 'Confluence connection' {
+        description 'Space LD · the bot can create and edit pages and add attachments'
+      }
+      connGit = component 'Local Git repositories' {
+        description 'leavedesk-app (code) · leavedesk-qa (QC toolkit) · leavedesk-knowledge (BA toolkit)'
+      }
+      statuses = component 'Jira statuses' {
+        description 'To Do → PRD → Planning → Implement → Testing → Review → Done'
+      }
+      agentSetup = component 'Agent setup' {
+        description 'The Orchestrator Agent (no repository); the BA and QC Agents run automatically, the Dev Agent on the developer’s own machine'
+      }
+    }
+
+    workflow = container 'LeaveDesk workflow' {
+      description 'Orchestrated workflow: triggers (status changed, mention), the process rules in natural language, settings (debounce, cancelOn)'
+      technology 'workflow · agent.mode: orchestrated'
+
+      // The rules as they are in the workflow (agent.instructions), section by section.
+      // Quotes are verbatim, except "runner" reads "agent".
+      rRoles = rule 'Roles' {
+        description 'What BA, Dev, QC and people do; follow what each command declares'
+
+        qWho = quote 'Who does what' {
+          description '“BA: writes the PRD … Dev: writes the implementation plan, implements it and opens its own pull request (never merges) … QC: designs the test plan; separately, automates and runs it …”'
+        }
+        qDeclared = quote 'Follow the declarations' {
+          description '“The agents list says which agent does what; follow what each command declares (needs, produces, files).”'
+        }
+      }
+      rTicket = rule 'The ticket' {
+        description 'Agents do not see Jira: the ticket goes into every task prompt'
+
+        qTicket = quote 'The ticket in the prompt' {
+          description '“Before the first task of a ticket (and whenever the ticket’s description changed), read the ticket with source_item_get and put it in the task prompt as people wrote it.”'
+        }
+      }
+      rDocuments = rule 'Documents on Confluence' {
+        description 'One page per document under the ticket page; versions on the same page; people’s edits kept'
+
+        qPages = quote 'One page per document' {
+          description '“Every ticket has one page “<KEY> · <summary>” … Child pages: PRD, Implementation plan, Test plan. Each test round is a child page of the test plan.”'
+        }
+        qSamePage = quote 'Same page, new version' {
+          description '“Later versions update the SAME page: pass page (the page id from the case’s Documents).”'
+        }
+        qCurrent = quote 'The page as it is now' {
+          description '“Before a task works from a document, hand it the page’s CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence).”'
+        }
+        qEdited = quote 'Keep people’s edits' {
+          description '“If page_publish refuses because people edited the page: run the task again with that page in its files so their edits are kept, then publish.”'
+        }
+        qReadFirst = quote 'Read before answering' {
+          description '“To answer a question about a document, read the page first (page_get).”'
+        }
+      }
+      rFlow = rule 'Flow (Jira status order)' {
+        description 'To Do → PRD → Planning → Implement → Testing → Review → Done: what each status starts'
+
+        qOrder = quote 'One line per status' {
+          description '“PRD: BA writes the PRD … Planning: … Implement: Dev implements from the plan page … Testing: QC automates and runs the approved tests … Review: start nothing new … Done: close the case.”'
+        }
+        qParallel = quote 'Planning at the same time' {
+          description '“Planning: at the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-<KEY>.md in their files.”'
+        }
+        qChanges = quote 'Changes resume the task' {
+          description '“When people ask for changes, resume the BA task with their feedback and the current PRD page in its files, publish the same page and comment what changed.”'
+        }
+        qFork = quote 'Questions on the code fork' {
+          description '“Review: … answer in the thread from the agent that knows (Dev: resume its implementation task with fork, or its read-only command …).”'
+        }
+      }
+      rQuestions = rule 'Questions and answers' {
+        description 'Every status: each comment in its own thread, answers become decisions'
+
+        qThread = quote 'Its own thread' {
+          description '“Answer each comment in its own thread (replyTo).”'
+        }
+        qWhoKnows = quote 'Ask the agent that wrote it' {
+          description '“A question about the PRD, the plan, the test plan or the results: read the page, ask the agent that wrote it when needed, answer in the thread with the page link.”'
+        }
+        qPartial = quote 'Resume when all are answered' {
+          description '“A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.”'
+        }
+        qDecision = quote 'Answers are decisions' {
+          description '“A confirmed answer is a decision: pass it in the prompt of later tasks.”'
+        }
+        qNeverStops = quote 'A question never stops a task' {
+          description '“A question never stops or restarts a running task.”'
+        }
+      }
+      rBlocked = rule 'Blocked tasks' {
+        description 'A BLOCKED answer did nothing: say what is missing, pass it, run once more'
+
+        qBlocked = quote 'BLOCKED: pass the input' {
+          description '“A task answer that starts with BLOCKED: did nothing. Comment what is missing and who produces it. If the missing document exists, pass it in the task’s files and run the task again (once); otherwise wait for it.”'
+        }
+      }
+      rStatusWork = rule 'Work belongs to its status' {
+        description 'Writing tasks only for the current status; reading tasks in every status'
+
+        qCurrentStatus = quote 'Only the current status' {
+          description '“Start a writing task only for the work of the ticket’s CURRENT status … If someone asks for work of another status, do not start it. Reading tasks are allowed in every status.”'
+        }
+      }
+      rComingBack = rule 'Coming back to a status' {
+        description 'Start nothing; report what exists; act on a person’s instruction'
+
+        qNothing = quote 'Start NOTHING' {
+          description '“When the ticket moves back to a status whose work was already done in this case, start NOTHING on your own. Comment what that status already produced and ask what to change.”'
+        }
+        qInstruction = quote 'Resume on an instruction' {
+          description '“Start the work only when a person says what to do in a comment (e.g. “fix D-1”), then resume the task that did that work with their instruction.”'
+        }
+      }
+      rCancelling = rule 'Cancelling' {
+        description 'Only a status change cancels; forward keeps tasks; the final status counts'
+
+        qOnlyStatus = quote 'Only a status change' {
+          description '“Only a status change cancels tasks.”'
+        }
+        qForward = quote 'Forward keeps tasks' {
+          description '“Moving forward in the flow keeps running tasks (say they are still running).”'
+        }
+        qFinal = quote 'The final status' {
+          description '“Several changes in one turn: act on the final status only.”'
+        }
+      }
+      rLanguage = rule 'Language' {
+        description 'Vietnamese by default; a comment is answered in its language'
+
+        qLanguage = quote 'Answer in its language' {
+          description '“A comment written in another language is answered in that language.”'
+        }
+      }
+    }
+
+    api = container 'AgentFlow API' {
+      description 'Receives events, keeps every case, talks to Jira, Confluence and Git'
+
+      inbound = component 'Inbound events' {
+        description 'Jira webhooks: status changed, comment created; ignores the bot’s own changes'
+      }
+      caseStore = component 'Case store' {
+        description 'One case per ticket: conversations (one per thread), messages, tasks, waits, documents, decisions'
+        technology 'PostgreSQL'
+      }
+      engine = component 'Engine tick' {
+        description 'Every 10 s: settles tasks, fires waits and deadlines, starts the due turns'
+      }
+      fileStore = component 'Task files' {
+        description 'Files the agents leave for the ticket (PRD-, PLAN-, TESTCASES-, RESULTS-<KEY>.md, screenshots)'
+        technology 'S3 (RustFS)'
+      }
+      integrations = component 'Integrations' {
+        description 'Jira (comments, threads), Confluence (pages, versions, attachments), Git (pull requests)'
+      }
+    }
+
+    orchestrator = container 'Orchestrator Agent' {
+      description 'Reads the rules and the case, decides what to do next, never blocks: every turn ends with a wait'
+      technology 'Claude Code · MCP tools only · no repository'
+
+      debounce = component 'Debounce & supersede' {
+        description 'Waits 20 s for more messages; a newer message stops a running turn and the next turn handles all of them'
+      }
+      turn = component 'Orchestrator Agent' {
+        description 'Decides the next step. AgentFlow runs it once per batch of new messages (a turn): it reads the rules, each agent’s AGENTFLOW.md, CASE.md and the messages (each with its comment ref), acts through its tools and ends with a wait'
+        technology 'one run = one turn'
+      }
+      tools = component 'Orchestrator tools' {
+        description 'task_run · task_get · task_cancel · wait_for · reply (replyTo) · page_publish · page_get · pull_request_open · case notes'
+        technology 'MCP'
+      }
+      guards = component 'Guards' {
+        description 'Declared commands only · read/write mode · needs met (file or page) · same-case files · cancel only on a ticket change · no writes from a superseded turn · Confluence space and edit protection'
+      }
+
+      decides = component 'How it decides' {
+        description 'Seven mechanisms that make every case come out right'
+
+        mContext = component 'Context' {
+          description 'Every turn reads the rules, what each agent declares, CASE.md, the ticket as people wrote it and the new messages, each with its comment ref'
+          technology 'seen in cases 1 · 2'
+        }
+        mSelection = component 'Agent selection' {
+          description 'The role in the rules picks the agent whose AGENTFLOW.md declares that role; its declared commands (description, needs, produces) pick the command; guards refuse undeclared commands, wrong mode, missing inputs'
+          technology 'seen in cases 1 · 2 · 3 · 4'
+        }
+        mConversations = component 'Conversations' {
+          description 'One conversation per thread; a 20 s debounce gathers messages; a newer message supersedes a running turn; each answer goes to its own thread'
+          technology 'seen in cases 6 · 7'
+        }
+        mNeverBlocks = component 'Never blocks' {
+          description 'Tasks run in parallel; every turn ends with a wait (all / any / deadline); the next turn gets the results'
+          technology 'seen in cases 2 · 4'
+        }
+        mResume = component 'Resume the right work' {
+          description 'Answers and fixes resume the task that did the work, with its session; questions fork it so the original stays as it was'
+          technology 'seen in cases 1 · 4 · 5'
+        }
+        mStatus = component 'Status logic' {
+          description 'The final status counts; only a ticket change cancels (cancelOn); coming back to a status starts nothing; work belongs to its status'
+          technology 'seen in cases 4 · 7 · 8'
+        }
+        mDocuments = component 'Documents' {
+          description 'A task gets the Confluence page as it is now; publishing adds a version to the same page and keeps people’s edits'
+          technology 'seen in cases 1 · 2 · 4'
+        }
+      }
+    }
+
+    agents = container 'Agents' {
+      description 'Each agent is a team of Claude Code skills; it declares what it can do in AGENTFLOW.md'
+
+      baAgent = agent 'BA Agent' {
+        description 'Writes the PRD, archives it, researches the policy'
+        technology 'automatic · toolkit leavedesk-knowledge'
+
+        baCapabilities = component 'AGENTFLOW.md (BA)' {
+          description 'What this agent declares it can do: each command with its args, mode, needs, produces and files. The Orchestrator Agent reads it every turn.'
+          technology 'role: BA (LeaveDesk) · toolkit leavedesk-knowledge'
+
+          cResearch = declaration '/leavedesk-research' {
+            description '“Answer a question about the leave policy, decisions, change requests, meetings, earlier requirements or the app, with citations”'
+            technology '<question> · read · produces answer'
+          }
+          cRequirement = declaration '/ba-requirement' {
+            description '“Analyse a ticket into questions and a reviewed PRD; ask again with answers or review feedback to revise”'
+            technology 'analyze <KEY> · write · produces prd · asks · attach PRD-*.md'
+          }
+          cArchive = declaration '/ba-archive' {
+            description '“Archive an approved PRD with its answers, decisions and change requests in the knowledge base; opens a pull request”'
+            technology '<KEY> · write · needs prd · produces archive · push'
+          }
+        }
+        baSkills = component 'BA skills' {
+          description 'requirement-analysis · prd-writing · prd-review (critic) · ba-archive · leavedesk-research'
+        }
+      }
+      devAgent = agent 'Dev Agent' {
+        description 'Writes the implementation plan, implements it with TDD, opens its own pull request'
+        technology 'personal · the developer’s own machine and credentials'
+
+        devCapabilities = component 'AGENTFLOW.md (Dev)' {
+          description 'What this agent declares it can do: each command with its args, mode, needs, produces and files. The Orchestrator Agent reads it every turn.'
+          technology 'role: Dev (LeaveDesk, An) · personal'
+
+          cWritingPlans = declaration '/writing-plans' {
+            description '“Write the implementation plan of a ticket from its PRD”'
+            technology '<ticket-key> · write · needs prd · produces plan · asks · attach PLAN-*.md'
+          }
+          cExecutingPlans = declaration '/executing-plans' {
+            description '“Implement an approved plan with TDD, commit, push and open the PR”'
+            technology '<ticket-key> · write · needs approved-plan · produces code · push · attach pr-body-*.md'
+          }
+          cDebugging = declaration '/systematic-debugging' {
+            description '“Find the root cause of a bug in leavedesk-app before changing code”'
+            technology 'read · produces answer'
+          }
+        }
+        devSkills = component 'Dev skills' {
+          description 'superpowers: writing-plans · executing-plans · test-driven-development · requesting-code-review'
+        }
+      }
+      qcAgent = agent 'QC Agent' {
+        description 'Designs the test plan, automates and runs it, reports each test round'
+        technology 'automatic · toolkit leavedesk-qa · Playwright'
+
+        qcCapabilities = component 'AGENTFLOW.md (QC)' {
+          description 'What this agent declares it can do: each command with its args, mode, needs, produces and files. The Orchestrator Agent reads it every turn.'
+          technology 'role: QC (LeaveDesk) · toolkit leavedesk-qa'
+
+          cQaReview = declaration '/qa-review' {
+            description '“Review or answer questions about a ticket’s test cases and specs (coverage of each AC and rule, expected results)”'
+            technology '<KEY> · read · produces answer'
+          }
+          cQaTest = declaration '/qa-test' {
+            description '“Design the test cases of a ticket from its PRD (no run)”'
+            technology '<KEY> design · write · needs prd · produces testcases · asks · attach TESTCASES-*.md'
+          }
+          cQaRun = declaration '/qa-run' {
+            description '“Run the designed tests of a ticket on its Dev branch (or main once merged); AgentFlow pushes the results, the orchestrator opens the pull request”'
+            technology '<KEY> [fresh | rerun | report] · write · needs testcases · produces results · push · attach RESULTS-*.md, evidence-*/*.png'
+          }
+        }
+        qcSkills = component 'QC skills' {
+          description 'qa-ticket-analysis · qa-test-design · qa-e2e-automation · qa-run-triage · qa-reporting'
+        }
+      }
+    }
+  }
+
+  // ── Relationships ─────────────────────────────────────────────────────────
+  team -> jira 'moves the status, asks, answers'
+  team -> confluence 'reviews and edits the documents'
+  team -> git 'reviews and merges the pull requests'
+  admin -> jira 'moves the status, comments'
+  ba -> jira 'asks, answers'
+  dev -> jira 'asks about the plan and the code'
+  qc -> jira 'asks about the tests'
+  ba -> confluence.prdPage 'reviews, edits'
+  dev -> confluence.planPage 'reviews'
+  qc -> confluence.testPlanPage 'reviews'
+  dev -> git.appRepo 'reviews, merges'
+  qc -> git.qaRepo 'reviews, merges'
+  ba -> git.knowledgeRepo 'reviews, merges'
+
+  jira -[async]-> agentflow.api.inbound 'webhook: status changed, comment'
+  agentflow.api.inbound -> agentflow.api.caseStore 'records a message in the ticket’s case'
+  agentflow.api.engine -> agentflow.api.caseStore 'settles tasks, fires waits'
+  agentflow.api.engine -> agentflow.orchestrator.debounce 'a conversation is due'
+  agentflow.orchestrator.debounce -> agentflow.orchestrator.turn 'starts one turn'
+  agentflow.workflow -> agentflow.orchestrator.turn 'rules and settings'
+  agentflow.orchestrator.turn -> agentflow.orchestrator.tools 'calls'
+  agentflow.orchestrator.tools -> agentflow.orchestrator.guards 'every write is checked'
+  agentflow.orchestrator.tools -> agentflow.api.caseStore 'reads the case, records tasks, waits, documents'
+
+  agentflow.orchestrator.tools -> agentflow.agents.baAgent 'task_run: a declared command + files'
+  agentflow.orchestrator.tools -> agentflow.agents.devAgent 'task_run: a declared command + files'
+  agentflow.orchestrator.tools -> agentflow.agents.qcAgent 'task_run: a declared command + files'
+  agentflow.agents.baAgent -> agentflow.api.fileStore 'leaves PRD-<KEY>.md'
+  agentflow.agents.devAgent -> agentflow.api.fileStore 'leaves PLAN-<KEY>.md, PR body'
+  agentflow.agents.qcAgent -> agentflow.api.fileStore 'leaves TESTCASES-, RESULTS-<KEY>.md, screenshots'
+  agentflow.agents.baAgent -> agentflow.api.engine 'task done (answer, questions)'
+  agentflow.agents.devAgent -> agentflow.api.engine 'task done (answer, questions)'
+  agentflow.agents.qcAgent -> agentflow.api.engine 'task done (answer, questions)'
+  agentflow.agents.baAgent -> git.knowledgeRepo 'pushes the archive branch'
+  agentflow.agents.devAgent -> git.appRepo 'pushes branch LD-6, opens PR #6'
+  agentflow.agents.qcAgent -> git.qaRepo 'pushes specs and results'
+
+  agentflow.orchestrator.tools -> agentflow.api.integrations 'reply · page_publish · page_get · pull_request_open'
+  agentflow.api.integrations -> jira 'comments in the right thread'
+  agentflow.api.integrations -> confluence 'creates and updates pages, uploads screenshots'
+  agentflow.api.integrations -> git 'opens pull requests'
+  agentflow.api.integrations -> agentflow.api.fileStore 'reads the task files'
+
+  agentflow.agents.baAgent.baCapabilities -> agentflow.agents.baAgent.baSkills 'commands run'
+  agentflow.agents.devAgent.devCapabilities -> agentflow.agents.devAgent.devSkills 'commands run'
+  agentflow.agents.qcAgent.qcCapabilities -> agentflow.agents.qcAgent.qcSkills 'commands run'
+
+  // ── The case study and its cases (L5) ─────────────────────────────────────
+  ld6 = casestudy 'LD-6 · Team calendar' {
+    description 'One Jira ticket from To Do to Done, coordinated by AgentFlow'
+
+    full = scenario 'LD-6 end to end · PRD → Done' {
+      description 'Cases 1 to 5 in one walkthrough, from the first status change to the closed case'
+    }
+    case1 = scenario '1 · PRD' {
+      description 'Questions, partial answers, a person’s edit on Confluence: PRD v1 → v4 on the same page'
+    }
+    case2 = scenario '2 · Planning' {
+      description 'Three agents in parallel from the PRD page: archive PR, implementation plan, test plan'
+    }
+    case3 = scenario '3 · Implement' {
+      description 'The Dev Agent implements the plan page with TDD and opens its own pull request'
+    }
+    case4 = scenario '4 · Testing: fail → fix → pass' {
+      description 'Round 1 fails 32/33, back to Implement, fix D-1, round 2 passes 33/33'
+    }
+    case5 = scenario '5 · Review → Done' {
+      description 'People review the three pull requests, ask in Jira, merge, move to Done'
+    }
+    case6 = scenario '6 · Comments in one window' {
+      description 'Several comments in one debounce window: one turn, each answer in its own thread'
+    }
+    case7 = scenario '7 · Accidental status flip' {
+      description 'Implement → Planning → Testing within seconds: one turn, only the final status counts'
+    }
+    case8 = scenario '8 · Coming back to a status' {
+      description 'Re-entering a status whose work is done: report what exists, start nothing, wait for an instruction'
+    }
+  }
+  ld6.case1 -> ld6.case2 'PRD approved'
+  ld6.case2 -> ld6.case3 'plans approved'
+  ld6.case3 -> ld6.case4 'PR opened'
+  ld6.case4 -> ld6.case5 'tests passed'
+
+  // ── Setup and how the Orchestrator Agent decides ──────────────────────────
+  agentflow.project.connJira -> jira 'reads events, writes comments'
+  agentflow.project.connConfluence -> confluence 'creates and updates pages'
+  agentflow.project.connGit -> git 'checkouts, pull requests'
+  agentflow.project.statuses -> agentflow.workflow 'the flow the rules follow'
+  agentflow.project.agentSetup -> agentflow.agents 'BA, Dev, QC'
+  agentflow.project.agentSetup -> agentflow.orchestrator 'the orchestrator'
+  // Rules → mechanisms (each quote drives one mechanism)
+  agentflow.workflow.rTicket.qTicket -> agentflow.orchestrator.decides.mContext 'the ticket in every prompt'
+  agentflow.workflow.rQuestions.qDecision -> agentflow.orchestrator.decides.mContext 'answers carried forward'
+  agentflow.workflow.rRoles.qWho -> agentflow.orchestrator.decides.mSelection 'role → agent'
+  agentflow.workflow.rRoles.qDeclared -> agentflow.orchestrator.decides.mSelection 'command from AGENTFLOW.md'
+  agentflow.workflow.rQuestions.qWhoKnows -> agentflow.orchestrator.decides.mSelection 'who wrote it answers'
+  agentflow.workflow.rBlocked.qBlocked -> agentflow.orchestrator.decides.mSelection 'missing input → pass it'
+  agentflow.workflow.rQuestions.qThread -> agentflow.orchestrator.decides.mConversations 'replyTo'
+  agentflow.workflow.rQuestions.qNeverStops -> agentflow.orchestrator.decides.mConversations 'questions run beside tasks'
+  agentflow.workflow.rLanguage.qLanguage -> agentflow.orchestrator.decides.mConversations 'its language'
+  agentflow.workflow.rFlow.qParallel -> agentflow.orchestrator.decides.mNeverBlocks 'three tasks at once'
+  agentflow.workflow.rCancelling.qForward -> agentflow.orchestrator.decides.mNeverBlocks 'tasks keep running'
+  agentflow.workflow.rQuestions.qPartial -> agentflow.orchestrator.decides.mResume 'resume when complete'
+  agentflow.workflow.rFlow.qChanges -> agentflow.orchestrator.decides.mResume 'feedback → same task'
+  agentflow.workflow.rFlow.qFork -> agentflow.orchestrator.decides.mResume 'fork for questions'
+  agentflow.workflow.rComingBack.qInstruction -> agentflow.orchestrator.decides.mResume 'instruction → same task'
+  agentflow.workflow.rFlow.qOrder -> agentflow.orchestrator.decides.mStatus 'what each status starts'
+  agentflow.workflow.rStatusWork.qCurrentStatus -> agentflow.orchestrator.decides.mStatus 'current status only'
+  agentflow.workflow.rComingBack.qNothing -> agentflow.orchestrator.decides.mStatus 're-entry starts nothing'
+  agentflow.workflow.rCancelling.qOnlyStatus -> agentflow.orchestrator.decides.mStatus 'only a status cancels'
+  agentflow.workflow.rCancelling.qFinal -> agentflow.orchestrator.decides.mStatus 'final status counts'
+  agentflow.workflow.rDocuments.qPages -> agentflow.orchestrator.decides.mDocuments 'one page per document'
+  agentflow.workflow.rDocuments.qSamePage -> agentflow.orchestrator.decides.mDocuments 'same page, new version'
+  agentflow.workflow.rDocuments.qCurrent -> agentflow.orchestrator.decides.mDocuments 'the page as it is now'
+  agentflow.workflow.rDocuments.qEdited -> agentflow.orchestrator.decides.mDocuments 'edits kept'
+  agentflow.workflow.rDocuments.qReadFirst -> agentflow.orchestrator.decides.mDocuments 'read before answering'
+
+  // Mechanisms → the platform that guarantees them, whatever the model does
+  agentflow.orchestrator.decides.mContext -[guarantees]-> agentflow.api.caseStore 'guaranteed by: CASE.md: notes, documents, tasks, decisions'
+  agentflow.orchestrator.decides.mSelection -[guarantees]-> agentflow.orchestrator.guards 'guaranteed by: refuses undeclared commands, wrong mode, missing needs'
+  agentflow.orchestrator.decides.mConversations -[guarantees]-> agentflow.orchestrator.debounce 'guaranteed by: 20 s debounce, supersede, one turn per thread'
+  agentflow.orchestrator.decides.mConversations -[guarantees]-> agentflow.orchestrator.tools 'guaranteed by: reply replyTo, task_run replyTo'
+  agentflow.orchestrator.decides.mNeverBlocks -[guarantees]-> agentflow.api.engine 'guaranteed by: evaluates waits, starts the next turn'
+  agentflow.orchestrator.decides.mResume -[guarantees]-> agentflow.orchestrator.tools 'guaranteed by: task_run resumeTaskId, fork'
+  agentflow.orchestrator.decides.mStatus -[guarantees]-> agentflow.orchestrator.guards 'guaranteed by: task_cancel only after a ticket change (cancelOn)'
+  agentflow.orchestrator.decides.mDocuments -[guarantees]-> agentflow.orchestrator.guards 'guaranteed by: project space only, edit protection'
+
+  // Mechanisms → the cases where they are seen
+  agentflow.orchestrator.decides.mContext -[seenin]-> ld6.case1 'seen in'
+  agentflow.orchestrator.decides.mContext -[seenin]-> ld6.case2 'seen in'
+  agentflow.orchestrator.decides.mSelection -[seenin]-> ld6.case1 'seen in'
+  agentflow.orchestrator.decides.mSelection -[seenin]-> ld6.case2 'seen in'
+  agentflow.orchestrator.decides.mSelection -[seenin]-> ld6.case3 'seen in'
+  agentflow.orchestrator.decides.mSelection -[seenin]-> ld6.case4 'seen in'
+  agentflow.orchestrator.decides.mConversations -[seenin]-> ld6.case6 'seen in'
+  agentflow.orchestrator.decides.mConversations -[seenin]-> ld6.case7 'seen in'
+  agentflow.orchestrator.decides.mNeverBlocks -[seenin]-> ld6.case2 'seen in'
+  agentflow.orchestrator.decides.mNeverBlocks -[seenin]-> ld6.case4 'seen in'
+  agentflow.orchestrator.decides.mResume -[seenin]-> ld6.case1 'seen in'
+  agentflow.orchestrator.decides.mResume -[seenin]-> ld6.case4 'seen in'
+  agentflow.orchestrator.decides.mResume -[seenin]-> ld6.case5 'seen in'
+  agentflow.orchestrator.decides.mStatus -[seenin]-> ld6.case4 'seen in'
+  agentflow.orchestrator.decides.mStatus -[seenin]-> ld6.case7 'seen in'
+  agentflow.orchestrator.decides.mStatus -[seenin]-> ld6.case8 'seen in'
+  agentflow.orchestrator.decides.mDocuments -[seenin]-> ld6.case1 'seen in'
+  agentflow.orchestrator.decides.mDocuments -[seenin]-> ld6.case2 'seen in'
+  agentflow.orchestrator.decides.mDocuments -[seenin]-> ld6.case4 'seen in'
+  // Capabilities → agent selection (each declared command)
+  agentflow.agents.baAgent.baCapabilities.cResearch -> agentflow.orchestrator.decides.mSelection 'declares /leavedesk-research'
+  agentflow.agents.baAgent.baCapabilities.cRequirement -> agentflow.orchestrator.decides.mSelection 'declares /ba-requirement'
+  agentflow.agents.baAgent.baCapabilities.cArchive -> agentflow.orchestrator.decides.mSelection 'declares /ba-archive'
+  agentflow.agents.devAgent.devCapabilities.cWritingPlans -> agentflow.orchestrator.decides.mSelection 'declares /writing-plans'
+  agentflow.agents.devAgent.devCapabilities.cExecutingPlans -> agentflow.orchestrator.decides.mSelection 'declares /executing-plans'
+  agentflow.agents.devAgent.devCapabilities.cDebugging -> agentflow.orchestrator.decides.mSelection 'declares /systematic-debugging'
+  agentflow.agents.qcAgent.qcCapabilities.cQaReview -> agentflow.orchestrator.decides.mSelection 'declares /qa-review'
+  agentflow.agents.qcAgent.qcCapabilities.cQaTest -> agentflow.orchestrator.decides.mSelection 'declares /qa-test'
+  agentflow.agents.qcAgent.qcCapabilities.cQaRun -> agentflow.orchestrator.decides.mSelection 'declares /qa-run'
+  jira -> agentflow.orchestrator.decides.mConversations 'comments, status changes'
+  confluence -> agentflow.orchestrator.decides.mDocuments 'pages as people left them'
+
+}

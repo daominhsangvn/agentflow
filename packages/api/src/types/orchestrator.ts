@@ -63,6 +63,10 @@ export const OrchestratorMessageKind = {
   LabelRemoved: "label_removed",
   /** A tool call of the orchestrator that was refused (audit; never wakes a turn). */
   ToolRefused: "tool_refused",
+  /** A page the orchestrator published (page_publish). */
+  Document: "document",
+  /** Another case of this workflow notified this one (case_notify); wakes a turn. */
+  CaseNotify: "case_notify",
 } as const;
 export type OrchestratorMessageKind =
   (typeof OrchestratorMessageKind)[keyof typeof OrchestratorMessageKind];
@@ -221,6 +225,13 @@ export const OrchestratorToolName = {
   RequestDecision: "request_decision",
   RecordDecision: "record_decision",
   EditReply: "edit_reply",
+  PagePublish: "page_publish",
+  PageGet: "page_get",
+  PullRequestOpen: "pull_request_open",
+  SourceItemTransition: "source_item_transition",
+  SourceItemLabel: "source_item_label",
+  SourceItemLink: "source_item_link",
+  CaseNotify: "case_notify",
 } as const;
 export type OrchestratorToolName =
   (typeof OrchestratorToolName)[keyof typeof OrchestratorToolName];
@@ -261,10 +272,17 @@ export type OrchestratorCaseSummary = {
   turnRunning: boolean;
   taskCount: number;
   turnCount: number;
-  /** Known turn + task loop cost; null when none is known. */
+  /** Known cost of the case's task sessions (loop cost when a loop has no session) and turns; null when none is known. */
   costUsd: number | null;
+  /** Known input/output tokens of the case's task sessions (loop numbers when a loop has no session) and turns. */
+  inputTokens: number;
+  outputTokens: number;
+  /** Active agent time: summed session (or loop) durations of the case's tasks plus its turns. */
+  activeMs: number;
   createdAt: string;
   updatedAt: string;
+  /** When the case was closed; null while open. */
+  closedAt: string | null;
 };
 
 export type OrchestratorTurnUsage = {
@@ -282,6 +300,9 @@ export type OrchestratorCaseMessage = {
   text: string;
   turnId: string | null;
   createdAt: string;
+  via?: OrchestratorMessageVia | null;
+  /** Tasks whose questions this case-page message answered. */
+  answeredTaskIds?: string[];
 };
 
 export type OrchestratorCaseTurn = {
@@ -370,6 +391,7 @@ export type OrchestratorCaseDetail = OrchestratorCaseSummary & {
   tasks: OrchestratorCaseTask[];
   waits: OrchestratorCaseWait[];
   decisions: OrchestratorCaseDecision[];
+  documents: OrchestratorCaseDocument[];
 };
 
 export const updateOrchestratorCaseInputSchema = z.object({
@@ -420,3 +442,145 @@ export type OrchestratorCaseLoops = {
   sessions: WorkflowRunSession[];
   pullRequests: WorkflowRunPullRequest[];
 };
+
+/** What a page published by the orchestrator is (shown in CASE.md and on the case page). */
+export const OrchestratorDocumentKind = {
+  Ticket: "ticket",
+  Prd: "prd",
+  Plan: "plan",
+  TestPlan: "test_plan",
+  TestRun: "test_run",
+  Other: "other",
+} as const;
+export type OrchestratorDocumentKind =
+  (typeof OrchestratorDocumentKind)[keyof typeof OrchestratorDocumentKind];
+
+/** Display label of each document kind (CASE.md and the case page). */
+export const DOCUMENT_KIND_LABELS: Record<OrchestratorDocumentKind, string> = {
+  [OrchestratorDocumentKind.Ticket]: "Ticket page",
+  [OrchestratorDocumentKind.Prd]: "PRD",
+  [OrchestratorDocumentKind.Plan]: "Implementation plan",
+  [OrchestratorDocumentKind.TestPlan]: "Test plan",
+  [OrchestratorDocumentKind.TestRun]: "Test run",
+  [OrchestratorDocumentKind.Other]: "Document",
+};
+
+/** A page the orchestrator published for the case (newest version of each page). */
+export type OrchestratorCaseDocument = {
+  pageId: string;
+  title: string;
+  url: string;
+  kind: OrchestratorDocumentKind;
+  version: number;
+  attachments: string[];
+  publishedAt: string;
+};
+
+export const ORCHESTRATOR_TASK_BLOCKED_PREFIX = "BLOCKED:";
+
+export const OrchestratorCaseWaitingFor = {
+  /** The case is closed. */
+  Nothing: "nothing",
+  /** A turn runs. */
+  Turn: "turn",
+  /** A decision is pending. */
+  Decision: "decision",
+  /** An unfired wait or active tasks. */
+  Tasks: "tasks",
+  /** A conversation is waiting for people. */
+  Human: "human",
+  /** Idle. */
+  NextMessage: "next_message",
+} as const;
+export type OrchestratorCaseWaitingFor =
+  (typeof OrchestratorCaseWaitingFor)[keyof typeof OrchestratorCaseWaitingFor];
+
+export type OrchestratorCaseListItem = OrchestratorCaseSummary & {
+  project: { id: string; name: string };
+  workflow: { id: string; name: string };
+  waitingFor: OrchestratorCaseWaitingFor;
+  /** Machine names of the agents running or queued for the case's active tasks. */
+  runningAgents: string[];
+};
+
+export const orchestratorCaseListQuerySchema = z
+  .object({
+    projectId: z.uuid().optional(),
+    workflowId: z.uuid().optional(),
+    status: z.enum(OrchestratorCaseStatus).optional(),
+  })
+  .strict();
+export type OrchestratorCaseListQuery = z.infer<
+  typeof orchestratorCaseListQuerySchema
+>;
+
+/** A message written on the case page in AgentFlow, or a reply shown there. */
+export const OrchestratorMessageVia = {
+  AgentFlow: "agentflow",
+} as const;
+export type OrchestratorMessageVia =
+  (typeof OrchestratorMessageVia)[keyof typeof OrchestratorMessageVia];
+
+/** Where a reply goes: the ticket's thread or the case page. */
+export const OrchestratorReplyTarget = {
+  Thread: "thread",
+  CasePage: "case_page",
+} as const;
+export type OrchestratorReplyTarget =
+  (typeof OrchestratorReplyTarget)[keyof typeof OrchestratorReplyTarget];
+
+export const ORCHESTRATOR_CASE_MESSAGE_MAX = 4000;
+export const ORCHESTRATOR_CASE_ANSWERS_MAX = 20;
+
+export const postOrchestratorCaseMessageInputSchema = z
+  .object({
+    conversationId: z.uuid(),
+    text: z.string().trim().max(ORCHESTRATOR_CASE_MESSAGE_MAX).default(""),
+    answers: z
+      .array(
+        z.object({
+          taskId: z.uuid(),
+          questionId: z.string().trim().min(1).max(100),
+          answer: z.string().trim().min(1).max(ORCHESTRATOR_CASE_MESSAGE_MAX),
+        })
+      )
+      .max(ORCHESTRATOR_CASE_ANSWERS_MAX)
+      .default([]),
+  })
+  .refine((input) => input.text.length > 0 || input.answers.length > 0, {
+    message: "Write a message or answer a question",
+  });
+export type PostOrchestratorCaseMessageInput = z.input<
+  typeof postOrchestratorCaseMessageInputSchema
+>;
+
+export type OrchestratorCaseMessagePosted = {
+  messageId: string;
+  conversationId: string;
+};
+
+export const orchestratorMessageViaPayloadSchema = z.looseObject({
+  via: z.enum(OrchestratorMessageVia),
+});
+
+const orchestratorMessageAnswersPayloadSchema = z.looseObject({
+  answers: z.array(z.looseObject({ taskId: z.string() })),
+});
+
+/** The tasks a case-page message answered (empty when it answered none). */
+export function readOrchestratorMessageAnsweredTaskIds(
+  payload: unknown
+): string[] {
+  const parsed = orchestratorMessageAnswersPayloadSchema.safeParse(payload);
+  if (!parsed.success) {
+    return [];
+  }
+  return [...new Set(parsed.data.answers.map((answer) => answer.taskId))];
+}
+
+export function readOrchestratorMessageVia(
+  payload: unknown
+): OrchestratorMessageVia | null {
+  const parsed = orchestratorMessageViaPayloadSchema.safeParse(payload);
+  return parsed.success ? parsed.data.via : null;
+}

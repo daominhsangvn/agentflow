@@ -99,6 +99,16 @@ const PRD_FILE = {
   skipped: null,
 };
 
+const PAGE_INPUT = {
+  pageId: "1638401",
+  title: "LD-6 · Implementation plan",
+  url: "https://x.atlassian.net/wiki/pages/1638401",
+  version: 2,
+  name: "PLAN-LD-6.md",
+  content: "# Plan",
+  size: 6,
+};
+
 describe("task files", () => {
   it("hands a sibling task's text file to the launched step as an input", async () => {
     addSibling([PRD_FILE]);
@@ -121,6 +131,69 @@ describe("task files", () => {
     ]);
     expect(call.prompt).toContain("inputs/");
     expect(call.prompt).toContain("PRD-LD-5.md");
+  });
+
+  it("hands a task file and a page input to the step together", async () => {
+    addSibling([PRD_FILE]);
+    mocks.stored.set(PRD_KEY, new TextEncoder().encode("# PRD"));
+
+    const started = await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+      files: [PRD_REF],
+      pageInputs: [PAGE_INPUT],
+    });
+
+    expect(started.ok).toBe(true);
+    expect(mocks.tasks[1]?.result).toMatchObject({
+      pageInputs: [{ pageId: "1638401", name: "PLAN-LD-6.md" }],
+    });
+    const call = mocks.createLoop.mock.calls[0]?.[2];
+    expect(call.metadata.step.inputs).toEqual([
+      { name: "PRD-LD-5.md", content: "# PRD" },
+      { name: "PLAN-LD-6.md", content: "# Plan" },
+    ]);
+  });
+
+  it("refuses a page input named like a task file, too many inputs and too much text", async () => {
+    addSibling([PRD_FILE]);
+    mocks.stored.set(PRD_KEY, new TextEncoder().encode("# PRD"));
+    const start = (files: unknown[], pageInputs: unknown[]) =>
+      startTask({
+        ...BASE,
+        runner: "runner-1",
+        command: "/ba-requirement",
+        files: files as never,
+        pageInputs: pageInputs as never,
+      });
+
+    const duplicate = await start(
+      [PRD_REF],
+      [{ ...PAGE_INPUT, name: "PRD-LD-5.md" }]
+    );
+    expect(duplicate).toEqual({
+      ok: false,
+      error: 'Two files would be named "PRD-LD-5.md" in the task\'s inputs.',
+    });
+    const many = await start(
+      [],
+      Array.from({ length: 6 }, (_, index) => ({
+        ...PAGE_INPUT,
+        name: `p${index}.md`,
+      }))
+    );
+    expect(many.ok).toBe(false);
+    const big = await start(
+      [],
+      Array.from({ length: 3 }, (_, index) => ({
+        ...PAGE_INPUT,
+        name: `p${index}.md`,
+        size: 190_000,
+      }))
+    );
+    expect(big.ok ? "" : big.error).toContain("400000 bytes at most together");
+    expect(mocks.tasks).toHaveLength(1);
   });
 
   it("refuses files of another case, unknown names and skipped files without creating a task", async () => {

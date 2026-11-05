@@ -1,0 +1,30 @@
+---
+title: "People in the loop"
+description: "Where people decide in AgentFlow: status moves, answers, edited pages, merges, decisions and approvals, and what is not guarded yet."
+---
+
+Agents produce documents, code and answers. People decide at these points.
+
+| Where | How people decide |
+|---|---|
+| Jira status | Moving the ticket is an approval, for example PRD → Planning. The move arrives as a message and your rules say what each status means. |
+| Jira comments | Answers to the Agents' questions. A reply that answers some questions and asks new ones is handled per your rules. |
+| Confluence pages | People edit a PRD or plan page. The next revision starts from the edited page, so their edits are kept. |
+| Pull requests | Agents open them and never merge. People review and merge. |
+| Decisions | The Orchestrator Agent asks with `request_decision`. An org admin clicks **Approve** or **Reject** on the case page, which wakes the conversation. |
+| Approval steps | A process can include an approval step; an admin decides. See [Process YAML](/docs/guides/setup/process-yaml). |
+| Grants | A call that needs approval is recorded as `pending_approval` until someone decides. See [Connection grants](/docs/guides/setup/connection-grants). |
+| Email | The `agentflow.email` action can notify people when a run needs them (`input.needed`). See [Notifications](/docs/guides/operate/notifications). |
+
+A decision can also be given in the thread ("approved"); the Orchestrator Agent then records it with `record_decision`. Write the rule for the way your team uses. Details: [Orchestrator guide](/docs/guides/setup/orchestrator#approvals).
+
+## What is not guarded yet
+
+Today AgentFlow enforces: undeclared commands are refused, a write task cannot run a read command, a missing `needs` is refused, write tools of a superseded turn are refused, writes not granted in `agent.orchestrator.connections` are hidden and refused, and `task_cancel` works only in a turn caused by a ticket change. Refused calls are recorded on the case as "Refused" messages. See [Orchestrator tools](/docs/reference/orchestrator-tools#guards).
+
+Not guarded:
+
+- Who may approve in a thread. `record_decision` trusts the orchestrator's reading of who wrote the comment; there is no mapping from Jira or Teams accounts to AgentFlow members.
+- Budgets per case or project (turns per hour, tasks, cost).
+- Cancelling only on backward moves: your rules decide, not the platform.
+- Untrusted ticket text beyond marking it untrusted in the prompt.

@@ -1,6 +1,7 @@
 import {
   OrchestratorCaseStatus,
   OrchestratorDecisionStatus,
+  OrchestratorDocumentKind,
   OrchestratorTaskStatus,
   OrchestratorTurnStatus,
 } from "@repo/api/src/types/orchestrator";
@@ -23,10 +24,19 @@ const mocks = vi.hoisted(() => ({
   userFindFirst: vi.fn(),
   cancel: vi.fn(),
   loadCaseStats: vi.fn(),
+  listCaseDocuments: vi.fn(),
+}));
+
+vi.mock("@/app/orchestrator/cases/service/case-messages", () => ({
+  postCaseMessage: vi.fn(),
 }));
 
 vi.mock("@/app/orchestrator/cases/service/case-stats", () => ({
   loadCaseStats: mocks.loadCaseStats,
+}));
+
+vi.mock("@/lib/orchestrator/case-documents", () => ({
+  listCaseDocuments: mocks.listCaseDocuments,
 }));
 
 vi.mock("@repo/database", () => {
@@ -61,6 +71,7 @@ const SUMMARY_ROW = {
   status: OrchestratorCaseStatus.Open,
   createdAt: D("2026-10-23T08:00:00.000Z"),
   updatedAt: D("2026-10-23T09:00:00.000Z"),
+  closedAt: null,
   _count: { conversations: 1, decisions: 2, tasks: 3 },
 };
 
@@ -95,6 +106,13 @@ const DETAIL_ROW = {
           text: "first",
           turnId: null,
           createdAt: D("2026-10-23T08:01:00.000Z"),
+          payload: {
+            answers: [
+              { taskId: "task-1", questionId: "q1", answer: "A" },
+              { taskId: "task-1", questionId: "q2", answer: "B" },
+              { taskId: "task-2", questionId: "q1", answer: "C" },
+            ],
+          },
         },
       ],
       turns: [
@@ -180,8 +198,21 @@ const DETAIL_ROW = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.turnFindMany.mockResolvedValue([]);
+  mocks.listCaseDocuments.mockResolvedValue([]);
   mocks.loadCaseStats.mockResolvedValue(
-    new Map([[CASE_ID, { taskCount: 4, turnCount: 5, costUsd: 0.5 }]])
+    new Map([
+      [
+        CASE_ID,
+        {
+          taskCount: 4,
+          turnCount: 5,
+          costUsd: 0.5,
+          inputTokens: 100,
+          outputTokens: 50,
+          activeMs: 5_400_000,
+        },
+      ],
+    ])
   );
   mocks.workflowFindFirst.mockResolvedValue({ id: "workflow-1" });
 });
@@ -221,7 +252,11 @@ describe("orchestratorCaseService.listForWorkflow", () => {
       taskCount: 4,
       turnCount: 5,
       costUsd: 0.5,
+      inputTokens: 100,
+      outputTokens: 50,
+      activeMs: 5_400_000,
       updatedAt: "2026-10-23T09:00:00.000Z",
+      closedAt: null,
     });
   });
 });
@@ -254,13 +289,42 @@ describe("orchestratorCaseService.get", () => {
 
   it("maps the rows: oldest-first, task results, usage", async () => {
     mocks.caseFindFirst.mockResolvedValue(DETAIL_ROW);
+    mocks.listCaseDocuments.mockResolvedValue([
+      {
+        pageId: "page-1",
+        title: "Plan",
+        url: "https://x.atlassian.net/wiki/pages/1",
+        version: 3,
+        kind: OrchestratorDocumentKind.Plan,
+        space: "ENG",
+        attachments: ["shot.png"],
+        conversationId: "conv-1",
+        publishedAt: D("2026-10-23T09:00:00.000Z"),
+      },
+    ]);
 
     const detail = await orchestratorCaseService.get(ORG, CASE_ID);
 
+    expect(mocks.listCaseDocuments).toHaveBeenCalledWith(ORG, CASE_ID);
+    expect(detail?.documents).toEqual([
+      {
+        pageId: "page-1",
+        title: "Plan",
+        url: "https://x.atlassian.net/wiki/pages/1",
+        kind: OrchestratorDocumentKind.Plan,
+        version: 3,
+        attachments: ["shot.png"],
+        publishedAt: "2026-10-23T09:00:00.000Z",
+      },
+    ]);
     const conversation = detail?.conversations[0];
     expect(conversation?.messages.map((m) => m.text)).toEqual([
       "first",
       "second",
+    ]);
+    expect(conversation?.messages.map((m) => m.answeredTaskIds)).toEqual([
+      ["task-1", "task-2"],
+      [],
     ]);
     expect(conversation?.turns.map((t) => t.id)).toEqual([
       "t-done",
@@ -312,11 +376,27 @@ describe("orchestratorCaseService.setStatus", () => {
 
     expect(mocks.caseUpdateMany).toHaveBeenCalledWith({
       where: { id: CASE_ID, organizationId: ORG },
-      data: { status: OrchestratorCaseStatus.Closed },
+      data: {
+        status: OrchestratorCaseStatus.Closed,
+        closedAt: expect.any(Date),
+      },
     });
     expect(result).toEqual({
       ok: true,
       value: { status: OrchestratorCaseStatus.Closed },
+    });
+  });
+
+  it("clears closedAt when reopening", async () => {
+    mocks.caseUpdateMany.mockResolvedValue({ count: 1 });
+
+    await orchestratorCaseService.setStatus(ORG, CASE_ID, {
+      status: OrchestratorCaseStatus.Open,
+    });
+
+    expect(mocks.caseUpdateMany).toHaveBeenCalledWith({
+      where: { id: CASE_ID, organizationId: ORG },
+      data: { status: OrchestratorCaseStatus.Open, closedAt: null },
     });
   });
 

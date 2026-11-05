@@ -339,6 +339,38 @@ describe("advanceConversation", () => {
     expect(fake.messages[0]?.turnId).toBeNull();
   });
 
+  it("a failed turn's retry keeps a document message with that turn", async () => {
+    await advanceConversation(conversationId, NOW);
+    const turnId = fake.turns[0]?.id as string;
+    await fake.db.orchestratorMessage.create({
+      data: {
+        organizationId: ORG_ID,
+        conversationId,
+        origin: OrchestratorMessageOrigin.Internal,
+        kind: OrchestratorMessageKind.Document,
+        actor: null,
+        text: "Published",
+        externalRef: null,
+        dedupKey: "document:retry",
+        turnId,
+      },
+    });
+    finish({
+      type: "result",
+      ok: false,
+      error: "Claude crashed",
+      retryable: true,
+      sessionId: null,
+    });
+
+    await advanceConversation(conversationId, LATER);
+
+    const document = fake.messages.find(
+      (message) => message.kind === OrchestratorMessageKind.Document
+    );
+    expect(document?.turnId).toBe(turnId);
+  });
+
   it("stops giving the messages again after three failed turns in a row", async () => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const at = new Date(NOW.getTime() + attempt * 10 * 60_000);
@@ -615,6 +647,43 @@ describe("concurrency", () => {
 
     expect(mocks.cancel).not.toHaveBeenCalled();
     expect(fake.messages[1]?.turnId).toBeNull();
+  });
+
+  it("supersede: a document message stays with the stopped turn", async () => {
+    await startTurnThenWrite("supersede");
+    const turnId = fake.turns[0]?.id as string;
+    await fake.db.orchestratorMessage.create({
+      data: {
+        organizationId: ORG_ID,
+        conversationId,
+        origin: OrchestratorMessageOrigin.Internal,
+        kind: OrchestratorMessageKind.Document,
+        actor: null,
+        text: "Published a page",
+        externalRef: null,
+        dedupKey: "document:audit-1",
+        turnId,
+      },
+    });
+    await advanceConversation(conversationId, LATER);
+    finish({
+      type: "result",
+      ok: false,
+      error: "The turn was stopped for a newer message.",
+      retryable: false,
+      sessionId: "session-1",
+    });
+    mocks.dispatch.mockResolvedValue("cmd-2");
+
+    await advanceConversation(conversationId, LATER);
+
+    const document = fake.messages.find(
+      (message) => message.kind === OrchestratorMessageKind.Document
+    );
+    expect(document?.turnId).toBe(turnId);
+    const prompt = mocks.dispatch.mock.calls.at(-1)?.[0].request
+      .prompt as string;
+    expect(prompt).not.toContain("Published a page");
   });
 
   it("an admin's stop fails the turn with their name and does not retry its messages", async () => {

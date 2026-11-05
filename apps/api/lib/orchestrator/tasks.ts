@@ -54,6 +54,7 @@ import { isLoopSettled } from "@/lib/workflows/engine/run-loops";
 import { renderCase } from "./case-render";
 import { taskCancelledMessage } from "./task-cancel";
 import {
+  checkInputsFit,
   loadTaskInputs,
   resolveTaskInputs,
   type TaskFileRef,
@@ -64,6 +65,7 @@ import {
   mergeTaskResult,
   readTaskResult,
   type TaskInputFile,
+  type TaskPageInput,
   type TaskResult,
 } from "./task-result";
 
@@ -101,6 +103,8 @@ export type StartTaskInput = {
   fork: boolean;
   /** Files of earlier tasks of the case, written to the task's `inputs/`. */
   files: TaskFileRef[];
+  /** Confluence pages read by task_run, written to the task's `inputs/` as files. */
+  pageInputs: TaskPageInput[];
   /** The message ref the task answers (reply's replyTo); null when none. */
   replyTo: string | null;
 };
@@ -167,23 +171,19 @@ export async function startTask(input: StartTaskInput): Promise<
       conversationId: input.conversationId,
       files,
       declared: checked.value.declared,
-      inputNames: input.files.map((file) => file.name),
+      inputNames: [
+        ...input.files.map((file) => file.name),
+        ...input.pageInputs.map((page) => page.name),
+      ],
     });
     if (!needs.ok) {
       return Result.err(needs.error);
     }
   }
-  const inputs =
-    input.files.length > 0
-      ? await resolveTaskInputs(input.caseId, input.files)
-      : null;
-  if (inputs && !inputs.ok) {
-    return Result.err(inputs.error);
+  const initial = await initialResultFor(input);
+  if (!initial.ok) {
+    return Result.err(initial.error);
   }
-  const initial = initialTaskResult(
-    inputs?.ok ? inputs.value : null,
-    input.replyTo
-  );
   const task = await withDb((db) =>
     db.orchestratorTask.create({
       data: {
@@ -199,7 +199,9 @@ export async function startTask(input: StartTaskInput): Promise<
         resumeTaskId: input.resumeTaskId,
         fork: input.fork,
         status: OrchestratorTaskStatus.Queued,
-        ...(initial ? { result: initial as Prisma.InputJsonValue } : {}),
+        ...(initial.value
+          ? { result: initial.value as Prisma.InputJsonValue }
+          : {}),
       },
       select: { id: true },
     })
@@ -439,8 +441,10 @@ async function prepareStep(
     string
   >
 > {
+  const stored = readTaskResult(task.result);
   const inputs = await loadTaskInputs(
-    readTaskResult(task.result)?.inputs ?? []
+    stored?.inputs ?? [],
+    stored?.pageInputs ?? []
   );
   if (!inputs.ok) {
     return Result.err(inputs.error);
@@ -841,9 +845,10 @@ async function loopCreateFailure(
 
 function initialTaskResult(
   inputs: TaskInputFile[] | null,
+  pageInputs: TaskPageInput[],
   replyTo: string | null
 ): TaskResult | null {
-  if (!(inputs || replyTo)) {
+  if (!(inputs || replyTo || pageInputs.length > 0)) {
     return null;
   }
   return {
@@ -851,6 +856,28 @@ function initialTaskResult(
     questions: [],
     error: null,
     ...(inputs ? { inputs } : {}),
+    ...(pageInputs.length > 0 ? { pageInputs } : {}),
     ...(replyTo ? { replyTo } : {}),
   };
+}
+
+/** Checks the task's input files and pages and builds the result it starts with. */
+async function initialResultFor(
+  input: StartTaskInput
+): Promise<Result<TaskResult | null, string>> {
+  const inputs =
+    input.files.length > 0
+      ? await resolveTaskInputs(input.caseId, input.files)
+      : null;
+  if (inputs && !inputs.ok) {
+    return Result.err(inputs.error);
+  }
+  const resolved = inputs?.ok ? inputs.value : null;
+  const fits = checkInputsFit(resolved ?? [], input.pageInputs);
+  if (!fits.ok) {
+    return Result.err(fits.error);
+  }
+  return Result.ok(
+    initialTaskResult(resolved, input.pageInputs, input.replyTo)
+  );
 }

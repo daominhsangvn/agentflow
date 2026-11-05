@@ -1,0 +1,68 @@
+---
+title: "Agent tools"
+description: "The integration tools an Agent gets from the connections its workflow grants: reading tickets, commenting, moving status, review threads and operations such as Confluence pages."
+---
+
+An Agent never holds credentials for Jira, Confluence or your Git server. Instead, the Agent that carries out an [instruction](/docs/guides/setup/workflow-yaml) or a [process](/docs/guides/setup/process-yaml) step gets an MCP server named `agentflow_integrations`, and AgentFlow makes the call for it.
+
+## How it works
+
+1. When the attempt starts, the Agent receives a session token in the environment variable `AGENTFLOW_INTEGRATION_TOKEN`. The token is valid while the attempt runs.
+2. The MCP server (`apps/mcp`) lists the tools of that session and forwards each call to the API.
+3. The API checks the `connections:` grant again and runs the call with the project connection's credentials.
+
+The tools an Agent sees come from its grant and nothing else. A call outside the grant is refused and nothing is sent to the outside system. See [Connection grants](/docs/guides/setup/connection-grants) for how to write `connections:`, fixed options (`with`) and `approval: required`.
+
+## Tools
+
+| Tool | Available when | What it does |
+|---|---|---|
+| `integrations_overview` | The run has a source connection | Describes what this session may do: the source item, the connections it may write to and the allowed operations. Use it when a call was refused |
+| `source_item_get` | The run has a source connection | Reads the item the run started from: title, status, description, labels, assignee, latest comments and attachment names, as JSON with its URL. Also `blockedBy` and `blocks`: the items this one waits for and the items that wait for it (Jira "Blocks" links, Azure DevOps Dependency relations), each with key, title and status when the provider has them |
+| `source_item_attachment_read` | The source provider reads attachments | Reads the text of one file attached to the source item by name. Binary files are refused |
+| `connection_get_item` | A connection that can read items is granted (`<key>: read` or any operation on it) | Reads another item (a Jira issue, an Azure DevOps work item, with the same fields including `blockedBy` / `blocks`) of a granted connection, only inside the project connection's projects |
+| `source_item_comment` | `source` grants `comment` | Comments on the source item |
+| `source_item_transition` | `source` grants `transition` | Moves the source item to another status; an unknown name returns the available ones |
+| `source_item_label` | `source` grants `label` | Adds and removes labels (tags on Azure DevOps). Removing a label the item lacks is not an error |
+| `source_item_link` | `source` grants `link` | Adds a web link; adding one the item already has updates its title |
+| `pull_requests_list` | `pull_requests` is granted | Lists the pull requests this run opened, with repository and state |
+| `pull_request_threads` | `pull_requests` is granted and the run has pull requests | Reads review threads of one of the run's pull requests (`open` by default, or `all`) |
+| `pull_request_reply` | `pull_requests` grants `reply` | Replies to a review thread |
+| `pull_request_resolve` | `pull_requests` grants `resolve` | Marks a review thread resolved |
+
+The source item tools take no item or connection: the item is the run's, fixed by AgentFlow, so a key written in a ticket's text cannot redirect them. The pull request tools take a pull request URL from the run's own pull requests only.
+
+## Operation tools
+
+Every other operation granted on a project connection key becomes a tool named after the operation, with the dot replaced by an underscore: `confluence.create_page` becomes `confluence_create_page`, and `microsoft_teams.post_message` becomes `microsoft_teams_post_message`. Each takes a `connection` argument, limited to the keys whose grant names that operation. Reads a provider offers (such as `confluence_get_page`) are available on any key granted `read` or any operation. See [Integrations](/docs/integrations) for each provider's operations.
+
+## Attaching files to a comment
+
+When the source provider can attach files (Jira, Azure DevOps) and the `source` grant has no `approval: required`, `source_item_comment` accepts `attachments`. Upload each file first from a shell command:
+
+```bash
+"$AGENTFLOW_ATTACH" evidence/login-error.png
+```
+
+An optional content type may follow the file name. The command prints an id; pass the ids in `attachments`. The upload attaches the file to the ticket at once.
+
+- At most 10 files per comment.
+- 8 MB per file.
+- A file name is at most 200 characters.
+
+## Call statuses
+
+Every call is recorded on the run page under "Integration tool calls".
+
+| Status | Meaning |
+|---|---|
+| `running` | In progress |
+| `succeeded` | Done |
+| `failed` | The outside system or AgentFlow returned an error |
+| `refused` | Outside the session's grants; nothing was sent |
+| `pending_approval` | The grant has `approval: required`; waits for a person to decide |
+| `rejected` | A person rejected it; nothing was sent |
+
+## The Orchestrator Agent
+
+The Orchestrator Agent does not use these tools. It has its own set: [Orchestrator tools](/docs/reference/orchestrator-tools).

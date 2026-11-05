@@ -1,0 +1,28 @@
+// Where the components run. Runners only connect outwards to the API.
+
+deployment {
+  environment selfHosted "Self-hosted" {
+    server controlPlane "Control plane server" {
+      description "Next.js apps and the docker compose services"
+
+      instanceOf agentflow.app
+      instanceOf agentflow.integration
+      instanceOf agentflow.orchestrator.core
+      instanceOf agentflow.mcp
+      instanceOf agentflow.database
+      instanceOf agentflow.objectStorage
+    }
+
+    runner orchestratorRunner "Orchestrator runner" {
+      description "Headless runner of the workflow: an empty folder, MCP tools only"
+
+      instanceOf agentflow.orchestrator.agent
+    }
+
+    runner workerRunners "Worker runners" {
+      description "Headless or personal runners, one per role, with the project's repositories"
+
+      instanceOf agentflow.workers
+    }
+  }
+}

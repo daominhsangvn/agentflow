@@ -48,6 +48,8 @@ export const fakeTriggerDefinition: IntegrationTriggerDefinition<{
 export function createIngestDbFake() {
   const deliveries: Row[] = [];
   const runs: Row[] = [];
+  const workflowEvents: Row[] = [];
+  let failEventsWith: unknown = null;
   const triggers: Row[] = [];
   const scopes: Array<{
     scopeKey: string;
@@ -95,6 +97,17 @@ export function createIngestDbFake() {
           deliveries.splice(index, 1);
         }
         return Promise.resolve({ count: index >= 0 ? 1 : 0 });
+      }),
+    },
+    workflowEvent: {
+      createMany: vi.fn((args: { data: Row[] }) => {
+        if (failEventsWith) {
+          return Promise.reject(failEventsWith);
+        }
+        for (const row of args.data) {
+          workflowEvents.push({ ...row });
+        }
+        return Promise.resolve({ count: args.data.length });
       }),
     },
     integrationConnection: {
@@ -211,6 +224,11 @@ export function createIngestDbFake() {
     db,
     deliveries,
     runs,
+    workflowEvents,
+    /** The next workflow event insert rejects. */
+    failEventRecording(error: unknown) {
+      failEventsWith = error;
+    },
     triggers,
     workflows,
     connectionUpdates,

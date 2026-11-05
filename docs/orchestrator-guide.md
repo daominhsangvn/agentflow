@@ -6,6 +6,8 @@ orchestrated workflow. The reference (how each part works in code) is
 [runner.md](runner.md); triggers in [workflows.md](workflows.md). The worked
 example throughout is LeaveDesk:
 [workshop/leavedesk/orchestrator-workflow.yaml](workshop/leavedesk/orchestrator-workflow.yaml).
+A full ticket, To Do to Done, step by step with LikeC4 diagrams:
+[case-studies/ld-6-team-calendar](case-studies/ld-6-team-calendar/README.md).
 
 ## 1. Concepts
 
@@ -131,6 +133,25 @@ of this case, pass it with task_run files and run the task again (once)."*
 Platform: `needs` is checked before dispatch; the command checks again on the
 runner.
 
+**Blockers.**
+Write: *"Before starting tasks for a status, read the item
+(source_item_get). If any item in blockedBy is not yet in Review or Done, start
+nothing and comment which items it waits for. When this item moves to Review or
+Done, call case_notify for each item in blocks with what changed. On a
+case_notify message, read the item again; if no blocker remains, act on its
+current status as if it had just moved there. A comment on the ticket also
+re-checks blockers."*
+Why: a task started on an unfinished dependency produces work that is thrown
+away; a blocked case must be woken when the blocker resolves.
+Platform: `source_item_get` returns `blockedBy` / `blocks` (Jira "Blocks"
+links, Azure DevOps predecessor / successor); `case_notify` queues a message on
+the other case and wakes it (reopens a closed case).
+Limits: the blocker must be in a workflow with a status-changed trigger (no
+turn runs when it moves otherwise) and its case must exist in the same
+workflow; notifying is model-driven (no platform guarantee), so the manual
+comment is the fallback; which statuses count as resolved is the rules' choice,
+not config.
+
 **Language.** Write the default language of comments and that a comment in
 another language is answered in that language. File names, commands and
 ticket keys stay as they are.
@@ -163,7 +184,7 @@ ticket keys stay as they are.
 - [ ] **Runners**: one per team, plus one for the orchestrator (no repository
   clone; a small model is enough for testing). Personal runners for people who
   work on their own machine (AGENTFLOW.md in their project folder).
-- [ ] **Capabilities**: Project → Integrations → Commands → refresh each auto
+- [ ] **Capabilities**: Project → Agents → Commands → refresh each auto
   runner after a toolkit change; check problems and warnings. A personal runner
   uploads its file when it starts.
 - [ ] **The workflow**: `agent.mode: orchestrated`, the orchestrator's runner,
@@ -182,6 +203,23 @@ ticket keys stay as they are.
   `write:repository` and `write:issue`).
 - [ ] **Try it** on one ticket through every status, with a question in a
   comment at each review step, before using it on real work.
+
+## Navigation
+
+- **Cases**: sidebar Cases lists every case of the org (filter by project,
+  workflow, status). Home shows what needs attention (pending decisions,
+  waiting for a person, blocked or failed tasks, offline agents); each item
+  links to its case.
+- **Agents**: sidebar Agents lists every agent (automatic and personal) with
+  health and Claude Code version. Click an agent for its detail:
+  capabilities, the workflows that use it, recent tasks and usage.
+
+## Case time and cost
+
+Active agent time is the summed duration of the sessions of the case's tasks
+(the loop's start to end when a loop has no synced session) plus the
+orchestrator's turns. Elapsed time is opened to closed. Tokens and cost are
+summed the same way and include personal-agent sessions.
 
 ## 6. What is not guarded yet
 

@@ -38,6 +38,8 @@ export const taskMocks = {
   settled: true,
   baToolkit: null as null | { repository: string; mounts: string[] },
   baAttach: undefined as string[] | undefined,
+  /** The BA command produces prd (PRD-*.md) and the dev command needs it. */
+  needsPrd: false,
   stored: new Map<string, Uint8Array>(),
   runnerCapabilities: { loopStepForkSession: true } as Record<string, unknown>,
 };
@@ -138,7 +140,10 @@ export function capabilitiesModule() {
                       name: "/ba-requirement",
                       mode: RunnerCommandMode.Read,
                       asks: true,
-                      attach: taskMocks.baAttach,
+                      attach: taskMocks.needsPrd
+                        ? ["PRD-*.md"]
+                        : taskMocks.baAttach,
+                      ...(taskMocks.needsPrd ? { produces: "prd" } : {}),
                     },
                   ],
               skills: [],
@@ -155,6 +160,7 @@ export function capabilitiesModule() {
                   name: "/executing-plans",
                   mode: RunnerCommandMode.Write,
                   push: true,
+                  ...(taskMocks.needsPrd ? { needs: ["prd"] } : {}),
                 },
               ],
               skills: [],
@@ -250,6 +256,7 @@ export const BASE = {
   resumeTaskId: null,
   fork: false,
   files: [],
+  pageInputs: [],
   replyTo: null,
 };
 
@@ -264,6 +271,7 @@ export function resetTaskMocks() {
   taskMocks.settled = true;
   taskMocks.baToolkit = null;
   taskMocks.baAttach = undefined;
+  taskMocks.needsPrd = false;
   taskMocks.stored = new Map();
   taskMocks.runnerCapabilities = { loopStepForkSession: true };
   taskMocks.createDocument.mockResolvedValue({ id: "doc-1" });

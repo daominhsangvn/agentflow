@@ -1,0 +1,49 @@
+---
+title: "Azure DevOps"
+description: "Start workflows from Azure Boards work items, update them, add Azure Repos repositories, open pull requests and queue pipelines."
+---
+
+## What it does
+
+Azure DevOps works like Jira for work items (triggers and actions) and like a Git server for Azure Repos (repositories and pull requests). The connection's user is the bot.
+
+When an Agent or the Orchestrator Agent reads a work item, its Dependency relations come with it: predecessors as `blockedBy`, successors as `blocks`. Other relation types are not returned. See [Waiting for blockers](/docs/guides/recipes/waiting-for-blockers).
+
+## Connection settings
+
+| Key | Notes |
+|---|---|
+| `config.organizationUrl` | `https://dev.azure.com/<organization>`. Changing it asks for the token again |
+| secret `pat` | Organization-scoped personal access token: Work Items read and write; Code read and write for Azure Repos; Build read and execute for pipelines |
+| `inbound.mode` | `webhook` (service hooks `workitem.created`, `workitem.updated`, and `workitem.commented` for mentions; authenticate with the `X-AgentFlow-Token` header or Basic auth) or `poll` |
+
+Project setting: `projects`, the team projects this AgentFlow project works on.
+
+## Triggers
+
+| Type | Starts when |
+|---|---|
+| `azure_devops.work_item_assigned` | A work item is assigned to the bot. Filters: projects, work item types, area path prefix, tags |
+| `azure_devops.work_item_tagged` | A configured tag is added |
+| `azure_devops.work_item_mentioned` | A comment, or the description of a new work item, mentions the bot |
+| `azure_devops.work_item_conditions` | Combines assigned, tagged and mentioned with `match: all` or `any`, plus projects, types, area path and states; same behavior as `jira.issue_conditions` |
+
+## Actions
+
+| Operation | What it does |
+|---|---|
+| `azure_devops.add_comment` | Markdown comment on the work item |
+| `azure_devops.update_state` | Changes the state |
+| `azure_devops.update_tags` | Adds and removes tags |
+| `azure_devops.add_link` | Adds a hyperlink; skipped when already linked |
+| `azure_devops.create_pull_request` | Opens pull requests for the run's pushed branches |
+| `azure_devops.run_pipeline` | Queues an Azure Pipelines run by pipeline id; the branch defaults to the one the Agents pushed. It is retried only on 429/503, so a retry never queues a second run |
+
+## Repositories and pull requests
+
+Project → **Connections & Repos** → add a repository → choose the Azure DevOps connection. Repositories are Azure Repos Git repositories named `<organization>/<project>/<repo>`. A project has at most 20 repositories. Pull requests reuse the active one of the same source and target branch; an orchestrated workflow uses `pull_request_open`.
+
+## Limits
+
+- Poll mode only sees work items assigned to the bot. Mentions in poll mode are best effort.
+- Azure DevOps cannot call localhost or private addresses: use public HTTPS or poll.

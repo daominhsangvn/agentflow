@@ -11,7 +11,11 @@ import { QueryErrorMessage } from "@repo/app/integrations/components/query-error
 import { ApiError } from "@repo/app/shared/api/api-error";
 import { ConfirmationDialog } from "@repo/app/shared/components/confirmation-dialog";
 import { formatRelativeTime } from "@repo/app/shared/lib/date-utils";
-import { formatCostPrecise } from "@repo/app/shared/lib/format-utils";
+import { formatActiveTime } from "@repo/app/shared/lib/format-active-time";
+import {
+  formatCostPrecise,
+  formatTokenCount,
+} from "@repo/app/shared/lib/format-utils";
 import { Badge } from "@repo/design-system/components/ui/badge";
 import { Button } from "@repo/design-system/components/ui/button";
 import {
@@ -37,6 +41,7 @@ import {
   OrchestratorCaseWaitsCard,
 } from "./orchestrator-case-conversation-card";
 import { OrchestratorCaseDecisionsCard } from "./orchestrator-case-decisions-card";
+import { OrchestratorCaseDocumentsCard } from "./orchestrator-case-documents-card";
 import { OrchestratorCaseWorkCards } from "./orchestrator-case-work-cards";
 
 export type OrchestratorCaseDetailViewProps = {
@@ -87,6 +92,7 @@ function CaseContent({
     <div className="space-y-6" data-testid="orchestrator-case-detail">
       <CaseHeader detail={detail} isAdmin={isAdmin} />
       {detail.notes ? <CaseNotesCard notes={detail.notes} /> : null}
+      <OrchestratorCaseDocumentsCard documents={detail.documents} />
       <OrchestratorCaseDecisionsCard
         caseId={detail.id}
         decisions={detail.decisions}
@@ -146,7 +152,13 @@ function CaseHeader({
           {` · last activity ${formatRelativeTime(detail.updatedAt)}`}
           {` · ${detail.taskCount} ${detail.taskCount === 1 ? "task" : "tasks"}`}
           {` · ${detail.turnCount} ${detail.turnCount === 1 ? "turn" : "turns"}`}
+          {` · active ${formatActiveTime(detail.activeMs)}`}
+          {` · ${formatTokenCount(detail.inputTokens + detail.outputTokens)} tokens`}
           {` · ${cost}`}
+        </p>
+        <p className="text-muted-foreground text-xs">
+          {`Elapsed ${caseElapsed(detail)}`}
+          {isOpen ? " (open)" : ""}
         </p>
       </div>
       {isAdmin ? (
@@ -193,4 +205,9 @@ function CaseNotesCard({ notes }: Readonly<{ notes: string }>) {
       </CardContent>
     </Card>
   );
+}
+
+function caseElapsed(detail: OrchestratorCaseDetail): string {
+  const end = detail.closedAt ? Date.parse(detail.closedAt) : Date.now();
+  return formatActiveTime(end - Date.parse(detail.createdAt));
 }

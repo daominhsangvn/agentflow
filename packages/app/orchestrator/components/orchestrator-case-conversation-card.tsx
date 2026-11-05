@@ -8,6 +8,7 @@ import {
   type OrchestratorCaseWait,
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
+  OrchestratorMessageVia,
   OrchestratorTaskStatus,
   OrchestratorTurnStatus,
 } from "@repo/api/src/types/orchestrator";
@@ -26,10 +27,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/design-system/components/ui/card";
+import { Label } from "@repo/design-system/components/ui/label";
+import { Textarea } from "@repo/design-system/components/ui/textarea";
 import { Link } from "@repo/navigation/link";
 import { useOrgPath } from "@repo/navigation/use-org-path";
 import { useState } from "react";
-import { useCancelOrchestratorTurn } from "../hooks/use-orchestrator-cases";
+import {
+  useCancelOrchestratorTurn,
+  usePostOrchestratorCaseMessage,
+} from "../hooks/use-orchestrator-cases";
 import {
   buildConversationTimeline,
   type CaseTimelineEntry,
@@ -78,6 +84,8 @@ const MESSAGE_KIND_LABELS: Record<OrchestratorMessageKind, string> = {
   [OrchestratorMessageKind.LabelAdded]: "Label added",
   [OrchestratorMessageKind.LabelRemoved]: "Label removed",
   [OrchestratorMessageKind.ToolRefused]: "Refused",
+  [OrchestratorMessageKind.Document]: "Document",
+  [OrchestratorMessageKind.CaseNotify]: "Case notice",
 };
 const CLAMP_CHARS = 600;
 const SHORT_ID_CHARS = 8;
@@ -96,6 +104,15 @@ export function OrchestratorCaseConversationCard({
   isAdmin: boolean;
 }>) {
   const timeline = buildConversationTimeline(conversation, tasks);
+  // Answered on the case page, or resumed without a fork (answered elsewhere).
+  const answeredTaskIds = new Set([
+    ...conversation.messages.flatMap(
+      (message) => message.answeredTaskIds ?? []
+    ),
+    ...tasks.flatMap((task) =>
+      task.resumeTaskId && !task.fork ? [task.resumeTaskId] : []
+    ),
+  ]);
 
   return (
     <Card>
@@ -106,6 +123,7 @@ export function OrchestratorCaseConversationCard({
       <CardContent className="space-y-3">
         {timeline.entries.map((entry) => (
           <TimelineEntry
+            answeredTaskIds={answeredTaskIds}
             caseId={caseId}
             entry={entry}
             isAdmin={isAdmin}
@@ -116,10 +134,20 @@ export function OrchestratorCaseConversationCard({
           <div className="space-y-2">
             <p className="font-medium text-sm">Other tasks</p>
             {timeline.unassignedTasks.map((task) => (
-              <TaskRow key={task.id} task={task} />
+              <TaskRow
+                answeredTaskIds={answeredTaskIds}
+                caseId={caseId}
+                key={task.id}
+                task={task}
+              />
             ))}
           </div>
         ) : null}
+        <ConversationMessageForm
+          caseId={caseId}
+          conversationId={conversation.id}
+          key={conversation.id}
+        />
       </CardContent>
     </Card>
   );
@@ -129,12 +157,19 @@ function TimelineEntry({
   entry,
   caseId,
   isAdmin,
-}: Readonly<{ entry: CaseTimelineEntry; caseId: string; isAdmin: boolean }>) {
+  answeredTaskIds,
+}: Readonly<{
+  entry: CaseTimelineEntry;
+  caseId: string;
+  isAdmin: boolean;
+  answeredTaskIds: ReadonlySet<string>;
+}>) {
   if (entry.kind === CaseTimelineEntryKind.Message) {
     return <MessageRow message={entry.message} />;
   }
   return (
     <TurnRow
+      answeredTaskIds={answeredTaskIds}
       caseId={caseId}
       isAdmin={isAdmin}
       tasks={entry.tasks}
@@ -158,6 +193,9 @@ function MessageRow({
           {message.actor ?? origin}
         </span>
         <Badge variant="outline">{MESSAGE_KIND_LABELS[message.kind]}</Badge>
+        {message.via === OrchestratorMessageVia.AgentFlow ? (
+          <Badge variant="secondary">AgentFlow (case page)</Badge>
+        ) : null}
         <span>{origin}</span>
         <span>{formatDateTime(message.createdAt)}</span>
       </div>
@@ -171,11 +209,13 @@ function TurnRow({
   tasks,
   caseId,
   isAdmin,
+  answeredTaskIds,
 }: Readonly<{
   turn: OrchestratorCaseTurn;
   tasks: OrchestratorCaseTask[];
   caseId: string;
   isAdmin: boolean;
+  answeredTaskIds: ReadonlySet<string>;
 }>) {
   const cancel = useCancelOrchestratorTurn(caseId);
   const [confirmStop, setConfirmStop] = useState(false);
@@ -217,7 +257,12 @@ function TurnRow({
         </p>
       ) : null}
       {tasks.map((task) => (
-        <TaskRow key={task.id} task={task} />
+        <TaskRow
+          answeredTaskIds={answeredTaskIds}
+          caseId={caseId}
+          key={task.id}
+          task={task}
+        />
       ))}
       <ConfirmationDialog
         confirmLabel="Stop turn"
@@ -235,8 +280,17 @@ function TurnRow({
   );
 }
 
-function TaskRow({ task }: Readonly<{ task: OrchestratorCaseTask }>) {
+function TaskRow({
+  task,
+  caseId,
+  answeredTaskIds,
+}: Readonly<{
+  task: OrchestratorCaseTask;
+  caseId: string;
+  answeredTaskIds: ReadonlySet<string>;
+}>) {
   const buildOrgPath = useOrgPath();
+  const isPending = hasPendingQuestions(task, answeredTaskIds);
 
   return (
     <div className="space-y-1 rounded-md bg-muted/30 p-2 text-sm">
@@ -266,7 +320,10 @@ function TaskRow({ task }: Readonly<{ task: OrchestratorCaseTask }>) {
       </div>
       {task.reply ? <ClampedText text={task.reply} /> : null}
       <TaskFiles task={task} />
-      {task.questions.length > 0 ? (
+      {isPending ? (
+        <TaskQuestionsForm caseId={caseId} key={task.id} task={task} />
+      ) : null}
+      {task.questions.length > 0 && !isPending ? (
         <ul className="list-disc pl-5">
           {task.questions.map((question) => (
             <li key={question.id}>{question.question}</li>
@@ -427,4 +484,147 @@ function formatFileSize(bytes: number): string {
     return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`;
   }
   return `${(bytes / (BYTES_PER_KB * BYTES_PER_KB)).toFixed(1)} MB`;
+}
+
+/** A succeeded task whose questions no stored answer or non-fork resume covers yet. */
+function hasPendingQuestions(
+  task: OrchestratorCaseTask,
+  answeredTaskIds: ReadonlySet<string>
+): boolean {
+  if (
+    task.status !== OrchestratorTaskStatus.Succeeded ||
+    task.questions.length === 0
+  ) {
+    return false;
+  }
+  return !answeredTaskIds.has(task.id);
+}
+
+function TaskQuestionsForm({
+  task,
+  caseId,
+}: Readonly<{ task: OrchestratorCaseTask; caseId: string }>) {
+  const post = usePostOrchestratorCaseMessage(caseId);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [sent, setSent] = useState(false);
+  const filled = task.questions.filter(
+    (question) => (answers[question.id] ?? "").trim().length > 0
+  );
+
+  const submit = async () => {
+    try {
+      await post.mutateAsync({
+        conversationId: task.conversationId,
+        answers: filled.map((question) => ({
+          taskId: task.id,
+          questionId: question.id,
+          answer: (answers[question.id] ?? "").trim(),
+        })),
+      });
+      setAnswers({});
+      setSent(true);
+    } catch {
+      // The global mutation handler toasts the error; keep the typed answers.
+    }
+  };
+
+  if (sent) {
+    return (
+      <p
+        className="text-muted-foreground text-xs"
+        data-testid="orchestrator-task-answers-sent"
+      >
+        Answers sent. The orchestrator picks them up on its next turn.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3" data-testid="orchestrator-task-questions">
+      {task.questions.map((question) => (
+        <div className="space-y-1" key={question.id}>
+          <Label htmlFor={`${task.id}-${question.id}`}>
+            {question.question}
+          </Label>
+          {question.options && question.options.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {question.options.map((option) => (
+                <Button
+                  key={option}
+                  onClick={() =>
+                    setAnswers((current) => ({
+                      ...current,
+                      [question.id]: option,
+                    }))
+                  }
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {option}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          <Textarea
+            id={`${task.id}-${question.id}`}
+            onChange={(event) =>
+              setAnswers((current) => ({
+                ...current,
+                [question.id]: event.target.value,
+              }))
+            }
+            value={answers[question.id] ?? ""}
+          />
+        </div>
+      ))}
+      <Button
+        disabled={filled.length === 0 || post.isPending}
+        onClick={submit}
+        size="sm"
+        type="button"
+      >
+        Send answers
+      </Button>
+    </div>
+  );
+}
+
+function ConversationMessageForm({
+  caseId,
+  conversationId,
+}: Readonly<{ caseId: string; conversationId: string }>) {
+  const post = usePostOrchestratorCaseMessage(caseId);
+  const [text, setText] = useState("");
+  const trimmed = text.trim();
+
+  const submit = async () => {
+    try {
+      await post.mutateAsync({ conversationId, text: trimmed });
+      setText("");
+    } catch {
+      // The global mutation handler toasts the error; keep the typed text.
+    }
+  };
+
+  return (
+    <div className="space-y-2 border-t pt-3">
+      <Label htmlFor={`message-${conversationId}`}>
+        Message the orchestrator
+      </Label>
+      <Textarea
+        id={`message-${conversationId}`}
+        onChange={(event) => setText(event.target.value)}
+        value={text}
+      />
+      <Button
+        disabled={trimmed.length === 0 || post.isPending}
+        onClick={submit}
+        size="sm"
+        type="button"
+      >
+        Send
+      </Button>
+    </div>
+  );
 }

@@ -25,6 +25,7 @@ describe("workflow orchestrator config", () => {
         OrchestratorTicketChange.StatusChanged,
         OrchestratorTicketChange.LabelRemoved,
       ],
+      connections: {},
     });
   });
 
@@ -52,6 +53,7 @@ describe("workflow orchestrator config", () => {
         OrchestratorTicketChange.StatusChanged,
         OrchestratorTicketChange.LabelRemoved,
       ],
+      connections: {},
     });
   });
 });

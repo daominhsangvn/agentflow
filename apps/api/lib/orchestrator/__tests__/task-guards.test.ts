@@ -171,6 +171,7 @@ describe("checkTaskNeeds", () => {
         "/dev-code needs prd (PRD-*.md, produced by /ba-requirement on runner-1)"
       ),
     });
+    expect(result.ok ? "" : result.error).toContain("[{page, name}]");
   });
 
   it("passes when the ticket cannot be read", async () => {

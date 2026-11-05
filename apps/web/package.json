@@ -7,7 +7,6 @@
     "start": "next start",
     "analyze": "cross-env ANALYZE=true npm run build",
     "clean": "git clean -xdf .cache .turbo dist *.tsbuildinfo node_modules",
-    "generate:api-reference": "tsx scripts/generate-api-reference.ts",
     "typecheck": "fumadocs-mdx && tsc --noEmit --emitDeclarationOnly false --incremental --tsBuildInfoFile ./tsconfig.tsbuildinfo"
   },
   "dependencies": {

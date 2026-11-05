@@ -62,6 +62,7 @@ describe("loadOrchestratorWorkflows", () => {
         OrchestratorTicketChange.LabelRemoved,
       ],
       enabled: true,
+      connections: {},
     });
   });
 

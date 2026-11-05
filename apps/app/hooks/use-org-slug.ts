@@ -22,7 +22,7 @@ export function useOrgSlug(): string {
   //   1. Clerk still loading org data (pre-load window), or
   //   2. Clerk loaded but the active organization has not yet propagated —
   //      the transient state on "/" while the sidebar renders and the page
-  //      client-redirects to "/{orgSlug}/my-tasks".
+  //      client-redirects to "/{orgSlug}/dashboard".
   // Returning "" is the established "slug not yet available" contract every
   // call site already tolerates (branch above returns "" too); the real slug
   // arrives on the next render. Throwing here (FEA-2404) surfaced as a real-prod

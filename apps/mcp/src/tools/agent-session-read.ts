@@ -55,11 +55,8 @@ import {
  * existing row can still return one. This note and the description's `waiting`
  * clause stay until those rows are gone.
  *
- * ISS-5641: neither this description nor its published reference
- * (`apps/web/content/docs/mcp/agent-sessions.mdx`) may spell the vocabulary out
- * by hand or count it — ISS-5366 grew the set from four values to six, and the
- * hardcoded copies drifted. Both are pinned to the SSOT by tests in
- * `../__tests__/agent-session-read.test.ts`.
+ * ISS-5641: the description must not spell the vocabulary out by hand or count
+ * it; it is pinned to the SSOT by `../__tests__/agent-session-read.test.ts`.
  */
 const STATUS_FILTER_DESCRIPTION = `Filter to a single canonical session status: ${SESSION_STATUS_FILTER_VALUES.map(
   (status) => `"${status}"`

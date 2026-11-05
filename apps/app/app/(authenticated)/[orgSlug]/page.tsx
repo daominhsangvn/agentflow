@@ -5,5 +5,5 @@ import { useOrgSlug } from "@/hooks/use-org-slug";
 
 export default function App() {
   const orgSlug = useOrgSlug();
-  return <ClientRedirect href={`/${orgSlug}/my-tasks`} />;
+  return <ClientRedirect href={`/${orgSlug}/dashboard`} />;
 }

@@ -1,39 +1,34 @@
 import { LOOP_STEP_INPUTS_MAX } from "@agentflow-ai/loops-api/loop-step";
-import type { JsonObject, JsonValue } from "@repo/api/src/types/common";
-import type {
-  IntegrationToolCallResponse,
-  IntegrationToolSessionDescriptor,
-} from "@repo/api/src/types/integration-tools";
+import type { JsonValue } from "@repo/api/src/types/common";
+import { SourceOperation } from "@repo/api/src/types/connection-grants";
+import type { IntegrationToolSessionDescriptor } from "@repo/api/src/types/integration-tools";
 import {
   OrchestratorCaseStatus,
   OrchestratorDecisionVia,
-  OrchestratorMessageKind,
-  OrchestratorMessageOrigin,
+  OrchestratorReplyTarget,
   OrchestratorTaskStatus,
   OrchestratorToolName,
   OrchestratorTurnEnd,
   OrchestratorTurnStatus,
   OrchestratorWaitKind,
 } from "@repo/api/src/types/orchestrator";
+import {
+  OrchestratorPageAccess,
+  OrchestratorSourceOperation,
+  pageKeysWith,
+  resolveOrchestratorGrants,
+} from "@repo/api/src/types/orchestrator-grants";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { RunnerCommandMode } from "@repo/api/src/types/runner-capabilities";
 import { withDb } from "@repo/database";
 import { z } from "zod";
 import { computeTargetCapabilitiesService } from "@/app/compute-targets/capabilities-service";
 import { toItemOutput } from "@/app/integration-tools/service/execute";
-import { getPrismaErrorCode } from "@/lib/db-utils";
 import { createProviderContext } from "@/lib/integrations/connection-service";
-import { loadProjectConnectionRuntime } from "@/lib/integrations/project-connections";
-import {
-  RetryableSourceError,
-  type SourceItemFile,
-} from "@/lib/integrations/types";
+import { RetryableSourceError } from "@/lib/integrations/types";
 import { jsonValueSchema } from "@/lib/json-schema";
 import { renderCase } from "@/lib/orchestrator/case-render";
-import {
-  type ConversationChannel,
-  readChannel,
-} from "@/lib/orchestrator/channel";
+import { readChannel } from "@/lib/orchestrator/channel";
 import { decide, requestDecision } from "@/lib/orchestrator/decisions";
 import {
   TURN_SUPERSEDED_ERROR,
@@ -47,10 +42,11 @@ import {
 import { readTaskResult } from "@/lib/orchestrator/task-result";
 import { startTask } from "@/lib/orchestrator/tasks";
 import { createWait, evaluateWaits } from "@/lib/orchestrator/waits";
+import { loadOrchestratorWorkflows } from "@/lib/orchestrator/workflow-settings";
 import { scrubProviderError } from "@/lib/workflows/engine/errors";
-import { orchestratorCaseUrl } from "@/lib/workflows/engine/links";
-import { REPLY_ATTACHMENTS_MAX, uploadReplyFiles } from "./service/attachments";
+import { REPLY_ATTACHMENTS_MAX } from "./service/attachments";
 import { recordRefusedCall } from "./service/audit";
+import { caseNotifyInputSchema, notifyCase } from "./service/case-notify";
 import {
   NOTES_MAX,
   REPLY_MAX,
@@ -58,8 +54,37 @@ import {
   WAIT_TASKS_MAX,
   WAIT_TIMEOUT_MAX_MINUTES,
 } from "./service/limits";
-import { latestMessageRef, messageThread } from "./service/threads";
-import { INSTRUCTIONS, TOOLS } from "./service/tools";
+import {
+  getPage,
+  type PageFileRef,
+  pageFileRefSchema,
+  pageGetInputSchema,
+  pagePublishInputSchema,
+  publishPage,
+  resolvePageInputs,
+} from "./service/pages";
+import {
+  openTaskPullRequests,
+  pullRequestOpenInputSchema,
+} from "./service/pull-requests";
+import { editReply, reply, resolveReplyTarget } from "./service/replies";
+import {
+  runSourceWrite,
+  type SourceWrite,
+  sourceLabelInputSchema,
+  sourceLinkInputSchema,
+  sourceTransitionInputSchema,
+} from "./service/source-writes";
+import { messageThread } from "./service/threads";
+import { buildInstructions, visibleTools } from "./service/tools";
+import {
+  caseLink,
+  loadConversationConnection,
+  notGranted,
+  refused,
+  type ToolOutcome,
+  type TurnContext,
+} from "./service/turn";
 import { hashOrchestratorToken } from "./token";
 
 /**
@@ -70,25 +95,13 @@ import { hashOrchestratorToken } from "./token";
  */
 
 const RUNNER_FILE_MAX = 20_000;
-const PRISMA_UNIQUE_VIOLATION = "P2002";
 const LOG_PREFIX = "[orchestrator-tools]";
-
-type TurnContext = {
-  turnId: string;
-  organizationId: string;
-  conversationId: string;
-  projectId: string;
-  caseId: string;
-  projectConnectionId: string | null;
-  channel: ConversationChannel | null;
-};
-
-type ToolOutcome = IntegrationToolCallResponse;
 
 const notesInputSchema = z.object({ notes: z.string().max(NOTES_MAX) });
 const replyInputSchema = z.object({
   text: z.string().trim().min(1).max(REPLY_MAX),
   replyTo: z.string().trim().min(1).max(255).optional(),
+  where: z.enum(OrchestratorReplyTarget).optional(),
   attachments: z
     .array(taskFileRefSchema)
     .max(REPLY_ATTACHMENTS_MAX)
@@ -107,7 +120,10 @@ const taskRunInputSchema = z.object({
   mode: z.enum(RunnerCommandMode).optional(),
   resumeTaskId: z.uuid().optional(),
   fork: z.boolean().default(false),
-  files: z.array(taskFileRefSchema).max(LOOP_STEP_INPUTS_MAX).default([]),
+  files: z
+    .array(z.union([taskFileRefSchema, pageFileRefSchema]))
+    .max(LOOP_STEP_INPUTS_MAX)
+    .default([]),
   replyTo: z.string().trim().min(1).max(255).optional(),
 });
 const taskGetInputSchema = z.object({ taskId: z.uuid() });
@@ -149,7 +165,10 @@ export const orchestratorToolService = {
     if (!context) {
       return Result.err(Status.Unauthorized);
     }
-    return Result.ok({ instructions: INSTRUCTIONS, tools: TOOLS });
+    return Result.ok({
+      instructions: buildInstructions(context.grants),
+      tools: visibleTools(context.grants),
+    });
   },
 
   async call(
@@ -213,6 +232,7 @@ async function authenticate(token: string | null): Promise<TurnContext | null> {
             caseId: true,
             projectConnectionId: true,
             channel: true,
+            case: { select: { workflowId: true } },
           },
         },
       },
@@ -221,6 +241,10 @@ async function authenticate(token: string | null): Promise<TurnContext | null> {
   if (!turn) {
     return null;
   }
+  const workflows = await loadOrchestratorWorkflows(turn.organizationId, [
+    turn.conversation.case.workflowId,
+  ]);
+  const workflow = workflows.get(turn.conversation.case.workflowId);
   return {
     turnId: turn.id,
     organizationId: turn.organizationId,
@@ -229,6 +253,9 @@ async function authenticate(token: string | null): Promise<TurnContext | null> {
     caseId: turn.conversation.caseId,
     projectConnectionId: turn.conversation.projectConnectionId,
     channel: readChannel(turn.conversation.channel),
+    grants: resolveOrchestratorGrants(workflow?.connections),
+    workflowId: turn.conversation.case.workflowId,
+    workflowName: workflow?.name ?? "",
   };
 }
 
@@ -301,6 +328,55 @@ const HANDLERS: Record<string, Handler> = {
     }
   },
 
+  [OrchestratorToolName.SourceItemTransition]: async (context, input) => {
+    const parsed = sourceTransitionInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        "transitionName: the transition (Jira) or state (Azure DevOps) to move the item to."
+      );
+    }
+    return await sourceWrite(context, {
+      op: SourceOperation.Transition,
+      transitionName: parsed.data.transitionName,
+    });
+  },
+
+  [OrchestratorToolName.SourceItemLabel]: async (context, input) => {
+    const parsed = sourceLabelInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        "add and remove: the labels to add and to remove, at least one."
+      );
+    }
+    return await sourceWrite(context, {
+      op: SourceOperation.Label,
+      add: parsed.data.add,
+      remove: parsed.data.remove,
+    });
+  },
+
+  [OrchestratorToolName.SourceItemLink]: async (context, input) => {
+    const parsed = sourceLinkInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused("url (http or https) and title of the link to add.");
+    }
+    return await sourceWrite(context, {
+      op: SourceOperation.Link,
+      url: parsed.data.url,
+      title: parsed.data.title,
+    });
+  },
+
+  [OrchestratorToolName.CaseNotify]: async (context, input) => {
+    const parsed = caseNotifyInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        "itemKey (the other item's key, e.g. from blocks of source_item_get) and message (what changed, e.g. LD-3 moved to Review)."
+      );
+    }
+    return await notifyCase(context, parsed.data);
+  },
+
   [OrchestratorToolName.Reply]: async (context, input) => {
     const parsed = replyInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -310,7 +386,8 @@ const HANDLERS: Record<string, Handler> = {
       context,
       parsed.data.text,
       parsed.data.attachments,
-      parsed.data.replyTo
+      parsed.data.replyTo,
+      parsed.data.where
     );
   },
 
@@ -335,7 +412,7 @@ const HANDLERS: Record<string, Handler> = {
     await withDb((db) =>
       db.orchestratorCase.update({
         where: { id: context.caseId },
-        data: { status: OrchestratorCaseStatus.Closed },
+        data: { status: OrchestratorCaseStatus.Closed, closedAt: new Date() },
       })
     );
     return {
@@ -349,7 +426,7 @@ const HANDLERS: Record<string, Handler> = {
     const parsed = taskRunInputSchema.safeParse(input);
     if (!parsed.success) {
       return refused(
-        "runner (its name), command (a slash command it declares), args, prompt (what you want and the context it needs), optional mode, resumeTaskId, fork, optional files ([{taskId, name}] of earlier tasks of this case), optional replyTo (the <message> ref the task answers)."
+        "runner (its name), command (a slash command it declares), args, prompt (what you want and the context it needs), optional mode, resumeTaskId, fork, optional files ([{taskId, name}] of earlier tasks, or [{page, name}] for a Confluence page's current content), optional replyTo (the <message> ref the task answers)."
       );
     }
     const { replyTo } = parsed.data;
@@ -360,6 +437,20 @@ const HANDLERS: Record<string, Handler> = {
           `replyTo: ${replyTo} is not a message of this conversation (use the ref of the <message> the task answers).`
         );
       }
+    }
+    const pageRefs: PageFileRef[] = [];
+    const taskRefs: TaskFileRef[] = [];
+    for (const ref of parsed.data.files) {
+      const pageRef = pageFileRefSchema.safeParse(ref);
+      if (pageRef.success) {
+        pageRefs.push(pageRef.data);
+      } else {
+        taskRefs.push(taskFileRefSchema.parse(ref));
+      }
+    }
+    const pageInputs = await resolvePageInputs(pageContext(context), pageRefs);
+    if (!pageInputs.ok) {
+      return refused(pageInputs.error);
     }
     const started = await startTask({
       organizationId: context.organizationId,
@@ -374,7 +465,8 @@ const HANDLERS: Record<string, Handler> = {
       mode: parsed.data.mode ?? null,
       resumeTaskId: parsed.data.resumeTaskId ?? null,
       fork: parsed.data.fork,
-      files: parsed.data.files,
+      files: taskRefs,
+      pageInputs: pageInputs.value,
       replyTo: replyTo ?? null,
     });
     if (!started.ok) {
@@ -394,10 +486,48 @@ const HANDLERS: Record<string, Handler> = {
     };
   },
 
+  [OrchestratorToolName.PagePublish]: async (context, input) => {
+    const parsed = pagePublishInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        "file ({taskId, name} of a task's Markdown file), title, optional kind, page, parent, space, attachments ([{taskId, name}], max 10), overwrite, connection."
+      );
+    }
+    return await publishPage(pageContext(context), parsed.data);
+  },
+
+  [OrchestratorToolName.PageGet]: async (context, input) => {
+    const parsed = pageGetInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused("page (a page id or URL), optional connection.");
+    }
+    return await getPage(pageContext(context), parsed.data);
+  },
+
+  [OrchestratorToolName.PullRequestOpen]: async (context, input) => {
+    const parsed = pullRequestOpenInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        "taskId (a succeeded task that pushed), title, optional description and draft."
+      );
+    }
+    if (!context.grants.pullRequestOpen) {
+      return notGranted("pull_requests: open");
+    }
+    return await openTaskPullRequests(context, parsed.data);
+  },
+
   [OrchestratorToolName.RequestDecision]: async (context, input) => {
     const parsed = requestDecisionInputSchema.safeParse(input);
     if (!parsed.success) {
       return refused("question: what people must approve or reject.");
+    }
+    const target = await resolveReplyTarget(context);
+    if (
+      target === OrchestratorReplyTarget.Thread &&
+      !context.grants.source.has(OrchestratorSourceOperation.Comment)
+    ) {
+      return notGranted("source: comment");
     }
     const decisionId = await requestDecision({
       organizationId: context.organizationId,
@@ -408,7 +538,10 @@ const HANDLERS: Record<string, Handler> = {
     const link = await caseLink(context);
     const posted = await reply(
       context,
-      `${parsed.data.question}\n\nApprove or reject${link ? ` in AgentFlow (${link})` : " in AgentFlow"}, or answer here.`
+      `${parsed.data.question}\n\nApprove or reject${link ? ` in AgentFlow (${link})` : " in AgentFlow"}, or answer here.`,
+      [],
+      undefined,
+      target
     );
     return {
       ok: true,
@@ -498,10 +631,19 @@ const HANDLERS: Record<string, Handler> = {
               skipped,
             })),
             filesOmitted: result?.filesOmitted ?? 0,
-            inputs: (result?.inputs ?? []).map(({ taskId, name }) => ({
-              taskId,
-              name,
-            })),
+            inputs: [
+              ...(result?.inputs ?? []).map(({ taskId, name }) => ({
+                taskId,
+                name,
+              })),
+              ...(result?.pageInputs ?? []).map(
+                ({ pageId, version, name }) => ({
+                  page: pageId,
+                  version,
+                  name,
+                })
+              ),
+            ],
           })
         )
       ),
@@ -578,203 +720,6 @@ const HANDLERS: Record<string, Handler> = {
   },
 };
 
-async function reply(
-  context: TurnContext,
-  text: string,
-  attachments: TaskFileRef[] = [],
-  replyTo?: string
-): Promise<ToolOutcome> {
-  const channel = context.channel;
-  const connection = await loadConversationConnection(context);
-  const replyOnItem = connection?.provider.replyOnItem;
-  if (!(channel && connection && replyOnItem)) {
-    return refused("This conversation has no thread AgentFlow can post in.");
-  }
-  const answered = replyTo
-    ? await messageThread(context.conversationId, replyTo)
-    : undefined;
-  if (answered === null) {
-    return refused(
-      `replyTo: ${replyTo} is not a message of this conversation (use the ref of a <message> you were given).`
-    );
-  }
-  let files: SourceItemFile[] = [];
-  if (attachments.length > 0) {
-    const uploaded = await uploadReplyFiles({
-      caseId: context.caseId,
-      refs: attachments,
-      connection,
-      item: channel.item,
-    });
-    if (!uploaded.ok) {
-      return { ok: false, ...uploaded.error };
-    }
-    files = uploaded.value;
-  }
-  const parentId =
-    channel.parentId ??
-    answered ??
-    (await latestMessageRef(context.conversationId));
-  const posted = await replyOnItem(
-    createProviderContext(connection.runtime, LOG_PREFIX),
-    {
-      item: channel.item,
-      parentId,
-      text,
-      extras: channel.extras,
-      ...(files.length > 0 ? { files } : {}),
-    }
-  );
-  if (!posted.ok) {
-    const attachedNote =
-      files.length > 0
-        ? ` Attached before it: ${files.map((file) => file.name).join(", ")}.`
-        : "";
-    return {
-      ok: false,
-      error: `${scrubProviderError(posted.error, connection.runtime.secrets)}${attachedNote}`,
-      retryable: posted.retryable,
-    };
-  }
-  await recordReply(context, text, posted.externalRef);
-  return {
-    ok: true,
-    output: {
-      posted: true,
-      reference: posted.externalRef,
-      ...(files.length > 0 ? { attached: files.map((file) => file.name) } : {}),
-    } as JsonObject,
-  };
-}
-
-/** Replaces a message this conversation posted; its anchor keeps the reference. */
-async function editReply(
-  context: TurnContext,
-  input: { reference: string; text: string; version?: number }
-): Promise<ToolOutcome> {
-  const channel = context.channel;
-  const anchor = await withDb((db) =>
-    db.orchestratorAnchor.findFirst({
-      where: {
-        organizationId: context.organizationId,
-        conversationId: context.conversationId,
-        externalRef: input.reference,
-      },
-      select: { id: true },
-    })
-  );
-  if (!(anchor && channel)) {
-    return refused(
-      "Edit only a message this conversation posted (the reference reply returned)."
-    );
-  }
-  const connection = await loadConversationConnection(context);
-  const editOnItem = connection?.provider.editOnItem;
-  if (!(connection && editOnItem)) {
-    return refused("Messages of this conversation's thread cannot be edited.");
-  }
-  const edited = await editOnItem(
-    createProviderContext(connection.runtime, LOG_PREFIX),
-    {
-      item: channel.item,
-      externalRef: input.reference,
-      text: input.text,
-      extras: channel.extras,
-    }
-  );
-  if (!edited.ok) {
-    return {
-      ok: false,
-      error: scrubProviderError(edited.error, connection.runtime.secrets),
-      retryable: edited.retryable,
-    };
-  }
-  if (input.version) {
-    await withDb((db) =>
-      db.orchestratorAnchor.update({
-        where: { id: anchor.id },
-        data: { version: input.version },
-      })
-    );
-  }
-  return { ok: true, output: { edited: true, reference: input.reference } };
-}
-
-/** The case's page in AgentFlow, for people to decide there. */
-async function caseLink(context: TurnContext): Promise<string | null> {
-  const organization = await withDb((db) =>
-    db.organization.findUnique({
-      where: { id: context.organizationId },
-      select: { slug: true },
-    })
-  );
-  return organization?.slug
-    ? orchestratorCaseUrl(organization.slug, context.caseId)
-    : null;
-}
-
-/** The orchestrator's message in the history, and an anchor for replies to it. */
-async function recordReply(
-  context: TurnContext,
-  text: string,
-  externalRef: string | null
-): Promise<void> {
-  const provider = context.channel?.item.provider ?? "agentflow";
-  await withDb((db) =>
-    db.orchestratorMessage.create({
-      data: {
-        organizationId: context.organizationId,
-        conversationId: context.conversationId,
-        origin: OrchestratorMessageOrigin.Internal,
-        kind: OrchestratorMessageKind.Reply,
-        actor: null,
-        text,
-        externalRef,
-        dedupKey: `reply:${context.turnId}:${externalRef ?? Date.now()}`,
-        turnId: context.turnId,
-      },
-    })
-  );
-  if (!externalRef) {
-    return;
-  }
-  try {
-    await withDb((db) =>
-      db.orchestratorAnchor.create({
-        data: {
-          organizationId: context.organizationId,
-          conversationId: context.conversationId,
-          provider,
-          externalRef,
-        },
-      })
-    );
-  } catch (error) {
-    if (getPrismaErrorCode(error) !== PRISMA_UNIQUE_VIOLATION) {
-      throw error;
-    }
-  }
-}
-
-/**
- * The comment to answer in the thread of: the conversation's newest message
- * from people, or the comment that message replies to when it is itself a
- * reply (comment threads have one level: an answer goes to the thread's
- * first comment). A turn woken by task results or a decision took no message
- * from people itself, and still answers in the thread of the request it
- * works on.
- */
-async function loadConversationConnection(context: TurnContext) {
-  if (!context.projectConnectionId) {
-    return null;
-  }
-  const loaded = await loadProjectConnectionRuntime(
-    context.organizationId,
-    context.projectConnectionId
-  );
-  return loaded?.connection ?? null;
-}
-
 async function endTurn(
   context: TurnContext,
   ended: OrchestratorTurnEnd
@@ -787,8 +732,42 @@ async function endTurn(
   );
 }
 
-function refused(error: string): ToolOutcome {
-  return { ok: false, error, retryable: false };
+/** A write on the conversation's own item: needs its grant and connection. */
+async function sourceWrite(
+  context: TurnContext,
+  write: SourceWrite
+): Promise<ToolOutcome> {
+  if (!context.grants.source.has(write.op)) {
+    return notGranted(`source: ${write.op}`);
+  }
+  const connection = await loadConversationConnection(context);
+  if (!(connection && context.channel)) {
+    return refused("This conversation has no item AgentFlow can change.");
+  }
+  const link = await caseLink(context);
+  return await runSourceWrite(
+    {
+      organizationId: context.organizationId,
+      caseId: context.caseId,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      channel: context.channel,
+      connection,
+      workflow: { id: context.workflowId, name: context.workflowName },
+      caseUrl: link ?? "",
+    },
+    write
+  );
+}
+
+function pageContext(context: TurnContext) {
+  return {
+    ...context,
+    pageKeys: {
+      read: pageKeysWith(context.grants, OrchestratorPageAccess.Read),
+      publish: pageKeysWith(context.grants, OrchestratorPageAccess.Publish),
+    },
+  };
 }
 
 /** What the orchestrator should do after task_run, by how the task started. */
@@ -813,4 +792,10 @@ const SUPERSEDABLE_TOOLS: ReadonlySet<string> = new Set<string>([
   OrchestratorToolName.RequestDecision,
   OrchestratorToolName.RecordDecision,
   OrchestratorToolName.CloseCase,
+  OrchestratorToolName.PagePublish,
+  OrchestratorToolName.PullRequestOpen,
+  OrchestratorToolName.SourceItemTransition,
+  OrchestratorToolName.SourceItemLabel,
+  OrchestratorToolName.SourceItemLink,
+  OrchestratorToolName.CaseNotify,
 ]);

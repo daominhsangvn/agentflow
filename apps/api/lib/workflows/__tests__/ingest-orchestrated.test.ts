@@ -92,6 +92,7 @@ describe("ingestEvents — orchestrated workflows", () => {
     mocks.routeToOrchestrator.mockResolvedValue([
       {
         conversationId: "conversation-1",
+        caseId: "case-1",
         workflowId: WORKFLOW_ID,
         created: true,
       },
@@ -132,6 +133,7 @@ describe("ingestEvents — orchestrated workflows", () => {
     mocks.routeToOrchestrator.mockResolvedValue([
       {
         conversationId: "conversation-1",
+        caseId: "case-1",
         workflowId: WORKFLOW_ID,
         created: false,
       },

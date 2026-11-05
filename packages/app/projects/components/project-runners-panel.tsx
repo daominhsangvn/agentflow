@@ -24,15 +24,15 @@ import {
 
 export type ProjectRunnersPanelProps = {
   projectId: string;
-  /** Org admins choose the runners; members see them (the API enforces it). */
+  /** Org admins choose the agents; members see them (the API enforces it). */
   isAdmin: boolean;
 };
 
 /**
- * Project → Repositories → Runners: the computers the project's agent loops
- * run on. Each runner needs the toolchains of every repository above; a new
- * loop goes to the least busy one online. Without runners, loops run on the
- * computer the user (or the workflow) picks.
+ * Project → Agents: the computers the project's agent loops run on. Each
+ * agent needs the toolchains of every repository; a new loop goes to the least
+ * busy one online. Without agents, loops run on the computer the user (or the
+ * workflow) picks.
  */
 export function ProjectRunnersPanel({
   projectId,
@@ -48,13 +48,13 @@ export function ProjectRunnersPanel({
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h4 className="font-medium text-sm">Runners</h4>
+          <h4 className="font-medium text-sm">Agents</h4>
           <p className="text-muted-foreground text-xs">
-            Computers that run this project&apos;s agent loops. Each one needs
-            the toolchains of all the repositories above (for example .NET, Rust
-            and Node.js), so set them up alike; a new loop goes to the least
-            busy one online. Without runners, loops run on the computer each
-            user picks.
+            Agents are the computers that run this project&apos;s agent loops.
+            Each one needs the toolchains of all the repositories (for example
+            .NET, Rust and Node.js), so set them up alike; a new loop goes to
+            the least busy one online. Without agents, loops run on the computer
+            each user picks.
             {isAdmin ? null : " Only organization admins can change them."}
           </p>
         </div>
@@ -71,7 +71,7 @@ export function ProjectRunnersPanel({
             ) : (
               <>
                 <PlusIcon className="size-3.5" />
-                Add runner
+                Add agent
               </>
             )}
           </Button>
@@ -81,7 +81,7 @@ export function ProjectRunnersPanel({
         <QueryErrorMessage
           error={runners.error}
           onRetry={() => runners.refetch()}
-          title="Couldn't load the runners"
+          title="Couldn't load the agents"
         />
       ) : (
         <RunnerList
@@ -118,7 +118,7 @@ type RunnerListProps = {
   runners: ProjectRunner[];
   isLoading: boolean;
   isBusy: boolean;
-  /** Null: the viewer cannot remove runners. */
+  /** Null: the viewer cannot remove agents. */
   onRemove: ((id: string) => void) | null;
 };
 
@@ -134,7 +134,7 @@ function RunnerList({
   if (runners.length === 0) {
     return (
       <p className="rounded-md border border-dashed p-3 text-muted-foreground text-sm">
-        No runners yet: loops run on the computer each user picks.
+        No agents yet: loops run on the computer each user picks.
       </p>
     );
   }
@@ -235,7 +235,7 @@ function AddRunnerForm({
   if (choices.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        No other computer is available. Connect a runner, or share a computer
+        No other computer is available. Connect an agent, or share a computer
         with the organization.
       </p>
     );

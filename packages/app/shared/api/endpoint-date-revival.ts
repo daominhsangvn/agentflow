@@ -300,7 +300,11 @@ export const ENDPOINT_STRING_ONLY_DATE_KEYS: readonly EndpointStringOnlyDateKeys
       route: "/judges-analytics/artifact-counts",
     },
     {
-      keys: ["createdAt", "decidedAt", "startedAt", "updatedAt"],
+      keys: ["closedAt", "createdAt", "updatedAt"],
+      route: "/orchestrator/cases",
+    },
+    {
+      keys: ["closedAt", "createdAt", "decidedAt", "startedAt", "updatedAt"],
       route: "/orchestrator/cases/[id]",
     },
     {
@@ -324,7 +328,7 @@ export const ENDPOINT_STRING_ONLY_DATE_KEYS: readonly EndpointStringOnlyDateKeys
       route: "/trace-comments",
     },
     {
-      keys: ["createdAt", "updatedAt"],
+      keys: ["closedAt", "createdAt", "updatedAt"],
       route: "/workflows/[id]/cases",
     },
   ];

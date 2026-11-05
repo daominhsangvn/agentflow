@@ -128,7 +128,7 @@ export const WORKFLOW_YAML_KEY_DOCS: Record<string, WorkflowYamlKeyDoc> = {
   },
   orchestrator: {
     detail: "mapping, orchestrated mode",
-    info: "How the orchestrator takes a thread's messages: concurrency, debounceSeconds, turnTimeoutMinutes and cancelOn. Left out: the defaults.",
+    info: "How the orchestrator takes a thread's messages: concurrency, debounceSeconds, turnTimeoutMinutes, connections (what it may write) and cancelOn. Left out: the defaults.",
   },
   process: {
     detail: "mapping",
@@ -385,6 +385,10 @@ export const WORKFLOW_ORCHESTRATOR_KEY_DOCS: Record<
   turnTimeoutMinutes: {
     detail: `1 to ${ORCHESTRATOR_TURN_TIMEOUT_MINUTES_MAX}, default ${ORCHESTRATOR_TURN_TIMEOUT_MINUTES_DEFAULT}`,
     info: "A turn running longer than this is stopped.",
+  },
+  connections: {
+    detail: "mapping, default {}",
+    info: "What the orchestrator may write: source: [comment, attach, transition, label, link] on the case's ticket, a Confluence connection key: read or [publish], pull_requests: [open]. Default {}: it only reads the ticket. A tool not granted is refused and recorded on the case.",
   },
   cancelOn: {
     detail:

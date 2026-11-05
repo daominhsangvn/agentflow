@@ -2,6 +2,7 @@ import type {
   OrchestratorCaseConversation,
   OrchestratorCaseDecision,
   OrchestratorCaseDetail,
+  OrchestratorCaseDocument,
   OrchestratorCaseMessage,
   OrchestratorCaseSummary,
   OrchestratorCaseTask,
@@ -18,9 +19,14 @@ import type {
   OrchestratorTurnUsage,
   OrchestratorWaitKind,
 } from "@repo/api/src/types/orchestrator";
-import { OrchestratorCaseStatus } from "@repo/api/src/types/orchestrator";
+import {
+  OrchestratorCaseStatus,
+  readOrchestratorMessageAnsweredTaskIds,
+  readOrchestratorMessageVia,
+} from "@repo/api/src/types/orchestrator";
 import { z } from "zod";
 import type { CaseStats } from "@/app/orchestrator/cases/service/case-stats";
+import type { CaseDocument } from "@/lib/orchestrator/case-documents";
 import { readTaskResult } from "@/lib/orchestrator/task-result";
 
 /**
@@ -41,6 +47,7 @@ export type CaseSummaryRow = Row & {
   sourceKey: string | null;
   status: string;
   updatedAt: Date;
+  closedAt: Date | null;
   _count: { conversations: number; decisions: number; tasks: number };
 };
 
@@ -60,6 +67,7 @@ export type CaseDetailRow = CaseSummaryRow & {
           actor: string | null;
           text: string;
           turnId: string | null;
+          payload: unknown;
         }
       >;
       turns: Array<
@@ -137,15 +145,20 @@ export function toCaseSummary(
     taskCount: stats.taskCount,
     turnCount: stats.turnCount,
     costUsd: stats.costUsd,
+    inputTokens: stats.inputTokens,
+    outputTokens: stats.outputTokens,
+    activeMs: stats.activeMs,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    closedAt: row.closedAt?.toISOString() ?? null,
   };
 }
 
 export function toCaseDetail(
   row: CaseDetailRow,
   turnRunning: boolean,
-  stats: CaseStats
+  stats: CaseStats,
+  documents: CaseDocument[]
 ): OrchestratorCaseDetail {
   return {
     ...toCaseSummary(row, turnRunning, stats),
@@ -156,6 +169,7 @@ export function toCaseDetail(
     tasks: oldestFirst(row.tasks).map(toTask),
     waits: oldestFirst(row.conversations.flatMap((c) => c.waits)).map(toWait),
     decisions: oldestFirst(row.decisions).map(toDecision),
+    documents: documents.map(toDocument),
   };
 }
 
@@ -228,6 +242,8 @@ function toMessage(
     text: row.text,
     turnId: row.turnId,
     createdAt: row.createdAt.toISOString(),
+    via: readOrchestratorMessageVia(row.payload),
+    answeredTaskIds: readOrchestratorMessageAnsweredTaskIds(row.payload),
   };
 }
 
@@ -315,4 +331,16 @@ function cancelledError(
   result: ReturnType<typeof readTaskResult>
 ): string | null {
   return result?.cancelled ? `Cancelled: ${result.cancelled}` : null;
+}
+
+function toDocument(document: CaseDocument): OrchestratorCaseDocument {
+  return {
+    pageId: document.pageId,
+    title: document.title,
+    url: document.url,
+    kind: document.kind,
+    version: document.version,
+    attachments: document.attachments,
+    publishedAt: document.publishedAt.toISOString(),
+  };
 }

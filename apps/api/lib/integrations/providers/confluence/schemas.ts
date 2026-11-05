@@ -177,3 +177,28 @@ export const confluenceErrorBodySchema = z.looseObject({
     )
     .nullish(),
 });
+
+/** A page attachment of `PUT /wiki/rest/api/content/{id}/child/attachment`. */
+export const confluenceAttachmentSchema = z.looseObject({
+  id: z.union([z.string(), z.number()]).transform(String),
+  title: z.string(),
+  extensions: z
+    .looseObject({
+      fileId: z.string().nullish(),
+      mediaType: z.string().nullish(),
+    })
+    .nullish(),
+  _links: z
+    .looseObject({
+      webui: z.string().nullish(),
+      download: z.string().nullish(),
+    })
+    .nullish(),
+});
+export type ConfluenceAttachment = z.infer<typeof confluenceAttachmentSchema>;
+
+/** The upload answers a list, or the one attachment on some sites. */
+export const confluenceAttachmentsSchema = z.union([
+  z.looseObject({ results: z.array(confluenceAttachmentSchema) }),
+  confluenceAttachmentSchema.transform((one) => ({ results: [one] })),
+]);

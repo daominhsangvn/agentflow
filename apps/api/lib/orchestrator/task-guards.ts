@@ -97,7 +97,7 @@ export async function checkTaskNeeds(input: {
     return Result.ok(undefined);
   }
   return Result.err(
-    `${input.declared.name} needs ${gap.need} (${gap.patterns.join(", ")}, produced by ${gap.producers.join(", ")}): pass that file in files ([{taskId, name}] of the task that wrote it) or attach it to the ticket first.`
+    `${input.declared.name} needs ${gap.need} (${gap.patterns.join(", ")}, produced by ${gap.producers.join(", ")}): pass that file in files ([{taskId, name}] of the task that wrote it, or [{page, name}] of its Confluence page) or attach it to the ticket first.`
   );
 }
 

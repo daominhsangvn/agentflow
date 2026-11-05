@@ -1,0 +1,62 @@
+---
+title: "Install the server"
+description: "Start the backing services with Docker Compose and run the app, API and MCP server on your own machine."
+---
+
+AgentFlow needs no AWS, Vercel or hosted AgentFlow service. Everything it stores lives in the services below, started from `docker-compose.yml`.
+
+## Quick start
+
+```bash
+pnpm install
+cp .env.docker.example .env        # optional: change host ports / credentials
+docker compose up -d               # Postgres, RustFS (S3), Mailpit, Local Git
+pnpm storage:init                  # create the buckets + browser CORS (idempotent)
+pnpm local-git:init                # optional: Local Git account + token, written to apps/api/.env.local
+cd packages/database && pnpm prisma migrate deploy && cd ../..
+pnpm dev
+```
+
+| Service | Default host ports | Purpose |
+|---|---|---|
+| postgres | 5432 | The application database |
+| rustfs | 9000 (S3 API), 9001 (console) | Attachments, session transcripts and other stored files |
+| mailpit | 1025 (SMTP), 8025 (web UI) | Captures outgoing mail in development |
+| local-git | 3300 (web UI and git over HTTP) | Repositories on this machine for projects without a remote |
+
+The applications:
+
+| App | Port | What it is |
+|---|---|---|
+| app | 3000 | The web app people use |
+| api | 3002 | REST API, webhooks, the scheduler |
+| mcp | 3010 | MCP server |
+
+Agents call both the API and the MCP server, so both must be reachable from every Agent.
+
+## Environment files
+
+`pnpm dev` copies each missing `.env.local` from its `.env.example`. The values already point at the Docker services. `apps/api/.env.example` lists every variable; fill in at least, in `apps/api/.env.local`:
+
+- `BETTER_AUTH_SECRET`: signs sessions; any long random string.
+- `ENCRYPTION_KEY`: a 32-byte base64 key for secrets at rest (`openssl rand -base64 32`). Rotating it makes stored Claude tokens and connection credentials unreadable.
+
+An empty value such as `RESEND_TOKEN=""` fails validation. Comment out variables you do not use.
+
+| Variable | Notes |
+|---|---|
+| `DATABASE_URL` | Plain PostgreSQL URL. Add `?sslmode=disable` when the host is not `localhost` and has no TLS. |
+| `S3_ENDPOINT` / `S3_PUBLIC_ENDPOINT` | The endpoint the API uses, and the one baked into presigned URLs. The second must be reachable from browsers and Agents. |
+| `S3_CORS_ALLOWED_ORIGINS` | Web app origins `pnpm storage:init` allows. Without them the browser cannot upload attachments or show a session's transcript. |
+| `SMTP_URL`, `EMAIL_FROM` | Mail for invitations, password resets and the email action. |
+| `PUBLIC_WEBHOOK_BASE_URL` | Public HTTPS base URL of the API, for Jira webhooks. |
+
+All variables: [Server environment variables](/docs/reference/server-env).
+
+## The scheduler
+
+The API runs a small in-process scheduler. It advances workflows every `WORKFLOW_TICK_SECONDS` (default 10, minimum 5) and ends sessions that stopped reporting after `STALE_SESSION_AGE_HOURS` (default 24). To use an external scheduler instead, set `SELF_HOSTED_CRON_DISABLED=true` and `CRON_SECRET`, then call the API's cron routes yourself.
+
+## Next
+
+[Create the first admin and organization](/docs/getting-started/first-admin).

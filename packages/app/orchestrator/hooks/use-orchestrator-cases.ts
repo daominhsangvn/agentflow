@@ -4,8 +4,12 @@ import { LoopStatus } from "@repo/api/src/types/loop";
 import type {
   DecideOrchestratorDecisionInput,
   OrchestratorCaseDetail,
+  OrchestratorCaseListItem,
+  OrchestratorCaseListQuery,
   OrchestratorCaseLoops,
+  OrchestratorCaseMessagePosted,
   OrchestratorCaseSummary,
+  PostOrchestratorCaseMessageInput,
   UpdateOrchestratorCaseInput,
 } from "@repo/api/src/types/orchestrator";
 import { isLiveDisplayedSessionStatus } from "@repo/api/src/types/session-status";
@@ -25,6 +29,8 @@ export const orchestratorCaseKeys = {
   all: ["orchestrator-cases"] as const,
   workflow: (workflowId: string) =>
     [...orchestratorCaseKeys.all, "workflow", workflowId] as const,
+  org: (query: OrchestratorCaseListQuery) =>
+    [...orchestratorCaseKeys.all, "org", query] as const,
   detail: (caseId: string) =>
     [...orchestratorCaseKeys.all, "detail", caseId] as const,
   loops: (caseId: string) =>
@@ -161,4 +167,58 @@ export function isCaseActive(
 
 function casePath(caseId: string): string {
   return `/orchestrator/cases/${encodeURIComponent(caseId)}`;
+}
+
+/** Every case of the org (100 most recently updated), optionally filtered. */
+export function useOrgOrchestratorCases(query: OrchestratorCaseListQuery) {
+  const apiClient = useApiClient();
+
+  return useQuery({
+    queryKey: orchestratorCaseKeys.org(query),
+    queryFn: () =>
+      apiClient.get<OrchestratorCaseListItem[]>(
+        `/orchestrator/cases${buildOrgCaseQuery(query)}`
+      ),
+    refetchInterval: (state) => {
+      if (state.state.status === "error") {
+        return false;
+      }
+      return state.state.data?.some((item) => isCaseActive(item))
+        ? CASE_POLL_INTERVAL_MS
+        : false;
+    },
+  });
+}
+
+function buildOrgCaseQuery(query: OrchestratorCaseListQuery): string {
+  const params = new URLSearchParams();
+  if (query.projectId) {
+    params.set("projectId", query.projectId);
+  }
+  if (query.workflowId) {
+    params.set("workflowId", query.workflowId);
+  }
+  if (query.status) {
+    params.set("status", query.status);
+  }
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+export function usePostOrchestratorCaseMessage(caseId: string) {
+  const queryClient = useQueryClient();
+  const apiClient = useApiClient();
+
+  return useMutation({
+    mutationFn: (input: PostOrchestratorCaseMessageInput) =>
+      apiClient.post<OrchestratorCaseMessagePosted>(
+        `${casePath(caseId)}/messages`,
+        input
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: orchestratorCaseKeys.detail(caseId),
+      }),
+    ...mutationErrorOptions("Couldn't send the message"),
+  });
 }

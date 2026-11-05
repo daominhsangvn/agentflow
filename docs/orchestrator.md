@@ -21,8 +21,8 @@ auto runner's toolkit), the orchestrator settings, `agent.mode: orchestrated`,
 taking requests (conversations, turns, replies), tasks on other runners with
 wait conditions, `supersede`, Teams thread replies, decisions and edited
 messages, and the case pages. Of the guards (phase 8), the task guards and the
-refusal audit are built ("Guards" below); identity mapping, budgets and write
-grants come next. The orchestrator configuration moved from the project into
+refusal audit and the write grants are built ("Guards" and "Write grants"
+below); identity mapping and budgets come next. The orchestrator configuration moved from the project into
 the workflow.
 
 To set one up for a project and write its rules, see
@@ -40,6 +40,7 @@ Set in the workflow (editor or YAML) with `agent.mode: orchestrated`.
 | `agent.orchestrator.concurrency` | `supersede` (default): a new message on a thread whose turn is running stops that turn, and the next turn answers both. `queue`: the running turn finishes, the next one takes every new message. Messages on different threads always run in parallel. |
 | `agent.orchestrator.debounceSeconds` | Seconds a thread stays quiet before a turn starts, so a burst of messages is one turn (default 20). |
 | `agent.orchestrator.turnTimeoutMinutes` | Minutes one turn may take (default 10). |
+| `agent.orchestrator.connections` | What the orchestrator may write ("Write grants" below). Default `{}`: it only reads the ticket. `source`: `comment`, `attach`, `transition`, `label`, `link`; a Confluence connection key: `read` or `[publish]`; `pull_requests`: `[open]`. Only with `agent.mode: orchestrated`. |
 | `agent.orchestrator.cancelOn` | Ticket-change kinds whose turn may cancel tasks with `task_cancel`: `status_changed`, `label_added`, `label_removed`. Default `[status_changed, label_removed]`; `[]` = the orchestrator never cancels. |
 
 ```yaml
@@ -54,6 +55,10 @@ agent:
     debounceSeconds: 20
     turnTimeoutMinutes: 10
     cancelOn: [status_changed, label_removed]
+    connections:
+      source: [comment, attach]
+      confluence: [publish]
+      pull_requests: [open]
 ```
 
 **Deployment model.** The orchestrator runs on one headless runner with no
@@ -107,7 +112,8 @@ A ticket change (`InboundEvent.itemChange`, turned into a message by
 `ticket-change.ts`) is stored as an external message of kind `status_changed`
 (text `Status changed: A → B (by X)`, payload `{from, to, actor}`), `label_added`
 (`Label added: x (by X)`) or `label_removed` (`Label removed: x (by X)`);
-the label payload is `{added, removed, actor}`.
+the label payload is `{added, removed, actor}`. A `case_notify` from another case is
+an internal message of kind `case_notify`.
 
 A conversation belongs to the **case** of its source item (`jira:LD-7`: one
 case per item per workflow: unique on `workflowId, sourceKey`; conversations are unique per case and channel). The event's comment or message (`InboundEvent.
@@ -154,7 +160,8 @@ turn that finished before the stop arrived settles as usual.
 In a `supersede` conversation, from the moment a newer external message
 waits (or a stop was requested for the turn), the running turn's write
 tools (`reply`, `edit_reply`, `task_run`, `task_cancel`, `request_decision`,
-`record_decision`, `close_case`) are refused with `superseded: a newer message
+`record_decision`, `case_notify`, `source_item_transition`, `source_item_label`,
+`source_item_link`, `close_case`) are refused with `superseded: a newer message
 arrived; end the turn`. Reads, `case_update_notes`, `wait_for` and `wait_human`
 stay allowed (`lib/orchestrator/supersede.ts`).
 
@@ -178,17 +185,52 @@ tools for that token from `GET /orchestrator-tools/session` and
 | `case_get` | CASE.md: notes, conversations with their latest messages, tasks, decisions |
 | `case_update_notes` | Replaces the case's notes |
 | `runners_list` | Each runner's AGENTFLOW.md (commands, skills, online) |
-| `source_item_get` | The conversation's item through its project connection |
-| `reply` | Posts in the conversation's thread through the provider's `replyOnItem` (Jira: a comment in the thread of the comment answered, on the issue when the site refuses threads; Teams: a reply in the thread mentioning who asked last). Kept as a `reply` message and an anchor |
+| `source_item_get` | The conversation's item through its project connection, incl. `blockedBy` / `blocks` relations |
+| `reply` | `where`: `thread` (default for a message from the ticket) or `case_page` (default for a message sent from AgentFlow; shown on the case page only, no grant, no files). `thread` needs `source: comment`, and `attachments` needs `attach`. Posts in the conversation's thread through the provider's `replyOnItem` (Jira: a comment in the thread of the comment answered, on the issue when the site refuses threads; Teams: a reply in the thread mentioning who asked last). Kept as a `reply` message and an anchor |
 | `task_run` | Starts a runner's command as a task (below); optional `replyTo`: the message ref the task answers |
 | `task_get` | A task's status, answer, questions and error, and the message it answers (`replyTo`) |
 | `task_cancel` | Cancels a task of the case with a reason ("Cancelling tasks" below); only in a turn that took a ticket change listed in `cancelOn` |
 | `wait_for` | Ends the turn waiting for tasks: `all` (default) or `any`, `timeoutMinutes`, `wakeOnFailure` (default true) |
+| `source_item_transition` | `{ transitionName }`: moves the case's ticket (grant `source: transition`) |
+| `source_item_label` | `{ add, remove }`: adds and removes labels on the ticket (grant `source: label`) |
+| `source_item_link` | `{ url, title }`: adds a link to the ticket (grant `source: link`) |
+| `case_notify` | `{ itemKey, message }`: an internal message on the item conversation of another case of the same workflow (same connection), which wakes it after its debounce and reopens it if closed; refused when no case exists for that key, for the case's own item, when the calling conversation has no source item, or when the target case has no conversation on this project connection. No grant |
 | `request_decision` | Asks people to approve or reject: a decision row, and the question posted in the thread with the case's link |
 | `record_decision` | Records a decision someone gave in the thread (`via: message`) |
+| `page_publish` | (grant: the Confluence key `[publish]`) Publishes a task's Markdown file as a Confluence page, with attachments ("Confluence documents" below) |
+| `page_get` | (grant: the Confluence key `read` or `[publish]`) Reads a Confluence page as Markdown, with its version and last editor |
+| `pull_request_open` | (grant `pull_requests: [open]`) Opens the pull requests for the branches an auto-runner task pushed ("Pull requests of auto-runner tasks" below) |
 | `edit_reply` | Replaces the text of a message this conversation posted (provider `editOnItem`: Jira `PUT comment/{id}`, Teams activity update); `version` moves the anchor's version |
 | `wait_human` | Ends the turn waiting for people |
 | `close_case` | Ends the turn and closes the case (a new message reopens it) |
+
+Tools whose grant is missing are not listed to the turn
+(`visibleTools`, `service/tools.ts`).
+
+## Write grants
+
+`agent.orchestrator.connections` (`packages/api/src/types/orchestrator-grants.ts`,
+`orchestratorConnectionGrantsSchema`, resolved by `resolveOrchestratorGrants`)
+says what the orchestrator may write. Default `{}`.
+
+| Key | Values | Allows |
+|---|---|---|
+| `source` | `comment`, `attach` (needs `comment`), `transition`, `label`, `link` | `reply` / `edit_reply` / `request_decision` on the ticket; `reply attachments`; `source_item_transition`; `source_item_label`; `source_item_link` |
+| a Confluence key | `read` or `[publish]` | `page_get` and page files; `page_publish` (publish implies read). With several granted connections the call names `connection` |
+| `pull_requests` | `[open]` | `pull_request_open` |
+
+A Teams thread takes only `comment`. Saving checks the grants
+(`workflow-validation.ts` `checkOrchestratorGrants`): every `source` operation
+must be offered by some trigger's connection, every other key must be a
+Confluence connection of the project. The turn prompt's "Your writes" section
+(`turn-prompt.ts`) states what is granted and what is not.
+
+**Case-page messages.** `POST /orchestrator/cases/{id}/messages` (any org member;
+`{ conversationId, text, answers }`) stores a message from the member (via
+AgentFlow) and wakes the conversation; `answers` answer the questions of the
+case's tasks. The orchestrator replies with `reply` on the case page, which needs
+no grant and posts nothing on the ticket; posting there too is up to the rules
+(`reply where: thread`).
 
 ## Tasks and waits
 
@@ -245,6 +287,15 @@ created when:
   cannot be read (fail-open). The runner-side BLOCKED check stays. Tasks with
   `resumeTaskId` are exempt.
 
+- **granted**: a write the grants do not allow (`notGranted`) is refused and
+  recorded like any refusal.
+- **superseded**: the new write tools (`source_item_*`) are refused for a
+  superseded turn, like the other writes.
+- **own changes**: the bot's own transition or label change is stored as an
+  internal ticket-change message on the conversation (actor `AgentFlow`), so
+  people and the next turn see it. `task_cancel` counts only external messages,
+  so it never allows a cancel.
+
 Every refused tool call (`ok: false`, not retryable) is recorded as a
 `tool_refused` message on the conversation (`<tool> refused: <error>`, no tool
 input). It never wakes a turn, shows as "Refused" in the case detail and
@@ -266,6 +317,11 @@ lists them (name, size) in `task_get`, wait results and CASE.md.
 - `task_run files: [{taskId, name}]` passes text files of earlier tasks (at
   most 5, 200 KB each, 400 KB together) to the new task. They are written to
   `inputs/` in its work directory and kept in the task result until launch.
+- `task_run files: [{page, name}]` passes a Confluence page (id or link, inside
+  the project connection's spaces). Its current Markdown is read when
+  `task_run` runs, stored in the task result as `pageInputs`, and written to
+  `inputs/<name>` at launch, with the same limits as task files (shared count
+  and size). A page input counts for the guards' `needs` check.
 - `task_run replyTo` is checked against the conversation's messages, stored in
   the task result, and shown in `task_get`, wait results and CASE.md ("answers
   ref ...").
@@ -306,6 +362,50 @@ task, so only the removed label's tasks get cancelled. The turn prompt has a
 "Ticket changes" section; debounce merges a burst of flips into one turn that
 sees the sequence and the final status.
 
+## Confluence documents
+
+`page_publish { file: {taskId, name}, title, kind?, page?, parent?, space?,
+attachments?, overwrite?, connection? }` turns a Markdown file of a task of
+the case into a Confluence page (`kind`: `ticket`, `prd`, `plan`, `test_plan`,
+`test_run`, `other`).
+
+- **Target.** `page` (id or link) updates that page. Without it the page is
+  found by `title` in the space, or created: under `parent` (a page reference,
+  or `root` for the top of the space) or the project connection's
+  `parentPageId`; `space` names the space key when it is not implied. A title
+  already used by a page elsewhere in the space is refused (pass it as `page`
+  or choose another title).
+- **Overwrite guard.** Updating a page that someone else edited since
+  AgentFlow last published it (the version recorded on the case) is refused;
+  hand the page to a task with `task_run files [{page, name}]` so the edits
+  are kept, then publish again. `overwrite: true` replaces it when people
+  asked for that.
+- **Attachments and images.** `attachments` (at most 10 files of tasks of the
+  case, e.g. screenshots) are uploaded to the page; images are shown below the
+  body (file names in the Markdown stay plain text). A new page with files
+  is created first and then updated with the attachment blocks, so it has two
+  versions.
+- **`page_get { page, connection? }`** returns the page's Markdown (cut at
+  60 000 characters), version, parent and last editor (and whether
+  AgentFlow wrote that version).
+- **Recorded on the case.** Each publish is kept as a `document` message
+  (page, title, kind, version, URL). CASE.md lists them under "Documents", the
+  case page shows them in a card, and they are not fed again to the next turn
+  when a turn is superseded.
+- **Scope.** Only the project's Confluence connections are used; with more
+  than one, `connection` names the one. The provider refuses any page or
+  parent outside the connection's `spaceKeys`.
+
+## Pull requests of auto-runner tasks
+
+`push` on a command only pushes branches (an auto runner's command with
+`push: true` run in write mode); it opens no pull request.
+`pull_request_open { taskId, title, description?, draft? }` opens the pull
+requests for the branches that task pushed, one per project repository, through
+each repository's connection. It is refused for a task that has not succeeded or
+pushed nothing; a branch that already has a pull request is reported as
+existing, and a repository that fails does not stop the others.
+
 ## Decisions
 
 `request_decision` stores a pending decision on the case and posts its
@@ -323,4 +423,4 @@ question. It is decided once (`lib/orchestrator/decisions.ts`), either way:
 
 The orchestrator chooses among the commands the runners declare in their
 `AGENTFLOW.md`: docs/runner.md "Capabilities (AGENTFLOW.md)". Project →
-Integrations → Commands shows them.
+Agents → Commands shows them.

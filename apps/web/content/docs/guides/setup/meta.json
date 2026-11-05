@@ -1,0 +1,14 @@
+{
+  "title": "Setup",
+  "pages": [
+    "connections",
+    "agents",
+    "agent-capabilities",
+    "workflow-yaml",
+    "triggers-and-actions",
+    "process-yaml",
+    "connection-grants",
+    "orchestrator",
+    "leavedesk-example"
+  ]
+}

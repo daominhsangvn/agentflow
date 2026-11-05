@@ -45,7 +45,7 @@ test("Local Git connection: provided by the server, else offered in Add connecti
     ]),
   });
 
-  await page.goto(`/${orgSlug}/settings?tab=integrations`);
+  await page.goto(`/${orgSlug}/connections`);
   if (localGit?.providedByServer) {
     // Every organization already has it: listed as Default, never added.
     const row = page
@@ -153,7 +153,7 @@ test("project repositories: create a repository in Local Git and add it", {
     });
 
     await page.goto(`/${orgSlug}/projects/${project.id}`);
-    await page.getByRole("radio", { name: "Integrations" }).click();
+    await page.getByRole("radio", { name: "Connections & Repos" }).click();
     await expect(page).toHaveURL(REPOSITORIES_TAB_RE);
     await page.getByRole("button", { name: "Add repository" }).click();
     await page.getByRole("combobox", { name: "Connection" }).click();

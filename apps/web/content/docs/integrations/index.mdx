@@ -1,0 +1,26 @@
+---
+title: "Integrations"
+description: "The outside systems AgentFlow connects to: Jira, Confluence, Git servers, Azure DevOps, Microsoft Teams, HTTPS webhooks and email."
+---
+
+An integration is a provider that AgentFlow can talk to through a **connection**: one account in the outside system. Providers give a workflow some of: **triggers** (events that start work), **actions** (things AgentFlow does after a run), **Agent tools** (what Agents and the Orchestrator Agent can do through the project's connections) and **repositories** or **pages** (what a project works on).
+
+| Provider | Key | Used for |
+|---|---|---|
+| [Jira](/docs/integrations/jira) | `jira` | Triggers from tickets, comments and mentions; comment, transition, label and link actions; creating issues |
+| [Confluence](/docs/integrations/confluence) | `confluence` | Reading, creating and reviewing pages and comments |
+| [Local Git](/docs/integrations/local-git) | `local_git` | Repositories and pull requests on a Git server that runs next to AgentFlow |
+| [Bitbucket](/docs/integrations/bitbucket) | `bitbucket` | Repositories and pull requests (Bitbucket Cloud) |
+| [GitHub](/docs/integrations/github) | `github` | Repositories and pull requests |
+| [Azure DevOps](/docs/integrations/azure-devops) | `azure_devops` | Triggers from work items; state, tag, comment and link actions; repositories, pull requests, pipelines |
+| [Microsoft Teams](/docs/integrations/microsoft-teams) | `microsoft_teams` | Mentioning the bot in a channel; posting and replying in Teams |
+| [Webhook](/docs/integrations/webhook) | `webhook` | Starting a workflow from any system, and calling any HTTPS endpoint |
+| [Email](/docs/integrations/email) | none | Mail from the server: invitations, resets and the `agentflow.email` action |
+
+## How connections work
+
+1. An admin adds the **connection** in **Connections** (sidebar). It holds the credentials, which never leave the server.
+2. A project uses it through a **project connection** (Project → **Connections & Repos**), under a key that workflow YAML names.
+3. Repositories are added from their connection, in the same tab.
+
+The full walk-through is in [Connections and repositories](/docs/guides/setup/connections). What an Agent may do with a connection is set by [connection grants](/docs/guides/setup/connection-grants).

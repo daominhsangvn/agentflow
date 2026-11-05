@@ -82,7 +82,7 @@ describe("AgentOnboardingCard — prerequisites", () => {
     expect(screen.queryByRole("link", { name: "Runner online" })).toBeNull();
     expect(screen.getByRole("link", { name: GENERATE_AGENTS })).toHaveAttribute(
       "href",
-      "/acme/agents?from=onboarding"
+      "/acme/skills?from=onboarding"
     );
   });
 });

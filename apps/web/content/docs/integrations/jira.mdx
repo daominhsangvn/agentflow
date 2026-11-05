@@ -1,0 +1,75 @@
+---
+title: "Jira"
+description: "Start workflows from Jira tickets, comments and mentions, and let AgentFlow comment, transition, label, link and create issues."
+---
+
+## What it does
+
+Jira is the usual source of work: a ticket starts a workflow, the Agents read it, and the results go back as comments, status changes, labels and links. The connection's account is the **bot**. Changes the bot makes itself are ignored, so a bot never triggers itself.
+
+## Connection settings
+
+| Key | Notes |
+|---|---|
+| `config.deployment` | `cloud` or `data_center` |
+| `config.siteUrl` | The Jira site. Changing it asks for the token again |
+| `config.email` | Cloud only: the bot account |
+| secret `apiToken` | Cloud: API token of the bot (with or without scopes `read:jira-user`, `read:jira-work`, `write:jira-work`). Data Center: personal access token |
+| `inbound.mode` | `webhook` or `poll` |
+
+Saving the connection checks the account (`/myself`). A scoped Cloud token works through the Atlassian API gateway; AgentFlow detects this and stores the cloud id itself.
+
+## Triggers
+
+| Type | Starts when |
+|---|---|
+| `jira.issue_assigned` | A ticket is created with, or changed to, the bot as assignee. Filters: project keys, issue types, labels |
+| `jira.issue_labeled` | A configured label is added (`change: added`, `removed` or `both`; one label per trigger). Webhook only |
+| `jira.issue_status_changed` | The status changes. Filters: `from`, `to`, `projectKeys`, `issueTypes`. Webhook only |
+| `jira.issue_mentioned` | A comment or the description mentions the bot. Webhook only, with the Comment events enabled |
+| `jira.issue_conditions` | Combines "assigned to the bot", "has one of these labels" and "the bot is mentioned" with `match: all` or `any`, plus project, type and status filters |
+
+```yaml
+triggers:
+  - connection: jira
+    type: jira.issue_status_changed
+    config:
+      to: [In Progress]
+      projectKeys: [LD]
+  - connection: jira
+    type: jira.issue_conditions
+    config:
+      match: all
+      assigned: true
+      labels: [ai-ready]
+```
+
+A reply in the thread of a comment AgentFlow posted (`jira.comment_reply`) needs no trigger: it reaches the run that is waiting for the answer. In an orchestrated workflow, which ticket changes may cancel tasks is set by `agent.orchestrator.cancelOn`; see [Cancelling tasks](/docs/guides/recipes/cancelling).
+
+## Actions and tools
+
+| Operation | What it does |
+|---|---|
+| `jira.add_comment` | Comments on the source ticket (Markdown; ADF on Cloud) |
+| `jira.transition_issue` | Moves the ticket by transition name, e.g. "In Review" |
+| `jira.update_labels` | Adds and removes labels in one update |
+| `jira.add_link` | Adds a remote link, keyed by its URL |
+| `jira.create_issue` | Creates a ticket in one of the project connection's Jira projects; Agents get it by naming it in a [connection grant](/docs/guides/setup/connection-grants) |
+
+A ticket's "Blocks" links are read with it: `source_item_get` returns them as `blockedBy` (tickets that block this one) and `blocks` (tickets this one blocks). Other link types are not returned. See [Waiting for blockers](/docs/guides/recipes/waiting-for-blockers).
+
+The first four skip runs that did not come from a Jira ticket. Agents read tickets and attachments, comment, transition, label and link through the [Agent tools](/docs/reference/agent-tools).
+
+## Setup in Jira
+
+- **Webhook:** Jira → Settings → System → WebHooks, with the connection's inbound URL and secret, events Issue created/updated (and Comment created/updated for mentions and orchestrated workflows), and a JQL filter such as `project = LD`. The inbound URL is built from `PUBLIC_WEBHOOK_BASE_URL` and must be reachable over public HTTPS.
+- **Poll:** no Jira configuration.
+- The bot needs, on the project: Browse projects, Add comments, Edit issues, Transition issues, and Create attachments when Agents attach files.
+
+Step by step: [Connections and repositories](/docs/guides/setup/connections).
+
+## Limits
+
+- Poll mode only sees tickets assigned to the bot, so labels, status changes and mentions need a webhook.
+- A Jira project belongs to one AgentFlow project.
+- Jira Cloud cannot call a plain HTTP or private address.

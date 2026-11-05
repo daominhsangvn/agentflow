@@ -9,6 +9,7 @@ import {
   OrchestratorTurnStatus,
   orchestratorTurnResultSchema,
 } from "@repo/api/src/types/orchestrator";
+import { resolveOrchestratorGrants } from "@repo/api/src/types/orchestrator-grants";
 import { type Prisma, withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
 import { z } from "zod";
@@ -247,6 +248,7 @@ async function settleSuperseded(
           notIn: [
             OrchestratorMessageKind.Reply,
             OrchestratorMessageKind.ToolRefused,
+            OrchestratorMessageKind.Document,
           ],
         },
       },
@@ -459,7 +461,12 @@ async function failTurn(
     await tx.orchestratorMessage.updateMany({
       where: {
         turnId: turn.id,
-        kind: { not: OrchestratorMessageKind.ToolRefused },
+        kind: {
+          notIn: [
+            OrchestratorMessageKind.ToolRefused,
+            OrchestratorMessageKind.Document,
+          ],
+        },
       },
       data: { turnId: null },
     });
@@ -565,6 +572,7 @@ async function startTurnIfDue(
     workflowName: settings.name,
     workflowDescription: settings.description,
     rules: settings.rules,
+    grants: resolveOrchestratorGrants(settings.connections),
     channel: readChannel(conversation.channel),
     caseMarkdown: await renderCase(conversation.caseId),
     messages,

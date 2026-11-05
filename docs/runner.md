@@ -156,7 +156,7 @@ reports the tool as missing and agents cannot run it. Add the directory in
 `su runner -s /bin/bash -lc '<tool> --version'` in the Dockerfile.
 
 Run one image per set of toolchains and assign its runners to the projects
-that need them (Project → Integrations → Runners). Build all of a project's
+that need them (Project → Agents → Agents). Build all of a project's
 runners from the same image: a new loop goes to whichever is least busy. A
 runner with every toolchain (e.g. .NET, Rust and Node.js) can serve every
 project. The runner reports the toolchains it finds on its `PATH` (node, npm,
@@ -463,7 +463,7 @@ pages, the way the desktop app reports its local sessions
 - **The agent components** the runner offers — the bundled plugins and their
   subagents, commands and skills, and the `.claude` definitions of a loop
   workspace (a process toolkit) — make up the runner's inventory on the
-  Agents page; the subagents, skills and commands a loop invokes count as
+  Skills catalog (Labs); the subagents, skills and commands a loop invokes count as
   their usage.
 
 AgentFlow always ingests them: no organization setting or feature flag
@@ -762,7 +762,7 @@ branch>`, and upload it with `source: toolkit` through the same `PUT
 so `uploadedAt` shows the last check.
 
 - **Triggers.** (1) **Refresh** on a toolkit row, or **Read from a runner's
-  toolkit** in Project → Runners → Commands (org admins). (2) A daily cron,
+  toolkit** in Project → Agents → Commands (org admins). (2) A daily cron,
   `/cron/refresh-runner-capabilities`, which refreshes toolkit files older than
   20 h (at most 100 per run, online runners only). (3) Saving the project
   process with a changed `toolkit` (repository or mounts) refreshes the
@@ -787,7 +787,7 @@ so `uploadedAt` shows the last check.
   repository's `.claude/` tree; the runner also warns when the front matter
   names no toolkit or a different repository than the one it was read from.
 
-- Project → Integrations → **Commands** shows
+- Project → Agents → **Commands** shows
   each runner's commands, problems, warnings and the file;
   `GET /projects/{id}/runner-capabilities` returns them.
 - The file is sent to AgentFlow: never put a secret in it.

@@ -1,0 +1,71 @@
+---
+title: "Install an Agent"
+description: "Start an automatic Agent in Docker or a personal Agent on a person's machine, and set its model provider."
+---
+
+An **Agent** is a computer that runs Claude Code for AgentFlow. There are two kinds.
+
+| | Automatic | Personal |
+|---|---|---|
+| Runs on | A container, a server or a VM | A person's own computer |
+| Works in | Clones of the project's repositories | The person's project folder |
+| Credentials | Short-lived Git credentials from AgentFlow | The person's own Git, `gh` and `~/.claude` |
+
+In YAML an Agent is named with the key `runner` (`runner: runner-1`), and its environment variables start with `AGENTFLOW_RUNNER_`. The concept is the same. The [Agents guide](/docs/guides/setup/agents) explains both kinds in depth; this page gets one running.
+
+## What you need
+
+- The API URL, reachable over HTTPS (see [Prerequisites](/docs/getting-started/prerequisites)).
+- The API key from [First admin and organization](/docs/getting-started/first-admin).
+- Claude credentials: a model provider set in AgentFlow (below), `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
+- `GH_TOKEN` on the Agent, when it needs to clone or push to GitHub.
+
+## Automatic Agent with Docker
+
+Build the base image from the repository root, then run one container per Agent:
+
+```bash
+docker buildx build -f deploy/runner/Dockerfile -t agentflow-runner:base .
+
+docker run -d --name agentflow-runner-1 --restart unless-stopped \
+  -e AGENTFLOW_API_URL=https://agentflow.example.com \
+  -e AGENTFLOW_API_KEY=sk_live_... \
+  -e AGENTFLOW_RUNNER_NAME=runner-1 \
+  -e CLAUDE_CODE_OAUTH_TOKEN=... \
+  -v agentflow-runner-1-workspace:/workspace \
+  -v agentflow-runner-1-data:/home/runner/.agentflow-runner \
+  -v agentflow-runner-1-claude:/home/runner/.claude \
+  -v agentflow-runner-1-learnings:/home/runner/.agentflow-ai \
+  -v agentflow-runner-1-claude-versions:/home/runner/.local/share/claude \
+  agentflow-runner:base
+```
+
+Set `AGENTFLOW_RUNNER_NAME`: a container's hostname changes on every run. Keep the volumes so the Agent stays the same compute target across restarts. With Docker Desktop and the API on the same machine, use `AGENTFLOW_API_URL=http://host.docker.internal:3002` together with `AGENTFLOW_ALLOW_HTTP_HOSTS=host.docker.internal`.
+
+`docker logs -f agentflow-runner-1` shows the startup checks and the connection state.
+
+Other installs (Ubuntu with systemd, the bundle on macOS or WSL2, Windows) run the same Agent: see [Agent CLI and environment](/docs/reference/agent-cli).
+
+## Personal Agent
+
+On the person's computer, from the Agent bundle:
+
+```bash
+node runner.mjs setup                    # choose mode personal
+node runner.mjs --project PRO-1          # start it
+```
+
+Setup asks for the API URL and key, the project key, and the project folder (it must exist). The same settings can come from the environment: `AGENTFLOW_RUNNER_MODE=personal`, `AGENTFLOW_RUNNER_PROJECT_KEY` and `AGENTFLOW_RUNNER_PROJECT_DIR`. A personal Agent works for one project only.
+
+## After installing
+
+1. The Agent appears online under **Agents** (sidebar) → **Your agents**.
+2. Set its **Model provider** there: an Anthropic-compatible API (base URL, token, default model), or paste a Claude `settings.json` and import it. The token is stored sealed and sent with each task; nothing is written to the Agent's disk.
+3. Assign it to the project in Project → **Agents**.
+4. Tell AgentFlow what it can do with an `AGENTFLOW.md` file: [Agent capabilities](/docs/guides/setup/agent-capabilities).
+
+AgentFlow also checks the Claude Code version an Agent runs against the version set for it; see [Agents](/docs/guides/operate/agents).
+
+## Next
+
+[Quickstart](/docs/getting-started/quickstart).

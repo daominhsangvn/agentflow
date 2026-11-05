@@ -36,6 +36,7 @@ import { cn } from "@repo/design-system/lib/utils";
 import { Link } from "@repo/navigation/link";
 import { useNavigation } from "@repo/navigation/use-navigation";
 import {
+  BookOpenIcon,
   CheckIcon,
   ChevronsUpDownIcon,
   LogOutIcon,
@@ -43,6 +44,7 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import { useState } from "react";
+import { env } from "@/env";
 import { useOrgSlug } from "@/hooks/use-org-slug";
 
 export function AccountMenu() {
@@ -128,7 +130,7 @@ export function AccountMenu() {
                     return;
                   }
                   setActive({ organization: org.id })
-                    .then(() => navigate(`/${org.slug}/my-tasks`))
+                    .then(() => navigate(`/${org.slug}/dashboard`))
                     .catch(() => {
                       // Clerk surfaces failures via its own toast.
                     });
@@ -171,6 +173,12 @@ export function AccountMenu() {
               Settings
             </Link>
           </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a href={GUIDES_URL} rel="noopener noreferrer" target="_blank">
+              <BookOpenIcon className="size-4" />
+              Guides
+            </a>
+          </DropdownMenuItem>
           <ThemeSubmenu />
 
           <DropdownMenuSeparator />
@@ -188,7 +196,7 @@ export function AccountMenu() {
             <DialogTitle>Create Organization</DialogTitle>
           </DialogHeader>
           <CreateOrganization
-            afterCreateOrganizationUrl="/:slug/my-tasks"
+            afterCreateOrganizationUrl="/:slug/dashboard"
             skipInvitationScreen
           />
         </DialogContent>
@@ -196,3 +204,6 @@ export function AccountMenu() {
     </>
   );
 }
+
+// The task-oriented guides live on the docs site (apps/web/content/docs/guides).
+const GUIDES_URL = new URL("/docs/guides", env.NEXT_PUBLIC_WEB_URL).toString();

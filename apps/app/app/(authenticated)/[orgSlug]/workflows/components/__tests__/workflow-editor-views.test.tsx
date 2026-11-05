@@ -5,7 +5,6 @@ import {
 import type { WorkflowComputeTargetChoices } from "@repo/app/workflows/lib/workflow-editor-options";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SettingsTab } from "@/app/(authenticated)/[orgSlug]/settings/settings-tabs";
 import { toComputeTargetOption } from "../use-workflow-compute-targets";
 import {
   NewWorkflowView,
@@ -14,7 +13,7 @@ import {
 
 const TARGET_ID = "77777777-7777-4777-8777-777777777777";
 const WORKFLOW_ID = "55555555-5555-4555-8555-555555555555";
-const CONNECTIONS_PATH = `/settings?tab=${SettingsTab.Integrations}#integration-connections`;
+const CONNECTIONS_PATH = "/connections#integration-connections";
 
 const mocks = vi.hoisted(() => ({
   useComputeTargets: vi.fn(),

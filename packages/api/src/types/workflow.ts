@@ -12,6 +12,7 @@ import {
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "./orchestrator.ts";
+import { orchestratorConnectionGrantsSchema } from "./orchestrator-grants.ts";
 import { projectConnectionKeySchema } from "./project-connection.ts";
 import {
   type ProcessDocumentType,
@@ -452,6 +453,11 @@ export const workflowOrchestratorConfigSchema = z.object({
     .max(3)
     .default([...ORCHESTRATOR_CANCEL_ON_DEFAULT])
     .transform((values) => [...new Set(values)]),
+  /**
+   * What the orchestrator may write; default {}: it only reads the ticket
+   * (docs/orchestrator.md).
+   */
+  connections: orchestratorConnectionGrantsSchema.default({}),
 });
 export type WorkflowOrchestratorConfig = z.infer<
   typeof workflowOrchestratorConfigSchema

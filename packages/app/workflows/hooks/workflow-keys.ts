@@ -4,6 +4,10 @@ import type { WorkflowRunStatus } from "@repo/api/src/types/workflow";
 export type WorkflowRunListFilters = {
   limit?: number;
   status?: WorkflowRunStatus;
+  /** Org-wide list only: runs of one project. */
+  projectId?: string;
+  /** Org-wide list only: runs of one workflow (the per-workflow hook carries it in its path). */
+  workflowId?: string;
 };
 
 /**
@@ -27,4 +31,8 @@ export const workflowKeys = {
     [...workflowKeys.runs(), "org", filters] as const,
   runDetails: () => [...workflowKeys.runs(), "detail"] as const,
   runDetail: (runId: string) => [...workflowKeys.runDetails(), runId] as const,
+  events: (workflowId: string) =>
+    [...workflowKeys.all, "events", workflowId] as const,
+  eventPayload: (workflowId: string, eventId: string) =>
+    [...workflowKeys.events(workflowId), "payload", eventId] as const,
 };

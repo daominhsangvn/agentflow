@@ -28,6 +28,7 @@ import {
   useOrgWorkflowRuns,
   useWorkflowRuns,
 } from "../hooks/use-workflows";
+import type { WorkflowRunListFilters } from "../hooks/workflow-keys";
 import { describeWorkflowRunError } from "../lib/workflow-error-messages";
 import { WorkflowRunPullRequests } from "./workflow-run-pull-requests";
 import { WorkflowRunStatusBadge } from "./workflow-status-badges";
@@ -57,11 +58,20 @@ export function WorkflowRunHistory({
 }
 
 /** Run history across every workflow of the org. */
-export function OrgWorkflowRunHistory() {
-  const runs = useOrgWorkflowRuns();
+export function OrgWorkflowRunHistory({
+  filters,
+}: Readonly<{ filters?: WorkflowRunListFilters }>) {
+  const runs = useOrgWorkflowRuns(filters);
+  const hasFilters = Object.values(filters ?? {}).some(
+    (value) => value !== undefined
+  );
   return (
     <WorkflowRunsTable
-      emptyDescription="No workflow has run yet. Runs appear here when a trigger fires."
+      emptyDescription={
+        hasFilters
+          ? "No runs match these filters."
+          : "No workflow has run yet. Runs appear here when a trigger fires."
+      }
       error={runs.error}
       hasNextPage={runs.hasNextPage}
       isFetchingNextPage={runs.isFetchingNextPage}

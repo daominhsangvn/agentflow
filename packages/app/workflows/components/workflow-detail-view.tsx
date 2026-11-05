@@ -32,6 +32,7 @@ import { getManualRunTriggers } from "../lib/workflow-catalog";
 import type { WorkflowComputeTargetChoices } from "../lib/workflow-editor-options";
 import { describeWorkflowCaseActivity } from "../lib/workflow-labels";
 import { WorkflowEditor } from "./workflow-editor";
+import { WorkflowEventHistory } from "./workflow-events-table";
 import { WorkflowRunNowDialog } from "./workflow-run-now-dialog";
 import { WorkflowRunHistory } from "./workflow-runs-table";
 
@@ -39,6 +40,7 @@ export const WorkflowDetailTab = {
   Configuration: "configuration",
   Runs: "runs",
   Cases: "cases",
+  Events: "events",
 } as const;
 export type WorkflowDetailTab =
   (typeof WorkflowDetailTab)[keyof typeof WorkflowDetailTab];
@@ -52,7 +54,7 @@ export type WorkflowDetailViewProps = {
 
 /**
  * One workflow: its configuration (the editor, read-only for members) and its
- * run history (or, orchestrated, its cases) as URL-synced tabs, plus the admin actions "Run now" (for
+ * run history (or, orchestrated, its cases) and its inbound event log (Events tab) as URL-synced tabs, plus the admin actions "Run now" (for
  * triggers that support a manual run) and "Delete".
  */
 export function WorkflowDetailView({
@@ -196,6 +198,12 @@ function WorkflowDetailContent({
               Runs
             </TabsTrigger>
           )}
+          <TabsTrigger
+            className="flex-initial px-4"
+            value={WorkflowDetailTab.Events}
+          >
+            Events
+          </TabsTrigger>
         </TabsList>
         <TabsContent className="mt-3" value={WorkflowDetailTab.Configuration}>
           <WorkflowEditor
@@ -211,6 +219,9 @@ function WorkflowDetailContent({
         </TabsContent>
         <TabsContent className="mt-3" value={WorkflowDetailTab.Cases}>
           <OrchestratorCaseList workflowId={workflow.id} />
+        </TabsContent>
+        <TabsContent className="mt-3" value={WorkflowDetailTab.Events}>
+          <WorkflowEventHistory isAdmin={isAdmin} workflowId={workflow.id} />
         </TabsContent>
       </Tabs>
 
@@ -240,9 +251,17 @@ function WorkflowDetailContent({
 
 function detailTabsFor(mode: WorkflowAgentMode): readonly WorkflowDetailTab[] {
   if (mode === WorkflowAgentMode.Orchestrated) {
-    return [WorkflowDetailTab.Configuration, WorkflowDetailTab.Cases];
+    return [
+      WorkflowDetailTab.Configuration,
+      WorkflowDetailTab.Cases,
+      WorkflowDetailTab.Events,
+    ];
   }
-  return [WorkflowDetailTab.Configuration, WorkflowDetailTab.Runs];
+  return [
+    WorkflowDetailTab.Configuration,
+    WorkflowDetailTab.Runs,
+    WorkflowDetailTab.Events,
+  ];
 }
 
 function WorkflowActivityLine({ workflow }: Readonly<{ workflow: Workflow }>) {

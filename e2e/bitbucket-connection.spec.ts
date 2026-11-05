@@ -28,7 +28,7 @@ test("Bitbucket connection: offered in the catalog, its workspace in the YAML an
     capabilities: expect.arrayContaining(["repositories", "actions"]),
   });
 
-  await page.goto(`/${orgSlug}/settings?tab=integrations`);
+  await page.goto(`/${orgSlug}/connections`);
   await page.getByRole("button", { name: "Add connection" }).first().click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: BITBUCKET_RE }).click();

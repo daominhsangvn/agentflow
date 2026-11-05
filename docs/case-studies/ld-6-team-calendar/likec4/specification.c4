@@ -1,0 +1,87 @@
+// Element kinds and styles of the LD-6 case study (docs/case-studies/ld-6-team-calendar).
+
+specification {
+  element person {
+    style {
+      shape person
+      color green
+    }
+  }
+  element system {
+    style {
+      color secondary
+    }
+  }
+  element container {
+    style {
+      color primary
+    }
+  }
+  element component {
+    style {
+      color sky
+    }
+  }
+  element agent {
+    notation 'AI agent: a team of Claude Code skills'
+    style {
+      color indigo
+    }
+  }
+  element store {
+    style {
+      shape cylinder
+      color muted
+    }
+  }
+  element document {
+    style {
+      shape storage
+      color amber
+    }
+  }
+  element rule {
+    notation 'A section of the workflow rules (written by the admin)'
+    style {
+      color amber
+    }
+  }
+  element quote {
+    notation 'A line of the rules, quoted'
+    style {
+      shape document
+      color amber
+    }
+  }
+  element declaration {
+    notation 'A command an agent declares in its AGENTFLOW.md'
+    style {
+      shape document
+      color indigo
+    }
+  }
+  element casestudy {
+    style {
+      color slate
+    }
+  }
+  element scenario {
+    notation 'Case: click to follow it step by step'
+    style {
+      shape browser
+      color slate
+    }
+  }
+
+  relationship async {
+    line dashed
+  }
+  relationship guarantees {
+    line dotted
+    color muted
+  }
+  relationship seenin {
+    line dotted
+    color slate
+  }
+}

@@ -1,0 +1,51 @@
+---
+title: "Runs"
+description: "List the runs of workflows that are not orchestrated, read a run's page, answer a step, cancel or retry a run."
+---
+
+A **run** is one pass of a workflow over a work item when the workflow has `agent.mode` `plan`, `plan_and_execute` or a process. Orchestrated workflows start no runs: their tickets are [cases](/docs/guides/operate/cases).
+
+## The list
+
+**Runs** (sidebar, Work) lists the runs of every non-orchestrated workflow. Filter by **Projects**, **Workflows** and **Status**. The columns are Status, Source item, Workflow, Pull requests, Started and Finished. A workflow's page has the same history for that workflow.
+
+| Status | Meaning |
+|---|---|
+| Received | The trigger was accepted |
+| Running triggered actions | Actions that run before the Agents (`pre` actions) |
+| Importing | The item is fetched and the documents are created |
+| Planning | The plan is being written |
+| Implementing | The code is being written |
+| Running step | A step of the process is running |
+| Needs input | Open questions wait for people |
+| Waiting for approval | An approval step waits for an admin |
+| Succeeded, Failed, Cancelled | Final states |
+
+## A run's page
+
+The header shows the source item, the status, the workflow and when the run started and finished. A progress bar (the timeline) shows the stages. Below it:
+
+| Card | Content |
+|---|---|
+| Process | The steps of the run's process: done, current, stopped, upcoming. Where a step waits for you, the card has its input: answer questions, **Approve** or **Reject** an approval, review a plan |
+| Work items | The source item, the implementation plan and the **Pull requests** |
+| Agent loops | Every loop with its command, status, start, finish and pull request |
+| Sessions | The Agent sessions of the loops, with Agent, duration and last activity |
+| Actions | Each action run: stage, event, cycle, status, attempts and result |
+| Tool calls | The integration tools the Agents called |
+
+A failed run shows its error at the top.
+
+## Run now, cancel, retry
+
+Org admins can:
+
+- **Run now** (on the workflow's page): start a run for one item, choosing a trigger. Trigger filters are not applied.
+- **Cancel run**: active loops are cancelled and the run stops. Actions already delivered are not undone.
+- **Retry** a failed or cancelled run of a process: **Retry** *step* continues the failed step where it stopped (when it can), **Restart** *step* runs it again from its start.
+
+## See also
+
+- [Workflow YAML](/docs/guides/setup/workflow-yaml)
+- [Process YAML](/docs/guides/setup/process-yaml)
+- [Sessions](/docs/guides/operate/sessions)

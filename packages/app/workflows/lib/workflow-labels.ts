@@ -8,6 +8,7 @@ import {
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
+import { WorkflowEventResult } from "@repo/api/src/types/workflow-event";
 import { formatRelativeTime } from "@repo/app/shared/lib/date-utils";
 
 /** Badge tones used by the workflows UI (a subset of the design-system Badge variants). */
@@ -215,3 +216,29 @@ export function describeWorkflowCaseActivity(
   }
   return `${base} · last activity ${formatRelativeTime(counts.lastActivityAt)}`;
 }
+
+export const WORKFLOW_EVENT_RESULT_LABELS: Record<WorkflowEventResult, string> =
+  {
+    [WorkflowEventResult.Created]: "Run started",
+    [WorkflowEventResult.Resumed]: "Run resumed",
+    [WorkflowEventResult.Duplicate]: "Duplicate",
+    [WorkflowEventResult.Active]: "Run already active",
+    [WorkflowEventResult.Signaled]: "Review signal",
+    [WorkflowEventResult.Replied]: "Reply",
+    [WorkflowEventResult.CaseMessage]: "Case message",
+    [WorkflowEventResult.Filtered]: "Filtered",
+  };
+
+export const WORKFLOW_EVENT_RESULT_TONES: Record<
+  WorkflowEventResult,
+  WorkflowBadgeTone
+> = {
+  [WorkflowEventResult.Created]: "success",
+  [WorkflowEventResult.Resumed]: "success",
+  [WorkflowEventResult.CaseMessage]: "success",
+  [WorkflowEventResult.Signaled]: "info",
+  [WorkflowEventResult.Replied]: "info",
+  [WorkflowEventResult.Duplicate]: "muted",
+  [WorkflowEventResult.Active]: "muted",
+  [WorkflowEventResult.Filtered]: "warning",
+};

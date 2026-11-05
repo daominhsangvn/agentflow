@@ -325,6 +325,31 @@ describe("startTask", () => {
     expect(mocks.dispatch).not.toHaveBeenCalled();
   });
 
+  it("meets a command's needs with a page input named like the produced file", async () => {
+    mocks.needsPrd = true;
+    const page = {
+      pageId: "1638401",
+      title: "LD-6 · PRD",
+      url: "https://x.atlassian.net/wiki/pages/1638401",
+      version: 3,
+      name: "PRD-LD-6.md",
+      content: "# PRD",
+      size: 5,
+    };
+
+    const started = await startTask({
+      ...BASE,
+      runner: "an-PRO-1",
+      command: "/executing-plans",
+      pageInputs: [page],
+    });
+
+    expect(started.ok).toBe(true);
+    expect(mocks.tasks[0]?.result).toMatchObject({
+      pageInputs: [{ name: "PRD-LD-6.md", version: 3 }],
+    });
+  });
+
   it("does not fork on a runner that cannot: it would continue the earlier session itself", async () => {
     await startTask({
       ...BASE,

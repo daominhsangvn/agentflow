@@ -4,18 +4,16 @@ import { useFeatureFlag } from "@repo/analytics/client";
 import { FeatureFlagged } from "@repo/analytics/components/feature-flagged";
 import { INSIGHTS_FEATURE_FLAG_KEY } from "@repo/api/src/types/insights";
 import { ROUTINES_FEATURE_FLAG_KEY } from "@repo/api/src/types/routines";
-import { AgentsNavBadge } from "@repo/app/agents/components/agents-nav-badge";
 import { useScrollFade } from "@repo/app/shared/hooks/use-scroll-fade";
 import {
-  ArtifactFlag,
   JUDGES_FEATURE_FLAG_KEY,
   LABS_NAV_SECTION_FEATURE_FLAG_KEY,
 } from "@repo/app/shared/lib/feature-flags";
 import {
-  AGENTS_NAV_PATH,
   PRIMARY_NAV_DESTINATIONS,
   type PrimaryNavDestination,
   PrimaryNavGroup,
+  SKILLS_CATALOG_NAV_PATH,
 } from "@repo/app/shared/lib/primary-nav-destinations";
 import { isAdminRole } from "@repo/app/shared/lib/role-utils";
 import { useOrganization } from "@repo/auth/client";
@@ -34,7 +32,14 @@ import { cn } from "@repo/design-system/lib/utils";
 import { usePath } from "@repo/navigation/use-path";
 import { useQueryClient } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
-import { BarChart3, Coins, PackageIcon, TimerOff } from "lucide-react";
+import {
+  BarChart3,
+  BlocksIcon,
+  CalendarClockIcon,
+  Coins,
+  PackageIcon,
+  TimerOff,
+} from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useOrgSlug } from "@/hooks/use-org-slug";
 import { AccountMenu } from "./account-menu";
@@ -62,15 +67,6 @@ type NavItem = {
   path?: string;
 };
 
-// Per-item feature flags for the Artifacts nav section. Flag-gated items are
-// gated individually; the Artifacts header is hidden when every gated item is
-// off AND no always-on item survives. Issues shares its flag with the page
-// route (see @repo/app/shared/lib/feature-flags). Agents (FEA-3994) and, as of
-// FEA-4155, Branches/Sessions are always-on and carry no flag.
-const ArtifactNavFlag = {
-  Issues: ArtifactFlag.Issues,
-} as const;
-
 function primaryDestinationToNavItem(
   orgSlug: string,
   destination: PrimaryNavDestination
@@ -86,17 +82,16 @@ function primaryDestinationToNavItem(
 }
 
 function buildNavData(orgSlug: string) {
-  // Derive the top-level and Artifacts nav rows from the shared canonical
-  // destination list (the same source of truth the mobile bottom nav renders),
-  // so a destination added there reaches both navs in the same order with the
-  // same flag gating — no hand-maintained parallel copy to keep in sync.
-  const topLevel: NavItem[] = PRIMARY_NAV_DESTINATIONS.filter(
-    (destination) => destination.group === PrimaryNavGroup.TopLevel
-  ).map((destination) => primaryDestinationToNavItem(orgSlug, destination));
+  // Derive the Home, Work and Setup rows from the shared canonical
+  // destination list (the same source of truth the mobile bottom nav renders).
+  const byGroup = (group: PrimaryNavGroup): NavItem[] =>
+    PRIMARY_NAV_DESTINATIONS.filter(
+      (destination) => destination.group === group
+    ).map((destination) => primaryDestinationToNavItem(orgSlug, destination));
 
-  const artifacts: NavItem[] = PRIMARY_NAV_DESTINATIONS.filter(
-    (destination) => destination.group === PrimaryNavGroup.Artifact
-  ).map((destination) => primaryDestinationToNavItem(orgSlug, destination));
+  const home = byGroup(PrimaryNavGroup.Home);
+  const work = byGroup(PrimaryNavGroup.Work);
+  const setup = byGroup(PrimaryNavGroup.Setup);
 
   const labs: NavItem[] = [
     {
@@ -134,11 +129,25 @@ function buildNavData(orgSlug: string) {
       icon: PackageIcon,
       disabled: false,
     },
+    {
+      title: "Skills catalog",
+      url: `/${orgSlug}${SKILLS_CATALOG_NAV_PATH}`,
+      icon: BlocksIcon,
+      disabled: false,
+    },
+    {
+      title: "Routines",
+      url: `/${orgSlug}/routines`,
+      icon: CalendarClockIcon,
+      disabled: false,
+      featureFlag: ROUTINES_FEATURE_FLAG_KEY,
+    },
   ];
 
   return {
-    topLevel,
-    artifacts,
+    home,
+    work,
+    setup,
     labs,
   };
 }
@@ -198,7 +207,7 @@ export function GlobalSidebar({
           >
             <SidebarGroup className="p-1">
               <SidebarMenu className="gap-0">
-                {data.topLevel.map((item) =>
+                {data.home.map((item) =>
                   maybeFeatureFlagged(
                     item,
                     <SidebarNavLinkItem
@@ -219,10 +228,16 @@ export function GlobalSidebar({
               </SidebarMenu>
             </SidebarGroup>
 
-            <ArtifactsNavSection
-              isAdmin={isAdmin}
-              items={data.artifacts}
+            <NavSection
+              items={data.work}
               pathname={pathname ?? ""}
+              title="Work"
+            />
+
+            <NavSection
+              items={data.setup}
+              pathname={pathname ?? ""}
+              title="Setup"
             />
 
             <SidebarProjects />
@@ -279,78 +294,30 @@ function maybeFeatureFlagged(item: NavItem, children: ReactNode): ReactNode {
   return children;
 }
 
-function ArtifactsNavSection({
+function NavSection({
+  title,
   items,
   pathname,
-  isAdmin,
 }: {
+  title: string;
   items: NavItem[];
   pathname: string;
-  isAdmin: boolean;
 }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // Resolve every flag used by the artifact items up front so the hook call
-  // order stays stable across renders (rules-of-hooks). The header below is
-  // only rendered when at least one item survives flag filtering. FEA-4155:
-  // Branches/Sessions are always-on now (their destinations carry no
-  // featureFlag), so only Issues remains flag-gated here.
-  const issuesEnabled =
-    useFeatureFlag(ArtifactNavFlag.Issues)?.enabled === true;
-  // Routines is gated behind the PostHog `routines` flag until GA. Resolve it
-  // here (before the mounted guard, rules-of-hooks) so `visibleItems` keeps the
-  // Routines row when the flag is ON — omitting it would drop the row from the
-  // section entirely, hiding Routines even for a flag-ON user (one-way gate).
-  const routinesEnabled =
-    useFeatureFlag(ROUTINES_FEATURE_FLAG_KEY)?.enabled === true;
-
-  if (!mounted) {
-    return null;
-  }
-
-  const enabledByFlag: Record<string, boolean> = {
-    [ArtifactNavFlag.Issues]: issuesEnabled,
-    [ROUTINES_FEATURE_FLAG_KEY]: routinesEnabled,
-  };
-
-  const visibleItems = items.filter((item) => {
-    if (item.adminOnly && !isAdmin) {
-      return false;
-    }
-    return item.featureFlag === undefined || enabledByFlag[item.featureFlag];
-  });
-
-  if (visibleItems.length === 0) {
-    return null;
-  }
-
   return (
-    <SidebarCollapsibleSection title="Artifacts">
+    <SidebarCollapsibleSection title={title}>
       <SidebarMenu className="gap-0">
-        {visibleItems.map((item) => {
-          const isActive =
-            !item.disabled && isNavItemActive(pathname, item.url);
-          return (
-            <SidebarNavLinkItem
-              className="text-sm"
-              disabled={item.disabled}
-              href={item.disabled ? undefined : item.url}
-              icon={<item.icon />}
-              isActive={isActive}
-              key={item.title}
-              title={item.title}
-              tooltip={item.title}
-              trailing={
-                item.path === AGENTS_NAV_PATH ? (
-                  <AgentsNavBadge isActive={isActive} />
-                ) : undefined
-              }
-            />
-          );
-        })}
+        {items.map((item) => (
+          <SidebarNavLinkItem
+            className="text-sm"
+            disabled={item.disabled}
+            href={item.disabled ? undefined : item.url}
+            icon={<item.icon />}
+            isActive={!item.disabled && isNavItemActive(pathname, item.url)}
+            key={item.title}
+            title={item.title}
+            tooltip={item.title}
+          />
+        ))}
       </SidebarMenu>
     </SidebarCollapsibleSection>
   );
@@ -364,8 +331,8 @@ const LABS_NAV_SECTION_STORAGE_KEY = "agentflow.app.sidebar.labs.open";
  *
  * Flag off returns `null` — no header, no items, no empty collapsed shell —
  * rather than rendering an empty `SidebarCollapsibleSection`, which would still
- * occupy the sidebar and invite a click. The `mounted` guard mirrors
- * `ArtifactsNavSection`: it avoids a hydration mismatch while PostHog resolves,
+ * occupy the sidebar and invite a click. The `mounted` guard is a
+ * client-only guard: it avoids a hydration mismatch while PostHog resolves,
  * and because the pre-resolution render is `null` the section stays CLOSED
  * during that window instead of flashing on.
  *

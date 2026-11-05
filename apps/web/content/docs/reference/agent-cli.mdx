@@ -1,0 +1,143 @@
+---
+title: "Agent CLI and environment"
+description: "The Agent program's command line, every environment variable it reads, the ways to install it (Docker, systemd, bundle, Windows) and how to operate it."
+---
+
+An Agent is one program, `runner.mjs`, that connects outwards to the AgentFlow API (it needs no open port) and runs commands for the server. It registers under **Agents** (sidebar) → Your agents with the owner of its API key. Two kinds exist: **automatic** (default; clones the project's repositories) and **personal** (works for one project, in a folder on a person's computer). This page is the reference; the first install is in [Install an Agent](/docs/getting-started/install-agent), and the concepts are in [Agents](/docs/guides/setup/agents).
+
+In environment variable names, `RUNNER` means Agent: the names keep the old word.
+
+## Command line
+
+| Command | Starts |
+|---|---|
+| `node runner.mjs` | The automatic Agent (one per computer) |
+| `node runner.mjs --project <key>` | The personal Agent of an AgentFlow project (for example `--project PRO-1`) |
+| `node runner.mjs setup [--project <key>]` | Asks the setup questions and saves them to `<data dir>/runner.env` |
+
+Any other argument is rejected. Settings come from the environment and from `<data dir>/runner.env` (one `NAME=value` per line; a variable set in the environment wins). A start from a terminal with no API URL or key asks the setup questions first. Empty variables count as unset.
+
+Exit codes: `2` for an invalid configuration (the message names the variable), `3` when the startup check fails (a required tool such as `bash`, `git`, `claude`, `jq` or `python3` is missing, the plugins directory is not found, or the workspace is not writable), `1` for a runtime error, `130` when interrupted.
+
+## Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AGENTFLOW_API_URL` | required | Origin of the AgentFlow API. Must be https, except `localhost` or hosts in `AGENTFLOW_ALLOW_HTTP_HOSTS` |
+| `AGENTFLOW_API_KEY` | required | An API key (`sk_live_...`) with the `write` scope. The Agent acts as its owner |
+| `AGENTFLOW_WEB_APP_URL` | the API URL | Web app origin; used for links |
+| `AGENTFLOW_RUNNER_NAME` | the hostname | The Agent's name in AgentFlow (1-120 characters). Set it: a container's hostname changes on every `docker run` |
+| `AGENTFLOW_RUNNER_MODE` | `auto` | `auto` or `personal` |
+| `AGENTFLOW_RUNNER_PROJECT_KEY` | none | Personal: the AgentFlow project key, such as `PRO-1` (required in personal mode) |
+| `AGENTFLOW_RUNNER_PROJECT_DIR` | none | Personal: the project folder runs happen in; it must exist (required in personal mode). Replaces the workspace |
+| `AGENTFLOW_RUNNER_PARALLEL` | `false` | Personal: `true` lets several runs share the folder (the commands make their own worktrees); `false` runs them one at a time |
+| `AGENTFLOW_RUNNER_SKIP_PERMISSIONS` | `false` | Personal: `true` lets Claude Code use any tool without a permission prompt (`--permission-mode bypassPermissions`). Otherwise it uses the run's allowed tools plus the person's own `permissions.allow` |
+| `AGENTFLOW_RUNNER_WORKSPACE` | `/workspace` | Automatic: where repositories are cloned and runs work in worktrees |
+| `AGENTFLOW_RUNNER_DATA_DIR` | `~/.agentflow-runner` | Identity, job store, sealed tokens and status file. Keep it private. A personal Agent uses `<data dir>/personal/<PROJECT KEY>` |
+| `AGENTFLOW_RUNNER_MAX_CONCURRENT` | `2` | Commands executed at the same time (1 to 16) |
+| `AGENTFLOW_RUNNER_GATEWAY_PORT` | any free port | Local gateway port, loopback only (1024 to 65535). A configured port that is taken stops the Agent |
+| `AGENTFLOW_RUNNER_REWRITE_CALLBACK_URL` | `true` | Send callbacks to `AGENTFLOW_API_URL` instead of the address the API put in the command, which is often reachable only from the API host |
+| `AGENTFLOW_RUNNER_REPORT_SESSIONS` | `true` | Report every run as a session on the Sessions and Agents pages. `false` turns it off |
+| `AGENTFLOW_ALLOW_HTTP_HOSTS` | none | Comma-separated host names allowed over plain http besides localhost, for a network you trust (for example `host.docker.internal` on Docker Desktop) |
+| `AGENTFLOW_MCP_URL` | the one the API names | MCP endpoint Agents use for [Agent tools](/docs/reference/agent-tools). Set it when the Agent reaches the MCP server under another address, such as `http://host.docker.internal:3010/mcp` from a container |
+| `AGENTFLOW_PLUGINS_DIR` | set by the image and the service; else `agent-plugins` next to `runner.mjs` | The `agent-plugins` directory, loaded into Claude Code with `--plugin-dir` |
+| `AGENTFLOW_GIT_BASH_PATH` | found next to `git.exe` | Windows: Git for Windows' `bin\bash.exe`, which runs the scripts |
+
+Credentials:
+
+| Variable | Purpose |
+|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude subscription token from `claude setup-token`, passed to `claude` |
+| `ANTHROPIC_API_KEY` and other `ANTHROPIC_*` | Claude API credentials, passed to `claude` |
+| `GH_TOKEN` / `GITHUB_TOKEN` | `gh` and Git (HTTPS) authentication, when a run needs them directly |
+
+A model provider set in AgentFlow (**Agents** → the Agent → **Model provider**) takes precedence for that Agent's runs, is stored sealed and sent with each run, and needs no restart to change. Project repositories are cloned with short-lived credentials from the connection, so an automatic Agent needs no Git login.
+
+## Install options
+
+Run as many Agents as you like, on any number of machines. Docker is the recommended default: the container is the isolation boundary. Install directly only when builds or tests need Docker themselves, special hardware or kernel features, and then on a dedicated VM. Never install an Agent on a server that also holds production data or other services' secrets.
+
+### Docker
+
+```bash
+docker buildx build -f deploy/runner/Dockerfile -t agentflow-runner:base .
+
+docker run -d --name agentflow-runner-1 --restart unless-stopped \
+  -e AGENTFLOW_API_URL=https://agentflow.example.com \
+  -e AGENTFLOW_API_KEY=sk_live_... \
+  -e AGENTFLOW_RUNNER_NAME=runner-1 \
+  -e CLAUDE_CODE_OAUTH_TOKEN=... \
+  -v agentflow-runner-1-workspace:/workspace \
+  -v agentflow-runner-1-data:/home/runner/.agentflow-runner \
+  -v agentflow-runner-1-claude:/home/runner/.claude \
+  -v agentflow-runner-1-learnings:/home/runner/.agentflow-ai \
+  -v agentflow-runner-1-claude-versions:/home/runner/.local/share/claude \
+  agentflow-runner:base
+```
+
+On Docker Desktop with the API on the same machine, use `-e AGENTFLOW_API_URL=http://host.docker.internal:3002 -e AGENTFLOW_ALLOW_HTTP_HOSTS=host.docker.internal`.
+
+| Volume | Keep it so that |
+|---|---|
+| `/workspace` | repositories are not cloned again on every restart |
+| `/home/runner/.agentflow-runner` | the Agent stays the same Agent across restarts and upgrades |
+| `/home/runner/.claude` | Claude Code's sessions persist; mount a logged-in `~/.claude` to use that configuration |
+| `/home/runner/.local/share/claude` | installed Claude Code versions are not downloaded again |
+
+Agents build and test what they change, so extend the base image with the project's toolchain (`FROM agentflow-runner:base`, switch to `USER root` to install, back to `USER runner`; see `deploy/runner/examples/`). A toolchain outside `/usr/bin` needs a script in `/etc/profile.d/`, because the Agent takes `PATH` from a login shell. To upgrade, rebuild the image, remove the container and run it again with the same name, volumes and environment.
+
+### Ubuntu or Debian with systemd
+
+Ubuntu 22.04 and 24.04 and Debian 12, x86_64 or arm64. Download `agentflow-runner-<version>-linux.tar.gz` from the repository's GitHub releases (tags `runner-v*`), or build it with `pnpm -C apps/desktop package:headless`.
+
+```bash
+tar -xzf agentflow-runner-*-linux.tar.gz
+sudo bash agentflow-runner/install.sh
+```
+
+The installer adds the tools the Agent needs, creates the user `agentflow-runner`, installs the bundle in `/opt/agentflow-runner` and enables `agentflow-runner.service`. It never overwrites an existing configuration. Edit `/etc/agentflow-runner/runner.env` (template `deploy/runner/linux/runner.env.example`; values are not quoted), then:
+
+```bash
+sudo systemctl start agentflow-runner
+journalctl -u agentflow-runner -f
+```
+
+Workspace: `/var/lib/agentflow-runner/workspace`; data: `/var/lib/agentflow-runner/data`. Upgrade by running `install.sh` again. Set `DISABLE_AUTOUPDATER=1` in `runner.env` so Claude Code does not update itself away from the version set in AgentFlow.
+
+### The bundle directly (development, macOS, WSL2)
+
+Needs Node.js 22+, `bash`, `git`, `gh`, `jq`, `python3` (with PyYAML) and Claude Code.
+
+```bash
+pnpm install
+pnpm -C apps/desktop build:headless
+export AGENTFLOW_PLUGINS_DIR="$PWD/agent-plugins"
+export AGENTFLOW_API_URL=... AGENTFLOW_API_KEY=... AGENTFLOW_RUNNER_WORKSPACE=~/agentflow-work
+node apps/desktop/dist-headless/runner.mjs
+```
+
+### Windows
+
+Runs the Agent directly on Windows, with the machine's own toolchains and network. It can do anything the Windows account can, so use a dedicated non-administrator account, and prefer Docker or a VM when the project builds on Linux. Install Node.js 22+, Git for Windows, `jq`, Python 3 with PyYAML and Claude Code (native installer), then unzip `agentflow-runner-<version>-windows.zip` (from the releases, or `pnpm -C apps/desktop package:headless --windows`) and run `start-runner.cmd`. The first start asks for the API URL, API key, name and workspace, and saves them to `%USERPROFILE%\.agentflow-runner\runner.env`; `setup-runner.cmd` asks again. `start-runner.cmd --project PRO-1` starts a personal Agent.
+
+On Windows, scripts run in Git for Windows' `bash.exe` (never WSL's), stopping a run ends its whole process tree, and the Claude Code version set in AgentFlow is not installed: the `claude` on `PATH` runs.
+
+## Claude Code version
+
+Under **Agents** → the Agent → **Model provider** → **Claude Code version** you choose `latest` (default) or an exact release such as `2.1.296`. When a run starts, an automatic Agent resolves `latest`, installs the version with `claude install <version>` if it is missing, and fails the run with the reason if an exact version cannot be installed. If the `latest` lookup fails, it uses the newest version already on the machine. A change applies to the next run. A personal Agent never installs: when the setting pins an exact release that differs from its `claude --version`, each run fails and says to run `claude install <version>`. See [Agents](/docs/guides/operate/agents).
+
+## Operations
+
+- **Stopping** an Agent abandons the runs it executes: the server times them out. Upgrade an Agent when it is idle.
+- **Recovery:** a run whose Claude Code finished but whose result could not reach AgentFlow (the API was down, a push failed) is finished again from what it left on disk, when the Agent starts and each time it reconnects. Each run is replayed at most 3 times.
+- **Leftover processes:** every run's Claude Code starts with `AGENTFLOW_LOOP_ID` set; when it exits, the Agent stops the processes still carrying that id (SIGTERM, then SIGKILL; Linux only).
+- **Scaling:** add Agents and assign them to projects (Project → **Agents**).
+- **Security:** an Agent executes code that Claude Code writes from ticket content. Keep it in a container or a dedicated VM, give it Git accounts limited to the repositories it may change, and do not share its data or workspace with other workloads.
+
+## Secret guard
+
+Every session loads the bundled `code` plugin, whose `PreToolUse` hook (`agent-plugins/code/hooks/secret-guard.py`) denies reading secret files, files that contain credentials, and dumping the environment, so keys do not end up in a transcript. It is a guard, not a sandbox: a program Claude Code runs can still open these files. To allow a category on one Agent, set it in `~/.claude/security-overrides.json` of the Agent's user (or the path in `CLAUDE_SECURITY_OVERRIDES`), for example `{ "overrides": { "secret-content": true } }`.
+
+## Troubleshooting
+
+Symptoms and fixes are in [Troubleshooting](/docs/resources/troubleshooting).

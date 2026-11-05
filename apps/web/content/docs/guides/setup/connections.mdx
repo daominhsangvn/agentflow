@@ -1,0 +1,119 @@
+---
+title: "Connections and repositories"
+description: "Add the accounts AgentFlow works with (Jira, Confluence, Git, Teams, webhooks), give them to a project under a key, scope them to the project's Jira projects and Confluence spaces, and add the project's repositories."
+---
+
+A **connection** is one account in an outside system: a Jira bot, a Confluence user, a Git server token. It is the only place credentials live; Agents never receive them (AgentFlow calls the outside system on their behalf). A connection belongs to the organization. A project uses it through a **project connection**, under a **key** that workflow YAML names.
+
+```
+Organization connection  ──added to a project as──▶  Project connection (key: jira)  ◀── workflow YAML: connection: jira
+(one account, its secrets)                             settings: projectKeys: [LD]
+```
+
+## 1. Add the organization connections
+
+**Connections** (sidebar) → Add. The editor is YAML; secrets are typed in the password fields below it (a secret written in the YAML is an error).
+
+```yaml
+name: LeaveDesk Jira bot
+enabled: true            # existing connections only
+config:                  # the provider's settings (non-secret)
+  deployment: cloud
+  siteUrl: https://shawn-team.atlassian.net
+  email: leavedesk-bot@example.com
+inbound:                 # only for providers that receive events
+  mode: webhook          # webhook, poll or none
+  pollIntervalSeconds: 120
+```
+
+### Connection settings by provider
+
+| Provider | `config` keys | Secrets (password fields) | Inbound modes |
+|---|---|---|---|
+| **Jira** (`jira`) | `deployment` (required: `cloud` or `data_center`), `siteUrl` (required; Data Center may include a context path), `email` (required on Cloud: the bot account) | `apiToken`: Cloud API token of the bot (a token without scopes, or with `read:jira-user`, `read:jira-work`, `write:jira-work`); Data Center personal access token | `webhook`, `poll` |
+| **Confluence** (`confluence`) | `siteUrl` (required, Cloud, without `/wiki`), `email` (required) | `apiToken` (without scopes, or with `read:confluence-user`, `read:page:confluence`, `write:page:confluence`, `read:comment:confluence`, `write:comment:confluence`, `read:space:confluence`, `search:confluence`) | none |
+| **Local Git** (`local_git`) | `serverUrl` (required: how the API reaches it, e.g. `http://localhost:3300`), `runnerUrl` (how Agents reach it to clone and push when that differs, e.g. `http://host.docker.internal:3300`), `owner` (user or organization whose repositories projects can add and where new ones are created) | `token` with `write:repository`, `write:organization`, `write:user`, `write:issue` | none |
+| **GitHub** (`github`) | `apiUrl` (leave the default for github.com; `https://<host>/api/v3` for Enterprise Server) | `token`: fine-grained token of the bot, Contents and Pull requests read and write | none |
+| **Bitbucket** (`bitbucket`) | `workspace` (required for access tokens) | `token`: Atlassian API token with the Bitbucket scopes `read:user`, `read:workspace`, `read:repository`, `write:repository`, `read:pullrequest`, `write:pullrequest` (each `...:bitbucket`), or a workspace, project or repository access token | none |
+| **Azure DevOps** (`azure_devops`) | `organizationUrl` (required) | `pat`: organization-scoped, Work Items read and write; Code read and write for Azure Repos; Build read and execute for pipelines | `webhook`, `poll` |
+| **Microsoft Teams** (`microsoft_teams`) | `appId`, `tenantId` (the Azure Bot, to be mentioned and answer in threads) | `webhookUrl` (a Teams Workflows "Send webhook alerts to a channel" URL, to post), `clientSecret` (the bot's app registration) | `webhook` |
+| **Webhook (HTTPS)** (`webhook`) | `allowedCallbackHosts` (hosts an inbound request's `callbackUrl` may point to) | `callbackUrl` (where `webhook.post` sends events by default), `signingSecret` (Standard Webhooks `whsec_...`, to sign outbound requests) | `webhook` |
+
+Notes:
+
+- Changing a credential origin setting (Jira `siteUrl` or `deployment`, Azure DevOps `organizationUrl`) asks for the secret again.
+- **Inbound** `webhook`: the external system calls the connection's inbound URL (shown with its secret after saving). `poll`: AgentFlow asks the system every `pollIntervalSeconds`. Jira polling only sees issues assigned to the bot, so labels, status changes and mentions need `webhook`.
+- **Local Git** can be provided by the server for every organization: `pnpm local-git:init` writes `LOCAL_GIT_*` to the API's environment, and the API provides that connection to every organization.
+- Every workflow also has a built-in `http` connection: its own signed inbound URL as a trigger, and a plain HTTPS call as an action. It needs no setup.
+
+### Jira webhook
+
+After saving a Jira connection with `mode: webhook`, its page shows the inbound URL and secret, and the steps for your site.
+
+1. Jira → Settings (⚙) → System → **WebHooks** → Create a WebHook.
+2. **URL**: the connection's inbound URL. **Secret**: the connection's inbound secret.
+3. **Events**: Issue **created** and **updated**. For mention triggers, and for an orchestrated workflow (which answers comments), also Comment **created** and **updated**.
+4. **JQL filter**: keep it to the project, e.g. `project = LD`. A filter on `assignee` alone misses labels, mentions and status changes of issues not assigned to the bot.
+5. Leave **Exclude body** unchecked and save.
+
+A Jira Automation rule ("Send web request" with the "Work item data (Jira format)" body) also works without the Jira admin role, but only covers assignments.
+
+The bot account needs, on the project: Browse projects, Add comments, Edit issues (labels), Transition issues, and Create attachments when Agents attach files or evidence.
+
+## 2. Add them to the project
+
+Project → **Connections & Repos** → Add connection (org admins). For each connection choose its **key** and the project's settings. The key is a slug, unique in the project, and never changes: it is what workflow and process YAML write.
+
+| Provider | Project settings | What they do |
+|---|---|---|
+| Jira | `projectKeys` | The Jira projects this project works on. Their issues start this project's workflows; Agents can only read and write issues of these projects. A Jira project belongs to one AgentFlow project. |
+| Azure DevOps | `projects` | The same, with team project names. |
+| Confluence | `spaceKeys` | The spaces this project works in. Agents, actions and the orchestrator can only read and write pages and comments of these spaces. |
+| Confluence | `parentPageId` | Where new pages go when nobody names a parent (the number in the page's URL). Empty: the top of the space. |
+| Microsoft Teams | `channels` | Channels where mentioning the bot starts this project's workflows (channel link or id). Empty when the project only posts to Teams. |
+
+LeaveDesk:
+
+| Key | Connection | Settings |
+|---|---|---|
+| `jira` | LeaveDesk Jira bot | `projectKeys: [LD]` |
+| `confluence` | LeaveDesk Confluence | `spaceKeys: [LD]` (no `parentPageId`: pages the orchestrator creates without a parent go to the top of the space) |
+
+Repositories do not need a project connection key: they are added from their connection directly (step 3). A `*.create_pull_request` action without `connection` works on every connection holding a pushed repository.
+
+### How an event finds its project
+
+An event arrives on an organization connection (its webhook URL or its poll) and goes to the project connection of that connection that claims the item's container (the Jira project `LD`). An item no project connection claims is ignored. Changes made by the connection's own bot are ignored, so a bot never triggers itself.
+
+### One bot per workflow
+
+An organization connection is one account, and it is added to a project at most once. For a separate Jira bot per role (BA, Dev, QC), add one Jira connection per bot (same site, each with its own email and token), add them to the project together with the same `projectKeys`, each under its own key (`jira-ba`, `jira-dev`, `jira-qc`), and configure one Jira webhook per bot. Then:
+
+- A label one bot adds starts another bot's workflow: only the bot that made the change ignores it. Two workflows that label each other in a cycle keep starting runs; give each direction its own label.
+- A comment by another workflow's bot counts as feedback for a run; a mention reaches the bot it names.
+
+## 3. Add the repositories
+
+Project → **Connections & Repos**, in the repositories list → Add (org admins): choose a connection that offers repositories (GitHub, Bitbucket, Azure DevOps, Local Git), search, add. Local Git can also create a new repository. A project has at most 20 repositories.
+
+- Every repository of the project is cloned into every loop, as equals. The loop workspace holds one worktree per repository and a `CLAUDE.md` with the project's **agent instructions** (Project → Instructions) and the list of repositories.
+- A repository stores no token. Automatic Agents clone and push with short-lived credentials AgentFlow gives each loop; personal Agents use the person's own Git setup.
+- **Toolkit repositories** (skills, commands and `AGENTFLOW.md` of a team's Agent) are project repositories too. A process or an Agent's `AGENTFLOW.md` names one as `toolkit.repository`, and its directories are linked into the workspace.
+- Pull requests are never implicit. A run-based workflow opens them with a `*.create_pull_request` action; an orchestrated workflow with the orchestrator's `pull_request_open` tool, or the personal Agent's own command.
+
+LeaveDesk: `workshop/leavedesk-app`, `workshop/leavedesk-knowledge`, `workshop/leavedesk-qa`, `workshop/leavedesk-superpowers`, all from the Local Git connection.
+
+## 4. Write the agent instructions
+
+Project → **Instructions**: project-wide context every loop reads (from the workspace `CLAUDE.md`): the product, domain terms, conventions, what each repository is for and which ones an Agent must not read. Each repository keeps its own `CLAUDE.md` or `AGENTS.md` for its own conventions.
+
+```markdown
+# LeaveDesk
+
+Leave management for Sao Mai Software (~120 people, Hanoi and HCMC).
+
+- leavedesk-app: the application (Node 24, Express, SQLite, React). `npm start`, `npm test`.
+- leavedesk-knowledge: leave policy v3.1 (the source of truth), decisions D-001..., change requests. Only the BA reads it.
+- leavedesk-qa: Playwright tests and test cases. Only the QC writes it.
+- Never merge a pull request: people merge.
+```

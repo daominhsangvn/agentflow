@@ -52,6 +52,8 @@ export type OrchestratorRouteInput = {
 
 export type OrchestratorRouteResult = {
   conversationId: string;
+  /** The case the conversation belongs to. */
+  caseId: string;
   workflowId: string;
   /** False when the message was already recorded (a retried delivery). */
   created: boolean;
@@ -62,12 +64,13 @@ type RouteTarget = {
   workflowId: string;
   projectId: string;
   conversationId: string | null;
+  caseId: string | null;
 };
 
 type KnownConversation = {
   id: string;
   projectId: string;
-  case: { workflowId: string };
+  case: { id: string; workflowId: string };
 };
 
 export async function routeToOrchestrator(
@@ -130,7 +133,7 @@ async function resolveTargets(
               select: {
                 id: true,
                 projectId: true,
-                case: { select: { workflowId: true } },
+                case: { select: { id: true, workflowId: true } },
               },
             },
           },
@@ -149,6 +152,7 @@ async function resolveTargets(
         workflowId: workflow.workflowId,
         projectId: workflow.projectId,
         conversationId: null,
+        caseId: null,
       });
     }
   }
@@ -167,7 +171,7 @@ async function resolveTargets(
       select: {
         id: true,
         projectId: true,
-        case: { select: { workflowId: true } },
+        case: { select: { id: true, workflowId: true } },
       },
       take: CONTINUED_MAX,
     })
@@ -180,6 +184,7 @@ function toKnownTarget(conversation: KnownConversation): RouteTarget {
     workflowId: conversation.case.workflowId,
     projectId: conversation.projectId,
     conversationId: conversation.id,
+    caseId: conversation.case.id,
   };
 }
 
@@ -192,16 +197,17 @@ async function deliver(args: {
   workflow: OrchestratorWorkflow;
 }): Promise<OrchestratorRouteResult> {
   const { input, organizationId, target, workflow } = args;
-  const conversationId =
-    target.conversationId ??
-    (await openConversation({
-      organizationId,
-      projectId: target.projectId,
-      workflowId: target.workflowId,
-      projectConnectionId: input.projectConnectionId,
-      event: input.event,
-      parentId: args.parentId,
-    }));
+  const { conversationId, caseId } =
+    target.conversationId && target.caseId
+      ? { conversationId: target.conversationId, caseId: target.caseId }
+      : await openConversation({
+          organizationId,
+          projectId: target.projectId,
+          workflowId: target.workflowId,
+          projectConnectionId: input.projectConnectionId,
+          event: input.event,
+          parentId: args.parentId,
+        });
   const created = await recordMessage({
     organizationId,
     conversationId,
@@ -212,7 +218,7 @@ async function deliver(args: {
   if (created && workflow.debounceSeconds === 0) {
     waitUntil(advanceConversation(conversationId));
   }
-  return { conversationId, workflowId: target.workflowId, created };
+  return { conversationId, caseId, workflowId: target.workflowId, created };
 }
 
 async function openConversation(input: {
@@ -222,7 +228,7 @@ async function openConversation(input: {
   projectConnectionId: string;
   event: InboundEvent;
   parentId: string | null;
-}): Promise<string> {
+}): Promise<{ conversationId: string; caseId: string }> {
   const { organizationId, projectId, workflowId, event } = input;
   const sourceKey = caseSourceKey(event.item);
   const channelKey = channelKeyFor(event.item, input.parentId);
@@ -236,7 +242,7 @@ async function openConversation(input: {
         sourceKey,
         title: caseTitle(event),
       },
-      update: { status: OrchestratorCaseStatus.Open },
+      update: { status: OrchestratorCaseStatus.Open, closedAt: null },
       select: { id: true },
     });
     const existing = await tx.orchestratorConversation.findUnique({
@@ -256,7 +262,7 @@ async function openConversation(input: {
             }
           : {},
       });
-      return existing.id;
+      return { conversationId: existing.id, caseId: found.id };
     }
     const conversation = await tx.orchestratorConversation.create({
       data: {
@@ -272,7 +278,7 @@ async function openConversation(input: {
       },
       select: { id: true },
     });
-    return conversation.id;
+    return { conversationId: conversation.id, caseId: found.id };
   });
 }
 

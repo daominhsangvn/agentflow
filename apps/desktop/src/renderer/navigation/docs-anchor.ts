@@ -16,7 +16,7 @@
  *     mounted (e.g. a screen with a sub-tab that documents to different pages).
  *
  * `page` is the bundle path — the Fumadocs page id (`.mdx` path under
- * `apps/web/content/docs` minus extension, e.g. `mechanisms/desktop-gateway`),
+ * `apps/web/content/docs` minus extension, e.g. `reference/agent-cli`),
  * matching {@link DocsHelpPage.path} and what `helpPageHref`/the Help view's
  * `page` query param expect. `heading` is a GitHub-style heading slug (see
  * `slugifyHeading` / the M1 bundle generator) to scroll the reader to a section.
@@ -25,7 +25,7 @@ import { NavId } from "./route-table";
 
 /** A screen's declared docs target: a bundle page path + optional heading slug. */
 export type DocsAnchor = {
-  /** Bundle page path, e.g. `mechanisms/desktop-gateway` (Fumadocs page id). */
+  /** Bundle page path, e.g. `reference/agent-cli` (Fumadocs page id). */
   page: string;
   /** Optional GitHub-style heading slug to deep-link a section within `page`. */
   heading?: string;
@@ -37,9 +37,9 @@ export type DocsAnchor = {
  * Each maps to a REAL page in the M1 docs bundle (`apps/web/content/docs`) that
  * genuinely documents that screen — the "Help on this screen" tooltip must
  * deep-link to that screen's docs, not a generic page. Only screens with an
- * on-topic page get an entry: Settings → the desktop-gateway page's authenticated
- * endpoints, Diagnostics → the troubleshooting guide, Sessions → the canonical
- * Sessions surface page. Branches has no dedicated docs page yet, so it is
+ * on-topic page get an entry: Settings → the Agent CLI reference's environment
+ * variables, Diagnostics → the troubleshooting page, Sessions → the Sessions
+ * list in the Operate guide. Branches has no dedicated docs page yet, so it is
  * intentionally left out rather than pointed at a generic page — the button
  * self-hides when a screen declares no anchor, so no affordance appears until a
  * real page lands. When a dedicated page ships in `apps/web/content/docs`, add
@@ -49,17 +49,18 @@ export type DocsAnchor = {
  * simply render no "Help on this" affordance.
  */
 export const NAV_DOCS_ANCHORS: Partial<Record<NavId, DocsAnchor>> = {
-  // Settings — the gateway/relay + auth configuration this screen hosts.
+  // Settings — the environment variables an Agent is configured with.
   settings: {
-    page: "mechanisms/desktop-gateway",
-    heading: "authenticated-endpoints",
+    page: "reference/agent-cli",
+    heading: "environment-variables",
   },
-  // Diagnostics — the desktop/gateway troubleshooting guide.
+  // Diagnostics — the troubleshooting page.
   diagnostics: { page: "resources/troubleshooting" },
-  // Sessions — the canonical Sessions surface doc (list, filters, status model,
-  // cost buckets, trace, PR/branch attribution). Wires the desktop "Help on
-  // this" affordance on the Sessions screen to `mechanisms/sessions`.
-  [NavId.Sessions]: { page: "mechanisms/sessions" },
+  // Sessions — the Sessions list in the Operate guide.
+  [NavId.Sessions]: {
+    page: "guides/operate/sessions",
+    heading: "sessions-list",
+  },
 };
 
 /** The static docs anchor declared for `navId`, or null when none is declared. */

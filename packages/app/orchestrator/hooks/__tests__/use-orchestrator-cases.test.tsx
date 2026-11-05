@@ -1,3 +1,4 @@
+import { OrchestratorCaseStatus } from "@repo/api/src/types/orchestrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -6,6 +7,7 @@ import {
   isCaseActive,
   useOrchestratorCase,
   useOrchestratorCaseLoops,
+  useOrgOrchestratorCases,
   useWorkflowOrchestratorCases,
 } from "../use-orchestrator-cases";
 
@@ -146,5 +148,37 @@ describe("useOrchestratorCaseLoops", () => {
     expect(await run({ poll: true }, idle)).toBe(5000);
     expect(await run(undefined, liveLoop)).toBe(5000);
     expect(await run(undefined, liveSession)).toBe(5000);
+  });
+});
+
+describe("useOrgOrchestratorCases", () => {
+  beforeEach(() => {
+    mockApiClient.get.mockReset();
+    mockApiClient.get.mockResolvedValue([]);
+  });
+
+  it("builds the query string from the set filters only", async () => {
+    const { result } = renderHook(
+      () =>
+        useOrgOrchestratorCases({
+          projectId: "p1",
+          status: OrchestratorCaseStatus.Open,
+        }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      `/orchestrator/cases?projectId=p1&status=${OrchestratorCaseStatus.Open}`
+    );
+  });
+
+  it("calls the bare path without filters", async () => {
+    const { result } = renderHook(() => useOrgOrchestratorCases({}), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenCalledWith("/orchestrator/cases");
   });
 });

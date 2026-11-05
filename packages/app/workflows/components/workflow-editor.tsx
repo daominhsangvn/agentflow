@@ -262,7 +262,9 @@ function WorkflowYamlForm({
         </Alert>
       ) : null}
       <WorkflowYamlIntro />
-      <WorkflowConfigurationGuide catalog={catalog} defaultOpen={!workflow} />
+      {workflow ? null : (
+        <WorkflowConfigurationGuide catalog={catalog} defaultOpen />
+      )}
       {unavailable.length > 0 ? (
         <Alert variant="warning">
           <AlertTriangleIcon />

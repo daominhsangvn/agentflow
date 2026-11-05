@@ -1,8 +1,18 @@
-import { OrchestratorTaskStatus } from "@repo/api/src/types/orchestrator";
+import {
+  OrchestratorMessageVia,
+  OrchestratorTaskStatus,
+} from "@repo/api/src/types/orchestrator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderCase } from "@/lib/orchestrator/case-render";
 
-const mocks = vi.hoisted(() => ({ findUnique: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  findUnique: vi.fn(),
+  listCaseDocuments: vi.fn(),
+}));
+
+vi.mock("@/lib/orchestrator/case-documents", () => ({
+  listCaseDocuments: mocks.listCaseDocuments,
+}));
 
 vi.mock("@repo/database", () => ({
   withDb: (fn: (db: unknown) => unknown) =>
@@ -34,6 +44,7 @@ function task(
 
 function mockCase(tasks: unknown[]) {
   mocks.findUnique.mockResolvedValue({
+    organizationId: "org-1",
     title: "LD-7",
     status: "open",
     sourceKey: null,
@@ -47,6 +58,27 @@ function mockCase(tasks: unknown[]) {
 describe("renderCase task lines", () => {
   beforeEach(() => {
     mocks.findUnique.mockReset();
+    mocks.listCaseDocuments.mockReset();
+    mocks.listCaseDocuments.mockResolvedValue([]);
+  });
+
+  it("lists the published documents, or says there are none", async () => {
+    mockCase([]);
+    expect(await renderCase("c1")).toContain("## Documents\n(none yet)");
+    mocks.listCaseDocuments.mockResolvedValue([
+      {
+        pageId: "123",
+        title: "LD-7 · PRD",
+        url: "https://x.atlassian.net/wiki/pages/123",
+        version: 3,
+        kind: "prd",
+        space: "ENG",
+        attachments: [],
+      },
+    ]);
+    expect(await renderCase("c1")).toContain(
+      'PRD "LD-7 · PRD" → https://x.atlassian.net/wiki/pages/123 (v3, page 123)'
+    );
   });
 
   it("names the status change that started a task", async () => {
@@ -120,5 +152,34 @@ describe("renderCase task lines", () => {
       }),
     ]);
     expect(await renderCase("c1")).toContain(" — files: PRD-LD-5.md —");
+  });
+
+  it("marks a message written in AgentFlow", async () => {
+    mocks.findUnique.mockResolvedValue({
+      organizationId: "org-1",
+      title: "LD-7",
+      status: "open",
+      sourceKey: null,
+      notes: "",
+      conversations: [
+        {
+          channelKey: "jira:LD-7",
+          status: "idle",
+          channel: null,
+          messages: [
+            {
+              actor: "Sang",
+              kind: "message",
+              text: "hello",
+              payload: { via: OrchestratorMessageVia.AgentFlow },
+              createdAt: new Date("2026-10-23T08:00:00.000Z"),
+            },
+          ],
+        },
+      ],
+      tasks: [],
+      decisions: [],
+    });
+    expect(await renderCase("c1")).toContain("Sang (AgentFlow) (message)");
   });
 });

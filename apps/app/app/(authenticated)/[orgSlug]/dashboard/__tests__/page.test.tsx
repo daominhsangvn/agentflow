@@ -6,31 +6,20 @@ import {
 } from "@repo/app/test/a11y/contrast";
 import { A11yThemeRoot } from "@repo/app/test/a11y/react";
 import { render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import DashboardPage from "../page";
+import HomePage from "../page";
 
-vi.mock("@repo/app/insights/components/insights-data-source-provider", () => ({
-  WebInsightsDataSourceProvider: ({ children }: { children: ReactNode }) => (
-    <div data-testid="web-insights-provider">{children}</div>
-  ),
+vi.mock("@repo/app/home/components/home-dashboard", () => ({
+  HomeDashboard: () => <section aria-label="Home statistics" />,
 }));
 
-vi.mock(
-  "@repo/app/insights/components/overview/insights-overview-dashboard",
-  () => ({
-    InsightsOverviewDashboard: ({
-      getSessionHref,
-    }: {
-      getSessionHref: (session: { id: string }) => string;
-    }) => (
-      <section aria-label="Insights overview">
-        <h2>Recent Sessions</h2>
-        <a href={getSessionHref({ id: "session-1" })}>Session one</a>
-      </section>
-    ),
-  })
-);
+vi.mock("../../../components/onboarding-checklist", () => ({
+  OnboardingChecklist: () => null,
+}));
+
+vi.mock("../../../components/agent-onboarding-card", () => ({
+  AgentOnboardingCard: () => null,
+}));
 
 vi.mock("@/app/(authenticated)/components/header", () => ({
   Header: ({ breadcrumbs }: { breadcrumbs: { label: string }[] }) => (
@@ -40,43 +29,34 @@ vi.mock("@/app/(authenticated)/components/header", () => ({
   ),
 }));
 
-vi.mock("@/hooks/use-org-slug", () => ({
-  useOrgSlug: () => "acme",
-}));
+const SUBTITLE = "Your projects, workflows, cases and agents at a glance.";
 
-describe("DashboardPage a11y", () => {
-  // FEA-4155: the dashboard is no longer wrapped in `<FeatureFlagged>` on the
-  // winding-down `DESKTOP_AGENT_SESSION_SYNC` flag (bot review #3789) — it is the
-  // first always-on nav destination and renders directly, its own empty/loading
-  // states owned by InsightsOverviewDashboard. This proves no flag gate wraps the
-  // body.
-  it("renders the dashboard shell directly with no feature-flag gate (FEA-4155)", () => {
-    render(<DashboardPage />);
+describe("HomePage", () => {
+  it("renders the Home heading, breadcrumb and statistics, without Insights", () => {
+    render(<HomePage />);
 
-    const sessionLink = screen.getByRole("link", { name: "Session one" });
-
-    expect(screen.getByTestId("web-insights-provider")).toBeInTheDocument();
-    expect(sessionLink).toHaveAttribute("href", "/acme/sessions/session-1");
+    expect(screen.getByRole("heading", { name: "Home" })).toBeInTheDocument();
+    expect(screen.getByRole("banner")).toHaveTextContent("Home");
     expect(
-      screen.getByRole("heading", { name: "Dashboard" })
+      screen.getByRole("region", { name: "Home statistics" })
     ).toBeInTheDocument();
-    expect(sessionLink.closest("[data-feature-flag]")).toBeNull();
+    expect(screen.queryByLabelText("Insights overview")).toBeNull();
   });
 
   it.each([
     A11yTheme.Light,
     A11yTheme.Dark,
-  ])("keeps the dashboard route critical a11y and contrast clean in %s theme", async (theme) => {
+  ])("keeps the home route critical a11y and contrast clean in %s theme", async (theme) => {
     const { container } = render(
       <A11yThemeRoot theme={theme}>
-        <DashboardPage />
+        <HomePage />
       </A11yThemeRoot>
     );
 
     await expectCriticalAxeClean(container);
-    expectElementContrast(screen.getByText("Recent Sessions"), {
+    expectElementContrast(screen.getByText(SUBTITLE), {
       background: themeBackground(theme),
-      label: `dashboard route ${theme}`,
+      label: `home route ${theme}`,
     });
   });
 });

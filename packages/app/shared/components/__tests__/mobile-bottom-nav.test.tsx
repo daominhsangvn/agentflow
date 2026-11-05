@@ -19,7 +19,7 @@ const ORG = "org-test";
 // The explicit phone destinations FEA-4155 pins the bar to (bot review #3789):
 // a fixed set regardless of flag state, with both unblanked surfaces on it.
 // The self-hosted edition hides Branches from navigation.
-const PHONE_LINK_NAMES = ["Dashboard", "Sessions", "Agents"];
+const PHONE_LINK_NAMES = ["Home", "Cases", "Sessions", "Agents"];
 
 // jsdom does not implement matchMedia; SidebarProvider's useIsMobile() reads it.
 // Stub a desktop (non-matching) media query so the provider mounts.
@@ -57,7 +57,7 @@ describe("MobileBottomNav", () => {
     renderNav();
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
-    // FEA-4155: the bar renders the explicit phone set (Dashboard, Sessions,
+    // FEA-4155: the bar renders the explicit phone set (Home, Cases, Sessions,
     // Agents), NOT a prefix slice of the sidebar list.
     for (const name of PHONE_LINK_NAMES) {
       expect(within(nav).getByRole("link", { name })).toBeInTheDocument();
@@ -115,9 +115,10 @@ describe("MobileBottomNav", () => {
     renderNav();
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
-    expect(
-      within(nav).getByRole("link", { name: "Dashboard" })
-    ).toHaveAttribute("href", `/${ORG}/dashboard`);
+    expect(within(nav).getByRole("link", { name: "Home" })).toHaveAttribute(
+      "href",
+      `/${ORG}/dashboard`
+    );
     expect(within(nav).getByRole("link", { name: "Agents" })).toHaveAttribute(
       "href",
       `/${ORG}/agents`
@@ -177,9 +178,9 @@ describe("MobileBottomNav", () => {
       "aria-current",
       "page"
     );
-    expect(
-      within(nav).getByRole("link", { name: "Dashboard" })
-    ).not.toHaveAttribute("aria-current");
+    expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute(
+      "aria-current"
+    );
   });
 
   it("keeps a destination current on a descendant route", () => {
