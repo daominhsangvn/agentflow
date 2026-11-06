@@ -565,7 +565,11 @@ async function startTurnIfDue(
     });
     await tx.orchestratorConversation.update({
       where: { id: conversationId },
-      data: { status: OrchestratorConversationStatus.Turn, nextWakeAt: null },
+      data: {
+        status: OrchestratorConversationStatus.Turn,
+        nextWakeAt: null,
+        askedHuman: null,
+      },
     });
     return created;
   });

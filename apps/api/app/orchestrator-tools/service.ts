@@ -3,6 +3,7 @@ import type { JsonValue } from "@repo/api/src/types/common";
 import { SourceOperation } from "@repo/api/src/types/connection-grants";
 import type { IntegrationToolSessionDescriptor } from "@repo/api/src/types/integration-tools";
 import {
+  ORCHESTRATOR_ASKED_HUMAN_MAX,
   OrchestratorCaseStatus,
   OrchestratorDecisionVia,
   OrchestratorReplyTarget,
@@ -112,7 +113,9 @@ const replyInputSchema = z.object({
 const closeInputSchema = z.object({
   summary: z.string().trim().max(2000).optional(),
 });
-const emptyInputSchema = z.object({});
+const waitHumanInputSchema = z.object({
+  asked: z.string().trim().min(1).max(ORCHESTRATOR_ASKED_HUMAN_MAX).optional(),
+});
 const COMMAND_RE = /^\/[\w:.-]{1,100}$/;
 const taskRunInputSchema = z.object({
   runner: z.string().trim().min(1).max(120),
@@ -416,10 +419,17 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   [OrchestratorToolName.WaitHuman]: async (context, input) => {
-    if (!emptyInputSchema.safeParse(input).success) {
-      return refused("wait_human takes no arguments.");
+    const parsed = waitHumanInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        `asked: optional, one line (≤${ORCHESTRATOR_ASKED_HUMAN_MAX} chars) on what you asked people.`
+      );
     }
-    await endTurn(context, OrchestratorTurnEnd.WaitHuman);
+    await endTurn(
+      context,
+      OrchestratorTurnEnd.WaitHuman,
+      parsed.data.asked ?? null
+    );
     return {
       ok: true,
       output:
@@ -746,12 +756,22 @@ const HANDLERS: Record<string, Handler> = {
 
 async function endTurn(
   context: TurnContext,
-  ended: OrchestratorTurnEnd
+  ended: OrchestratorTurnEnd,
+  askedHuman: string | null = null
 ): Promise<void> {
   await withDb((db) =>
     db.orchestratorTurn.updateMany({
       where: { id: context.turnId, status: OrchestratorTurnStatus.Running },
       data: { ended },
+    })
+  );
+  await withDb((db) =>
+    db.orchestratorConversation.updateMany({
+      where: {
+        id: context.conversationId,
+        organizationId: context.organizationId,
+      },
+      data: { askedHuman },
     })
   );
 }

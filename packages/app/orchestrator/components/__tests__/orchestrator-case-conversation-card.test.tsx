@@ -12,6 +12,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ConversationMessageForm } from "../conversation-message-form";
 import { OrchestratorCaseConversationCard } from "../orchestrator-case-conversation-card";
 
 const CASE_ID = "case-1";
@@ -75,8 +76,16 @@ describe("OrchestratorCaseConversationCard", () => {
     expect(screen.getByLabelText(QUESTION)).toHaveValue("MySQL");
   });
 
-  it("shows no form once a stored message answered the questions", () => {
+  it("shows the form when open questions remain even if an earlier message answered", () => {
     renderCard([makeTask()], null, [TASK_ID]);
+
+    expect(
+      screen.getByRole("button", { name: "Send answers" })
+    ).toBeInTheDocument();
+  });
+
+  it("shows no form when no question is open", () => {
+    renderCard([makeTask({ openQuestionCount: 0 })]);
 
     expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
     expect(screen.getByText(QUESTION)).toBeInTheDocument();
@@ -90,26 +99,13 @@ describe("OrchestratorCaseConversationCard", () => {
         resumeTaskId: TASK_ID,
         fork: true,
         questions: [],
+        openQuestionCount: 0,
       }),
     ]);
 
     expect(
       screen.getByRole("button", { name: "Send answers" })
     ).toBeInTheDocument();
-  });
-
-  it("shows no form when a later task resumed it without a fork", () => {
-    renderCard([
-      makeTask(),
-      makeTask({
-        id: "44444444-4444-4444-8444-444444444444",
-        resumeTaskId: TASK_ID,
-        fork: false,
-        questions: [],
-      }),
-    ]);
-
-    expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
   });
 
   it("shows a note instead of the form after sending", async () => {
@@ -140,6 +136,27 @@ describe("OrchestratorCaseConversationCard", () => {
     expect(mocks.mutateAsync).toHaveBeenCalledWith({
       conversationId: CONV_ID,
       text: "Go ahead",
+    });
+  });
+
+  it("sends toAgentId when given", async () => {
+    const user = userEvent.setup();
+    const agentId = "55555555-5555-4555-8555-555555555555";
+    render(
+      <ConversationMessageForm
+        caseId={CASE_ID}
+        conversationId={CONV_ID}
+        toAgentId={agentId}
+      />
+    );
+
+    await user.type(screen.getByLabelText("Message the orchestrator"), "Hi");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(mocks.mutateAsync).toHaveBeenCalledWith({
+      conversationId: CONV_ID,
+      text: "Hi",
+      toAgentId: agentId,
     });
   });
 
@@ -205,6 +222,7 @@ function makeTask(
     reply: null,
     files: [],
     filesOmitted: 0,
+    openQuestionCount: 1,
     questions: [
       { id: QUESTION_ID, question: QUESTION, options: ["MySQL", "Postgres"] },
     ],

@@ -234,6 +234,9 @@ function caseItem(): OrchestratorCaseListItem {
     workflow: { id: randomUUID(), name: "Workflow A" },
     waitingFor: OrchestratorCaseWaitingFor.Human,
     runningAgents: [],
+    needsPerson: false,
+    askedHuman: null,
+    agents: [],
   };
 }
 

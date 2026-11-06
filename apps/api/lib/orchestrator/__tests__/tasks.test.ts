@@ -283,6 +283,63 @@ describe("startTask", () => {
     );
   });
 
+  it("clears the open questions of a task a non-fork resume continues, not a fork's", async () => {
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+    });
+    mocks.createLoop.mockResolvedValue({
+      loopId: "loop-2",
+      status: LoopStatus.Pending,
+    });
+    Object.assign(mocks.tasks[0] ?? {}, { openQuestionCount: 2 });
+
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+      resumeTaskId: "task-1",
+      fork: true,
+    });
+    expect(mocks.tasks[0]?.openQuestionCount).toBe(2);
+
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+      resumeTaskId: "task-1",
+    });
+    expect(mocks.tasks[0]?.openQuestionCount).toBe(0);
+  });
+
+  it("keeps the open questions when the resume is refused", async () => {
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+    });
+    Object.assign(mocks.tasks[0] ?? {}, {
+      openQuestionCount: 1,
+      status: OrchestratorTaskStatus.Cancelled,
+    });
+
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+      resumeTaskId: "task-1",
+    });
+    await startTask({
+      ...BASE,
+      runner: "an-PRO-1",
+      command: "/executing-plans",
+      resumeTaskId: "task-1",
+    });
+
+    expect(mocks.tasks[0]?.openQuestionCount).toBe(1);
+  });
+
   it("refuses to resume a cancelled task and creates no loop", async () => {
     await startTask({
       ...BASE,
@@ -609,6 +666,61 @@ describe("advanceTasks", () => {
         error: null,
       },
     });
+  });
+
+  it("counts every question of a settled task as open, with or without a commentId", async () => {
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+    });
+    mocks.loops.set("loop-1", {
+      status: LoopStatus.Completed,
+      completedAt: new Date(),
+      revivalCount: 0,
+      error: null,
+      uploadedArtifacts: {
+        step: {
+          stepId: "task-1",
+          questions: [
+            { id: "q1", question: "Which?", commentId: "10234" },
+            { id: "q2", question: "And?" },
+          ],
+          files: [],
+          questionsError: null,
+        },
+      },
+    });
+
+    await advanceTasks(new Date());
+
+    expect(mocks.tasks[0]?.openQuestionCount).toBe(2);
+  });
+
+  it("settles a task without questions with no open question", async () => {
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+    });
+    mocks.loops.set("loop-1", {
+      status: LoopStatus.Completed,
+      completedAt: new Date(),
+      revivalCount: 0,
+      error: null,
+      uploadedArtifacts: {
+        step: {
+          stepId: "task-1",
+          questions: [],
+          files: [],
+          questionsError: null,
+        },
+      },
+    });
+
+    await advanceTasks(new Date());
+
+    expect(mocks.tasks[0]?.openQuestionCount).toBe(0);
   });
 
   it("keeps a question's commentId and records it as asked on the item", async () => {

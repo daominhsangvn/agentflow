@@ -2,6 +2,7 @@ import {
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
   OrchestratorMessageVia,
+  OrchestratorReplyTarget,
   OrchestratorTicketChange,
   OrchestratorToolName,
   readOrchestratorMessageVia,
@@ -16,6 +17,7 @@ import type { ComputeTargetCapabilities } from "@repo/api/src/types/runner-capab
 import { WORKFLOW_INSTRUCTIONS_MAX } from "@repo/api/src/types/workflow";
 import { readAnsweredQuestion } from "./asked-questions";
 import type { ConversationChannel } from "./channel";
+import { readMessageToAgent } from "./message-to-agent";
 import { isTicketChangeKind, readTicketChange } from "./ticket-change";
 
 /**
@@ -85,6 +87,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     ...describeTicketChanges(input.messages, input.cancelOn),
     ...describeHandoffs(input.messages),
     ...describeAskedQuestions(input.messages),
+    ...describeAgentMessages(input.messages),
     section(
       "New messages",
       [
@@ -128,7 +131,7 @@ You are this workflow's orchestrator, as in the earlier turns of this conversati
 
 const END_OF_TURN = `## Ending the turn
 
-End every turn with exactly one of: ${OrchestratorToolName.WaitFor} (wait for the tasks you started), ${OrchestratorToolName.WaitHuman} (wait for people: an answer, a decision, the next request), or ${OrchestratorToolName.CloseCase} (the case is done). AgentFlow wakes you with the next message or the results; you never wait inside a turn. Then finish with a one-line note of what you did.`;
+End every turn with exactly one of: ${OrchestratorToolName.WaitFor} (wait for the tasks you started), ${OrchestratorToolName.WaitHuman} (wait for people: an answer, a decision, the next request; set asked, one line, when you asked people something and wait for their answer, leave it out when you only wait for the next request), or ${OrchestratorToolName.CloseCase} (the case is done). AgentFlow wakes you with the next message or the results; you never wait inside a turn. Then finish with a one-line note of what you did.`;
 
 function section(title: string, body: string): string {
   return `## ${title}\n\n${body}`;
@@ -207,12 +210,14 @@ function formatMessage(message: TurnPromptMessage): string {
   const ref = message.externalRef
     ? ` ref="${escapeAttribute(message.externalRef)}"`
     : "";
+  const toAgent = readMessageToAgent(message.payload);
+  const to = toAgent ? ` to="${escapeAttribute(toAgent.name)}"` : "";
   const answered = answeredQuestionOf(message);
   const task = answered ? ` task="${escapeAttribute(answered.taskId)}"` : "";
   const question = answered?.questionId
     ? ` question="${escapeAttribute(answered.questionId)}"`
     : "";
-  return `<message from="${escapeAttribute(from)}" kind="${message.kind}"${via}${ref}${task}${question} at="${message.createdAt.toISOString()}">\n${message.text.slice(0, MESSAGE_MAX)}\n</message>`;
+  return `<message from="${escapeAttribute(from)}" kind="${message.kind}"${via}${to}${ref}${task}${question} at="${message.createdAt.toISOString()}">\n${message.text.slice(0, MESSAGE_MAX)}\n</message>`;
 }
 
 function escapeAttribute(value: string): string {
@@ -371,6 +376,18 @@ function describeAskedQuestions(messages: TurnPromptMessage[]): string[] {
     section(
       "Questions agents asked on the item",
       `A task's agent posted these questions on the item itself, under its person's own account (a task_asked message; the comment ids are in the wait results and CASE.md). Do not post them again and do not reply repeating them; end the turn with ${OrchestratorToolName.WaitHuman} until the answers come. A message with task="…" question="…" is a reply to that comment and answers that task's question: keep the answer in the notes (${OrchestratorToolName.CaseUpdateNotes}), and when every question of that task has an answer (replies or the case page), resume that task with ${OrchestratorToolName.TaskRun} resumeTaskId <task> (no fork, same runner) and all the answers as its prompt. Answer the person in that comment's thread (replyTo its ref) only when your rules say so.`
+    ),
+  ];
+}
+
+function describeAgentMessages(messages: TurnPromptMessage[]): string[] {
+  if (!messages.some((m) => readMessageToAgent(m.payload) !== null)) {
+    return [];
+  }
+  return [
+    section(
+      "Messages for an agent",
+      `A message with to="<agent>" was written on the case page for that agent. Pass it on: ${OrchestratorToolName.TaskRun} on that agent resuming its latest task in this case (resumeTaskId, fork: true; mode read unless your rules allow changes), with replyTo the message's ref, then ${OrchestratorToolName.WaitFor} that task, and answer on the case page (${OrchestratorToolName.Reply} where ${OrchestratorReplyTarget.CasePage}) with what the agent said.`
     ),
   ];
 }

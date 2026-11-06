@@ -132,7 +132,13 @@ describe("WorkflowsIndexView", () => {
   it("shows case counts for an orchestrated workflow", () => {
     mocks.workflows.data = [
       makeWorkflow({
-        caseCounts: { total: 3, open: 1, closed: 2, lastActivityAt: null },
+        caseCounts: {
+          total: 3,
+          open: 1,
+          closed: 2,
+          lastActivityAt: null,
+          needsPerson: 0,
+        },
       }),
     ];
     render(<WorkflowsIndexView isAdmin />);

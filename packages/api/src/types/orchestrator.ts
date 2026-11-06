@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AgentKind } from "./agent-fleet.ts";
 import type {
   WorkflowRunLoopRef,
   WorkflowRunPullRequest,
@@ -311,6 +312,8 @@ export type OrchestratorCaseMessage = {
   via?: OrchestratorMessageVia | null;
   /** Tasks whose questions this case-page message answered. */
   answeredTaskIds?: string[];
+  /** The agent (compute target) a case-page message is addressed to. */
+  toAgentId?: string | null;
 };
 
 export type OrchestratorCaseTurn = {
@@ -360,6 +363,8 @@ export type OrchestratorCaseTask = {
   error: string | null;
   /** Why a queued task has not started (a busy runner). */
   waiting: string | null;
+  /** Questions no answer covers yet (server-owned). */
+  openQuestionCount: number;
   createdAt: string;
   finishedAt: string | null;
 };
@@ -514,6 +519,18 @@ export type OrchestratorCaseListItem = OrchestratorCaseSummary & {
   waitingFor: OrchestratorCaseWaitingFor;
   /** Machine names of the agents running or queued for the case's active tasks. */
   runningAgents: string[];
+  /** The case needs a person (caseNeedsPersonWhere). */
+  needsPerson: boolean;
+  /** The newest wait_human asked of the case's conversations. */
+  askedHuman: string | null;
+  /** Every agent with a task in the case. */
+  agents: OrchestratorCaseAgent[];
+};
+
+export type OrchestratorCaseAgent = {
+  computeTargetId: string;
+  activeTaskCount: number;
+  openQuestionCount: number;
 };
 
 export const orchestratorCaseListQuerySchema = z
@@ -544,6 +561,7 @@ export type OrchestratorReplyTarget =
 
 export const ORCHESTRATOR_CASE_MESSAGE_MAX = 4000;
 export const ORCHESTRATOR_CASE_ANSWERS_MAX = 20;
+export const ORCHESTRATOR_ASKED_HUMAN_MAX = 500;
 
 export const postOrchestratorCaseMessageInputSchema = z
   .object({
@@ -559,6 +577,7 @@ export const postOrchestratorCaseMessageInputSchema = z
       )
       .max(ORCHESTRATOR_CASE_ANSWERS_MAX)
       .default([]),
+    toAgentId: z.uuid().optional(),
   })
   .refine((input) => input.text.length > 0 || input.answers.length > 0, {
     message: "Write a message or answer a question",
@@ -597,3 +616,21 @@ export function readOrchestratorMessageVia(
   const parsed = orchestratorMessageViaPayloadSchema.safeParse(payload);
   return parsed.success ? parsed.data.via : null;
 }
+
+/** GET /workflows/{id}/agents: a node of the Agents tab diagram. */
+export type WorkflowAgentMapNode = {
+  computeTargetId: string;
+  name: string;
+  isOnline: boolean;
+};
+
+export type WorkflowAgentMapAgent = WorkflowAgentMapNode & {
+  role: string | null;
+  kind: AgentKind;
+  declared: boolean;
+};
+
+export type WorkflowAgentMap = {
+  orchestrator: WorkflowAgentMapNode | null;
+  agents: WorkflowAgentMapAgent[];
+};

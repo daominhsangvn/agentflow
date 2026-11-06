@@ -16,6 +16,7 @@ import {
   toCaseDetail,
   toCaseSummary,
 } from "@/app/orchestrator/cases/case-mappers";
+import { loadWorkflowAgentMap } from "@/app/orchestrator/cases/service/agent-map";
 import { loadCaseLoops } from "@/app/orchestrator/cases/service/case-loops";
 import { postCaseMessage } from "@/app/orchestrator/cases/service/case-messages";
 import {
@@ -48,6 +49,8 @@ const WAITS_MAX = 100;
 const DECISIONS_MAX = 100;
 
 export const orchestratorCaseService = {
+  agentMapForWorkflow: loadWorkflowAgentMap,
+
   postMessage: postCaseMessage,
 
   /** Null when the organization has no such workflow. */
@@ -110,17 +113,17 @@ export const orchestratorCaseService = {
     );
   },
 
-  /** The 100 most recently updated cases of the organization. */
+  /** Every needs-a-person case (up to 100), then the 100 most recently updated. */
   async listForOrg(
     organizationId: string,
     query: OrchestratorCaseListQuery
   ): Promise<OrchestratorCaseListItem[]> {
-    const rows = await loadOrgCaseRows(organizationId, query);
+    const { rows, needsPerson } = await loadOrgCaseRows(organizationId, query);
     const ids = rows.map((row) => row.id);
     const [running, stats, waitState] = await Promise.all([
       runningCaseIds(organizationId, ids),
       loadCaseStats(organizationId, ids),
-      loadCaseWaitState(organizationId, ids),
+      loadCaseWaitState(organizationId, ids, new Date()),
     ]);
     return rows.map((row) => {
       const turnRunning = running.has(row.id);
@@ -129,20 +132,23 @@ export const orchestratorCaseService = {
         turnRunning,
         stats.get(row.id) ?? EMPTY_STATS
       );
+      const needsAPerson = needsPerson.has(row.id);
       const waitingFor = deriveCaseWaitingFor({
         status: summary.status,
         turnRunning,
         pendingDecisionCount: summary.pendingDecisionCount,
         activeTaskCount: summary.activeTaskCount,
         hasOpenWait: waitState.openWait.has(row.id),
-        hasWaitingConversation: waitState.waitingConversation.has(row.id),
+        needsPerson: needsAPerson,
+        wakeDue: waitState.wakeDue.has(row.id),
       });
-      return toCaseListItem(
-        summary,
-        row,
+      return toCaseListItem(summary, row, {
         waitingFor,
-        waitState.agents.get(row.id) ?? []
-      );
+        runningAgents: waitState.agents.get(row.id) ?? [],
+        needsPerson: needsAPerson,
+        askedHuman: waitState.askedHuman.get(row.id) ?? null,
+        agents: waitState.caseAgents.get(row.id) ?? [],
+      });
     });
   },
 

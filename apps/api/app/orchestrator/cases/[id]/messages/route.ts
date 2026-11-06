@@ -19,7 +19,8 @@ const BODY_MAX_BYTES = 64 * 1024;
 /**
  * POST /orchestrator/cases/{id}/messages
  * A member writes to the case's orchestrator, optionally answering the
- * questions of its tasks (`{ conversationId, text, answers }`). Any org member.
+ * questions of its tasks (`{ conversationId, text, answers, toAgentId? }`);
+ * `toAgentId` addresses an agent with a task in the case. Any org member.
  */
 export const POST = withAnyAuth<
   OrchestratorCaseMessagePosted,
@@ -47,14 +48,13 @@ export const POST = withAnyAuth<
     if (result.error === Status.NotFound) {
       return notFoundResponse("Conversation");
     }
-    return NextResponse.json(
-      failure(
-        result.error === Status.BadRequest
-          ? "An answer does not match a question of the case"
-          : "Forbidden"
-      ),
-      { status: result.error }
-    );
+    let message = "Forbidden";
+    if (result.error === Status.BadRequest) {
+      message = "An answer does not match a question of the case";
+    } else if (result.error === Status.Conflict) {
+      message = "The agent has no task in this case";
+    }
+    return NextResponse.json(failure(message), { status: result.error });
   } catch (error) {
     return errorResponse("Failed to post the message", error);
   }

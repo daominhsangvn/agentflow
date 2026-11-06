@@ -117,7 +117,13 @@ describe("case count labels", () => {
   });
 
   it("describes case activity", () => {
-    const counts = { total: 0, open: 0, closed: 0, lastActivityAt: null };
+    const counts = {
+      total: 0,
+      open: 0,
+      closed: 0,
+      lastActivityAt: null,
+      needsPerson: 0,
+    };
     expect(describeWorkflowCaseActivity(counts)).toBe("No cases yet");
     expect(
       describeWorkflowCaseActivity({ ...counts, total: 2, open: 1, closed: 1 })
@@ -128,6 +134,7 @@ describe("case count labels", () => {
         open: 1,
         closed: 0,
         lastActivityAt: new Date(),
+        needsPerson: 0,
       })
     ).toContain("1 case (1 open) · last activity ");
   });

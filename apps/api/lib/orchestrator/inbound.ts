@@ -4,7 +4,7 @@ import {
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
 } from "@repo/api/src/types/orchestrator";
-import { type Prisma, withDb } from "@repo/database";
+import { type Prisma, type TransactionClient, withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import type { LoadedConnection } from "@/lib/integrations/connection-service";
@@ -325,7 +325,7 @@ async function recordMessage(input: {
   const content = messageContent(event);
   try {
     await withDb.tx(async (tx) => {
-      await tx.orchestratorMessage.create({
+      const created = await tx.orchestratorMessage.create({
         data: {
           organizationId: input.organizationId,
           conversationId: input.conversationId,
@@ -351,6 +351,13 @@ async function recordMessage(input: {
               : {}),
           },
         },
+        select: { id: true },
+      });
+      await coverAskedQuestion(tx, {
+        organizationId: input.organizationId,
+        conversationId: input.conversationId,
+        messageId: created.id,
+        answers: input.answers,
       });
       await tx.orchestratorConversation.updateMany({
         where: { id: input.conversationId },
@@ -368,6 +375,48 @@ async function recordMessage(input: {
     }
     throw error;
   }
+}
+
+/**
+ * The first reply to an agent's question covers it: one less open question
+ * on its task. Later replies to the same question and replies to anchors
+ * that are not a question change nothing.
+ */
+async function coverAskedQuestion(
+  tx: TransactionClient,
+  input: {
+    organizationId: string;
+    conversationId: string;
+    messageId: string;
+    answers: RouteTarget["answers"];
+  }
+): Promise<void> {
+  const { answers } = input;
+  if (!answers?.questionId) {
+    return;
+  }
+  const earlier = await tx.orchestratorMessage.findFirst({
+    where: {
+      conversationId: input.conversationId,
+      id: { not: input.messageId },
+      AND: [
+        { payload: { path: ["taskId"], equals: answers.taskId } },
+        { payload: { path: ["questionId"], equals: answers.questionId } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (earlier) {
+    return;
+  }
+  await tx.orchestratorTask.updateMany({
+    where: {
+      id: answers.taskId,
+      organizationId: input.organizationId,
+      openQuestionCount: { gt: 0 },
+    },
+    data: { openQuestionCount: { decrement: 1 } },
+  });
 }
 
 /** Kind, text and extra payload of the message an event records. */

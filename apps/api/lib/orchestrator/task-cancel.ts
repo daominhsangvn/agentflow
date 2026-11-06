@@ -105,6 +105,7 @@ export async function cancelTask(
         status: OrchestratorTaskStatus.Cancelled,
         finishedAt: now,
         result: result as Prisma.InputJsonValue,
+        openQuestionCount: 0,
       },
     })
   );

@@ -27,6 +27,7 @@ import {
 import { z } from "zod";
 import type { CaseStats } from "@/app/orchestrator/cases/service/case-stats";
 import type { CaseDocument } from "@/lib/orchestrator/case-documents";
+import { readMessageToAgent } from "@/lib/orchestrator/message-to-agent";
 import { readTaskResult } from "@/lib/orchestrator/task-result";
 
 /**
@@ -110,6 +111,7 @@ export type CaseDetailRow = CaseSummaryRow & {
       resumeTaskId: string | null;
       loopId: string | null;
       result: unknown;
+      openQuestionCount: number;
       finishedAt: Date | null;
     }
   >;
@@ -244,6 +246,7 @@ function toMessage(
     createdAt: row.createdAt.toISOString(),
     via: readOrchestratorMessageVia(row.payload),
     answeredTaskIds: readOrchestratorMessageAnsweredTaskIds(row.payload),
+    toAgentId: readMessageToAgent(row.payload)?.computeTargetId ?? null,
   };
 }
 
@@ -291,6 +294,7 @@ function toTask(row: CaseDetailRow["tasks"][number]): OrchestratorCaseTask {
     questions: result?.questions ?? [],
     error: result?.error ?? cancelledError(result),
     waiting: result?.waiting ?? null,
+    openQuestionCount: row.openQuestionCount,
     createdAt: row.createdAt.toISOString(),
     finishedAt: iso(row.finishedAt),
   };

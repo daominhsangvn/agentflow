@@ -228,7 +228,7 @@ tools for that token from `GET /orchestrator-tools/session` and
 | `case_lookup` | (setting `caseLookup`) `{ itemKey }`: CASE.md of the cases of another item in the same project (any workflow), read only |
 | `case_handoff` | (setting `caseHandoff`) `{ decisionId, itemKey, caseId? }`: sends an approved summary to another item's case. Checked on the server: the decision is this case's own and approved, and is sent once (`handoff:<decisionId>`); the text is the decision's question, not the model's; the target is in the same project, any workflow, its item conversation else the latest; several cases without `caseId` are refused with a list. The target gets a `handoff` message, wakes after its debounce and is reopened if closed |
 | `edit_reply` | Replaces the text of a message this conversation posted (provider `editOnItem`: Jira `PUT comment/{id}`, Teams activity update); `version` moves the anchor's version |
-| `wait_human` | Ends the turn waiting for people |
+| `wait_human` | Ends the turn waiting for people. `asked` (one line) says what people were asked; with it the case counts as needing a person until the next turn starts ("The Agents tab" below) |
 | `close_case` | Ends the turn and closes the case (a new message reopens it) |
 
 Tools whose grant or setting is missing are not listed to the turn
@@ -355,6 +355,43 @@ lists them (name, size) in `task_get`, wait results and CASE.md.
   ref ...").
 
 The case pages are on Workflow → Cases, with a breadcrumb back to the workflow.
+
+### The Agents tab
+
+An orchestrated workflow has an **Agents** tab. The left side is a diagram: the
+orchestrator and, below it, each Agent (automatic or personal) with a task in
+the workflow's cases. Each node shows a counter of the cases that need a person.
+The right side is a case inbox scoped to the selected node, then the case
+thread and a composer. The selection is in the URL:
+`?tab=agents&agent=<agentId>&case=<caseId>`; without `agent` the orchestrator
+is selected.
+
+**Needs a person** is one definition (`caseNeedsPersonWhere`,
+`apps/api/lib/orchestrator/case-needs-person.ts`), used by the org case list
+and the workflow case counts. A case needs a person when it is open, its
+orchestrator is not working (no running turn, no wake scheduled) and one of
+these holds:
+
+- a decision is pending;
+- an Agent question has no answer yet (a task with `openQuestionCount > 0`);
+- the last `wait_human` set `asked` (`askedHuman` on the conversation).
+
+`openQuestionCount` on a task is set to the number of the questions in its
+result when the task settles (including questions the Agent already asked on
+the item, `task_asked`). It goes down by one for the first anchored reply to
+each question, goes to 0 when answers are sent on the case page, when the task
+is resumed without fork, and when it is cancelled. `askedHuman` is set by
+`wait_human asked` and cleared when the next turn starts.
+
+**Writing to an Agent.** A case-page message may carry `toAgentId` (the Agent
+picked in the composer; it must have a task in the case). The orchestrator gets
+it as a message with `to="<agent>"` and relays it: a `task_run` that resumes
+that Agent's latest task in the case with `fork: true`, `replyTo` the
+message, then `wait_for`, then a `reply` on the case page with what the Agent
+said. The relay does not change the original task or its open questions.
+
+The inbox lists the cases that need a person first, then the others by last
+update. The counters count the cases that need a person per node.
 
 The tick (`advanceDueConversations`) launches queued tasks, settles running
 ones whose loop ended (`isLoopSettled`: a revivable timed-out loop is still

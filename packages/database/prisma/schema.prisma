@@ -722,6 +722,8 @@ model OrchestratorConversation {
   leaseUntil          DateTime? @map("lease_until")
   // When the next turn may start (debounce of its newest message, a deadline).
   nextWakeAt          DateTime? @map("next_wake_at")
+  // What the orchestrator asked people and waits for (wait_human asked); cleared when the next turn starts.
+  askedHuman          String?   @map("asked_human") @db.Text
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
@@ -850,6 +852,8 @@ model OrchestratorTask {
   status          String    @db.VarChar(16)
   // Reply, files, questions and error of the finished loop.
   result          Json?
+  // Questions of its result no answer covers yet (set when it settles; cleared by answers, a non-fork resume or a cancel).
+  openQuestionCount Int     @default(0) @map("open_question_count")
   finishedAt      DateTime? @map("finished_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")

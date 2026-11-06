@@ -1,16 +1,17 @@
 "use client";
 
 import { LoopStatus } from "@repo/api/src/types/loop";
-import type {
-  DecideOrchestratorDecisionInput,
-  OrchestratorCaseDetail,
-  OrchestratorCaseListItem,
-  OrchestratorCaseListQuery,
-  OrchestratorCaseLoops,
-  OrchestratorCaseMessagePosted,
-  OrchestratorCaseSummary,
-  PostOrchestratorCaseMessageInput,
-  UpdateOrchestratorCaseInput,
+import {
+  type DecideOrchestratorDecisionInput,
+  type OrchestratorCaseDetail,
+  type OrchestratorCaseListItem,
+  type OrchestratorCaseListQuery,
+  type OrchestratorCaseLoops,
+  type OrchestratorCaseMessagePosted,
+  type OrchestratorCaseSummary,
+  OrchestratorCaseWaitingFor,
+  type PostOrchestratorCaseMessageInput,
+  type UpdateOrchestratorCaseInput,
 } from "@repo/api/src/types/orchestrator";
 import { isLiveDisplayedSessionStatus } from "@repo/api/src/types/session-status";
 // Cross-slice: same server-message toasts as the integrations mutations.
@@ -24,6 +25,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
  */
 
 const CASE_POLL_INTERVAL_MS = 5000;
+const CASE_BACKGROUND_POLL_MS = 30_000;
 
 export const orchestratorCaseKeys = {
   all: ["orchestrator-cases"] as const,
@@ -31,6 +33,8 @@ export const orchestratorCaseKeys = {
     [...orchestratorCaseKeys.all, "workflow", workflowId] as const,
   org: (query: OrchestratorCaseListQuery) =>
     [...orchestratorCaseKeys.all, "org", query] as const,
+  agentMap: (workflowId: string) =>
+    [...orchestratorCaseKeys.all, "agent-map", workflowId] as const,
   detail: (caseId: string) =>
     [...orchestratorCaseKeys.all, "detail", caseId] as const,
   loops: (caseId: string) =>
@@ -216,9 +220,52 @@ export function usePostOrchestratorCaseMessage(caseId: string) {
         input
       ),
     onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: orchestratorCaseKeys.detail(caseId),
-      }),
+      Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: orchestratorCaseKeys.detail(caseId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [...orchestratorCaseKeys.all, "org"],
+        }),
+      ]),
     ...mutationErrorOptions("Couldn't send the message"),
   });
+}
+
+/** A workflow's case inbox for the Agents tab; polls fast while work is live. */
+export function useWorkflowAgentCases(
+  workflowId: string,
+  { enabled = true }: { enabled?: boolean } = {}
+) {
+  const apiClient = useApiClient();
+  const query: OrchestratorCaseListQuery = { workflowId };
+
+  return useQuery({
+    queryKey: orchestratorCaseKeys.org(query),
+    queryFn: () =>
+      apiClient.get<OrchestratorCaseListItem[]>(
+        `/orchestrator/cases${buildOrgCaseQuery(query)}`
+      ),
+    enabled: enabled && !!workflowId,
+    refetchInterval: (state) => {
+      if (state.state.status === "error") {
+        return false;
+      }
+      return workflowCasesPollInterval(state.state.data ?? []);
+    },
+  });
+}
+
+/** Fast while a case has a turn or active tasks, slow otherwise. */
+export function workflowCasesPollInterval(
+  items: readonly Pick<
+    OrchestratorCaseListItem,
+    "turnRunning" | "activeTaskCount" | "waitingFor"
+  >[]
+): number {
+  const live = items.some(
+    (item) =>
+      isCaseActive(item) || item.waitingFor === OrchestratorCaseWaitingFor.Turn
+  );
+  return live ? CASE_POLL_INTERVAL_MS : CASE_BACKGROUND_POLL_MS;
 }

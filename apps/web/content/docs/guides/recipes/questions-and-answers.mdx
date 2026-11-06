@@ -28,7 +28,7 @@ LD-6 case 1: the admin answered questions 1 to 4 and asked about privacy. The or
 
 - `reply` posts in the conversation's thread. With `replyTo` (the ref of the message answered) the answer lands in that comment's thread. Without it, a ticket change is answered with a new comment.
 - `task_run` also takes `replyTo`, so an answer that waits for a task is posted in the thread it answers.
-- `wait_human` ends the turn waiting for people. An answer, a decision or the next request wakes the conversation.
+- `wait_human` ends the turn waiting for people. With `asked` (one line: what people were asked) the case shows as needing a person in the workflow's **Agents** tab and in the case list. An answer, a decision or the next request wakes the conversation.
 - Several comments in the debounce window: with `concurrency: supersede` (the default), the running turn is superseded and its writes are refused. The next turn sees all messages, each with its comment reference, and answers each in its own thread.
 
 ## Questions the agent asked on the ticket
