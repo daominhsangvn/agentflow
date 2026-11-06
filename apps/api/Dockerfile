@@ -157,6 +157,8 @@ COPY --from=builder /app/packages/telemetry-contract/dist ./packages/telemetry-c
 # Lets `node scripts/storage-init.mjs` create buckets + CORS from this image
 # (production compose job); it resolves @aws-sdk/client-s3 through packages/storage.
 COPY scripts/storage-init.mjs ./scripts/storage-init.mjs
+# Lets the `bootstrap-admin` compose job create the first owner from this image
+COPY scripts/bootstrap-first-admin.mjs ./scripts/bootstrap-first-admin.mjs
 EXPOSE 3002
 # api `start` = `NODE_ENV=production tsx server.ts` (cwd = apps/api).
 CMD ["pnpm", "--filter", "api", "start"]

@@ -44,6 +44,10 @@ local-git (profile), plus the one-shot migrate and storage-init jobs. Published 
 existing reverse proxy. Configure it in `deploy/compose/.env`, copied from `.env.prod.example`. `NEXT_PUBLIC_*` values
 are build args of the app and api images. Start it with
 `docker compose -f deploy/compose/docker-compose.prod.yml up -d --build` (Compose reads `deploy/compose/.env` from the compose file's directory).
+Besides `migrate` and `storage-init`, the stack runs `bootstrap-admin` (creates the first AgentFlow owner from
+`AGENTFLOW_ADMIN_*` when no user exists; `app` waits for it, but the api accepts sign-up once healthy, so set `AUTH_ALLOW_SIGN_UP=false` for the first `up`) and, with the `local-git` profile, `local-git-init`
+(Gitea admin plus the API token the api reads through `LOCAL_GIT_TOKEN_FILE`). The `mailpit` profile adds a mail
+catcher. Every account is set in `deploy/compose/.env`.
 Full guide: `apps/web/content/docs/guides/setup/production-server.mdx`.
 
 ## Authentication

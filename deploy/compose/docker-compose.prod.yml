@@ -1,11 +1,18 @@
 # AgentFlow production stack (self-hosted): postgres, RustFS (S3), api, app, mcp,
-# plus one-shot migration and bucket-init jobs. Images are built on this server
-# from source. Every published port is bound to 127.0.0.1; put your HTTPS
-# reverse proxy in front of it.
+# plus one-shot jobs: `migrate` (database), `storage-init` (buckets) and
+# `bootstrap-admin` (first AgentFlow owner from AGENTFLOW_ADMIN_*). Images are
+# built on this server from source. Every published port is bound to 127.0.0.1;
+# put your HTTPS reverse proxy in front of it.
+#
+# Optional profiles:
+#   local-git  Gitea plus the `local-git-init` job (admin user + API token,
+#              written to a shared volume the api reads via LOCAL_GIT_TOKEN_FILE)
+#   mailpit    Mailpit mail catcher (UI behind MAILPIT_UI_USER/PASSWORD)
+# Select them with --profile or COMPOSE_PROFILES=local-git,mailpit in .env.
 #
 #   cp deploy/compose/.env.prod.example deploy/compose/.env   # then edit it
 #   docker compose -f deploy/compose/docker-compose.prod.yml up -d --build
-#   docker compose -f deploy/compose/docker-compose.prod.yml --profile local-git up -d   # optional Local Git
+#   docker compose -f deploy/compose/docker-compose.prod.yml --profile local-git --profile mailpit up -d
 #
 # Compose reads deploy/compose/.env (next to this file) for ${...} substitution,
 # so no --env-file is needed. Run the commands from the repository root. NEXT_PUBLIC_* values are baked into
@@ -13,7 +20,7 @@
 
 name: agentflow-prod
 
-x-api-image: &api-image agentflow-prod/api:local
+x-api-image: &api-image ${AGENTFLOW_IMAGE_NAMESPACE:-agentflow-prod}/api:local
 x-database-url: &database-url postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}@postgres:5432/${POSTGRES_DB:-agentflow_ai}?sslmode=disable
 
 services:
@@ -94,7 +101,7 @@ services:
     image: *api-image
     restart: unless-stopped
     env_file:
-      - path: .env
+      - path: ${AGENTFLOW_ENV_FILE:-.env}
         required: true
     environment:
       DATABASE_URL: *database-url
@@ -107,10 +114,17 @@ services:
       AGENTFLOW_MCP_URL: ${MCP_SERVER_URL:?set MCP_SERVER_URL in deploy/compose/.env}/mcp
       HOST: 0.0.0.0
       PORT: "3002"
+      # JWKS for verifying session tokens: reach this container, not the public URL.
+      AUTH_API_URL: http://127.0.0.1:3002
+      LOCAL_GIT_SERVER_URL: ${LOCAL_GIT_SERVER_URL:-http://local-git:3000}
+      LOCAL_GIT_RUNNER_URL: ${LOCAL_GIT_RUNNER_URL:-${LOCAL_GIT_URL:-}}
+      LOCAL_GIT_TOKEN_FILE: /run/local-git/token
       # Never install dependencies at boot.
       PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
     ports:
       - "127.0.0.1:${API_PORT:-3002}:3002"
+    volumes:
+      - local_git_token:/run/local-git:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 15s
@@ -126,6 +140,84 @@ services:
         condition: service_completed_successfully
       storage-init:
         condition: service_completed_successfully
+      local-git-init:
+        condition: service_completed_successfully
+        required: false
+      mailpit:
+        condition: service_healthy
+        required: false
+
+  # One-shot: create the first AgentFlow owner through the api (skipped when a
+  # user already exists). `app` waits for it, so only the app's sign-up page is
+  # held back. The api accepts sign-up once healthy; set AUTH_ALLOW_SIGN_UP=false
+  # for the first `up` (the bootstrap call bypasses it for the first owner).
+  bootstrap-admin:
+    image: *api-image
+    pull_policy: never
+    restart: "no"
+    working_dir: /app
+    command: ["node", "scripts/bootstrap-first-admin.mjs"]
+    environment:
+      AGENTFLOW_API_INTERNAL_URL: http://api:3002
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?set INTERNAL_API_SECRET in deploy/compose/.env}
+      AGENTFLOW_ADMIN_EMAIL: ${AGENTFLOW_ADMIN_EMAIL:?set AGENTFLOW_ADMIN_EMAIL in deploy/compose/.env}
+      AGENTFLOW_ADMIN_PASSWORD: ${AGENTFLOW_ADMIN_PASSWORD:?set AGENTFLOW_ADMIN_PASSWORD in deploy/compose/.env}
+      AGENTFLOW_ADMIN_NAME: ${AGENTFLOW_ADMIN_NAME:-Administrator}
+      PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # One-shot (profile local-git): ensure the Gitea admin user and API token.
+  local-git-init:
+    image: gitea/gitea:1.24.7
+    profiles: ["local-git"]
+    restart: "no"
+    entrypoint: ["/bin/sh", "/local-git-init.sh"]
+    environment:
+      LOCAL_GIT_ADMIN_USER: ${LOCAL_GIT_ADMIN_USER:-agentflow}
+      LOCAL_GIT_ADMIN_PASSWORD: ${LOCAL_GIT_ADMIN_PASSWORD:-}
+      LOCAL_GIT_ADMIN_EMAIL: ${LOCAL_GIT_ADMIN_EMAIL:-}
+      LOCAL_GIT_OWNER: ${LOCAL_GIT_OWNER:-}
+      GITEA_INTERNAL_URL: http://local-git:3000
+    volumes:
+      - ./local-git-init.sh:/local-git-init.sh:ro
+      - local_git_data:/data
+      - local_git_token:/run/local-git
+    depends_on:
+      local-git:
+        condition: service_healthy
+
+  # Optional mail catcher. Start with `--profile mailpit`; set SMTP_URL=smtp://mailpit:1025.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    profiles: ["mailpit"]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$${MAILPIT_UI_PASSWORD}" ]; then
+          echo "set MAILPIT_UI_PASSWORD in deploy/compose/.env" >&2
+          exit 1
+        fi
+        export MP_UI_AUTH="$${MAILPIT_UI_USER}:$${MAILPIT_UI_PASSWORD}"
+        exec /mailpit
+    environment:
+      MAILPIT_UI_USER: ${MAILPIT_UI_USER:-admin}
+      MAILPIT_UI_PASSWORD: ${MAILPIT_UI_PASSWORD:-}
+      MP_DATABASE: /data/mailpit.db
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+    volumes:
+      - mailpit_data:/data
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # One-shot: apply database migrations with the api image.
   migrate:
@@ -181,7 +273,7 @@ services:
         NEXT_PUBLIC_GITHUB_APP_SLUG: ${NEXT_PUBLIC_GITHUB_APP_SLUG:-}
         NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
         NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-}
-    image: agentflow-prod/app:local
+    image: ${AGENTFLOW_IMAGE_NAMESPACE:-agentflow-prod}/app:local
     restart: unless-stopped
     environment:
       AUTH_API_URL: http://api:3002
@@ -192,12 +284,14 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      bootstrap-admin:
+        condition: service_completed_successfully
 
   mcp:
     build:
       context: ../..
       dockerfile: apps/mcp/Dockerfile
-    image: agentflow-prod/mcp:local
+    image: ${AGENTFLOW_IMAGE_NAMESPACE:-agentflow-prod}/mcp:local
     restart: unless-stopped
     environment:
       AGENTFLOW_API_URL: http://api:3002
@@ -225,3 +319,5 @@ volumes:
   postgres_data:
   rustfs_data:
   local_git_data:
+  local_git_token:
+  mailpit_data:

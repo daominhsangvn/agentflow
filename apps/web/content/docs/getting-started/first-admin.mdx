@@ -7,6 +7,8 @@ description: "Sign up the first account, invite people, create a project and an 
 
 Open the web app (http://localhost:3000) and sign up. Accounts are local email and password accounts.
 
+Docker Compose deployments create this account for you: the `bootstrap-admin` job signs up the owner from `AGENTFLOW_ADMIN_EMAIL` and `AGENTFLOW_ADMIN_PASSWORD` before the app starts, so you sign in instead, and it works with `AUTH_ALLOW_SIGN_UP=false`. See [Accounts](/docs/guides/setup/production-server#accounts).
+
 - The first account creates the organization (`AUTH_DEFAULT_ORGANIZATION_NAME` and `AUTH_DEFAULT_ORGANIZATION_SLUG`, default `AgentFlow` and `agentflow`) and becomes its owner.
 - Later accounts join it as members. Set `AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION=false` to stop that; an invitation for their email can still give them another role.
 - Owners and admins invite people from **Settings → Organization**. The email links to sign-up with the address filled in.

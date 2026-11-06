@@ -18,8 +18,9 @@ The Compose file is `deploy/compose/docker-compose.prod.yml` (project name `agen
 | rustfs console | 9001 | Administrators only, on `127.0.0.1` (use an SSH tunnel) | none |
 | postgres | 5432 | The api, mcp and migration job, inside the Compose network. Not published on the host | none |
 | local-git | 3300 | The api and Agents, when you use [Local Git](/docs/integrations/local-git). Optional profile `local-git`, off by default | optional |
+| mailpit | 8025 (UI), 1025 (SMTP) | Administrators (UI, behind a password) and the api (SMTP). Optional profile `mailpit`, off by default | none |
 
-Two one-shot jobs run before the api starts: `migrate` (`prisma migrate deploy`) and `storage-init` (buckets and CORS rules). Both use the api image.
+One-shot jobs: `migrate` (`prisma migrate deploy`) and `storage-init` (buckets and CORS rules) run before the api starts; `bootstrap-admin` creates the first AgentFlow owner once the api is healthy; `local-git-init` (profile `local-git`) creates the Gitea admin and token. All of them use the api image, except `local-git-init`, which uses the Gitea image.
 
 Agents connect outwards to the API and the MCP server, so the machines they run on need no open port. `apps/relay` is not needed: Agents connect to the WebSocket the API process hosts.
 
@@ -27,6 +28,7 @@ Agents connect outwards to the API and the MCP server, so the machines they run 
 
 - A Linux server with Docker Engine and Compose v2.
 - At least 8 GB of RAM, or swap. The api and app builds each use up to 4 GB of Node heap (`NODE_OPTIONS=--max-old-space-size=4096` in their Dockerfiles). On a small machine build one image at a time: `build api`, then `build app`, then `build mcp` (with the `afc` alias from step 4).
+- About 20 GB of free disk for Docker. A first build of the three images from an empty build cache uses that much; the finished images are about 2.1 GB (api), 450 MB (app) and 700 MB (mcp).
 - A reverse proxy that already terminates HTTPS.
 - DNS records for the four hosts: app, api, mcp and s3.
 
@@ -60,9 +62,10 @@ Edit `deploy/compose/.env`. [Server environment variables](/docs/reference/serve
 | `INTERNAL_API_SECRET` | `openssl rand -hex 32`, shared by the app, api and mcp |
 | `AGENTFLOW_RUNNER_JWT_SECRET` | `openssl rand -hex 32`. Required: the api refuses to start without it. At least 32 characters with at least 8 different characters |
 | `SMTP_URL`, `EMAIL_FROM` | Your mail server and sender (see [Email](/docs/integrations/email)) |
-| `AUTH_ALLOW_SIGN_UP` | Set `false` once the first admin exists, so only invited people can sign up |
+| `AGENTFLOW_ADMIN_EMAIL`, `AGENTFLOW_ADMIN_PASSWORD` | Required. The first AgentFlow owner, created by the `bootstrap-admin` job. Password: at least 8 characters, `openssl rand -base64 18`. `AGENTFLOW_ADMIN_NAME` is optional (default `Administrator`) |
+| `AUTH_ALLOW_SIGN_UP` | Set `false` to make the deployment invite-only. The first owner is created from `AGENTFLOW_ADMIN_*`, so no one needs to sign up first |
 
-Comment out variables you do not use: an empty value (`""`) fails validation. The Compose file sets these itself, so do not set them: `DATABASE_URL`, `S3_ENDPOINT`, `BETTER_AUTH_URL`, `AGENTFLOW_MCP_URL`, `AUTH_API_URL`.
+Comment out variables you do not use: an empty value (`""`) fails validation. The Compose file sets these itself, so do not set them: `DATABASE_URL`, `S3_ENDPOINT`, `BETTER_AUTH_URL`, `AGENTFLOW_MCP_URL`, `AUTH_API_URL`. The host ports can be changed in `.env`; the `NEXT_PUBLIC_*` values and `MCP_SERVER_URL` must still be the public URLs your reverse proxy serves.
 
 Build time versus runtime. The `NEXT_PUBLIC_*` variables are baked into the app and the api images: after changing one, run `up -d --build`. Every other value is read when the container starts: after changing one, run `up -d`, which recreates the containers that use it. Only the api container receives the whole `.env` file; the app and mcp containers get just the variables the Compose file lists for them.
 
@@ -86,14 +89,35 @@ Start everything:
 afc up -d --build
 ```
 
-What happens: Compose builds the api, app and mcp images, starts postgres and rustfs, and waits for both to be healthy. `migrate` applies the database migrations and `storage-init` creates the buckets and the browser CORS rules; both exit when done. Then the api starts. The app starts when the api is healthy, and mcp after the migration job completes and the api has started.
+What happens: Compose builds the api, app and mcp images, starts postgres and rustfs, and waits for both to be healthy. `migrate` applies the database migrations and `storage-init` creates the buckets and the browser CORS rules; both exit when done. Then the api starts (with the `local-git` profile it also waits for `local-git-init`; with the `mailpit` profile, for mailpit to be healthy). `bootstrap-admin` runs once the api is healthy and creates the first owner from `AGENTFLOW_ADMIN_*` (it does nothing when a user already exists). The app starts when the api is healthy and `bootstrap-admin` has completed, so the sign-up page is not served before the owner exists. This gates only the app container: the api accepts `POST /api/auth/sign-up/email` as soon as it is healthy, before `bootstrap-admin` runs, unless `AUTH_ALLOW_SIGN_UP=false` (only emails with a pending invitation can then sign up; the bootstrap job bypasses that check for the first owner). Set `AUTH_ALLOW_SIGN_UP=false` for the first `up` if the api host is reachable by anyone else. mcp starts after the migration job completes and the api has started.
 
 ```bash
-afc ps -a          # the two jobs show "Exited (0)"
+afc ps -a          # the jobs show "Exited (0)"
 afc logs -f api
+afc logs bootstrap-admin
 ```
 
 Run one API process. It hosts the in-process scheduler and the WebSocket every Agent connects to; see [The scheduler](/docs/getting-started/install-server#the-scheduler) to move scheduling elsewhere.
+
+## Accounts
+
+Every account comes from `deploy/compose/.env`. Nothing needs a manual step after `up`.
+
+| Account | Variables | What creates it, and when | How to rotate |
+|---|---|---|---|
+| Postgres | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Postgres itself, on the first start of an empty `postgres_data` volume only. Later changes to these variables do not change the database | `afc exec postgres psql -U <POSTGRES_USER> -d <POSTGRES_DB> -c "ALTER USER <POSTGRES_USER> PASSWORD '<new>'"`, then update `.env` and run `afc up -d` |
+| RustFS | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | RustFS root credentials, read at every start. They are also the keys the api uses | Change both in `.env`, then `afc up -d` |
+| AgentFlow first owner | `AGENTFLOW_ADMIN_EMAIL`, `AGENTFLOW_ADMIN_PASSWORD`, `AGENTFLOW_ADMIN_NAME` | The `bootstrap-admin` job, on every `up`. It creates the owner only when no user exists | Change the password in the app. The `.env` value only takes effect when the owner is created; `AGENTFLOW_ADMIN_PASSWORD` must stay set because Compose requires it on every `up`, and a stale value is harmless after the password is changed in the app. The job never changes the email of an existing user |
+| Local Git admin | `LOCAL_GIT_ADMIN_USER`, `LOCAL_GIT_ADMIN_PASSWORD`, `LOCAL_GIT_ADMIN_EMAIL`, `LOCAL_GIT_OWNER` | The `local-git-init` job, on every `up` with the `local-git` profile. It creates the admin, or re-applies only the password to the existing one (a changed `LOCAL_GIT_ADMIN_EMAIL` is ignored for an existing admin; change it in Gitea), and creates the `LOCAL_GIT_OWNER` organization when set | Edit `.env`, then `afc --profile local-git up -d` |
+| Local Git token | none (`LOCAL_GIT_TOKEN_FILE` is set by the Compose file) | The same job writes an access token to `/run/local-git/token` on the `local_git_token` volume, which the api mounts read-only. A token that is still valid is kept | Delete the file, then `up -d` issues a new one (command below) |
+| Mailpit UI | `MAILPIT_UI_USER`, `MAILPIT_UI_PASSWORD` | Mailpit, at every start with the `mailpit` profile. The password is required | Edit `.env`, then `afc --profile mailpit up -d` |
+
+To rotate the Local Git token:
+
+```bash
+afc --profile local-git run --rm --entrypoint rm local-git-init /run/local-git/token
+afc --profile local-git up -d
+```
 
 ## 5. HTTPS reverse proxy
 
@@ -169,7 +193,7 @@ Jira Cloud and Azure DevOps call `PUBLIC_WEBHOOK_BASE_URL` (default: the API ori
 
 ## 6. Check it
 
-1. Open the app URL and sign up the first admin ([First admin and organization](/docs/getting-started/first-admin)).
+1. Open the app URL and sign in with `AGENTFLOW_ADMIN_EMAIL` and `AGENTFLOW_ADMIN_PASSWORD` ([First admin and organization](/docs/getting-started/first-admin)).
 2. Upload an attachment to a document: it checks `S3_PUBLIC_ENDPOINT` and the CORS rules.
 3. Start an Agent with `AGENTFLOW_API_URL=https://api.agentflow.example.com` ([Install an Agent](/docs/getting-started/install-agent)). It appears online under **Agents** when the WebSocket works.
 4. Test a connection and send one webhook (for Jira, change a ticket's status) and check that the workflow starts.
@@ -191,7 +215,7 @@ Jira Cloud and Azure DevOps call `PUBLIC_WEBHOOK_BASE_URL` (default: the API ori
 
 ## Back up and restore
 
-The volumes are `agentflow-prod_postgres_data`, `agentflow-prod_rustfs_data` and `agentflow-prod_local_git_data`. Back up these together:
+The volumes are `agentflow-prod_postgres_data`, `agentflow-prod_rustfs_data` and `agentflow-prod_local_git_data`, plus `agentflow-prod_local_git_token` (the Local Git token, re-issued by `local-git-init` if lost) and `agentflow-prod_mailpit_data` (caught mail, only with the `mailpit` profile; usually not worth backing up). Back up these together:
 
 | What | How |
 |---|---|
@@ -212,23 +236,21 @@ Restore a volume by extracting its archive into an empty volume, then start the 
 
 ## Local Git (optional)
 
-Add `--profile local-git` to every `afc` command (or set `COMPOSE_PROFILES=local-git` in `deploy/compose/.env`). Set `LOCAL_GIT_URL` in `.env` to the public URL you proxy to `127.0.0.1:3300`, then start it:
+Add `--profile local-git` to every `afc` command (or set `COMPOSE_PROFILES=local-git` in `deploy/compose/.env`). In `.env` set `LOCAL_GIT_ADMIN_PASSWORD` (required with the profile), and optionally `LOCAL_GIT_ADMIN_USER` (default `agentflow`), `LOCAL_GIT_ADMIN_EMAIL` and `LOCAL_GIT_OWNER`. Set `LOCAL_GIT_URL` to the public URL you proxy to `127.0.0.1:3300`; Agents use it too unless you set `LOCAL_GIT_RUNNER_URL`. Then start it:
 
 ```bash
 afc --profile local-git up -d
 ```
 
-Create the admin account and an access token inside the container (the same calls `pnpm local-git:init` makes):
+The `local-git-init` job creates the admin user and an access token, and the api reads the token from `LOCAL_GIT_TOKEN_FILE` (`/run/local-git/token`, set by the Compose file). You do not paste a token into `.env`; `LOCAL_GIT_TOKEN` is only an override. The api reaches Gitea at `http://local-git:3000` (`LOCAL_GIT_SERVER_URL`). See [Accounts](#accounts) for rotation and [Local Git](/docs/integrations/local-git).
+
+## Mailpit (optional)
+
+Mailpit catches outgoing mail so you can read invitations and password resets without a mail server. Add `--profile mailpit` to the `afc` commands (or `COMPOSE_PROFILES=mailpit`), set `MAILPIT_UI_PASSWORD` (required, no spaces) and optionally `MAILPIT_UI_USER` (default `admin`), and point the api at it with `SMTP_URL=smtp://mailpit:1025`. The UI is on `127.0.0.1:8025` (`MAILPIT_UI_PORT`) behind that login; reach it through an SSH tunnel or your proxy. The SMTP port is published on `127.0.0.1:1025` (`MAILPIT_SMTP_PORT`).
 
 ```bash
-afc --profile local-git exec -T -u git local-git gitea admin user create \
-  --admin --username <admin> --email <email> --password <password> --must-change-password=false
-afc --profile local-git exec -T -u git local-git gitea admin user generate-access-token \
-  --username <admin> --token-name agentflow \
-  --scopes write:repository,write:organization,write:user,write:issue --raw
+afc --profile mailpit up -d
 ```
-
-Put the printed token in `deploy/compose/.env` as `LOCAL_GIT_TOKEN`, with `LOCAL_GIT_SERVER_URL=http://local-git:3000` and `LOCAL_GIT_RUNNER_URL` set to the URL Agents use to reach it, then run `afc --profile local-git up -d api`. See [Local Git](/docs/integrations/local-git).
 
 ## Optional features
 
@@ -240,6 +262,7 @@ Put the printed token in `deploy/compose/.env` as `LOCAL_GIT_TOKEN`, with `LOCAL
 - [ ] Every published port is bound to `127.0.0.1` (check `afc ps`); Postgres is not published at all.
 - [ ] `deploy/compose/.env` is readable only by root or the deploy user (`chmod 600`).
 - [ ] RustFS credentials, `POSTGRES_PASSWORD`, `INTERNAL_API_SECRET`, `AGENTFLOW_RUNNER_JWT_SECRET`, `BETTER_AUTH_SECRET` and `ENCRYPTION_KEY` are not the example values.
-- [ ] `AUTH_ALLOW_SIGN_UP=false` after the first admin signs up.
+- [ ] `AUTH_ALLOW_SIGN_UP=false` unless you want open sign-up (the first owner comes from `AGENTFLOW_ADMIN_*`).
+- [ ] `AGENTFLOW_ADMIN_PASSWORD`, `LOCAL_GIT_ADMIN_PASSWORD` and `MAILPIT_UI_PASSWORD` are strong and not the example values.
 - [ ] Agents run in containers or dedicated VMs, not on the server: they run code agents write from ticket content ([Agents](/docs/guides/setup/agents)).
 - [ ] Backups run on a schedule and a restore has been tried once.

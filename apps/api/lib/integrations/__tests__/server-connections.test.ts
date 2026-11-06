@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   IntegrationConnectionStatus,
   IntegrationDeliveryMode,
@@ -124,6 +127,30 @@ describe("getServerConnectionSpecs", () => {
         LOCAL_GIT_TOKEN: TOKEN,
       })
     ).toBe(false);
+  });
+
+  it("reads the token from LOCAL_GIT_TOKEN_FILE", () => {
+    const dir = mkdtempSync(join(tmpdir(), "local-git-token-"));
+    const file = join(dir, "token");
+    const empty = join(dir, "empty");
+    writeFileSync(file, " tok\n");
+    writeFileSync(empty, "\n");
+
+    const specs = getServerConnectionSpecs({ LOCAL_GIT_TOKEN_FILE: file });
+    expect(specs).toHaveLength(1);
+    expect(specs[0]?.secrets.token).toBe("tok");
+    expect(
+      getServerConnectionSpecs({ LOCAL_GIT_TOKEN_FILE: join(dir, "missing") })
+    ).toEqual([]);
+    expect(getServerConnectionSpecs({ LOCAL_GIT_TOKEN_FILE: empty })).toEqual(
+      []
+    );
+    expect(
+      getServerConnectionSpecs({
+        LOCAL_GIT_TOKEN: TOKEN,
+        LOCAL_GIT_TOKEN_FILE: file,
+      })[0]?.secrets.token
+    ).toBe(TOKEN);
   });
 
   it("recognises a server connection by its provider and missing creator", () => {

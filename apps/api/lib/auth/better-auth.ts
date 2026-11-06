@@ -13,6 +13,10 @@ import {
   sendPasswordResetEmail,
 } from "./auth-email";
 import {
+  isFirstAdminSignUp,
+  runAsFirstAdminSignUp,
+} from "./first-admin-sign-up";
+import {
   defaultActiveOrganizationId,
   hasPendingInvitation,
   provisionNewUser,
@@ -71,10 +75,7 @@ const betterAuthServer = betterAuth({
         // `AUTH_ALLOW_SIGN_UP=false` makes the deployment invite-only: an
         // account can still be created for an email with a pending invitation.
         before: async (user) => {
-          if (
-            process.env.AUTH_ALLOW_SIGN_UP === "false" &&
-            !(await hasPendingInvitation(user.email))
-          ) {
+          if (await isSignUpBlocked(user.email)) {
             throw new APIError("FORBIDDEN", {
               message: "Sign-up is by invitation only",
             });
@@ -185,4 +186,31 @@ function trustedOrigins(): string[] {
     .map((origin) => origin.trim())
     .filter(Boolean);
   return [new URL(appBaseUrl()).origin, ...extra];
+}
+
+async function isSignUpBlocked(email: string): Promise<boolean> {
+  if (process.env.AUTH_ALLOW_SIGN_UP !== "false") {
+    return false;
+  }
+  if (isFirstAdminSignUp()) {
+    return false;
+  }
+  return !(await hasPendingInvitation(email));
+}
+
+/**
+ * Create the first account through the normal Better Auth sign-up, so the
+ * `after` hook provisions the default organization and owner membership.
+ * Bypasses `AUTH_ALLOW_SIGN_UP=false` for this one call only. The caller must
+ * guarantee no user exists yet.
+ */
+export async function createFirstAdminAccount(input: {
+  email: string;
+  password: string;
+  name: string;
+}): Promise<{ userId: string }> {
+  const result = await runAsFirstAdminSignUp(() =>
+    betterAuthServer.api.signUpEmail({ body: input })
+  );
+  return { userId: result.user.id };
 }

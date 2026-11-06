@@ -63,6 +63,8 @@ Generate a key with `node -e "console.log(require('crypto').randomBytes(32).toSt
 | `AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION` | joins | `false`: later accounts do not join the default organization |
 | `AUTH_ALLOW_CREATE_ORGANIZATION` | single organization | `true`: more than one organization |
 | `AUTH_DEFAULT_ORGANIZATION_NAME`, `AUTH_DEFAULT_ORGANIZATION_SLUG` | `AgentFlow`, `agentflow` | The organization the first account creates |
+| `AGENTFLOW_ADMIN_EMAIL`, `AGENTFLOW_ADMIN_PASSWORD` | none | Production Compose only (read by the `bootstrap-admin` job, required there): the first owner, created when no user exists. Password: at least 8 characters |
+| `AGENTFLOW_ADMIN_NAME` | `Administrator` | Production Compose only: display name of that owner |
 
 See [First admin and organization](/docs/getting-started/first-admin).
 
@@ -89,16 +91,20 @@ The API process runs a small scheduler: workflows every `WORKFLOW_TICK_SECONDS`,
 
 ## Local Git
 
-`pnpm local-git:init` writes these to `apps/api/.env.local`. See [Local Git](/docs/integrations/local-git).
+`pnpm local-git:init` writes these to `apps/api/.env.local`. Under production Compose the `local-git-init` job does it instead ([Accounts](/docs/guides/setup/production-server#accounts)). See [Local Git](/docs/integrations/local-git).
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `LOCAL_GIT_SERVER_URL` | `http://localhost:3300` | Where the API reaches Local Git |
 | `LOCAL_GIT_RUNNER_URL` | the server URL | Where Agents reach it |
-| `LOCAL_GIT_TOKEN` | none | Access token; with it every organization gets the Local Git connection |
+| `LOCAL_GIT_TOKEN` | none | Access token; with it every organization gets the Local Git connection. Wins over `LOCAL_GIT_TOKEN_FILE` |
+| `LOCAL_GIT_TOKEN_FILE` | none | Path of a file holding the access token. Set by the production Compose file to `/run/local-git/token`, written by `local-git-init`; do not set it in `.env` |
+| `LOCAL_GIT_ADMIN_USER`, `LOCAL_GIT_ADMIN_PASSWORD`, `LOCAL_GIT_ADMIN_EMAIL` | `agentflow`, none, `<user>@local-git.invalid` | Production Compose, profile `local-git` (read by `local-git-init`): the Gitea admin. The password is required with the profile |
 | `LOCAL_GIT_OWNER` | the token's account | Organization or user of new repositories |
 | `LOCAL_GIT_PORT`, `LOCAL_GIT_URL` | `3300`, `http://localhost:3300` | In the Docker `.env`: the host port, and the address browsers use |
 
 ## Docker services (`.env`)
 
 `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `S3_PORT`, `S3_CONSOLE_PORT`, `MAILPIT_SMTP_PORT`, `MAILPIT_UI_PORT` and `LOCAL_GIT_PORT` change the host ports and credentials of the services started by `docker compose up -d`. Change the RustFS credentials for anything beyond local development.
+
+In the production Compose `.env` (profile `mailpit`), `MAILPIT_UI_USER` (default `admin`) and `MAILPIT_UI_PASSWORD` (required, no spaces) protect the Mailpit UI.
