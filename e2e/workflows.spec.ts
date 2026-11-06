@@ -157,7 +157,6 @@ test.describe("workflows", { tag: E2ETag.Smoke }, () => {
           key: WEBHOOK_KEY,
           name: connection.name,
           settings: {},
-          override: null,
         },
         token,
       });

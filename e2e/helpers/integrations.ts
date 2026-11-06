@@ -5,8 +5,10 @@ import {
   type IntegrationInboundDetails,
 } from "@repo/api/src/types/integration";
 import {
-  createProjectConnectionInputSchema,
+  createProjectConnectionsInputSchema,
   type ProjectConnection,
+  type ProjectConnectionEntryInput,
+  type ProjectConnectionsResponse,
 } from "@repo/api/src/types/project-connection";
 import type { z } from "zod";
 import { bearer, deleteQuietly, readApiResult } from "./api-result";
@@ -79,21 +81,30 @@ export async function createProjectConnection(
     token,
   }: {
     projectId: string;
-    input: z.input<typeof createProjectConnectionInputSchema>;
+    input: ProjectConnectionEntryInput & { settings?: Record<string, unknown> };
     token: string;
   }
 ): Promise<ProjectConnection> {
+  const { settings, ...entry } = input;
   const response = await request.post(
     `${getApiBaseUrl()}/projects/${projectId}/connections`,
     {
-      data: createProjectConnectionInputSchema.parse(input),
+      data: createProjectConnectionsInputSchema.parse({
+        connections: [entry],
+        settings: settings ?? {},
+      }),
       headers: bearer(token),
     }
   );
-  return readApiResult<ProjectConnection>(
+  const added = await readApiResult<ProjectConnectionsResponse>(
     response,
     `Add ${input.key} to the project`
   );
+  const [connection] = added.connections;
+  if (!connection) {
+    throw new Error(`Add ${input.key} to the project returned no connection`);
+  }
+  return connection;
 }
 
 export async function deleteProjectConnection(
