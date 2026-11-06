@@ -76,3 +76,12 @@ function isProcessRunning(pid: number): boolean {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
+
+/** True when a running process holds `<dataDir>/runner.lock`. */
+export function isInstanceLockHeld(
+  dataDir: string,
+  isRunning: (pid: number) => boolean = isProcessRunning
+): boolean {
+  const holder = readHolder(path.join(dataDir, LOCK_FILE_NAME));
+  return holder !== null && isRunning(holder);
+}
