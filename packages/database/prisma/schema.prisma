@@ -812,10 +812,14 @@ model OrchestratorAnchor {
   // What it is about (plan, testcases, answer, ...) and its version.
   artifact       String?  @db.VarChar(40)
   version        Int?
+  // A question an agent asked on the item itself (questions.json commentId): its task and id.
+  taskId         String?  @map("task_id") @db.Uuid
+  questionId     String?  @map("question_id") @db.VarChar(64)
   createdAt      DateTime @default(now()) @map("created_at")
 
   organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   conversation OrchestratorConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  task         OrchestratorTask?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, provider, externalRef])
   @@map("orchestrator_anchors")
@@ -856,6 +860,7 @@ model OrchestratorTask {
   turn          OrchestratorTurn?        @relation(fields: [turnId], references: [id], onDelete: SetNull)
   computeTarget ComputeTarget?           @relation(fields: [computeTargetId], references: [id], onDelete: SetNull)
   document      Artifact?                @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  anchors       OrchestratorAnchor[]
 
   // The tick: tasks still running.
   @@index([status])

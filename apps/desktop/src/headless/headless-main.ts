@@ -8,11 +8,14 @@
  *   node runner.mjs                       the auto runner (one per computer)
  *   node runner.mjs --project <key>       the personal runner of a project
  *   node runner.mjs setup [--project <key>]   asks the setup questions
+ *   node runner.mjs uninstall [--project <key>]   removes the Windows service, optionally the data
  */
 
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 import { LoopHarness } from "@agentflow-ai/loops-api/desktop-request";
 import { gatewayLog } from "../main/logging/gateway-logger.js";
 import { ClaudeCredentialSource } from "../server/claude-credentials.js";
@@ -43,15 +46,32 @@ import {
 } from "./headless-preflight.js";
 import { type HeadlessRunner, startHeadlessRunner } from "./headless-runner.js";
 import {
+  type Ask,
   applyRunnerConfig,
   askRunnerMode,
   askRunnerSettings,
+  askStartWithWindows,
+  askYesNo,
   needsSetup,
   readRunnerConfigFile,
   runnerConfigFile,
   SETUP_SETTINGS,
+  type SetupContext,
   writeRunnerConfigFile,
 } from "./headless-setup.js";
+import { defaultUninstallDeps, runUninstall } from "./headless-uninstall.js";
+import {
+  applyServiceChoice,
+  defaultWindowsServiceDeps,
+  installedServiceId,
+  programFolderWarning,
+  readServiceState,
+  ServiceOutcome,
+  ServiceState,
+  serviceDisplayName,
+  serviceFiles,
+  serviceId,
+} from "./headless-windows-service.js";
 import {
   prepareWindowsTools,
   windowsToolOverrides,
@@ -63,10 +83,15 @@ const EXIT_PREFLIGHT_ERROR = 3;
 const EXIT_RUNTIME_ERROR = 1;
 const EXIT_INTERRUPTED = 130;
 const SETUP_COMMAND = "setup";
+const UNINSTALL_COMMAND = "uninstall";
 /** `--project <key>`: the personal runner of that AgentFlow project. */
 const PROJECT_OPTION = "--project";
 
-type RunnerArgs = { setup: boolean; projectKey: string | null };
+type RunnerArgs = {
+  setup: boolean;
+  uninstall: boolean;
+  projectKey: string | null;
+};
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
@@ -75,17 +100,33 @@ async function main(): Promise<void> {
     process.exitCode = EXIT_CONFIG_ERROR;
     return;
   }
+  if (args.value.uninstall) {
+    await runUninstallCommand(args.value.projectKey);
+    return;
+  }
   let dataDir = instanceDataDir(args.value.projectKey);
   if (args.value.setup) {
     await runInteractiveSetup(dataDir, args.value.projectKey);
     return;
   }
+  logServiceMode();
   applyRunnerConfig(
     process.env,
     readRunnerConfigFile(runnerConfigFile(dataDir))
   );
   if (needsSetup(process.env) && process.stdin.isTTY) {
-    dataDir = await runInteractiveSetup(dataDir, args.value.projectKey);
+    const setup = await runInteractiveSetup(dataDir, args.value.projectKey);
+    dataDir = setup.dataDir;
+    if (setup.serviceStarted) {
+      const files = serviceFiles({
+        id: setup.serviceId,
+        instanceDataDir: dataDir,
+      });
+      process.stdout.write(
+        `The Agent now runs as the Windows service ${setup.serviceId}; this window can be closed. Logs: ${files.logDir}\n`
+      );
+      return;
+    }
     applyRunnerConfig(
       process.env,
       readRunnerConfigFile(runnerConfigFile(dataDir))
@@ -127,11 +168,19 @@ async function main(): Promise<void> {
 function parseArgs(
   argv: readonly string[]
 ): { ok: true; value: RunnerArgs } | { ok: false; error: string } {
-  const value: RunnerArgs = { setup: false, projectKey: null };
+  const value: RunnerArgs = {
+    setup: false,
+    uninstall: false,
+    projectKey: null,
+  };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === SETUP_COMMAND && index === 0) {
       value.setup = true;
+      continue;
+    }
+    if (arg === UNINSTALL_COMMAND && index === 0) {
+      value.uninstall = true;
       continue;
     }
     if (arg === PROJECT_OPTION) {
@@ -148,7 +197,7 @@ function parseArgs(
     }
     return {
       ok: false,
-      error: `Unknown argument "${arg}": run without arguments (auto runner), with "${PROJECT_OPTION} <project key>" (personal runner), or "${SETUP_COMMAND}"`,
+      error: `Unknown argument "${arg}": run without arguments (auto runner), with "${PROJECT_OPTION} <project key>" (personal runner), "${SETUP_COMMAND}" or "${UNINSTALL_COMMAND}"`,
     };
   }
   return { ok: true, value };
@@ -209,6 +258,14 @@ function loadInstanceConfig(
   const instance = acquireInstanceLock(config.dataDir);
   if (!instance.ok) {
     gatewayLog.error(LOG_TAG, `Cannot start: ${instance.error}`);
+    const installed = installedServiceId(config.dataDir);
+    if (installed) {
+      const keyOption = projectKey ? ` ${PROJECT_OPTION} ${projectKey}` : "";
+      gatewayLog.error(
+        LOG_TAG,
+        `This Agent is installed as the Windows service ${installed}. Stop it in services.msc, or remove it with uninstall-runner.cmd${keyOption}.`
+      );
+    }
     return null;
   }
   process.on("exit", () => instance.lock.release());
@@ -264,26 +321,13 @@ async function setUpClaudeCode(
  * Asks the setup questions in this terminal and saves the answers to the
  * data directory of the chosen instance, which it returns: the default one
  * for the auto runner, the project's own for a personal runner.
+ * `serviceStarted` is true when the Agent now runs as a Windows service.
  */
 async function runInteractiveSetup(
   dataDir: string,
   projectKey: string | null
-): Promise<string> {
-  const prompt = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  // Without a listener, Ctrl+C only pauses the prompt.
-  prompt.on("SIGINT", () => {
-    prompt.close();
-    process.exit(EXIT_INTERRUPTED);
-  });
-  // Read through the iterator, not prompt.question(): it keeps lines that
-  // arrive before their question (answers piped in) and ends on end of input.
-  const lines = prompt[Symbol.asyncIterator]();
-  const say = (line: string) => {
-    process.stdout.write(`${line}\n`);
-  };
+): Promise<{ dataDir: string; serviceId: string; serviceStarted: boolean }> {
+  const { ask, say, close } = openPrompt();
   try {
     const fromFile = readRunnerConfigFile(runnerConfigFile(dataDir));
     const current: Record<string, string | undefined> = {};
@@ -292,18 +336,7 @@ async function runInteractiveSetup(
     }
     say("AgentFlow runner setup. Press Enter to keep the value in brackets.");
     const context = {
-      ask: async (question: string, shownDefault?: string) => {
-        process.stdout.write(
-          shownDefault ? `${question} [${shownDefault}]: ` : `${question}: `
-        );
-        const line = await lines.next();
-        if (line.done) {
-          throw new Error(
-            "Setup input ended before every question was answered"
-          );
-        }
-        return line.value.trim();
-      },
+      ask,
       say,
       current,
       username: currentUsername(),
@@ -326,9 +359,130 @@ async function runInteractiveSetup(
         `Start this personal runner with: start-runner ${PROJECT_OPTION} ${answeredKey} (node runner.mjs ${PROJECT_OPTION} ${answeredKey})`
       );
     }
-    return targetDir;
+    const serviceKey =
+      mode === RunnerMode.Personal ? (answeredKey ?? null) : null;
+    const serviceStarted = isWindows()
+      ? await offerWindowsService(context, targetDir, serviceKey)
+      : false;
+    return {
+      dataDir: targetDir,
+      serviceId: serviceId(serviceKey),
+      serviceStarted,
+    };
   } finally {
+    close();
+  }
+}
+
+/** A readline prompt on this terminal. */
+function openPrompt(): {
+  ask: Ask;
+  say: (line: string) => void;
+  close(): void;
+} {
+  const prompt = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  // Without a listener, Ctrl+C only pauses the prompt.
+  prompt.on("SIGINT", () => {
     prompt.close();
+    process.exit(EXIT_INTERRUPTED);
+  });
+  // Read through the iterator, not prompt.question(): it keeps lines that
+  // arrive before their question (answers piped in) and ends on end of input.
+  const lines = prompt[Symbol.asyncIterator]();
+  return {
+    ask: async (question: string, shownDefault?: string) => {
+      process.stdout.write(
+        shownDefault ? `${question} [${shownDefault}]: ` : `${question}: `
+      );
+      const line = await lines.next();
+      if (line.done) {
+        throw new Error("Setup input ended before every question was answered");
+      }
+      return line.value.trim();
+    },
+    say: (line: string) => {
+      process.stdout.write(`${line}\n`);
+    },
+    close: () => prompt.close(),
+  };
+}
+
+/**
+ * Windows only: asks whether this Agent starts with Windows and installs,
+ * updates or removes its service. True when the service now runs it.
+ */
+async function offerWindowsService(
+  context: SetupContext,
+  instanceDir: string,
+  projectKey: string | null
+): Promise<boolean> {
+  const programDir = path.dirname(fileURLToPath(import.meta.url));
+  const spec = {
+    id: serviceId(projectKey),
+    instanceDataDir: instanceDir,
+    projectKey,
+    nodePath: process.execPath,
+    programDir,
+    baseDataDir: resolveRunnerDataDir(),
+  };
+  const deps = defaultWindowsServiceDeps(context.say, (question) =>
+    askYesNo(context, question, false)
+  );
+  const state = await readServiceState(spec, deps);
+  const wanted = await askStartWithWindows(
+    context,
+    state !== null && state !== ServiceState.NonExistent
+  );
+  if (wanted) {
+    const warning = programFolderWarning(programDir, {
+      homeDir: os.homedir(),
+      tmpDir: os.tmpdir(),
+    });
+    if (warning) {
+      context.say(warning);
+    }
+  }
+  const outcome = await applyServiceChoice(spec, wanted, deps);
+  const running =
+    outcome === ServiceOutcome.Installed || outcome === ServiceOutcome.Updated;
+  if (running) {
+    context.say(
+      `The Agent runs as the Windows service ${spec.id} (${serviceDisplayName(projectKey)}) and starts with Windows. Logs: ${serviceFiles(spec).logDir}`
+    );
+  }
+  return running;
+}
+
+/** `uninstall`: removes the Windows service and, when asked, the data. */
+async function runUninstallCommand(projectKey: string | null): Promise<void> {
+  const { ask, say, close } = openPrompt();
+  try {
+    const context: SetupContext = {
+      ask,
+      say,
+      current: {},
+      username: currentUsername(),
+      homeDir: os.homedir(),
+    };
+    process.exitCode = await runUninstall(
+      { baseDataDir: resolveRunnerDataDir(), projectKey },
+      defaultUninstallDeps(say, (question) =>
+        askYesNo(context, question, false)
+      )
+    );
+  } finally {
+    close();
+  }
+}
+
+/** Notes in the log that this process is the Windows service. */
+function logServiceMode(): void {
+  const id = process.env[HeadlessRunnerEnv.Service]?.trim();
+  if (id) {
+    gatewayLog.info(LOG_TAG, `Running as the Windows service ${id}`);
   }
 }
 

@@ -107,7 +107,7 @@ asked where it belongs:
 
 | The event | Its conversation (`channelKey`) |
 |---|---|
-| A reply to an anchor | the anchor's conversation |
+| A reply to an anchor (a message the orchestrator posted, or a comment an agent asked a question in) | the anchor's conversation |
 | A Teams message (post or reply) | the Teams thread: `microsoft_teams:<thread key>` |
 | A Jira comment replying to another comment | that comment thread: `jira:<KEY>:comment:<parent id>` |
 | A Jira mention on the issue | the issue's top level: `jira:<KEY>:item` |
@@ -122,6 +122,9 @@ the label payload is `{added, removed, actor}`. A `case_notify` from another cas
 an internal message of kind `case_notify`. A `case_handoff` writes an internal
 message of kind `handoff` on the target case, and the sending conversation gets a
 `handoff_sent` message as an audit record (it never wakes a turn).
+A `task_asked` message is an internal message recorded when a task settles with
+questions that carry a `commentId` (the agent asked them on the item itself, see
+"Questions asked on the item" under Tasks and waits). It never wakes a turn.
 
 A conversation belongs to the **case** of its source item (`jira:LD-7`: one
 case per item per workflow: unique on `workflowId, sourceKey`; conversations are unique per case and channel). The event's comment or message (`InboundEvent.
@@ -360,6 +363,25 @@ ones whose loop ended (`isLoopSettled`: a revivable timed-out loop is still
 running): `succeeded` with the answer file and the questions, `failed` with
 the loop's error. The task's result keeps its `inputs`, `replyTo` and
 cancel/waiting notes when it settles or fails.
+
+**Questions asked on the item.** A personal Agent may comment a question on the
+ticket itself and write that comment's id as `commentId` in its
+`questions.json`; it flows into `TaskResult.questions`. When the task settles,
+`task-asked.ts` records the `task_asked` message and one anchor per `commentId`
+(`orchestrator_anchors.task_id`, `question_id`; provider = the conversation's
+item provider; idempotent on the unique key). A reply to that comment routes by
+the anchor, whatever the triggers and `mentionOnly`, and its message payload
+carries `taskId` and `questionId` (`task="..." question="..."` in the prompt).
+The orchestrator collects the answers in a turn and resumes the task (no fork,
+same runner). Wait results, CASE.md and `task_get` mark these questions as
+asked on the item; AgentFlow never posts them.
+
+Anchors are written when the task settles, not when the agent comments. A reply
+posted in that window (loop still running, settle delay) is not anchored yet and
+routes by the triggers, so on a `mentionOnly` workflow it is dropped. The
+provider of an anchor is the conversation's item provider, which is also the
+case's source provider (a case holds only conversations of its own source), so
+it always matches the commented item.
 
 **Waits** (`waits.ts`). `wait_for` stores what the conversation waits for and
 ends the turn. The engine evaluates it in code whenever one of its tasks

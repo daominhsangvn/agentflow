@@ -14,6 +14,7 @@ In environment variable names, `RUNNER` means Agent: the names keep the old word
 | `node runner.mjs` | The automatic Agent (one per computer) |
 | `node runner.mjs --project <key>` | The personal Agent of an AgentFlow project (for example `--project PRO-1`) |
 | `node runner.mjs setup [--project <key>]` | Asks the setup questions and saves them to `<data dir>/runner.env` |
+| `node runner.mjs uninstall [--project <key>]` | Windows: removes the Agent's service; asks whether to delete its local data |
 
 Any other argument is rejected. Settings come from the environment and from `<data dir>/runner.env` (one `NAME=value` per line; a variable set in the environment wins). A start from a terminal with no API URL or key asks the setup questions first. Empty variables count as unset.
 
@@ -119,6 +120,8 @@ node apps/desktop/dist-headless/runner.mjs
 ### Windows
 
 Runs the Agent directly on Windows, with the machine's own toolchains and network. It can do anything the Windows account can, so use a dedicated non-administrator account, and prefer Docker or a VM when the project builds on Linux. Install Node.js 22+, Git for Windows, `jq`, Python 3 with PyYAML and Claude Code (native installer), then unzip `agentflow-runner-<version>-windows.zip` (from the releases, or `pnpm -C apps/desktop package:headless --windows`) and run `start-runner.cmd`. The first start asks for the API URL, API key, name and workspace, and saves them to `%USERPROFILE%\.agentflow-runner\runner.env`; `setup-runner.cmd` asks again. `start-runner.cmd --project PRO-1` starts a personal Agent.
+
+The last setup question offers to start the Agent with Windows as a Windows service (WinSW, `agentflow-agent` or `agentflow-agent-pro-1`) that starts before sign-in. It runs under your Windows account: WinSW asks for its password (not a Windows Hello PIN) and the "log on as a service" right. Mapped network drives are not visible to services; use UNC paths. Logs are in `<data dir>\service\logs`. Keep the unzipped folder in a permanent place. To upgrade, unzip the new release, run `setup-runner.cmd [--project KEY]` from it and press Enter to every question. `uninstall-runner.cmd [--project KEY]` removes the service and asks whether to delete the local data (default no); answering no to the service question also removes it. A service left behind by a deleted folder is removed with `sc.exe delete <id>`.
 
 On Windows, scripts run in Git for Windows' `bash.exe` (never WSL's), stopping a run ends its whole process tree, and the Claude Code version set in AgentFlow is not installed: the `claude` on `PATH` runs.
 

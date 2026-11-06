@@ -2,7 +2,9 @@
 
 A practical guide for running a project's ticket flow through an
 orchestrated workflow. The reference (how each part works in code) is
-[orchestrator.md](orchestrator.md); runners and AGENTFLOW.md are in
+[orchestrator.md](orchestrator.md); bringing an agent people already run on
+their own computer under the orchestrator is in
+[agent-integration.md](agent-integration.md); runners and AGENTFLOW.md are in
 [runner.md](runner.md); triggers in [workflows.md](workflows.md). The worked
 example throughout is LeaveDesk:
 [workshop/leavedesk/orchestrator-workflow.yaml](workshop/leavedesk/orchestrator-workflow.yaml).
@@ -126,6 +128,12 @@ decisions to pass to later tasks that use the same file.
 Platform: each comment thread is its own conversation; `reply replyTo` and
 `task_run replyTo` keep an answer that waits for a task in the thread it
 answers.
+Write: *"A question the agent already asked on the ticket (marked already
+asked): do not post it again; wait for the reply to that comment; when every
+question of the task has an answer, resume it with the answers."*
+Platform: the question's `commentId` becomes an anchor; a reply to that comment
+reaches the orchestrator even without a mention and carries `task` and
+`question`.
 
 **BLOCKED.**
 Write: *"A task answer that starts with BLOCKED: did nothing. Comment what is

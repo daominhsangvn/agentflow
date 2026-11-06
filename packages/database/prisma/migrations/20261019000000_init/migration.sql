@@ -2021,7 +2021,9 @@ CREATE TABLE public.orchestrator_anchors (
     external_ref character varying(255) NOT NULL,
     artifact character varying(40),
     version integer,
-    created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    task_id uuid,
+    question_id character varying(64)
 );
 
 CREATE TABLE public.orchestrator_cases (
@@ -4480,6 +4482,9 @@ ALTER TABLE ONLY public.orchestrator_anchors
 
 ALTER TABLE ONLY public.orchestrator_anchors
     ADD CONSTRAINT orchestrator_anchors_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.orchestrator_anchors
+    ADD CONSTRAINT orchestrator_anchors_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.orchestrator_tasks(id) ON UPDATE CASCADE ON DELETE SET NULL;
 
 ALTER TABLE ONLY public.orchestrator_cases
     ADD CONSTRAINT orchestrator_cases_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;

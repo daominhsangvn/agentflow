@@ -90,6 +90,8 @@ export function createOrchestratorDbFake() {
           (row) => row.id === anchor.conversationId
         );
         return Promise.resolve({
+          taskId: anchor.taskId ?? null,
+          questionId: anchor.questionId ?? null,
           conversation: {
             id: conversation?.id,
             projectId: conversation?.projectId,
@@ -312,13 +314,19 @@ export function createOrchestratorDbFake() {
         },
       });
     },
-    addAnchor(conversationId: string, provider: string, externalRef: string) {
+    addAnchor(
+      conversationId: string,
+      provider: string,
+      externalRef: string,
+      extras: { taskId?: string; questionId?: string } = {}
+    ) {
       anchors.push({
         id: nextId("anchor"),
         organizationId: ORG_ID,
         conversationId,
         provider,
         externalRef,
+        ...extras,
       });
     },
   };

@@ -88,6 +88,7 @@ const MESSAGE_KIND_LABELS: Record<OrchestratorMessageKind, string> = {
   [OrchestratorMessageKind.CaseNotify]: "Case notice",
   [OrchestratorMessageKind.Handoff]: "Change request",
   [OrchestratorMessageKind.HandoffSent]: "Handed off",
+  [OrchestratorMessageKind.TaskAsked]: "Asked on item",
 };
 const CLAMP_CHARS = 600;
 const SHORT_ID_CHARS = 8;

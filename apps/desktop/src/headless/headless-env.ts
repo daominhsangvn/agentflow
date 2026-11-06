@@ -60,6 +60,8 @@ export const HeadlessRunnerEnv = {
    * loop's allowed tools plus the person's own `permissions.allow`.
    */
   SkipPermissions: "AGENTFLOW_RUNNER_SKIP_PERMISSIONS",
+  /** Set by the Windows service to its id (see headless-windows-service.ts). */
+  Service: "AGENTFLOW_RUNNER_SERVICE",
 } as const;
 export type HeadlessRunnerEnv =
   (typeof HeadlessRunnerEnv)[keyof typeof HeadlessRunnerEnv];

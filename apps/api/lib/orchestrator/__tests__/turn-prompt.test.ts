@@ -286,4 +286,37 @@ describe("buildTurnPrompt writes", () => {
     });
     expect(prompt).toContain("Confirmed change requests");
   });
+
+  it("explains questions asked on the item only when the turn has one", () => {
+    const base = {
+      origin: OrchestratorMessageOrigin.Internal,
+      actor: null,
+      text: "x",
+      createdAt: new Date("2026-10-23T08:00:00.000Z"),
+    };
+    const section = "Questions agents asked on the item";
+    const plain = buildTurnPrompt(BASE);
+    expect(plain).not.toContain(section);
+    expect(plain).not.toContain(' task="');
+
+    const asked = buildTurnPrompt({
+      ...BASE,
+      messages: [{ ...base, kind: OrchestratorMessageKind.TaskAsked }],
+    });
+    expect(asked).toContain(section);
+
+    const reply = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          ...base,
+          origin: OrchestratorMessageOrigin.External,
+          kind: OrchestratorMessageKind.Message,
+          payload: { taskId: "t1", questionId: "q2" },
+        },
+      ],
+    });
+    expect(reply).toContain(section);
+    expect(reply).toContain('task="t1" question="q2"');
+  });
 });

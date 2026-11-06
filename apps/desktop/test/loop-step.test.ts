@@ -337,6 +337,7 @@ describe("readStepOutputs", () => {
       JSON.stringify({
         questions: [
           { id: "q1", question: "Which delimiter?", options: [",", ";"] },
+          { id: "q2", question: "Header row?", commentId: "10234" },
         ],
       })
     );
@@ -355,6 +356,7 @@ describe("readStepOutputs", () => {
     assert.equal(result.stepId, "specify");
     assert.deepEqual(result.questions, [
       { id: "q1", question: "Which delimiter?", options: [",", ";"] },
+      { id: "q2", question: "Header row?", commentId: "10234" },
     ]);
     assert.equal(result.questionsError, null);
     assert.deepEqual(
@@ -465,6 +467,7 @@ describe("buildStepWorkspaceInstructions", () => {
       )
     );
     assert.ok(text.includes("Do not commit or push"));
+    assert.ok(text.includes("commentId"));
     assert.ok(
       text.includes("### Toolkit\n\nRun scripts from .specify/scripts.")
     );

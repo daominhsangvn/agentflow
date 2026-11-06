@@ -447,3 +447,29 @@ function checkYesNo(value: string): SettingCheck {
 function maskApiKey(key: string): string {
   return `${key.slice(0, API_KEY_VISIBLE_PREFIX)}…${key.slice(-API_KEY_VISIBLE_SUFFIX)}`;
 }
+
+/** A yes/no question; Enter keeps the default. Nothing is written to runner.env. */
+export async function askYesNo(
+  context: SetupContext,
+  question: string,
+  defaultYes: boolean
+): Promise<boolean> {
+  const answer = await askUntilValid(context, {
+    question,
+    currentValue: defaultYes ? "yes" : "no",
+    check: checkYesNo,
+  });
+  return answer === "true";
+}
+
+/** The last Windows setup question; `installed` makes Enter keep the service. */
+export function askStartWithWindows(
+  context: SetupContext,
+  installed: boolean
+): Promise<boolean> {
+  return askYesNo(
+    context,
+    "Start this Agent with Windows (as a Windows service, before anyone signs in)? yes/no",
+    installed
+  );
+}

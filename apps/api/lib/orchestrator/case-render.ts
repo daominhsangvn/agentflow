@@ -6,6 +6,7 @@ import {
   readOrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
 import { withDb } from "@repo/database";
+import { askedOnItem } from "./asked-questions";
 import { listCaseDocuments } from "./case-documents";
 import { readChannel } from "./channel";
 import { readTaskResult } from "./task-result";
@@ -112,7 +113,7 @@ export async function renderCase(caseId: string): Promise<string> {
   }
   for (const task of found.tasks) {
     lines.push(
-      `- ${task.id} ${task.command}${task.args ? ` ${task.args}` : ""} on ${task.computeTarget?.machineName ?? "a removed runner"} (${task.mode}): ${task.status}${taskNote(task)}${taskFilesNote(task)}${taskReplyToNote(task)} — started for: ${startedFor(task)}`
+      `- ${task.id} ${task.command}${task.args ? ` ${task.args}` : ""} on ${task.computeTarget?.machineName ?? "a removed runner"} (${task.mode}): ${task.status}${taskNote(task)}${taskFilesNote(task)}${taskReplyToNote(task)}${taskQuestionsNote(task)} — started for: ${startedFor(task)}`
     );
   }
   lines.push("", "## Decisions");
@@ -175,6 +176,20 @@ function taskFilesNote(task: { result: unknown }): string {
 function taskReplyToNote(task: { result: unknown }): string {
   const replyTo = readTaskResult(task.result)?.replyTo;
   return replyTo ? ` — answers ref ${replyTo}` : "";
+}
+
+function taskQuestionsNote(task: { result: unknown }): string {
+  const questions = readTaskResult(task.result)?.questions ?? [];
+  if (questions.length === 0) {
+    return "";
+  }
+  const asked = new Map(askedOnItem(questions).map((q) => [q.id, q.commentId]));
+  const names = questions.map((q) =>
+    asked.has(q.id)
+      ? `${q.id} (asked on the item, comment ${asked.get(q.id)})`
+      : q.id
+  );
+  return ` — questions: ${names.join(", ")}`;
 }
 
 type StartedForTask = {

@@ -220,6 +220,7 @@ export function personalStepInstructions(
   if (step.askQuestions) {
     lines.push(
       `- When you need a decision, do not ask in the terminal and do not guess: write the questions to \`${path.join(workDir, LoopStepFile.Questions)}\` as a JSON array of \`{"id": "q1", "question": "...", "options": ["..."]}\` (options optional), then stop. The questions are shown in AgentFlow; the run resumes this session with the answers.`,
+      '- If your instructions have you ask the question on the ticket yourself (a comment with this computer\'s own account), still write it to that file and put the comment\'s id in "commentId" (`{"id": "q1", "question": "...", "commentId": "10234"}`): AgentFlow then does not post it again and takes the reply to that comment as the answer.',
       `- Limits of that file: at most ${LOOP_STEP_QUESTIONS_MAX} questions; each question at most ${LOOP_STEP_QUESTION_MAX} characters; at most ${LOOP_STEP_OPTIONS_MAX} options per question, each at most ${LOOP_STEP_OPTION_MAX} characters.`
     );
   } else {

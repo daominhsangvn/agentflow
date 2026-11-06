@@ -2,6 +2,7 @@ import {
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
   OrchestratorTaskStatus,
+  OrchestratorToolName,
   OrchestratorWaitKind,
 } from "@repo/api/src/types/orchestrator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -315,6 +316,25 @@ describe("evaluateWaits", () => {
     const text = mocks.messages[0]?.text as string;
     expect(text).toContain("cancelled: label create-prd removed");
     expect(text).not.toContain("resumeTaskId");
+  });
+
+  it("marks a question the agent already asked on the item", async () => {
+    mocks.tasks = [
+      task("task-1", OrchestratorTaskStatus.Succeeded, {
+        reply: null,
+        questions: [
+          { id: "q1", question: "Part-timers too?", commentId: "10234" },
+        ],
+        error: null,
+      }),
+    ];
+    await waitFor(["task-1"], { wakeOnFailure: false });
+
+    expect(await evaluateWaits("conversation-1", NOW)).toBe(true);
+    const text = mocks.messages[0]?.text as string;
+    expect(text).toContain("comment 10234");
+    expect(text).toContain("do not post it again");
+    expect(text).toContain(OrchestratorToolName.WaitHuman);
   });
 
   it("names the message a task answers", async () => {

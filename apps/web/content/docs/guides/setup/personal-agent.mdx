@@ -117,12 +117,14 @@ systemctl --user enable --now agentflow-runner-pro-1
 journalctl --user -u agentflow-runner-pro-1 -f
 ```
 
-**Windows.** In Task Scheduler, create a task that runs at log on: program `start-runner.cmd`, arguments `--project PRO-1`, start in the bundle's folder.
+**Windows.** The last question of `setup-runner.cmd --project PRO-1` offers to start the Agent with Windows as a Windows service (WinSW), named `agentflow-agent-pro-1`, that starts before anyone signs in. It runs under your Windows account: WinSW asks for that account's password (not a Windows Hello PIN; Microsoft accounts use the online password) and the "log on as a service" right. Mapped network drives are not visible to services, so use UNC paths. Logs are in `%USERPROFILE%\.agentflow-runner\personal\PRO-1\service\logs`. Keep the unzipped folder in a permanent place, not Downloads or temp.
 
 ## Stop and upgrade
 
 - Stop it with Ctrl+C, `launchctl unload <plist>`, `systemctl --user stop <unit>` or by ending the task. Stopping abandons the task it runs; the server times it out. Stop it when it is idle.
 - To upgrade, stop it, replace the bundle folder with the new release and start it again. The data directory in `~/.agentflow-runner` is not in the bundle folder, so the Agent keeps its identity and settings.
+- On Windows, stop the service in `services.msc`, or remove it with `uninstall-runner.cmd --project PRO-1`. That command also asks whether to delete the Agent's local data (default no); the Agent stays in AgentFlow as offline. A service left behind by a deleted folder is removed with `sc.exe delete agentflow-agent-pro-1`.
+- On Windows, to upgrade, unzip the new release, run `setup-runner.cmd --project PRO-1` from it and press Enter to every question: the service is re-pointed and restarted. Answering no to the service question removes it.
 - Upgrading Claude Code is the person's job: run `claude install <version>` when AgentFlow pins a new version.
 
 ## Troubleshooting

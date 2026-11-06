@@ -279,7 +279,10 @@ pnpm -C apps/desktop package:headless --windows
 # dist-headless/agentflow-runner-<version>-windows.zip
 ```
 
-Unzip it on the Windows machine and run `start-runner.cmd`. The first start
+Unzip it on the Windows machine. The folder holds `runner.mjs`,
+`agent-plugins/`, `start-runner.cmd`, `setup-runner.cmd`,
+`uninstall-runner.cmd`, `README.txt` and `winsw/` (`WinSW.exe` and its
+`LICENSE.txt`). Run `start-runner.cmd`. The first start
 asks four questions, then connects:
 
 | Question | Default |
@@ -315,8 +318,30 @@ ConnectionStrings__DefaultConnection=Server=localhost;Database=App_Agent;Trusted
   has no graceful equivalent, so the scripts get no chance to clean up.
 - The Claude Code version set in AgentFlow is not installed: loops run the
   `claude` on PATH. Keep it current with `claude update`.
-- To start the runner with Windows, add `start-runner.cmd` to a Task
-  Scheduler task that runs at logon of the runner's account.
+
+**Start with Windows.** The last setup question offers to install the Agent
+as a Windows service ([WinSW](https://github.com/winsw/winsw), shipped in
+`winsw/`) that starts before anyone signs in. There is one service per Agent:
+`agentflow-agent`, or `agentflow-agent-pro-1` for the personal Agent of PRO-1.
+It runs under your Windows account: WinSW asks for that account's password
+(not a Windows Hello PIN; Microsoft accounts use the online password) and
+offers the "log on as a service" right. Windows asks for administrator
+approval once per action. Mapped network drives are not visible to services;
+use UNC paths. Logs are in `<data dir>\service\logs`
+(`%USERPROFILE%\.agentflow-runner\service\logs`, or
+`...\personal\PRO-1\service\logs`). Keep the unzipped folder in a permanent
+place, not Downloads or temp: the service runs `runner.mjs` from it.
+Answering no to the question removes an installed service.
+
+**Upgrade.** Unzip the new release, run `setup-runner.cmd [--project KEY]`
+from it and press Enter to every question; the service is re-pointed to the
+new folder and restarted.
+
+**Uninstall.** `uninstall-runner.cmd [--project KEY]` (`node runner.mjs
+uninstall`) removes the service and asks whether to delete the Agent's local
+data (default no). The Agent stays in AgentFlow as an offline computer;
+remove it there if you no longer need it. A service left behind by a deleted
+folder is removed with `sc.exe delete <id>`.
 
 ## After installing
 
@@ -604,6 +629,9 @@ node runner.mjs --project PRO-1          # Windows: start-runner.cmd --project P
 node runner.mjs setup --project PRO-1    # asks that runner's questions again
 ```
 
+On Windows each personal Agent can be its own service, and
+`uninstall-runner.cmd --project PRO-1` removes it.
+
 Each personal runner has its own data directory (identity, job store, loop
 tokens, status, Windows shims), so any number of them, for different
 projects, run side by side with auto runners. Runners are not limited; a
@@ -644,7 +672,9 @@ already in use, since both would be the same computer in AgentFlow.
   nobody is at the terminal to approve a prompt.
 - Questions work like any step with `questions: ask`: the command writes
   `$AGENTFLOW_WORKDIR/questions.json` and stops; the run shows them in
-  AgentFlow, and the answers resume the same session.
+  AgentFlow, and the answers resume the same session. A question may carry
+  `commentId` when the command already commented it on the ticket (see
+  "Writing commands for a personal runner").
 - The folder is never removed or reset; worktree clean-up skips it.
 - A workflow chooses a person's runner per item with runner rules
   (docs/workflows.md "Runner rules"), e.g. the assignee's.
@@ -673,13 +703,18 @@ runs it by hand.
    When you need a decision you cannot make from the ticket or the code:
    - If `$AGENTFLOW_WORKDIR` is set (an AgentFlow run), write the questions to
      `$AGENTFLOW_WORKDIR/questions.json` as a JSON array, e.g.
-     `[{"id": "q1", "question": "Export CSV or XLSX?", "options": ["CSV", "XLSX"]}]`,
+     `[{"id": "q1", "question": "Export CSV or XLSX?", "options": ["CSV", "XLSX"]}]`
+     (with `"commentId": "10234"` when you already commented it, see below),
      then stop. Do not ask in the terminal.
    - Otherwise ask the user as usual.
    ```
 
    At most 30 questions, 2,000 characters each, 10 options of 500
-   characters. The answers come back as the next prompt of the same session:
+   characters. When the command itself comments the question on the ticket
+   with the person's Jira tools, it writes that comment's id as `commentId`
+   (`[{"id": "q1", "question": "...", "commentId": "10234"}]`, at most 255
+   characters); AgentFlow does not post it again and takes the reply to that
+   comment as the answer. Without `commentId` nothing changes. The answers come back as the next prompt of the same session:
    pick up where the command stopped (write the answers where the command
    keeps them, e.g. `clarifications.md`, then go on).
 2. **Never wait for a confirmation.** Decide with a stated default, or ask

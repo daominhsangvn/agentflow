@@ -52,6 +52,7 @@ import {
 import { personalRunnerBusy } from "@/lib/workflows/engine/personal-runner-queue";
 import { isLoopSettled } from "@/lib/workflows/engine/run-loops";
 import { renderCase } from "./case-render";
+import { recordAskedQuestions } from "./task-asked";
 import { taskCancelledMessage } from "./task-cancel";
 import {
   checkInputsFit,
@@ -708,6 +709,9 @@ async function settleTask(
       },
     })
   );
+  if (updated.count === 1) {
+    await recordAskedQuestions(taskId, result.questions);
+  }
   return updated.count === 1;
 }
 
