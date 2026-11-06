@@ -6,6 +6,7 @@
     "agents",
     "personal-agent",
     "agent-capabilities",
+    "integrate-existing-agent",
     "workflow-yaml",
     "triggers-and-actions",
     "process-yaml",

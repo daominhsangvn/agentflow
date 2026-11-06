@@ -2,7 +2,9 @@
 
 A practical guide for running a project's ticket flow through an
 orchestrated workflow. The reference (how each part works in code) is
-[orchestrator.md](orchestrator.md); runners and AGENTFLOW.md are in
+[orchestrator.md](orchestrator.md); bringing an agent people already run on
+their own computer under the orchestrator is in
+[agent-integration.md](agent-integration.md); runners and AGENTFLOW.md are in
 [runner.md](runner.md); triggers in [workflows.md](workflows.md). The worked
 example throughout is LeaveDesk:
 [workshop/leavedesk/orchestrator-workflow.yaml](workshop/leavedesk/orchestrator-workflow.yaml).
