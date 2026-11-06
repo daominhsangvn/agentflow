@@ -319,4 +319,38 @@ describe("buildTurnPrompt writes", () => {
     expect(reply).toContain(section);
     expect(reply).toContain('task="t1" question="q2"');
   });
+
+  it("marks a message for an agent and explains the relay only then", () => {
+    const section = "Messages for an agent";
+    const plain = buildTurnPrompt(BASE);
+    expect(plain).not.toContain(section);
+    expect(plain).not.toContain(' to="');
+
+    const relayed = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          origin: OrchestratorMessageOrigin.External,
+          kind: OrchestratorMessageKind.Message,
+          actor: "An",
+          text: "Ask BA about the policy",
+          createdAt: new Date("2026-10-23T08:00:00.000Z"),
+          externalRef: "agentflow-1",
+          payload: {
+            via: OrchestratorMessageVia.AgentFlow,
+            toAgent: { computeTargetId: "ct-1", name: "BA runner" },
+          },
+        },
+      ],
+    });
+    expect(relayed).toContain(section);
+    expect(relayed).toContain(
+      `via="agentflow" to="BA runner" ref="agentflow-1"`
+    );
+    expect(relayed).toContain(OrchestratorToolName.TaskRun);
+  });
+
+  it("tells the orchestrator to set asked when it asked people", () => {
+    expect(buildTurnPrompt(BASE)).toContain("set asked");
+  });
 });

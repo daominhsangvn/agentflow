@@ -2053,7 +2053,8 @@ CREATE TABLE public.orchestrator_conversations (
     lease_until timestamp(3) without time zone,
     next_wake_at timestamp(3) without time zone,
     created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp(3) without time zone NOT NULL
+    updated_at timestamp(3) without time zone NOT NULL,
+    asked_human text
 );
 
 CREATE TABLE public.orchestrator_decisions (
@@ -2106,7 +2107,8 @@ CREATE TABLE public.orchestrator_tasks (
     result jsonb,
     finished_at timestamp(3) without time zone,
     created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp(3) without time zone NOT NULL
+    updated_at timestamp(3) without time zone NOT NULL,
+    open_question_count integer DEFAULT 0 NOT NULL
 );
 
 CREATE TABLE public.orchestrator_turns (

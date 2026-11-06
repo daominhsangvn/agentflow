@@ -34,7 +34,7 @@ export async function postCaseMessage(
   if (!parsed.success) {
     return Result.err(Status.BadRequest);
   }
-  const { conversationId, text, answers } = parsed.data;
+  const { conversationId, text, answers, toAgentId } = parsed.data;
   const user = await withDb((db) =>
     db.user.findFirst({
       where: { id: userId, organizationId },
@@ -52,6 +52,12 @@ export async function postCaseMessage(
   );
   if (!conversation) {
     return Result.err(Status.NotFound);
+  }
+  const toAgent = toAgentId
+    ? await findAddressedAgent(organizationId, caseId, toAgentId)
+    : null;
+  if (toAgentId && !toAgent) {
+    return Result.err(Status.Conflict);
   }
   const questions = await answeredQuestions(organizationId, caseId, answers);
   if (!questions) {
@@ -80,10 +86,21 @@ export async function postCaseMessage(
           userId,
           answers,
           parentId: null,
+          ...(toAgent ? { toAgent } : {}),
         },
       },
       select: { id: true },
     });
+    if (answers.length > 0) {
+      await tx.orchestratorTask.updateMany({
+        where: {
+          id: { in: [...new Set(answers.map((answer) => answer.taskId))] },
+          caseId,
+          organizationId,
+        },
+        data: { openQuestionCount: 0 },
+      });
+    }
     await tx.orchestratorConversation.updateMany({
       where: { id: conversationId, organizationId },
       data: { nextWakeAt: new Date(Date.now() + debounceSeconds * 1000) },
@@ -102,6 +119,28 @@ export async function postCaseMessage(
     waitUntil(advanceConversation(conversationId));
   }
   return Result.ok({ messageId, conversationId });
+}
+
+/** The agent of the case's newest task on that compute target, or null. */
+async function findAddressedAgent(
+  organizationId: string,
+  caseId: string,
+  computeTargetId: string
+): Promise<{ computeTargetId: string; name: string } | null> {
+  const task = await withDb((db) =>
+    db.orchestratorTask.findFirst({
+      where: { organizationId, caseId, computeTargetId },
+      orderBy: { createdAt: "desc" },
+      select: { computeTarget: { select: { id: true, machineName: true } } },
+    })
+  );
+  if (!task?.computeTarget) {
+    return null;
+  }
+  return {
+    computeTargetId: task.computeTarget.id,
+    name: task.computeTarget.machineName,
+  };
 }
 
 /** The question text per "taskId:questionId", or null when one is unknown. */

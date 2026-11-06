@@ -12,12 +12,15 @@ const USER = "user-1";
 const CASE_ID = "case-1";
 const CONVERSATION = "0198f1c0-0000-7000-8000-000000000001";
 const TASK = "0198f1c0-0000-7000-8000-000000000002";
+const AGENT = "0198f1c0-0000-7000-8000-000000000003";
 
 const mocks = vi.hoisted(() => ({
   userFindFirst: vi.fn(),
   conversationFindFirst: vi.fn(),
   conversationUpdateMany: vi.fn(),
   taskFindMany: vi.fn(),
+  taskFindFirst: vi.fn(),
+  taskUpdateMany: vi.fn(),
   messageCreate: vi.fn(),
   caseUpdateMany: vi.fn(),
   loadOrchestratorWorkflows: vi.fn(),
@@ -32,7 +35,11 @@ vi.mock("@repo/database", () => {
       findFirst: mocks.conversationFindFirst,
       updateMany: mocks.conversationUpdateMany,
     },
-    orchestratorTask: { findMany: mocks.taskFindMany },
+    orchestratorTask: {
+      findMany: mocks.taskFindMany,
+      findFirst: mocks.taskFindFirst,
+      updateMany: mocks.taskUpdateMany,
+    },
     orchestratorMessage: { create: mocks.messageCreate },
     orchestratorCase: { updateMany: mocks.caseUpdateMany },
   };
@@ -150,5 +157,58 @@ describe("postCaseMessage", () => {
       where: { status: OrchestratorCaseStatus.Closed },
       data: { status: OrchestratorCaseStatus.Open, closedAt: null },
     });
+  });
+
+  it("addresses an agent with a task in the case", async () => {
+    mocks.taskFindFirst.mockResolvedValue({
+      computeTarget: { id: AGENT, machineName: "BA-runner" },
+    });
+    const result = await postCaseMessage(ORG, USER, CASE_ID, {
+      conversationId: CONVERSATION,
+      text: "Ask more",
+      toAgentId: AGENT,
+    });
+    expect(result.ok).toBe(true);
+    expect(mocks.taskFindFirst.mock.calls[0][0].where).toEqual({
+      organizationId: ORG,
+      caseId: CASE_ID,
+      computeTargetId: AGENT,
+    });
+    expect(mocks.messageCreate.mock.calls[0][0].data.payload.toAgent).toEqual({
+      computeTargetId: AGENT,
+      name: "BA-runner",
+    });
+  });
+
+  it("refuses an agent without a task in the case and creates no message", async () => {
+    mocks.taskFindFirst.mockResolvedValue(null);
+    const result = await postCaseMessage(ORG, USER, CASE_ID, {
+      conversationId: CONVERSATION,
+      text: "Ask more",
+      toAgentId: AGENT,
+    });
+    expect(result).toEqual({ ok: false, error: Status.Conflict });
+    expect(mocks.messageCreate).not.toHaveBeenCalled();
+  });
+
+  it("clears the open questions of the answered tasks only", async () => {
+    await postCaseMessage(ORG, USER, CASE_ID, {
+      conversationId: CONVERSATION,
+      text: "",
+      answers: [{ taskId: TASK, questionId: "q1", answer: "REST" }],
+    });
+    expect(mocks.taskUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mocks.taskUpdateMany.mock.calls[0][0]).toEqual({
+      where: { id: { in: [TASK] }, caseId: CASE_ID, organizationId: ORG },
+      data: { openQuestionCount: 0 },
+    });
+  });
+
+  it("clears nothing without answers", async () => {
+    await postCaseMessage(ORG, USER, CASE_ID, {
+      conversationId: CONVERSATION,
+      text: "Hello",
+    });
+    expect(mocks.taskUpdateMany).not.toHaveBeenCalled();
   });
 });

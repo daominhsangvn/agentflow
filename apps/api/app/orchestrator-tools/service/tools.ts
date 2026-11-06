@@ -1,6 +1,7 @@
 import { LOOP_STEP_INPUTS_MAX } from "@agentflow-ai/loops-api/loop-step";
 import type { IntegrationToolDescriptor } from "@repo/api/src/types/integration-tools";
 import {
+  ORCHESTRATOR_ASKED_HUMAN_MAX,
   OrchestratorDocumentKind,
   OrchestratorReplyTarget,
   OrchestratorToolName,
@@ -309,8 +310,14 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.WaitHuman,
     title: "Wait for people",
     description:
-      "Ends the turn waiting for people: an answer, a decision or the next request wakes the conversation.",
-    inputSchema: NO_ARGUMENTS,
+      "Ends the turn waiting for people: an answer, a decision or the next request wakes the conversation. Set asked (one line) when you asked people something and wait for their answer: AgentFlow shows the case as needing a person. Omit it when you only wait for the next request.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        asked: { type: "string", maxLength: ORCHESTRATOR_ASKED_HUMAN_MAX },
+      },
+      additionalProperties: false,
+    },
     annotations: KEEPS,
   },
   {

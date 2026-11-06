@@ -1033,4 +1033,6 @@ export type WorkflowCaseCounts = {
   closed: number;
   /** Max case updatedAt; null without cases. */
   lastActivityAt: Date | null;
+  /** Open cases that need a person (caseNeedsPersonWhere). */
+  needsPerson: number;
 };

@@ -127,6 +127,9 @@ function item(
     workflow: { id: "w1", name: "Orchestrated flow" },
     waitingFor: OrchestratorCaseWaitingFor.Tasks,
     runningAgents: ["runner-1"],
+    needsPerson: false,
+    askedHuman: null,
+    agents: [],
     ...overrides,
   };
 }

@@ -216,12 +216,21 @@ ticket keys stay as they are.
 - [ ] **Try it** on one ticket through every status, with a question in a
   comment at each review step, before using it on real work.
 
+Rules advice: when a rule makes the orchestrator ask people something and
+wait, tell it to end with `wait_human` and set `asked` (one line: what was
+asked). The case then shows as needing a person in the Agents tab and the case
+list. Without `asked` the wait is not counted, which is right when it only
+waits for the next request.
+
 ## Navigation
 
 - **Cases**: sidebar Cases lists every case of the org (filter by project,
   workflow, status). Home shows what needs attention (pending decisions,
   waiting for a person, blocked or failed tasks, offline agents); each item
   links to its case.
+- **Workflow → Agents tab**: the orchestrator and its Agents as a diagram with
+  the number of cases that need a person at each node; select a node to see its
+  cases, read the thread and write to the orchestrator or to one Agent.
 - **Agents**: sidebar Agents lists every agent (automatic and personal) with
   health and Claude Code version. Click an agent for its detail:
   capabilities, the workflows that use it, recent tasks and usage.

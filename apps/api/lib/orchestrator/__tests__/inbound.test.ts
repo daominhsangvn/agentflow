@@ -237,6 +237,64 @@ describe("routeToOrchestrator", () => {
     expect(payloads.at(-1)).not.toHaveProperty("taskId");
   });
 
+  describe("open questions of an agent's task", () => {
+    async function setUp() {
+      const [first] = await routeToOrchestrator({
+        connection: connection(),
+        event: mention(),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: WORKFLOWS,
+      });
+      const conversationId = first?.conversationId ?? "";
+      fake.addTask("task-1", 2);
+      fake.addAnchor(conversationId, IntegrationProviderKey.Jira, "910", {
+        taskId: "task-1",
+        questionId: "q1",
+      });
+      fake.addAnchor(conversationId, IntegrationProviderKey.Jira, "912", {
+        taskId: "task-1",
+      });
+      return (id: string, parentId: string, dedupKey = `LD-7:reply:${id}`) =>
+        routeToOrchestrator({
+          connection: connection(),
+          event: mention({
+            triggerType: "jira.comment_reply",
+            dedupKey,
+            message: { id, parentId, text: "answer" },
+          }),
+          projectConnectionId: PROJECT_CONNECTION_ID,
+          workflows: [],
+        });
+    }
+
+    it("counts the first reply to a question and not the second", async () => {
+      const reply = await setUp();
+
+      await reply("920", "910");
+      expect(fake.tasks[0]?.openQuestionCount).toBe(1);
+
+      await reply("921", "910");
+      expect(fake.tasks[0]?.openQuestionCount).toBe(1);
+    });
+
+    it("does not count a duplicate delivery", async () => {
+      const reply = await setUp();
+
+      await reply("920", "910");
+      await reply("920", "910", "LD-7:reply:920-again");
+
+      expect(fake.tasks[0]?.openQuestionCount).toBe(1);
+    });
+
+    it("does not count a reply to an anchor that is not a question", async () => {
+      const reply = await setUp();
+
+      await reply("920", "912");
+
+      expect(fake.tasks[0]?.openQuestionCount).toBe(2);
+    });
+  });
+
   it("opens a conversation per comment thread replied to that is not its own", async () => {
     const [routed] = await routeToOrchestrator({
       connection: connection(),

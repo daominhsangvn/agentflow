@@ -1,4 +1,5 @@
 import {
+  ORCHESTRATOR_ASKED_HUMAN_MAX,
   OrchestratorCaseStatus,
   OrchestratorMessageKind,
   OrchestratorTaskStatus,
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   turn: null as Row | null,
   turnUpdates: [] as Row[],
   caseUpdates: [] as Row[],
+  conversationUpdates: [] as Row[],
   messages: [] as Row[],
   anchors: [] as Row[],
   replyOnItem: vi.fn(),
@@ -61,6 +63,12 @@ vi.mock("@repo/database", () => {
         ),
       updateMany: (args: { data: Row }) => {
         mocks.turnUpdates.push(args.data);
+        return Promise.resolve({ count: 1 });
+      },
+    },
+    orchestratorConversation: {
+      updateMany: (args: { data: Row }) => {
+        mocks.conversationUpdates.push(args.data);
         return Promise.resolve({ count: 1 });
       },
     },
@@ -105,7 +113,8 @@ vi.mock("@repo/database", () => {
       },
     },
   };
-  return { withDb: (fn: (client: unknown) => unknown) => fn(db) };
+  const run = (fn: (client: unknown) => unknown) => fn(db);
+  return { withDb: Object.assign(run, { tx: run }) };
 });
 vi.mock("@/lib/integrations/project-connections", () => ({
   loadProjectConnectionRuntime: () =>
@@ -176,6 +185,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.turnUpdates = [];
   mocks.caseUpdates = [];
+  mocks.conversationUpdates = [];
   mocks.messages = [];
   mocks.anchors = [];
   mocks.turn = {
@@ -495,6 +505,44 @@ describe("orchestratorToolService", () => {
     ]);
   });
 
+  it("stores what wait_human asked, and null without it", async () => {
+    await orchestratorToolService.call(TOKEN, OrchestratorToolName.WaitHuman, {
+      asked: "  Which policy version applies?  ",
+    });
+    for (const input of [{}, { asked: "   " }] as Record<string, string>[]) {
+      await orchestratorToolService.call(
+        TOKEN,
+        OrchestratorToolName.WaitHuman,
+        input
+      );
+    }
+    expect(mocks.conversationUpdates.map((u) => u.askedHuman)).toEqual([
+      "Which policy version applies?",
+      null,
+      null,
+    ]);
+  });
+
+  it("refuses an asked over the limit and ends nothing", async () => {
+    const result = await orchestratorToolService.call(
+      TOKEN,
+      OrchestratorToolName.WaitHuman,
+      { asked: "x".repeat(ORCHESTRATOR_ASKED_HUMAN_MAX + 1) }
+    );
+    expect(JSON.stringify(result)).toContain("asked");
+    expect(mocks.turnUpdates).toEqual([]);
+    expect(mocks.conversationUpdates).toEqual([]);
+  });
+
+  it("clears asked when the turn ends with close_case", async () => {
+    await orchestratorToolService.call(
+      TOKEN,
+      OrchestratorToolName.CloseCase,
+      {}
+    );
+    expect(mocks.conversationUpdates).toEqual([{ askedHuman: null }]);
+  });
+
   it("closes the case", async () => {
     await orchestratorToolService.call(TOKEN, OrchestratorToolName.CloseCase, {
       summary: "Answered.",
@@ -727,6 +775,7 @@ describe("orchestratorToolService", () => {
     expect(mocks.turnUpdates).toEqual([
       { ended: OrchestratorTurnEnd.WaitTasks },
     ]);
+    expect(mocks.conversationUpdates).toEqual([{ askedHuman: null }]);
     expect(mocks.evaluateWaits).toHaveBeenCalledWith(
       "conversation-1",
       expect.any(Date)

@@ -156,6 +156,7 @@ function makeDetail(): OrchestratorCaseDetail {
           { name: "big.bin", size: 900, stored: false, skipped: "too large" },
         ],
         filesOmitted: 0,
+        openQuestionCount: 0,
         questions: [],
         error: null,
         waiting: null,

@@ -107,6 +107,7 @@ const DETAIL_ROW = {
           turnId: null,
           createdAt: D("2026-10-23T08:01:00.000Z"),
           payload: {
+            toAgent: { computeTargetId: "r1", name: "runner-1" },
             answers: [
               { taskId: "task-1", questionId: "q1", answer: "A" },
               { taskId: "task-1", questionId: "q2", answer: "B" },
@@ -172,6 +173,7 @@ const DETAIL_ROW = {
       fork: false,
       resumeTaskId: null,
       loopId: null,
+      openQuestionCount: 1,
       result: {
         reply: "answer",
         questions: [{ id: "q1", question: "Which?" }],
@@ -326,6 +328,10 @@ describe("orchestratorCaseService.get", () => {
       ["task-1", "task-2"],
       [],
     ]);
+    expect(conversation?.messages.map((m) => m.toAgentId)).toEqual([
+      "r1",
+      null,
+    ]);
     expect(conversation?.turns.map((t) => t.id)).toEqual([
       "t-done",
       "t-running",
@@ -344,6 +350,7 @@ describe("orchestratorCaseService.get", () => {
       runnerName: "runner-1",
       waiting: "Waiting for runner-1.",
       filesOmitted: 2,
+      openQuestionCount: 1,
     });
     expect(detail?.tasks[0]?.files).toEqual([
       { name: "PRD.md", size: 1200, stored: true, skipped: null },

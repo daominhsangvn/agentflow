@@ -212,6 +212,14 @@ describe("advanceConversation", () => {
     });
   });
 
+  it("clears what the last turn asked when the next turn starts", async () => {
+    Object.assign(fake.conversations[0] ?? {}, { askedHuman: "Which policy?" });
+
+    await advanceConversation(conversationId, NOW);
+
+    expect(fake.conversations[0]?.askedHuman).toBeNull();
+  });
+
   it("waits while the thread is not quiet yet", async () => {
     await advanceConversation(
       conversationId,

@@ -207,6 +207,9 @@ export async function startTask(input: StartTaskInput): Promise<
       select: { id: true },
     })
   );
+  if (input.resumeTaskId && !input.fork) {
+    await clearOpenQuestions(input);
+  }
   const status = await launchTask(task.id);
   const stored = await withDb((db) =>
     db.orchestratorTask.findUnique({
@@ -646,6 +649,20 @@ async function ensureTaskDocument(
   return documentId;
 }
 
+/** A resume that is not a fork continues the task: its questions are covered. */
+async function clearOpenQuestions(input: StartTaskInput): Promise<void> {
+  await withDb((db) =>
+    db.orchestratorTask.updateMany({
+      where: {
+        id: input.resumeTaskId ?? "",
+        caseId: input.caseId,
+        organizationId: input.organizationId,
+      },
+      data: { openQuestionCount: 0 },
+    })
+  );
+}
+
 const DOCUMENT_TITLE_MAX = 255;
 
 /** Settles a running task whose loop ended; true when it did. */
@@ -706,6 +723,7 @@ async function settleTask(
           : OrchestratorTaskStatus.Failed,
         result: result as Prisma.InputJsonValue,
         finishedAt: now,
+        openQuestionCount: result.questions.length,
       },
     })
   );

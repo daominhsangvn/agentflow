@@ -1,4 +1,7 @@
-import { OrchestratorCaseStatus } from "@repo/api/src/types/orchestrator";
+import {
+  OrchestratorCaseStatus,
+  OrchestratorCaseWaitingFor,
+} from "@repo/api/src/types/orchestrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -8,7 +11,9 @@ import {
   useOrchestratorCase,
   useOrchestratorCaseLoops,
   useOrgOrchestratorCases,
+  useWorkflowAgentCases,
   useWorkflowOrchestratorCases,
+  workflowCasesPollInterval,
 } from "../use-orchestrator-cases";
 
 const CASE_ID = "case-1";
@@ -180,5 +185,58 @@ describe("useOrgOrchestratorCases", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockApiClient.get).toHaveBeenCalledWith("/orchestrator/cases");
+  });
+});
+
+describe("useWorkflowAgentCases", () => {
+  beforeEach(() => {
+    mockApiClient.get.mockReset();
+    mockApiClient.get.mockResolvedValue([]);
+  });
+
+  it("reads the workflow's cases from the org list", async () => {
+    const { result } = renderHook(() => useWorkflowAgentCases("w1"), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      "/orchestrator/cases?workflowId=w1"
+    );
+  });
+
+  it("sends no request while disabled", () => {
+    renderHook(() => useWorkflowAgentCases("w1", { enabled: false }), {
+      wrapper,
+    });
+
+    expect(mockApiClient.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("workflowCasesPollInterval", () => {
+  const idle = {
+    turnRunning: false,
+    activeTaskCount: 0,
+    waitingFor: OrchestratorCaseWaitingFor.Nothing,
+  };
+
+  it("polls in the background when nothing is live", () => {
+    expect(workflowCasesPollInterval([])).toBe(30_000);
+    expect(workflowCasesPollInterval([idle])).toBe(30_000);
+  });
+
+  it("polls fast when a case is active", () => {
+    expect(
+      workflowCasesPollInterval([idle, { ...idle, activeTaskCount: 1 }])
+    ).toBe(5000);
+  });
+
+  it("polls fast when a turn is awaited", () => {
+    expect(
+      workflowCasesPollInterval([
+        { ...idle, waitingFor: OrchestratorCaseWaitingFor.Turn },
+      ])
+    ).toBe(5000);
   });
 });

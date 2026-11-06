@@ -23,6 +23,7 @@ export function createOrchestratorDbFake() {
   const messages: Row[] = [];
   const turns: Row[] = [];
   const anchors: Row[] = [];
+  const tasks: Row[] = [];
   const workflows: Row[] = [];
 
   const unique = () =>
@@ -32,6 +33,19 @@ export function createOrchestratorDbFake() {
     Object.entries(where).every(([key, value]) => {
       if (key === "OR") {
         return (value as Row[]).some((part) => matches(row, part));
+      }
+      if (key === "AND") {
+        return (value as Row[]).every((part) => matches(row, part));
+      }
+      if (key === "payload") {
+        const { path, equals } = value as { path: string[]; equals: unknown };
+        const payload = (row.payload ?? {}) as Row;
+        return (
+          path.reduce<unknown>(
+            (node, step) => (node as Row | undefined)?.[step],
+            payload
+          ) === equals
+        );
       }
       if (value && typeof value === "object" && !(value instanceof Date)) {
         const filter = value as Row;
@@ -51,6 +65,9 @@ export function createOrchestratorDbFake() {
           return row[key] instanceof Date && row[key] < (filter.lt as Date);
         }
         if ("gt" in filter) {
+          if (typeof filter.gt === "number") {
+            return typeof row[key] === "number" && row[key] > filter.gt;
+          }
           return row[key] instanceof Date && row[key] > (filter.gt as Date);
         }
       }
@@ -245,6 +262,19 @@ export function createOrchestratorDbFake() {
         return Promise.resolve({ count: found.length });
       },
     },
+    orchestratorTask: {
+      updateMany: (args: { where: Row; data: Row }) => {
+        const found = tasks.filter((row) => matches(row, args.where));
+        for (const row of found) {
+          for (const [key, value] of Object.entries(args.data)) {
+            const step = (value as { decrement?: number } | null)?.decrement;
+            row[key] =
+              typeof step === "number" ? (row[key] as number) - step : value;
+          }
+        }
+        return Promise.resolve({ count: found.length });
+      },
+    },
     orchestratorTurn: {
       create: (args: { data: Row }) => {
         turns.push({
@@ -294,6 +324,10 @@ export function createOrchestratorDbFake() {
     messages,
     turns,
     anchors,
+    tasks,
+    addTask(id: string, openQuestionCount: number) {
+      tasks.push({ id, organizationId: ORG_ID, openQuestionCount });
+    },
     addWorkflow(
       id: string,
       name: string,

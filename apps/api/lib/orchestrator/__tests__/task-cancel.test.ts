@@ -166,6 +166,12 @@ describe("cancelTask", () => {
     expect(!result.ok && result.error).toContain("allows nothing");
   });
 
+  it("clears the task's open questions when it cancels", async () => {
+    const task = seedTask({ openQuestionCount: 2 });
+    await cancelTask(input);
+    expect(task.openQuestionCount).toBe(0);
+  });
+
   it("stops a running task's loop and closes it", async () => {
     const task = seedTask();
     const result = await cancelTask(input);

@@ -34,13 +34,14 @@ describe("loadCaseCounts", () => {
       open: 0,
       closed: 0,
       lastActivityAt: null,
+      needsPerson: 0,
     });
   });
 
   it("sums status groups and keeps the latest activity", async () => {
     const early = new Date("2026-10-01T00:00:00.000Z");
     const late = new Date("2026-10-05T00:00:00.000Z");
-    mocks.groupBy.mockResolvedValue([
+    mocks.groupBy.mockResolvedValueOnce([
       {
         workflowId: WF,
         status: OrchestratorCaseStatus.Open,
@@ -54,6 +55,9 @@ describe("loadCaseCounts", () => {
         _max: { updatedAt: late },
       },
     ]);
+    mocks.groupBy.mockResolvedValueOnce([
+      { workflowId: WF, _count: { _all: 1 } },
+    ]);
 
     const counts = await loadCaseCounts(ORG, [WF]);
 
@@ -62,6 +66,7 @@ describe("loadCaseCounts", () => {
       open: 2,
       closed: 3,
       lastActivityAt: late,
+      needsPerson: 1,
     });
   });
 
@@ -74,5 +79,19 @@ describe("loadCaseCounts", () => {
       organizationId: ORG,
       workflowId: { in: [WF] },
     });
+  });
+
+  it("counts needs-person cases with a second query that combines by AND", async () => {
+    mocks.groupBy.mockResolvedValue([]);
+
+    await loadCaseCounts(ORG, [WF]);
+
+    expect(mocks.groupBy).toHaveBeenCalledTimes(2);
+    const where = mocks.groupBy.mock.calls[1]?.[0].where;
+    expect(where.AND[0]).toEqual({
+      organizationId: ORG,
+      workflowId: { in: [WF] },
+    });
+    expect(where.AND[1].status).toBe(OrchestratorCaseStatus.Open);
   });
 });

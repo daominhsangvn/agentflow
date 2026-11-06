@@ -32,6 +32,9 @@ const cases: OrchestratorCaseListItem[] = [
     workflow: { id: "01WORKFLOW0000000000000", name: "Orchestrated" },
     waitingFor: OrchestratorCaseWaitingFor.Tasks,
     runningAgents: ["runner-1"],
+    needsPerson: false,
+    askedHuman: null,
+    agents: [],
   },
   {
     id: "01CASE0000000000000000002",
@@ -57,6 +60,9 @@ const cases: OrchestratorCaseListItem[] = [
     workflow: { id: "01WORKFLOW0000000000000", name: "Orchestrated" },
     waitingFor: OrchestratorCaseWaitingFor.Nothing,
     runningAgents: [],
+    needsPerson: false,
+    askedHuman: null,
+    agents: [],
   },
 ];
 

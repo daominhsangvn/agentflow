@@ -6,8 +6,9 @@ import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
 // catalog, and the inline error state is owned by that slice.
 import { QueryErrorMessage } from "@repo/app/integrations/components/query-error-message";
 import { useIntegrationProviders } from "@repo/app/integrations/hooks/use-integrations";
-// Cross-slice: an orchestrated workflow's cases are the orchestrator slice's list.
 import { OrchestratorCaseList } from "@repo/app/orchestrator/components/orchestrator-case-list";
+// Cross-slice: an orchestrated workflow's agents and cases are the orchestrator slice's views.
+import { WorkflowAgentsTab } from "@repo/app/orchestrator/components/workflow-agents-tab";
 import { ApiError } from "@repo/app/shared/api/api-error";
 import { ConfirmationDialog } from "@repo/app/shared/components/confirmation-dialog";
 import { useTabParam } from "@repo/app/shared/hooks/use-tab-param";
@@ -39,6 +40,7 @@ import { WorkflowRunHistory } from "./workflow-runs-table";
 export const WorkflowDetailTab = {
   Configuration: "configuration",
   Runs: "runs",
+  Agents: "agents",
   Cases: "cases",
   Events: "events",
 } as const;
@@ -126,6 +128,7 @@ function WorkflowDetailContent({
   const { navigate } = useNavigation();
   const buildOrgPath = useOrgPath();
   const isOrchestrated = workflow.agent.mode === WorkflowAgentMode.Orchestrated;
+  const needsPerson = workflow.caseCounts?.needsPerson ?? 0;
   const [runNowOpen, setRunNowOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const { activeTab, setActiveTab } = useTabParam<WorkflowDetailTab>({
@@ -186,6 +189,23 @@ function WorkflowDetailContent({
           {isOrchestrated ? (
             <TabsTrigger
               className="flex-initial px-4"
+              value={WorkflowDetailTab.Agents}
+            >
+              Agents
+              {needsPerson > 0 ? (
+                <Badge
+                  aria-label={`${needsPerson} ${needsPerson === 1 ? "case needs" : "cases need"} a person`}
+                  className="ml-2"
+                  variant="warning"
+                >
+                  {needsPerson}
+                </Badge>
+              ) : null}
+            </TabsTrigger>
+          ) : null}
+          {isOrchestrated ? (
+            <TabsTrigger
+              className="flex-initial px-4"
               value={WorkflowDetailTab.Cases}
             >
               Cases
@@ -216,6 +236,9 @@ function WorkflowDetailContent({
         </TabsContent>
         <TabsContent className="mt-3" value={WorkflowDetailTab.Runs}>
           <WorkflowRunHistory workflowId={workflow.id} />
+        </TabsContent>
+        <TabsContent className="mt-3" value={WorkflowDetailTab.Agents}>
+          <WorkflowAgentsTab isAdmin={isAdmin} workflowId={workflow.id} />
         </TabsContent>
         <TabsContent className="mt-3" value={WorkflowDetailTab.Cases}>
           <OrchestratorCaseList workflowId={workflow.id} />
@@ -253,6 +276,7 @@ function detailTabsFor(mode: WorkflowAgentMode): readonly WorkflowDetailTab[] {
   if (mode === WorkflowAgentMode.Orchestrated) {
     return [
       WorkflowDetailTab.Configuration,
+      WorkflowDetailTab.Agents,
       WorkflowDetailTab.Cases,
       WorkflowDetailTab.Events,
     ];

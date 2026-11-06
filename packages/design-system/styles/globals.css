@@ -390,6 +390,8 @@
      behind `motion-safe:` — the `progress-hatch` underneath is the
      reduced-motion (and paused) rendering. */
   --animate-progress-indeterminate: progress-indeterminate 1.6s linear infinite;
+  /* Agents tab diagram: dashes travel along an active edge (behind `motion-safe:`). */
+  --animate-edge-flow: edge-flow 1s linear infinite;
   /* ISS-5279: the status vocabulary's dot pulse — the mark `StatusDot` carries.
      The dot previously inlined `animate-[pulse_1.6s_ease-in-out_infinite]` as an
      arbitrary value, so a second surface wanting the same beat had to retype the
@@ -438,6 +440,12 @@
     }
     50% {
       box-shadow: 0 0 0 2px color-mix(in oklab, currentColor 25%, transparent);
+    }
+  }
+
+  @keyframes edge-flow {
+    to {
+      stroke-dashoffset: -12;
     }
   }
 
