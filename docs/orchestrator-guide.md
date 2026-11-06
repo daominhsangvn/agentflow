@@ -33,7 +33,7 @@ either drifts or cannot be enforced.
 | Layer | Where | Holds | Changed by |
 |---|---|---|---|
 | **Rules** | The workflow (`agent.instructions`, editor or YAML) | The process: the flow by status or label, roles, what needs approval, how to talk on the ticket | The admin, in AgentFlow |
-| **Capabilities** | Each runner's `AGENTFLOW.md` | The commands a runner offers: name, args, description, `mode`, `produces`, `needs`, `asks`, `push`, `attach` | The toolkit repository (auto runner) or the person's project folder (personal runner) |
+| **Capabilities** | Each of the project's Agents' `AGENTFLOW.md` (Project -> Agents) | The commands a runner offers: name, args, description, `mode`, `produces`, `needs`, `asks`, `push`, `attach` | The toolkit repository (auto runner) or the person's project folder (personal runner) |
 | **Skills and commands** | `.claude/skills` of the toolkit repo, or the personal folder | How a command does its work, its input check and its output files | The team owning the toolkit |
 | **Platform guarantees** | AgentFlow code | Cases, threads, debounce, supersede, waits, file transport, guards | Nobody per project |
 
@@ -184,7 +184,9 @@ ticket keys stay as they are.
   check in every command. Add them to the project's repositories.
 - [ ] **Runners**: one per team, plus one for the orchestrator (no repository
   clone; a small model is enough for testing). Personal runners for people who
-  work on their own machine (AGENTFLOW.md in their project folder).
+  work on their own machine (AGENTFLOW.md in their project folder). When the
+  project has Agents, the orchestrator's Agent must be one of them (save
+  refuses).
 - [ ] **Capabilities**: Project → Agents → Commands → refresh each auto
   runner after a toolkit change; check problems and warnings. A personal runner
   uploads its file when it starts.

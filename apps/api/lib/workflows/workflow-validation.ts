@@ -9,6 +9,7 @@ import {
 } from "@repo/api/src/types/orchestrator-grants";
 import type { ProjectProcess } from "@repo/api/src/types/project-process";
 import { ProcessStepType } from "@repo/api/src/types/project-process";
+import { readProjectRunnerIds } from "@repo/api/src/types/project-runners";
 import { Result } from "@repo/api/src/types/result";
 import {
   type SaveWorkflowInput,
@@ -51,6 +52,10 @@ import {
 } from "@/lib/integrations/registry";
 import { actionTarget } from "@/lib/integrations/types";
 import { toJsonObject } from "./engine/run-data";
+import {
+  projectAgentsError,
+  workflowAgentRefs,
+} from "./workflow-project-agents";
 
 /**
  * Validation of a saved workflow (docs/workflows.md "API"): projects and
@@ -160,9 +165,9 @@ export async function validateWorkflowInput(
   const { organizationId, existing } = context;
   const runAsUserId = input.runAsUserId ?? context.defaultRunAsUserId;
   const projectIds = triggerProjectIds(input);
-  const scopeError = await checkScope(organizationId, projectIds, runAsUserId);
-  if (scopeError) {
-    return Result.err(scopeError);
+  const scope = await checkScope(organizationId, projectIds, runAsUserId);
+  if (scope.error) {
+    return Result.err(scope.error);
   }
   const targetError = await checkComputeTarget({
     organizationId,
@@ -184,6 +189,14 @@ export async function validateWorkflowInput(
     if (ruleError) {
       return Result.err(`Runner rule ${index + 1}: ${ruleError}`);
     }
+  }
+  const agentsError = await checkProjectAgents(
+    organizationId,
+    input,
+    scope.projects
+  );
+  if (agentsError) {
+    return Result.err(agentsError);
   }
   const orchestratedError = checkOrchestrated(input);
   if (orchestratedError) {
@@ -300,12 +313,12 @@ async function checkScope(
   organizationId: string,
   projectIds: readonly string[],
   runAsUserId: string
-): Promise<string | null> {
+): Promise<{ error: string | null; projects: ScopeProject[] }> {
   const [projects, runAsUser] = await Promise.all([
     withDb((db) =>
       db.project.findMany({
         where: { id: { in: [...projectIds] }, organizationId },
-        select: { id: true },
+        select: { id: true, name: true, settings: true },
       })
     ),
     withDb((db) =>
@@ -316,12 +329,44 @@ async function checkScope(
     ),
   ]);
   if (projects.length !== projectIds.length) {
-    return "Project not found in this organization.";
+    return { error: "Project not found in this organization.", projects };
   }
   if (!runAsUser) {
-    return "The run-as user must be an active member of the organization.";
+    return {
+      error: "The run-as user must be an active member of the organization.",
+      projects,
+    };
   }
-  return null;
+  return { error: null, projects };
+}
+
+type ScopeProject = { id: string; name: string; settings: unknown };
+
+/**
+ * The default Agent and every rule's Agent must be Agents of each project
+ * that lists Agents. Names are loaded only when some project lists any.
+ */
+async function checkProjectAgents(
+  organizationId: string,
+  input: SaveWorkflowInput,
+  projects: ScopeProject[]
+): Promise<string | null> {
+  if (!projects.some((p) => readProjectRunnerIds(p.settings).length > 0)) {
+    return null;
+  }
+  const agents = workflowAgentRefs(input);
+  const agentIds = [...new Set(agents.map((a) => a.computeTargetId))];
+  const targets = await withDb((db) =>
+    db.computeTarget.findMany({
+      where: { id: { in: agentIds }, organizationId },
+      select: { id: true, machineName: true },
+    })
+  );
+  return projectAgentsError({
+    projects,
+    agents,
+    agentNames: new Map(targets.map((t) => [t.id, t.machineName])),
+  });
 }
 
 /**

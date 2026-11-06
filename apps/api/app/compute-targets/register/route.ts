@@ -4,11 +4,13 @@ import type {
 } from "@repo/api/src/types/compute-target";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import {
+  badRequestResponse,
   conflictResponse,
   errorResponse,
   parseBody,
   successResponse,
 } from "@/lib/route-utils";
+import { checkPersonalAgentProject } from "../personal-agent-project";
 import {
   computeTargetsService,
   isComputeTargetGatewayConflictResult,
@@ -31,6 +33,14 @@ export const POST = withAnyAuth<
 
     if (parseError || !body) {
       return parseError;
+    }
+
+    const project = await checkPersonalAgentProject(
+      user.organizationId,
+      body.capabilities
+    );
+    if (!project.ok) {
+      return badRequestResponse(project.error);
     }
 
     const target = await computeTargetsService.register(

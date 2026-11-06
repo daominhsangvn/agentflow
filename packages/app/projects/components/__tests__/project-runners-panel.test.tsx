@@ -1,3 +1,4 @@
+import { AgentKind } from "@repo/api/src/types/agent-fleet";
 import type { ProjectRunner } from "@repo/api/src/types/project-runners";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -12,17 +13,23 @@ const SPARE = "0199a5f0-0000-7000-8000-0000000000c3";
 
 const mocks = vi.hoisted(() => ({
   runners: [] as ProjectRunner[],
+  waiting: [] as ProjectRunner[],
   computers: [] as Array<{
     id: string;
     machineName: string;
     isOnline: boolean;
+    capabilities?: unknown;
   }>,
   saveMutate: vi.fn(),
 }));
 
 vi.mock("../../hooks/use-project-runners", () => ({
   useProjectRunners: () => ({
-    data: mocks.runners,
+    data: {
+      runners: mocks.runners,
+      waiting: mocks.waiting,
+      projectKey: "PRO-1",
+    },
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -45,6 +52,7 @@ function runner(id: string, overrides: Partial<ProjectRunner> = {}) {
     machineName: `runner-${id.slice(-2)}`,
     isOnline: true,
     isSharedWithOrg: true,
+    kind: AgentKind.Automatic,
     ownerName: "Ops Team",
     capacity: 2,
     activeLoops: 1,
@@ -65,6 +73,7 @@ beforeEach(() => {
       activeLoops: 0,
     }),
   ];
+  mocks.waiting = [];
   mocks.computers = [
     { id: DOTNET, machineName: "runner-c1", isOnline: true },
     { id: SPARE, machineName: "spare-box", isOnline: false },
@@ -78,12 +87,14 @@ describe("ProjectRunnersPanel", () => {
 
     const [dotnet, node] = screen.getAllByTestId("project-runner-row");
     expect(dotnet).toHaveTextContent(
-      "Online · 1 of 2 loops running · Ops Team"
+      "Online · Automatic · 1 of 2 loops running · Ops Team"
     );
     expect(
       within(dotnet).getByRole("list", { name: "Reported tools" })
     ).toHaveTextContent("gitpython3");
-    expect(node).toHaveTextContent("Offline · 0 loops running · Ops Team");
+    expect(node).toHaveTextContent(
+      "Offline · Automatic · 0 loops running · Ops Team"
+    );
     expect(node).toHaveTextContent("Not shared with the organization");
   });
 
@@ -107,6 +118,60 @@ describe("ProjectRunnersPanel", () => {
       screen.getByRole("option", { name: "spare-box (offline)" })
     ).toBeVisible();
     expect(screen.queryByRole("option", { name: "runner-c1" })).toBeNull();
+  });
+
+  it("lists waiting personal Agents with Add for admins only", async () => {
+    const user = userEvent.setup();
+    mocks.waiting = [runner(SPARE, { kind: AgentKind.Personal })];
+    const { unmount } = render(
+      <ProjectRunnersPanel isAdmin projectId={PROJECT_ID} />
+    );
+
+    expect(screen.getAllByTestId("project-runner-waiting-row")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Add runner-c3" }));
+    expect(mocks.saveMutate).toHaveBeenCalledWith({
+      runnerIds: [DOTNET, NODE, SPARE],
+    });
+    unmount();
+
+    render(<ProjectRunnersPanel isAdmin={false} projectId={PROJECT_ID} />);
+    expect(screen.getAllByTestId("project-runner-waiting-row")).toHaveLength(1);
+    expect(
+      screen.queryByRole("button", { name: "Add runner-c3" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides personal Agents of other projects from the picker", async () => {
+    const user = userEvent.setup();
+    mocks.computers = [
+      {
+        id: SPARE,
+        machineName: "other-personal",
+        isOnline: true,
+        capabilities: { personalRunner: { projectKey: "PRO-2" } },
+      },
+      {
+        id: "0199a5f0-0000-7000-8000-0000000000c4",
+        machineName: "own-personal",
+        isOnline: true,
+        capabilities: { personalRunner: { projectKey: "PRO-1" } },
+      },
+      {
+        id: "0199a5f0-0000-7000-8000-0000000000c5",
+        machineName: "auto-box",
+        isOnline: true,
+      },
+    ];
+    render(<ProjectRunnersPanel isAdmin projectId={PROJECT_ID} />);
+
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+    await user.click(screen.getByRole("combobox", { name: "Computer" }));
+
+    expect(screen.queryByRole("option", { name: "other-personal" })).toBeNull();
+    expect(
+      screen.getByRole("option", { name: "own-personal (personal)" })
+    ).toBeVisible();
+    expect(screen.getByRole("option", { name: "auto-box" })).toBeVisible();
   });
 
   it("explains where loops run without agents", () => {

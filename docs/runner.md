@@ -647,9 +647,16 @@ already in use, since both would be the same computer in AgentFlow.
   AgentFlow, and the answers resume the same session.
 - The folder is never removed or reset; worktree clean-up skips it.
 - A workflow chooses a person's runner per item with runner rules
-  (docs/workflows.md "Runner rules"), e.g. the assignee's. A personal runner
-  a workflow or a rule names is used even when the project lists other
-  runners.
+  (docs/workflows.md "Runner rules"), e.g. the assignee's.
+- A personal Agent registers with the organization only. Its project key must
+  be a project of the API key's organization, or registration is refused
+  (`personal_agent_project_not_found`). It is not added to the project
+  automatically: it shows on Project -> Agents as "waiting to be added" and an
+  admin adds it. It can only be added to its own project.
+- When the project has Agents, a workflow only uses a personal Agent when it
+  is one of them. Otherwise the run fails with `agent_not_in_project` ("Agent ... is
+  not one of project ...'s Agents"). An offline personal Agent fails the
+  launch; the run is not moved to another Agent.
 
 ### Writing commands for a personal runner
 
@@ -695,7 +702,10 @@ runs it by hand.
 
 ## Capabilities (AGENTFLOW.md)
 
-A runner tells AgentFlow what it can do in an `AGENTFLOW.md`, so the project's
+An Agent (automatic or personal) tells AgentFlow what it can do in an
+`AGENTFLOW.md`. The project's Agents are the ones on Project -> Agents; when
+the project has some, the orchestrator only sees the files of those Agents.
+So the project's
 orchestrator knows which command of which runner to send a request to. A
 personal runner reads it from its project folder; an auto runner reads it from
 the root of the default branch of the project's toolkit repository (see

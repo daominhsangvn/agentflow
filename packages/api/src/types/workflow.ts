@@ -174,6 +174,8 @@ export const WorkflowRunErrorCode = {
   SourceFetchFailed: "source_fetch_failed",
   DocumentCreateFailed: "document_create_failed",
   ComputeTargetUnavailable: "compute_target_unavailable",
+  /** The workflow names an Agent that is not one of the run's project's Agents; the run never moves to another Agent. */
+  AgentNotInProject: "agent_not_in_project",
   /**
    * A personal runner that runs one loop at a time is busy: the step waits
    * for it (retried, never fails the run by itself).

@@ -26,6 +26,8 @@ export const WORKFLOW_RUN_ERROR_MESSAGES: Record<WorkflowRunErrorCode, string> =
       "Couldn't create the Issue or the implementation plan",
     [WorkflowRunErrorCode.ComputeTargetUnavailable]:
       "The compute target is offline or not available to the run-as user",
+    [WorkflowRunErrorCode.AgentNotInProject]:
+      "The workflow's Agent is not one of the project's Agents",
     [WorkflowRunErrorCode.RunnerBusy]:
       "The personal runner is running another task; the step starts when it is free",
     [WorkflowRunErrorCode.SigningRequired]:

@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   events: [] as Array<{ eventType: string; data: unknown }>,
   markExpired: vi.fn(),
   cancel: vi.fn(),
+  runnerIds: [] as string[],
 }));
 
 vi.mock("@repo/database", () => {
@@ -46,6 +47,9 @@ vi.mock("@repo/database", () => {
   withDb.tx = (fn: (db: unknown) => unknown) => fn(mocks.fake?.db);
   return { withDb };
 });
+vi.mock("@/app/projects/project-runner-selection", () => ({
+  loadProjectRunnerIds: () => Promise.resolve(mocks.runnerIds),
+}));
 vi.mock("@/lib/loops/loop-desktop", () => ({
   dispatchOrchestratorTurn: mocks.dispatch,
   dispatchOrchestratorTurnCancel: mocks.cancel,
@@ -90,6 +94,7 @@ beforeEach(async () => {
   fake = createOrchestratorDbFake();
   mocks.fake = fake;
   mocks.command = null;
+  mocks.runnerIds = [];
   mocks.events = [];
   mocks.dispatch.mockResolvedValue("cmd-1");
   fake.addWorkflow(WORKFLOW_ID, "Questions on tickets");
@@ -411,6 +416,27 @@ describe("advanceConversation", () => {
       error: expect.stringContaining("runner offline"),
     });
     expect(fake.messages[0]?.turnId).toBeNull();
+  });
+
+  it("fails the turn, without retry, when the orchestrator's Agent is not a project Agent", async () => {
+    mocks.runnerIds = ["0199a5f0-0000-7000-8000-0000000000c8"];
+
+    await advanceConversation(conversationId, NOW);
+
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(fake.turns[0]).toMatchObject({
+      status: OrchestratorTurnStatus.Failed,
+      error: expect.stringContaining("not one of the project's Agents"),
+    });
+    expect(fake.messages[0]?.turnId).toBe(fake.turns[0]?.id);
+  });
+
+  it("dispatches when the orchestrator's Agent is one of the project's Agents", async () => {
+    mocks.runnerIds = [RUNNER_ID];
+
+    await advanceConversation(conversationId, NOW);
+
+    expect(mocks.dispatch).toHaveBeenCalledTimes(1);
   });
 
   it("does not start turns while the project's orchestrator is disabled", async () => {

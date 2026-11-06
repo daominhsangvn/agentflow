@@ -25,11 +25,18 @@ const mocks = vi.hoisted(() => ({
   targetOwner: "" as string,
   projectSlug: "PRO-1",
   rows: [] as Row[],
+  runnerIds: [] as string[],
+  loadProjectRunnerIds: vi.fn(),
+  capabilitiesWhere: null as unknown,
 }));
 
 vi.mock("@/lib/identifier-utils", () => ({
   resolveProjectId: (id: string) =>
     Promise.resolve(id === mocks.projectSlug ? IDS.project : null),
+}));
+
+vi.mock("@/app/projects/project-runner-selection", () => ({
+  loadProjectRunnerIds: mocks.loadProjectRunnerIds,
 }));
 
 vi.mock("@repo/database", () => {
@@ -66,7 +73,19 @@ vi.mock("@repo/database", () => {
         mocks.rows = [row];
         return Promise.resolve(row);
       }),
-      findMany: vi.fn(() => Promise.resolve(mocks.rows)),
+      findMany: vi.fn(
+        (args: { where: { computeTargetId?: { in: string[] } } }) => {
+          mocks.capabilitiesWhere = args.where;
+          const ids = args.where.computeTargetId?.in;
+          return Promise.resolve(
+            ids
+              ? mocks.rows.filter((row) =>
+                  ids.includes(row.computeTargetId as string)
+                )
+              : mocks.rows
+          );
+        }
+      ),
     },
   };
   const withDb = (fn: (client: unknown) => unknown) => fn(db);
@@ -77,6 +96,55 @@ vi.mock("@repo/database", () => {
 beforeEach(() => {
   mocks.targetOwner = IDS.owner;
   mocks.rows = [];
+  mocks.runnerIds = [];
+  mocks.loadProjectRunnerIds.mockImplementation(() =>
+    Promise.resolve(mocks.runnerIds)
+  );
+});
+
+describe("computeTargetCapabilitiesService.listForProject", () => {
+  const other = "0199a5f0-0000-7000-8000-0000000000ff";
+  const fileRows = () =>
+    [
+      {
+        id: "a",
+        source: RunnerCapabilitiesSource.Personal,
+        uploadedAt: new Date("2026-11-01T00:00:00.000Z"),
+        computeTargetId: IDS.target,
+        computeTarget: { machineName: "a", isOnline: true },
+      },
+      {
+        id: "b",
+        source: RunnerCapabilitiesSource.Personal,
+        uploadedAt: new Date("2026-11-01T00:00:00.000Z"),
+        computeTargetId: other,
+        computeTarget: { machineName: "b", isOnline: true },
+      },
+    ] as Row[];
+
+  it("returns only the project's Agents' files", async () => {
+    mocks.rows = fileRows();
+    mocks.runnerIds = [IDS.target];
+
+    const files = await computeTargetCapabilitiesService.listForProject(
+      IDS.org,
+      IDS.project
+    );
+
+    expect(files.map((file) => file.computeTargetId)).toEqual([IDS.target]);
+    expect(mocks.capabilitiesWhere).toMatchObject({ organizationId: IDS.org });
+  });
+
+  it("returns every file when the project has no Agents", async () => {
+    mocks.rows = fileRows();
+
+    const files = await computeTargetCapabilitiesService.listForProject(
+      IDS.org,
+      IDS.project
+    );
+
+    expect(files).toHaveLength(2);
+  });
 });
 
 describe("computeTargetCapabilitiesService.upload", () => {

@@ -3,7 +3,7 @@ title: "Orchestrator"
 description: "Set up an orchestrated workflow, what the Orchestrator Agent can do with each of its tools and connections, and the rule text to copy into agent.instructions for every capability."
 ---
 
-An **orchestrated workflow** (`agent.mode: orchestrated`) starts no run. Every event its triggers match, and every reply to a comment it posted, goes to the workflow's **Orchestrator Agent**: Claude Code on an Agent of its own, with only the orchestrator's tools. On each turn it reads your **rules** (`agent.instructions`), what happened on the ticket so far (the **case**) and what each Agent declares it can do (`AGENTFLOW.md`), then chooses which command of which Agent does the work, and answers in the thread.
+An **orchestrated workflow** (`agent.mode: orchestrated`) starts no run. Every event its triggers match, and every reply to a comment it posted, goes to the workflow's **Orchestrator Agent**: Claude Code on an Agent of its own (a project Agent), choosing only among the project's Agents when it has any, with only the orchestrator's tools. On each turn it reads your **rules** (`agent.instructions`), what happened on the ticket so far (the **case**) and what each Agent declares it can do (`AGENTFLOW.md`), then chooses which command of which Agent does the work, and answers in the thread.
 
 ```
 Jira status change / mention / reply ──▶ case LD-6 ──▶ turn of the Orchestrator Agent
@@ -28,7 +28,7 @@ Jira status change / mention / reply ──▶ case LD-6 ──▶ turn of the O
 ## Set it up
 
 1. **Agents and their `AGENTFLOW.md`**: one Agent per role (BA, Dev, QC), each declaring its commands ([Agent capabilities](/docs/guides/setup/agent-capabilities)). Check Project → Agents → Commands: no problems, the commands you expect.
-2. **An Agent for the Orchestrator Agent**: an automatic Agent; its turns run in an empty folder, with no files, shell or web. Give it a model provider ([Agents](/docs/guides/setup/agents)).
+2. **An Agent for the Orchestrator Agent**: an automatic Agent; when the project has Agents, it must be one of them (saving refuses another); its turns run in an empty folder, with no files, shell or web. Give it a model provider ([Agents](/docs/guides/setup/agents)).
 3. **Connections**: the ticket system (Jira, or Teams threads), Confluence when documents live there (`spaceKeys`, `parentPageId`), and the repositories ([Connections](/docs/guides/setup/connections)). The Jira webhook needs Issue updated and Comment created and updated.
 4. **The workflow** (below), with the rules.
 5. **Try it** on one ticket through every status, with a question in a comment at each review step.

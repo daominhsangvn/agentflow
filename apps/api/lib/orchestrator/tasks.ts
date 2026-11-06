@@ -129,7 +129,7 @@ export async function startTask(input: StartTaskInput): Promise<
   const runner = findRunner(files, input.runner);
   if (!runner) {
     return Result.err(
-      `No runner "${input.runner}" declared commands for this project: ${files.map((file) => file.runnerName).join(", ") || "none did"}.`
+      `No Agent "${input.runner}" of this project declared commands: ${files.map((file) => file.runnerName).join(", ") || "none did"}.`
     );
   }
   const checked = checkTaskCommand(runner, input.command, input.mode);
@@ -514,7 +514,7 @@ async function buildStep(
   );
   if (!file) {
     return Result.err(
-      "The task's runner no longer has an AGENTFLOW.md for this project: the task was not started."
+      "The task's Agent is no longer one of the project's Agents, or has no AGENTFLOW.md for this project: the task was not started."
     );
   }
   const checked = checkTaskCommand(file, task.command, null);

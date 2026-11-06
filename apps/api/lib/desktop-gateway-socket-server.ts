@@ -12,6 +12,7 @@ import { redactGatewaySessionId } from "@repo/observability/redact-correlation";
 import { buildTelemetryTraceContext } from "@repo/observability/telemetry/context";
 import { Server, type Socket } from "socket.io";
 import { apiKeysService } from "../app/api-keys/service";
+import { checkPersonalAgentProject } from "../app/compute-targets/personal-agent-project";
 import {
   computeTargetsService,
   isComputeTargetGatewayConflictResult,
@@ -321,6 +322,38 @@ export async function handleSocketHello(
     desktopSecurityUpgradeProtocolVersion:
       payload.desktopSecurityUpgradeProtocolVersion ?? null,
   };
+
+  const projectStage = await runStage(
+    checkPersonalAgentProject(authContext.organizationId, payload.capabilities),
+    HELLO_OPERATION_TIMEOUT_MS,
+    "checkPersonalAgentProject",
+    DesktopHelloNackReason.InternalError
+  );
+  if (!(projectStage.ok && projectStage.value.ok)) {
+    if (projectStage.ok) {
+      log.warn("desktop.gateway.hello.personal_project_not_found", {
+        socketId: socket.id,
+        organizationId: authContext.organizationId,
+      });
+    } else {
+      log.warn("desktop.gateway.hello.personal_project_check_failed", {
+        socketId: socket.id,
+        organizationId: authContext.organizationId,
+        reason: projectStage.reason,
+        error: projectStage.cause,
+      });
+    }
+    socket.emit(
+      "desktop.hello.nack",
+      toEnvelope<DesktopHelloNackPayload>({
+        reason: projectStage.ok
+          ? DesktopHelloNackReason.PersonalAgentProjectNotFound
+          : projectStage.reason,
+      })
+    );
+    socket.disconnect(true);
+    return;
+  }
 
   const stageTimings: {
     updateOwnedMs?: number;

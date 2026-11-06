@@ -33,22 +33,6 @@ const ACTIVE_LOOP_STATUSES = [
 const sequentialPersonalRunnerSchema = z.object({
   personalRunner: z.object({ parallel: z.literal(false) }),
 });
-const personalRunnerSchema = z.object({
-  personalRunner: z.object({ projectKey: z.string() }),
-});
-
-/**
- * True when the compute target is a personal runner. A workflow that names
- * one (directly or by a runner rule) runs there even when the project lists
- * other runners: the runner itself refuses another project's loops.
- */
-export async function isPersonalRunnerTarget(input: {
-  organizationId: string;
-  computeTargetId: string;
-}): Promise<boolean> {
-  const target = await findOrganizationTarget(input);
-  return personalRunnerSchema.safeParse(target?.capabilities).success;
-}
 
 /**
  * The RunnerBusy error when the compute target is a personal runner that

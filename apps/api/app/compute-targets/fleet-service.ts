@@ -159,21 +159,15 @@ export function ownerName(
   return name === "" ? null : name;
 }
 
-/** Projects that list the agent in their settings or hold a capability file for it. */
+/** Projects that list the Agent (settings.runnerIds); AGENTFLOW.md only describes it. */
 export function agentProjectIds(
   targetId: string,
-  projects: { id: string; settings: unknown }[],
-  capabilityRows: { computeTargetId: string; projectId: string }[]
+  projects: { id: string; settings: unknown }[]
 ): Set<string> {
   const ids = new Set<string>();
   for (const project of projects) {
     if (readProjectRunnerIds(project.settings).includes(targetId)) {
       ids.add(project.id);
-    }
-  }
-  for (const row of capabilityRows) {
-    if (row.computeTargetId === targetId) {
-      ids.add(row.projectId);
     }
   }
   return ids;
@@ -211,7 +205,7 @@ export function buildFleetEntry(
   projects: FleetProjectRow[],
   workflows: FleetWorkflowRow[]
 ): AgentFleetEntry {
-  const agentProjects = agentProjectIds(target.id, projects, capabilityRows);
+  const agentProjects = agentProjectIds(target.id, projects);
   const ownRows = capabilityRows.filter(
     (row) => row.computeTargetId === target.id
   );

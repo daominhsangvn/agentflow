@@ -34,7 +34,7 @@ Set in the workflow (editor or YAML) with `agent.mode: orchestrated`.
 
 | Setting | Meaning |
 |---|---|
-| `enabled` (workflow) | The orchestrator takes the workflow's requests. Needs a runner. |
+| `enabled` (workflow) | The orchestrator takes the workflow's requests. Needs a runner; when the project has Agents, it must be one of them (saving refuses otherwise; a turn fails otherwise). |
 | `agent.runner` | The computer its turns run on (Claude Code with the orchestrator's tools only). A computer the admin owns or one shared with the organization. |
 | `agent.instructions` | The rules (up to 8000 characters): which runner handles what, the order of the work, what needs an admin's approval. Sent with every turn. |
 | `agent.orchestrator.concurrency` | `supersede` (default): a new message on a thread whose turn is running stops that turn, and the next turn answers both. `queue`: the running turn finishes, the next one takes every new message. Messages on different threads always run in parallel. |
@@ -63,6 +63,8 @@ agent:
       confluence: [publish]
       pull_requests: [open]
 ```
+
+When the project has Agents, `runners_list` and the tasks it starts only use them.
 
 **Deployment model.** The orchestrator runs on one headless runner with no
 repository clone: its turns run in an empty folder with the MCP tools only.
@@ -446,6 +448,6 @@ question. It is decided once (`lib/orchestrator/decisions.ts`), either way:
 
 ## What runners can do (AGENTFLOW.md)
 
-The orchestrator chooses among the commands the runners declare in their
+The orchestrator chooses among the commands the project's Agents declare in their
 `AGENTFLOW.md`: docs/runner.md "Capabilities (AGENTFLOW.md)". Project →
 Agents → Commands shows them.

@@ -1,8 +1,10 @@
 "use client";
 
+import { AgentKind } from "@repo/api/src/types/agent-fleet";
 import {
   PROJECT_RUNNERS_MAX,
   type ProjectRunner,
+  readPersonalAgentProjectKey,
 } from "@repo/api/src/types/project-runners";
 // Cross-slice: same retryable error block as the repositories list.
 import { QueryErrorMessage } from "@repo/app/integrations/components/query-error-message";
@@ -41,7 +43,8 @@ export function ProjectRunnersPanel({
   const runners = useProjectRunners(projectId);
   const save = useSaveProjectRunners(projectId);
   const [isAdding, setIsAdding] = useState(false);
-  const assigned = runners.data ?? [];
+  const assigned = runners.data?.runners ?? [];
+  const waiting = runners.data?.waiting ?? [];
   const saveIds = (runnerIds: string[]) => save.mutate({ runnerIds });
 
   return (
@@ -100,6 +103,15 @@ export function ProjectRunnersPanel({
           runners={assigned}
         />
       )}
+      {waiting.length > 0 ? (
+        <WaitingList
+          canAdd={isAdmin && assigned.length < PROJECT_RUNNERS_MAX}
+          isAdmin={isAdmin}
+          isBusy={save.isPending}
+          onAdd={(id) => saveIds([...assigned.map((runner) => runner.id), id])}
+          runners={waiting}
+        />
+      ) : null}
       {isAdmin && isAdding ? (
         <AddRunnerForm
           assignedIds={assigned.map((runner) => runner.id)}
@@ -108,8 +120,65 @@ export function ProjectRunnersPanel({
             saveIds([...assigned.map((runner) => runner.id), id]);
             setIsAdding(false);
           }}
+          projectKey={runners.data?.projectKey ?? null}
         />
       ) : null}
+    </div>
+  );
+}
+
+type WaitingListProps = {
+  runners: ProjectRunner[];
+  isAdmin: boolean;
+  canAdd: boolean;
+  isBusy: boolean;
+  onAdd: (id: string) => void;
+};
+
+function WaitingList({
+  runners,
+  isAdmin,
+  canAdd,
+  isBusy,
+  onAdd,
+}: Readonly<WaitingListProps>) {
+  return (
+    <div className="space-y-1">
+      <h5 className="font-medium text-xs">Waiting to be added</h5>
+      <ul className="divide-y rounded-md border border-dashed">
+        {runners.map((runner) => (
+          <li
+            className="flex items-center gap-2 px-3 py-2"
+            data-testid="project-runner-waiting-row"
+            key={runner.id}
+          >
+            <span
+              aria-hidden="true"
+              className={`size-2 shrink-0 rounded-full ${runner.isOnline ? "bg-green-500" : "bg-muted-foreground/40"}`}
+            />
+            <div className="min-w-0 flex-1">
+              <span className="block truncate font-medium text-sm">
+                {runner.machineName}
+              </span>
+              <span className="block truncate text-muted-foreground text-xs">
+                Personal Agent registered for this project
+              </span>
+            </div>
+            {isAdmin ? (
+              <Button
+                aria-label={`Add ${runner.machineName}`}
+                disabled={isBusy || !canAdd}
+                onClick={() => onAdd(runner.id)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Add
+              </Button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -205,19 +274,23 @@ function ToolList({ tools }: Readonly<{ tools: Record<string, string> }>) {
 
 type AddRunnerFormProps = {
   assignedIds: string[];
+  projectKey: string | null;
   isBusy: boolean;
   onAdd: (id: string) => void;
 };
 
 function AddRunnerForm({
   assignedIds,
+  projectKey,
   isBusy,
   onAdd,
 }: Readonly<AddRunnerFormProps>) {
   const computers = useAssignableComputers(true);
   const [selectedId, setSelectedId] = useState("");
   const choices = (computers.data ?? []).filter(
-    (computer) => !assignedIds.includes(computer.id)
+    (computer) =>
+      !assignedIds.includes(computer.id) &&
+      belongsToProject(computer, projectKey)
   );
 
   if (computers.error) {
@@ -250,6 +323,9 @@ function AddRunnerForm({
           {choices.map((computer) => (
             <SelectItem key={computer.id} value={computer.id}>
               {computer.machineName}
+              {readPersonalAgentProjectKey(computer.capabilities)
+                ? " (personal)"
+                : ""}
               {computer.isOnline ? "" : " (offline)"}
             </SelectItem>
           ))}
@@ -267,8 +343,21 @@ function AddRunnerForm({
   );
 }
 
+/** A personal Agent can only join the project it registered for. */
+function belongsToProject(
+  computer: { capabilities?: unknown },
+  projectKey: string | null
+): boolean {
+  const key = readPersonalAgentProjectKey(computer.capabilities);
+  return key === null || key === projectKey;
+}
+
 function describeRunner(runner: ProjectRunner): string {
-  const parts = [runner.isOnline ? "Online" : "Offline", describeLoad(runner)];
+  const parts = [
+    runner.isOnline ? "Online" : "Offline",
+    runner.kind === AgentKind.Personal ? "Personal" : "Automatic",
+    describeLoad(runner),
+  ];
   if (runner.ownerName) {
     parts.push(runner.ownerName);
   }

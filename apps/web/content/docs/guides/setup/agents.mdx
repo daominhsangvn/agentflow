@@ -84,7 +84,7 @@ How to write commands that run unattended: [Agent capabilities](/docs/guides/set
 2. **Share it with the organization** there when workflows run as other users. A workflow may name an Agent its run-as user owns or one shared with the organization.
 3. Set its **Model provider**: "Anthropic-compatible API" with base URL, token, default model and other Claude Code variables, or paste a Claude `settings.json` and Import. The token is stored sealed and sent with every loop; nothing is written to the Agent's disk, and changing it needs no restart.
 4. Set its **Claude Code version**: `latest` (default) or an exact release such as `2.1.296`. An automatic Agent installs that version before a loop (`claude install <version>`) and fails the loop if an exact version cannot be installed (if the `latest` lookup fails, it uses the newest installed version); a personal Agent never installs, and fails the loop with the `claude install` command to run when its version differs from a pinned one.
-5. **Assign it to projects** (Project → **Agents**) when a project should use its own Agents: a new loop goes to the least busy of them. A personal Agent named by a workflow or an Agent rule is always used.
+5. **Assign it to projects** (Project → **Agents**) when a project should use its own Agents: a new loop goes to the least busy of them. A personal Agent is added to its own project only (it shows under "Waiting to be added" until then), and, when the project has Agents, a workflow uses it only when it is one of them; otherwise the run fails with `agent_not_in_project`.
 6. Run the **System Check** of the Agent: it reports the tools it finds (`git`, `claude`, `gh`, `python3`, ...) and the Claude credential.
 
 ## runner.env settings
@@ -116,4 +116,4 @@ Set in the environment or in `<data dir>/runner.env` (`NAME=value` per line; the
 
 ## The Orchestrator Agent
 
-An orchestrated workflow needs an Agent of its own for the Orchestrator Agent: an automatic Agent whose turns run in an empty folder with only the orchestrator's tools (no files, no shell, no web). It never clones the project. A small model is enough while you try the flow. Name it in the workflow as `agent.runner` ([Orchestrator](/docs/guides/setup/orchestrator)).
+An orchestrated workflow needs an Agent of its own for the Orchestrator Agent: an automatic Agent whose turns run in an empty folder with only the orchestrator's tools (no files, no shell, no web). It never clones the project. A small model is enough while you try the flow. Name it in the workflow as `agent.runner`; when the project has Agents, it must be one of them ([Orchestrator](/docs/guides/setup/orchestrator)).

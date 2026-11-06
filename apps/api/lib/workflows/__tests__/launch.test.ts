@@ -377,6 +377,7 @@ describe("launchWorkflowLoop — PLAN on a project with runners", () => {
       userId: "user-1",
       documentId: "plan-1",
       preferredComputeTargetId: TARGET_ID,
+      requirePreferred: true,
     });
     expect(mocks.resolveComputeTargetWithPreferences).not.toHaveBeenCalled();
   });
@@ -394,6 +395,24 @@ describe("launchWorkflowLoop — PLAN on a project with runners", () => {
       error: {
         code: WorkflowRunErrorCode.ComputeTargetUnavailable,
         message: "None of the project's runners is online",
+      },
+    });
+    expect(mocks.createLoop).not.toHaveBeenCalled();
+  });
+
+  it("fails with AgentNotInProject when the workflow's Agent is not a project Agent", async () => {
+    mocks.chooseProjectRunner.mockResolvedValue({
+      kind: ProjectRunnerChoiceKind.NotProjectAgent,
+      message: "Agent x is not one of project P's Agents.",
+    });
+
+    const result = await launchWorkflowLoop(baseInput);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: WorkflowRunErrorCode.AgentNotInProject,
+        message: "Agent x is not one of project P's Agents.",
       },
     });
     expect(mocks.createLoop).not.toHaveBeenCalled();
@@ -454,6 +473,9 @@ describe("launchWorkflowLoop — EXECUTE", () => {
     });
     expect(mocks.chooseProjectRunner).toHaveBeenCalledWith(
       expect.objectContaining({ preferredComputeTargetId: PARENT_TARGET_ID })
+    );
+    expect(mocks.chooseProjectRunner.mock.calls[0][0]).not.toHaveProperty(
+      "requirePreferred"
     );
   });
 

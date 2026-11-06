@@ -1049,10 +1049,17 @@ agent:
 - **Saving.** Each rule's runner follows the access rule of `runner` (owned
   by the run-as user or shared with the organization), and a condition must
   parse; the editor reports both on the rule's line, and an offline runner
-  as a warning.
-- **Project runners.** A project that lists runners runs on them, but a
-  personal runner a rule (or `runner`) names is kept: it refuses another
-  project's loops itself.
+  as a warning. Saving rejects a default, rule or orchestrator Agent that is
+  not an Agent of every trigger project that has Agents.
+- **Project Agents.** The workflow's Agent (or the rule's) must be one of the
+  project's Agents, or the run fails with `agent_not_in_project`; it is never
+  moved to another Agent. A named personal Agent that is offline fails the
+  launch. A named automatic Agent that is offline gives way to the least-busy
+  online automatic project Agent; a personal Agent is never chosen as a
+  fallback, since it runs in its owner's folder with their credentials.
+  EXECUTE and later steps of a run stay on the Agent that holds the run's
+  state while it is online; otherwise another online automatic project Agent
+  restores the plan state.
 - **A busy personal runner.** A step whose runner is a personal runner that
   runs one task at a time, while another loop holds it, waits
   (`runner_busy`, retried every minute, `engine/personal-runner-queue.ts`)
@@ -1515,7 +1522,7 @@ create/update responses are admin-only and always full).
 | POST | `/projects/{id}/connections` | `CreateProjectConnectionsInput` (`{connections: [{connectionId, key, name}] (1-10, one provider), settings}`) → `ProjectConnectionsResponse` (admin; all or none; 409 when a key is taken in the project, a connection is already in the project, or a source item scope such as a Jira project key belongs to a project connection of another project) |
 | PATCH | `/projects/{id}/connections/{projectConnectionId}` | `UpdateProjectConnectionInput` (`{name?, settings?}`; the connection and the key never change) → `ProjectConnection` (admin) |
 | DELETE | `/projects/{id}/connections/{projectConnectionId}` | → `{deleted: true}` (admin; 409 while a workflow or the project's current process uses the key; the organization connection stays) |
-| GET / PUT | `/projects/{id}/runners` | → `ProjectRunners`; PUT `{runnerIds}` replaces them (admin; empty for none) |
+| GET / PUT | `/projects/{id}/runners` | → `ProjectRunners` (adds `projectKey`, `waiting`); PUT `{runnerIds}` replaces them (admin; empty for none) |
 | GET | `/projects/{id}/repositories` | → `ProjectRepositoriesResponse` (oldest first) |
 | GET / PUT | `/projects/{id}/agent-instructions` | → `{instructions}`; PUT `{instructions}` (admin, max 32 000 characters; blank removes them) |
 | POST | `/projects/{id}/repositories` | `AddProjectRepositoryInput` (`{connectionId, externalId, isPrimary?}`) → `ProjectRepository` (admin; the connection must offer repositories and see the repository; 409 when already added or at 20 repositories) |
@@ -2099,10 +2106,13 @@ those repositories, as equals (`apps/api/app/projects/project-repository-checkou
   find (`toolchains` capability: node, dotnet, cargo, java, ...), shown on
   each runner. A new loop on a project with runners always runs on one of
   them: the computer the user or the workflow asked for when it is a runner,
-  else the online runner with the most free capacity (active loops against
-  `maxInFlightCommands`), else the run fails with "none of the project's
-  runners is online". A loop that continues another (EXECUTE) stays on the
-  runner holding its state. A project without runners runs on the computer
+  else the online automatic runner with the most free capacity (active loops
+  against `maxInFlightCommands`; a personal Agent is never picked this way),
+  else the run fails with "none of the project's runners is online". A personal Agent is a candidate only when it is added
+  to the project (it shows under "Waiting to be added" until an admin adds
+  it, and only to its own project; `PUT` refuses others); a workflow's named
+  personal Agent that is offline fails the launch. A loop that continues
+  another (EXECUTE) stays on the runner holding its state while it is online. A project without runners runs on the computer
   the user or the workflow picks (`app/projects/project-runner-selection.ts`).
 - **Bootstrap.** The agent-bootstrap preflight (generated expert agents) is
   skipped for workspace loops: it writes into each repository, where an

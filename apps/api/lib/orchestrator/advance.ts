@@ -14,6 +14,7 @@ import { type Prisma, withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
 import { z } from "zod";
 import { computeTargetCapabilitiesService } from "@/app/compute-targets/capabilities-service";
+import { loadProjectRunnerIds } from "@/app/projects/project-runner-selection";
 import { mapWithDbConcurrency } from "@/lib/db-fanout";
 import { desktopCommandStore } from "@/lib/desktop-command-store";
 import {
@@ -569,6 +570,17 @@ async function startTurnIfDue(
     });
     return created;
   });
+  if (
+    await refuseForeignOrchestratorAgent({
+      turnId: turn.id,
+      organizationId: conversation.organizationId,
+      projectId: conversation.projectId,
+      computeTargetId: settings.computeTargetId,
+      now,
+    })
+  ) {
+    return;
+  }
   const prompt = buildTurnPrompt({
     projectName: conversation.case.project.name,
     workflowName: settings.name,
@@ -625,4 +637,39 @@ async function startTurnIfDue(
 
 function turnFailure(error: string): OrchestratorTurnResult {
   return { type: "result", ok: false, error, retryable: true, sessionId: null };
+}
+
+const ORCHESTRATOR_AGENT_NOT_IN_PROJECT_ERROR =
+  "The orchestrator's Agent is not one of the project's Agents. Add it on Project → Agents, or choose one of the project's Agents for the workflow.";
+
+/**
+ * Fails the turn (not retried) when the project has Agents and the
+ * orchestrator's is not one of them; true when it did.
+ */
+async function refuseForeignOrchestratorAgent(input: {
+  turnId: string;
+  organizationId: string;
+  projectId: string;
+  computeTargetId: string;
+  now: Date;
+}): Promise<boolean> {
+  const runnerIds = await loadProjectRunnerIds(input.organizationId, {
+    projectId: input.projectId,
+  });
+  if (runnerIds.length === 0 || runnerIds.includes(input.computeTargetId)) {
+    return false;
+  }
+  const row = await withDb((db) =>
+    db.orchestratorTurn.findUnique({ where: { id: input.turnId } })
+  );
+  if (row) {
+    await failTurn(
+      row,
+      ORCHESTRATOR_AGENT_NOT_IN_PROJECT_ERROR,
+      false,
+      null,
+      input.now
+    );
+  }
+  return true;
 }

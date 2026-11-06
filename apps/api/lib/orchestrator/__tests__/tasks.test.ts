@@ -199,7 +199,7 @@ describe("startTask", () => {
     });
 
     expect(byRole.ok && byRole.value.runner).toBe("an-PRO-1");
-    expect(unknown.ok ? "" : unknown.error).toContain('No runner "runner-qc"');
+    expect(unknown.ok ? "" : unknown.error).toContain('No Agent "runner-qc"');
   });
 
   it("leaves pushing to a personal runner's own command", async () => {

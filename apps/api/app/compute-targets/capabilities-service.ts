@@ -11,6 +11,7 @@ import {
 import { Prisma, withDb } from "@repo/database";
 import { z } from "zod";
 import { serverCapabilityWarnings } from "@/app/compute-targets/capabilities-warnings";
+import { loadProjectRunnerIds } from "@/app/projects/project-runner-selection";
 import { resolveProjectId } from "@/lib/identifier-utils";
 
 /**
@@ -114,14 +115,24 @@ export const computeTargetCapabilitiesService = {
     return rows ? rows.map(toCapabilities) : null;
   },
 
-  /** Every runner's file for a project (the orchestrator's runner catalog). */
+  /**
+   * The project's Agents' files (the orchestrator's Agent catalog); every
+   * file when the project has no Agents.
+   */
   async listForProject(
     organizationId: string,
     projectId: string
   ): Promise<ComputeTargetCapabilities[]> {
+    const runnerIds = await loadProjectRunnerIds(organizationId, { projectId });
     const rows = await withDb((db) =>
       db.computeTargetCapabilities.findMany({
-        where: { organizationId, projectId },
+        where: {
+          organizationId,
+          projectId,
+          ...(runnerIds.length > 0
+            ? { computeTargetId: { in: runnerIds } }
+            : {}),
+        },
         orderBy: { uploadedAt: "desc" },
         include: WITH_RUNNER,
       })

@@ -90,6 +90,10 @@ vi.mock("@repo/app/projects/hooks/use-projects", () => ({
   }),
 }));
 
+vi.mock("@repo/app/projects/hooks/use-project-runners", () => ({
+  useProjectRunners: () => ({ data: undefined }),
+}));
+
 vi.mock("@repo/app/projects/hooks/use-project-repositories", () => ({
   useProjectRepositories: (
     _projectId: string,

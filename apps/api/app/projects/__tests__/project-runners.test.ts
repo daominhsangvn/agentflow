@@ -1,5 +1,9 @@
+import { AgentKind } from "@repo/api/src/types/agent-fleet";
 import { LoopStatus } from "@repo/api/src/types/loop";
-import { readProjectRunnerIds } from "@repo/api/src/types/project-runners";
+import {
+  readPersonalAgentProjectKey,
+  readProjectRunnerIds,
+} from "@repo/api/src/types/project-runners";
 import { Status } from "@repo/api/src/types/result";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -28,13 +32,15 @@ type Target = {
 };
 
 type Where = {
-  id: { in: string[] };
+  id: { in?: string[]; notIn?: string[] };
   isOnline?: boolean;
+  capabilities?: { path: string[]; equals: string };
   OR?: Array<{ userId?: string; isSharedWithOrg?: boolean }>;
 };
 
 const mocks = vi.hoisted(() => ({
   settings: null as unknown,
+  slug: null as string | null,
   targets: [] as Target[],
   /** computeTargetId → loops waiting or running. */
   active: {} as Record<string, number>,
@@ -50,23 +56,37 @@ vi.mock("@repo/database", () => ({
       artifact: {
         findFirst: () => {
           mocks.artifactReads += 1;
-          return Promise.resolve({ project: { settings: mocks.settings } });
+          return Promise.resolve({
+            project: { name: "Payments", settings: mocks.settings },
+          });
         },
       },
       project: {
         findFirst: ({ where }: { where: unknown }) => {
           mocks.projectWhere = where;
-          return Promise.resolve({ settings: mocks.settings });
+          return Promise.resolve({
+            name: "Payments",
+            settings: mocks.settings,
+            slug: mocks.slug,
+          });
         },
       },
       computeTarget: {
+        findFirst: ({ where }: { where: { id: string } }) =>
+          Promise.resolve(
+            mocks.targets.find((target) => target.id === where.id) ?? null
+          ),
         findMany: ({ where }: { where: Where }) =>
           Promise.resolve(
             mocks.targets.filter(
               (target) =>
-                where.id.in.includes(target.id) &&
+                (!where.id.in || where.id.in.includes(target.id)) &&
+                !where.id.notIn?.includes(target.id) &&
                 (where.isOnline === undefined ||
                   target.isOnline === where.isOnline) &&
+                (!where.capabilities ||
+                  personalKey(target.capabilities) ===
+                    where.capabilities.equals) &&
                 (!where.OR ||
                   where.OR.some(
                     (option) =>
@@ -90,6 +110,17 @@ vi.mock("@repo/database", () => ({
       $executeRaw: mocks.executeRaw,
     }),
 }));
+
+function personalKey(capabilities: unknown): string | null {
+  return readPersonalAgentProjectKey(capabilities);
+}
+
+function personal(id: string, key: string, overrides: Partial<Target> = {}) {
+  return target(id, {
+    capabilities: { personalRunner: { projectKey: key } },
+    ...overrides,
+  });
+}
 
 function target(id: string, overrides: Partial<Target> = {}): Target {
   return {
@@ -116,6 +147,7 @@ function choose(preferredComputeTargetId?: string) {
 
 beforeEach(() => {
   mocks.settings = { runnerIds: [DOTNET, NODE, BIG] };
+  mocks.slug = null;
   mocks.targets = [target(DOTNET), target(NODE), target(BIG)];
   mocks.active = {};
   mocks.loopWhere = null;
@@ -204,6 +236,91 @@ describe("chooseProjectRunner", () => {
     expect(mocks.artifactReads).toBe(0);
   });
 
+  it("refuses a named Agent outside the project's Agents, even with none online", async () => {
+    const outsider = "0199a5f0-0000-7000-8000-0000000000c9";
+    mocks.targets = [target(outsider), target(DOTNET, { isOnline: false })];
+
+    const choice = await chooseProjectRunner({
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      documentId: DOCUMENT_ID,
+      preferredComputeTargetId: outsider,
+      requirePreferred: true,
+    });
+
+    expect(choice.kind).toBe(ProjectRunnerChoiceKind.NotProjectAgent);
+    expect(choice).toMatchObject({
+      message: expect.stringContaining("runner-c9"),
+    });
+    expect(choice).toMatchObject({
+      message: expect.stringContaining("Payments"),
+    });
+  });
+
+  it("swaps to the least-busy Agent without requirePreferred", async () => {
+    const outsider = "0199a5f0-0000-7000-8000-0000000000c9";
+    mocks.targets = [target(outsider), target(NODE)];
+
+    expect(await choose(outsider)).toMatchObject({ computeTargetId: NODE });
+  });
+
+  it("fails when a required personal project Agent is offline", async () => {
+    mocks.targets = [
+      personal(DOTNET, "PRO-1", { isOnline: false }),
+      target(NODE),
+    ];
+
+    const choice = await chooseProjectRunner({
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      documentId: DOCUMENT_ID,
+      preferredComputeTargetId: DOTNET,
+      requirePreferred: true,
+    });
+
+    expect(choice.kind).toBe(ProjectRunnerChoiceKind.Unavailable);
+    expect(choice).toMatchObject({
+      message: expect.stringContaining("Personal Agent"),
+    });
+  });
+
+  it("gives way to the least-busy Agent when a required automatic one is offline", async () => {
+    mocks.targets = [target(DOTNET, { isOnline: false }), target(NODE)];
+
+    const choice = await chooseProjectRunner({
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      documentId: DOCUMENT_ID,
+      preferredComputeTargetId: DOTNET,
+      requirePreferred: true,
+    });
+
+    expect(choice).toMatchObject({ computeTargetId: NODE });
+  });
+
+  it("never moves a step to a personal Agent that is not the preferred one", async () => {
+    mocks.targets = [
+      target(DOTNET, { isOnline: false }),
+      personal(NODE, "PRO-1"),
+    ];
+
+    const choice = await choose(DOTNET);
+
+    expect(choice.kind).toBe(ProjectRunnerChoiceKind.Unavailable);
+  });
+
+  it("picks the shared Agent over a less busy personal one", async () => {
+    mocks.targets = [target(DOTNET), personal(NODE, "PRO-1")];
+
+    expect(await choose(BIG)).toMatchObject({ computeTargetId: DOTNET });
+  });
+
+  it("keeps a personal Agent when it is the preferred one", async () => {
+    mocks.targets = [target(DOTNET), personal(NODE, "PRO-1")];
+
+    expect(await choose(NODE)).toMatchObject({ computeTargetId: NODE });
+  });
+
   it("never falls back to another computer when no runner can take the loop", async () => {
     mocks.targets = [
       target(DOTNET, { isOnline: false }),
@@ -233,12 +350,15 @@ describe("projectRunnersService", () => {
     mocks.active = { [NODE]: 1 };
 
     expect(await projectRunnersService.get(ORG_ID, PROJECT_ID)).toEqual({
+      projectKey: null,
+      waiting: [],
       runners: [
         {
           id: NODE,
           machineName: "runner-c2",
           isOnline: true,
           isSharedWithOrg: true,
+          kind: AgentKind.Automatic,
           ownerName: "Ops Team",
           capacity: 2,
           activeLoops: 1,
@@ -249,6 +369,7 @@ describe("projectRunnersService", () => {
           machineName: "runner-c1",
           isOnline: false,
           isSharedWithOrg: true,
+          kind: AgentKind.Automatic,
           ownerName: null,
           capacity: null,
           activeLoops: 0,
@@ -290,6 +411,85 @@ describe("projectRunnersService", () => {
       error: { status: Status.BadRequest },
     });
     expect(mocks.executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("adds a personal Agent only to its own project", async () => {
+    mocks.slug = "PRO-1";
+    mocks.settings = {};
+    mocks.targets = [personal(DOTNET, "PRO-1")];
+
+    const ok = await projectRunnersService.update(ORG_ID, USER_ID, PROJECT_ID, {
+      runnerIds: [DOTNET],
+    });
+    expect(ok.ok).toBe(true);
+
+    mocks.slug = "PRO-2";
+    const refused = await projectRunnersService.update(
+      ORG_ID,
+      USER_ID,
+      PROJECT_ID,
+      { runnerIds: [DOTNET] }
+    );
+    expect(refused).toMatchObject({
+      ok: false,
+      error: {
+        status: Status.BadRequest,
+        message: expect.stringContaining(
+          "personal Agent of project PRO-1: it can only be added to that project"
+        ),
+      },
+    });
+  });
+
+  it("does not let a stored mismatched personal Agent block a removal", async () => {
+    mocks.slug = "PRO-2";
+    mocks.settings = { runnerIds: [DOTNET, NODE] };
+    mocks.targets = [personal(DOTNET, "PRO-1"), target(NODE)];
+
+    const result = await projectRunnersService.update(
+      ORG_ID,
+      USER_ID,
+      PROJECT_ID,
+      { runnerIds: [DOTNET] }
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("explains that a private Agent of another user must be shared", async () => {
+    mocks.targets = [target(DOTNET, { isSharedWithOrg: false })];
+
+    const result = await projectRunnersService.update(
+      ORG_ID,
+      USER_ID,
+      PROJECT_ID,
+      { runnerIds: [DOTNET] }
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        message: expect.stringContaining("is not shared with the organization"),
+      },
+    });
+  });
+
+  it("lists the unadded personal Agents of this project as waiting", async () => {
+    mocks.slug = "PRO-1";
+    mocks.settings = { runnerIds: [DOTNET] };
+    mocks.targets = [
+      target(DOTNET),
+      personal(NODE, "PRO-1"),
+      personal(BIG, "PRO-2"),
+    ];
+
+    const result = await projectRunnersService.get(ORG_ID, PROJECT_ID);
+
+    expect(result?.projectKey).toBe("PRO-1");
+    expect(result?.runners.map((r) => r.id)).toEqual([DOTNET]);
+    expect(result?.waiting.map((r) => [r.id, r.kind])).toEqual([
+      [NODE, AgentKind.Personal],
+    ]);
   });
 
   it("reports a missing project", async () => {

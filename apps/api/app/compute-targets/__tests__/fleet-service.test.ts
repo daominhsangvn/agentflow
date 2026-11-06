@@ -91,14 +91,10 @@ describe("agentProjectIds", () => {
     { id: "p3", settings: { runnerIds: [T1] } },
   ];
 
-  it("unions settings and capability rows without duplicates", () => {
-    const ids = agentProjectIds(T1, projects, [
-      { computeTargetId: T1, projectId: "p2" },
-      { computeTargetId: T1, projectId: "p3" },
-      { computeTargetId: "other", projectId: "p9" },
-    ]);
+  it("counts only the projects that list the Agent", () => {
+    const ids = agentProjectIds(T1, projects);
 
-    expect([...ids].sort()).toEqual(["p1", "p2", "p3"]);
+    expect([...ids].sort()).toEqual(["p1", "p3"]);
   });
 });
 
@@ -175,9 +171,16 @@ describe("computeTargetFleetService.list", () => {
         capabilities: { runner: "Dev", commands: [{ name: "analyze" }] },
         problems: [{ message: "x" }],
       },
+      {
+        computeTargetId: T1,
+        projectId: "p2",
+        capabilities: { runner: "Dev", commands: [{ name: "other" }] },
+        problems: [],
+      },
     ]);
     mocks.projectFindMany.mockResolvedValue([
-      { id: "p1", name: "Proj", settings: {} },
+      { id: "p1", name: "Proj", settings: { runnerIds: [T1] } },
+      { id: "p2", name: "Other", settings: {} },
     ]);
     mocks.workflowFindMany.mockResolvedValue([
       {

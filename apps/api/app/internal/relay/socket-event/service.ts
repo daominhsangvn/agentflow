@@ -21,6 +21,7 @@ import {
   ErrorClass,
   TelemetryCategory,
 } from "@repo/observability/telemetry/schema";
+import { checkPersonalAgentProject } from "@/app/compute-targets/personal-agent-project";
 import {
   computeTargetsService,
   isComputeTargetGatewayConflictResult,
@@ -394,6 +395,7 @@ async function resolveRelayHelloTarget(
 // ---------------------------------------------------------------------------
 
 type HelloStageTimings = {
+  personalProjectMs?: number;
   resolveTargetMs?: number;
   pendingCommandsMs?: number;
   onlineStateMs?: number;
@@ -439,6 +441,35 @@ async function handleHello(
   const input = parseRelayHelloInput(payload);
   if (!input) {
     return { emit: [], disconnect: true };
+  }
+
+  const projectStage = await timeStage(stageTimings, "personalProjectMs", () =>
+    runStage(
+      checkPersonalAgentProject(auth.organizationId, input.capabilities),
+      HELLO_OPERATION_TIMEOUT_MS,
+      "checkPersonalAgentProject",
+      DesktopHelloNackReason.InternalError
+    )
+  );
+  if (!(projectStage.ok && projectStage.value.ok)) {
+    if (!projectStage.ok) {
+      log.warn("relay.hello.personal_project_check_failed", {
+        organizationId: auth.organizationId,
+        userId: auth.userId,
+        reason: projectStage.reason,
+        error: projectStage.cause,
+      });
+    }
+    logRelayHello(auth, helloStart, stageTimings, {
+      outcome: projectStage.ok
+        ? "personal_project_not_found"
+        : "personal_project_check_failed",
+    });
+    return helloNackResponse(
+      projectStage.ok
+        ? DesktopHelloNackReason.PersonalAgentProjectNotFound
+        : projectStage.reason
+    );
   }
 
   const resolvedTarget = await timeStage(stageTimings, "resolveTargetMs", () =>

@@ -65,7 +65,7 @@ It uploads the folder's `AGENTFLOW.md` and waits for tasks. The data directory k
 1. The Agent appears online under **Agents** (sidebar) → **Your agents**.
 2. Set its **Model provider** there, or leave Claude Code to use the person's own login.
 3. Set its **Claude Code version** to `latest`, or to the exact version `claude --version` prints. A pinned version that differs fails each task with the `claude install <version>` command to run.
-4. Assign it to the project in Project → **Agents**, and name it in the workflow (`runner:` or a step's runner) where its commands should run.
+4. Add it in Project → **Agents**: until then it shows under **Waiting to be added**, and only an admin of the project can add it. It can only be added to its own project. A project key that is not a project of the API key's organization is refused at start (`personal_agent_project_not_found`). Then name it in the workflow (`runner:` or a step's runner) where its commands should run.
 5. Check Project → **Agents** → **Commands**: the commands from `AGENTFLOW.md` and any problems found in it.
 
 Try it on one ticket through every step of the workflow before using it on real work.

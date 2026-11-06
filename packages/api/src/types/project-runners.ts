@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AgentKind } from "./agent-fleet.ts";
 
 /**
  * Runners of a project: the computers (compute targets) its agent loops run
@@ -18,6 +19,8 @@ export type ProjectRunner = {
   machineName: string;
   isOnline: boolean;
   isSharedWithOrg: boolean;
+  /** Personal Agents belong to one project; automatic ones are shared. */
+  kind: AgentKind;
   ownerName: string | null;
   /** Loops it runs at once; null when it did not report it. */
   capacity: number | null;
@@ -32,6 +35,10 @@ export type ProjectRunner = {
 
 export type ProjectRunners = {
   runners: ProjectRunner[];
+  /** The project's key (slug); personal Agents register against it. */
+  projectKey: string | null;
+  /** Personal Agents registered for this project and not added yet. */
+  waiting: ProjectRunner[];
 };
 
 export const updateProjectRunnersInputSchema = z.object({
@@ -47,4 +54,18 @@ export function readProjectRunnerIds(settings: unknown): string[] {
     .object({ runnerIds: z.array(z.string()) })
     .safeParse(settings);
   return parsed.success ? parsed.data.runnerIds : [];
+}
+
+/**
+ * The project key (slug) of a personal Agent; null for an automatic Agent.
+ */
+export function readPersonalAgentProjectKey(
+  capabilities: unknown
+): string | null {
+  const parsed = z
+    .object({
+      personalRunner: z.object({ projectKey: z.string().trim().min(1) }),
+    })
+    .safeParse(capabilities);
+  return parsed.success ? parsed.data.personalRunner.projectKey : null;
 }

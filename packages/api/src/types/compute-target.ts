@@ -486,6 +486,7 @@ export const DesktopHelloNackReason = {
   ComputeTargetUpdateFailed: "compute_target_update_failed",
   OnlineStateUpdateFailed: "online_state_update_failed",
   PendingCommandsLookupFailed: "pending_commands_lookup_failed",
+  PersonalAgentProjectNotFound: "personal_agent_project_not_found",
   InternalError: "internal_error",
 } as const;
 export type DesktopHelloNackReason =

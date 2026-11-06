@@ -160,7 +160,7 @@ export const agentDetailService = {
       ...loops.map((loop) => loop.id),
     ];
     const usageByLoop = await loadLoopUsage(organizationId, loopIds, now);
-    const agentProjects = agentProjectIds(targetId, projects, capabilityRows);
+    const agentProjects = agentProjectIds(targetId, projects);
     return {
       agent: buildFleetEntry(target, capabilityRows, projects, workflows),
       healthTools: toHealthTools(target.healthCheck?.result),

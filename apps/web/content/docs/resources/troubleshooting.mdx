@@ -21,6 +21,10 @@ description: "Symptoms, causes and fixes for the server, Agents, integrations an
 | Agent exits with code 3 and `Cannot start: missing required tools ...` | `bash`, `git`, `claude`, `jq` or `python3` is not on the PATH, the plugins are not found, or the workspace is not writable. | Install the missing tool or fix the workspace path. |
 | `Connection degraded: ...` | The API is unreachable or rejects the key (revoked, or missing `write` scope). The Agent keeps retrying. | Check the API URL and issue a new key. |
 | Agent shows offline | The Agent stopped or lost its connection. | Look at Needs attention on Home and at the [Agents page](/docs/guides/operate/agents), then restart the Agent. |
+| Saving a workflow says an Agent "is not one of the Agents of project ..." | The default, rule or orchestrator Agent is not added to a trigger project that has Agents. | Add it in Project → Agents, or name one of the project's Agents. |
+| Run failed: "Agent ... is not one of project ...'s Agents" (`agent_not_in_project`) | The workflow or rule names an Agent outside the project's Agents. The run is not moved to another Agent. | Add the Agent to the project, or name a project Agent. |
+| Run failed: "Personal Agent ... is offline" | The personal Agent the run needs is offline; the run does not move to another Agent. | Start the personal Agent and run again. |
+| Personal Agent refused at start with `personal_agent_project_not_found` | Its project key is not a project of the API key's organization. | Correct the project key (`node runner.mjs setup --project <key>`). |
 | Task fails with a `claude install <version>` message | A personal Agent's Claude Code version differs from the pinned version. | Run the command shown on the machine. |
 | `No Claude credentials on this runner` warning | Expected when a Model provider is set in AgentFlow. Otherwise tasks fail at the first `claude` call. | Set the Model provider on the Agent, or sign in to Claude Code on the machine. |
 
