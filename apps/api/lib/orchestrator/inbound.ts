@@ -35,6 +35,8 @@ import {
  * ticket itself (event.itemChange: status, labels) is recorded as a status_changed /
  * label_added / label_removed message on the item conversation (ticket-change.ts).
  * A workflow with mentionOnly drops thread replies that only continue a channel conversation.
+ * An anchor an agent's own comment made (questions.json commentId) routes a reply the same
+ * way, and the message carries the task and question it answers.
  */
 
 const PRISMA_UNIQUE_VIOLATION = "P2002";
@@ -68,6 +70,8 @@ type RouteTarget = {
   caseId: string | null;
   /** It only continues a channel conversation: no trigger, no anchor. */
   continued: boolean;
+  /** The task question the anchor was made for: a reply answers it. */
+  answers: { taskId: string; questionId: string | null } | null;
 };
 
 type KnownConversation = {
@@ -139,6 +143,8 @@ async function resolveTargets(
             },
           },
           select: {
+            taskId: true,
+            questionId: true,
             conversation: {
               select: {
                 id: true,
@@ -152,7 +158,7 @@ async function resolveTargets(
     : null;
   const targets: RouteTarget[] = [];
   if (anchored) {
-    targets.push(toKnownTarget(anchored.conversation, false));
+    targets.push(anchoredTarget(anchored));
   }
   const seen = new Set(targets.map((target) => target.workflowId));
   for (const workflow of input.workflows) {
@@ -164,6 +170,7 @@ async function resolveTargets(
         conversationId: null,
         caseId: null,
         continued: false,
+        answers: null,
       });
     }
   }
@@ -200,6 +207,7 @@ function toKnownTarget(
     conversationId: conversation.id,
     caseId: conversation.case.id,
     continued,
+    answers: null,
   };
 }
 
@@ -229,6 +237,7 @@ async function deliver(args: {
     event: input.event,
     workflowNames: [workflow.name],
     debounceSeconds: workflow.debounceSeconds,
+    answers: target.answers,
   });
   if (created && workflow.debounceSeconds === 0) {
     waitUntil(advanceConversation(conversationId));
@@ -304,6 +313,7 @@ async function recordMessage(input: {
   event: InboundEvent;
   workflowNames: string[];
   debounceSeconds: number;
+  answers: RouteTarget["answers"];
 }): Promise<boolean> {
   const { event } = input;
   // One comment can raise several events (a reply that mentions the bot): it
@@ -333,6 +343,12 @@ async function recordMessage(input: {
             workflows: input.workflowNames,
             // The comment it replies to: an answer goes in that thread.
             parentId: event.message?.parentId ?? null,
+            ...(input.answers
+              ? {
+                  taskId: input.answers.taskId,
+                  questionId: input.answers.questionId,
+                }
+              : {}),
           },
         },
       });
@@ -377,4 +393,19 @@ function messageContent(event: InboundEvent): {
 function caseTitle(event: InboundEvent): string {
   const title = event.item.title?.trim();
   return (title ? `${event.item.key}: ${title}` : event.item.key).slice(0, 255);
+}
+
+function anchoredTarget(anchored: {
+  taskId: string | null;
+  questionId: string | null;
+  conversation: KnownConversation;
+}): RouteTarget {
+  const target = toKnownTarget(anchored.conversation, false);
+  if (anchored.taskId) {
+    return {
+      ...target,
+      answers: { taskId: anchored.taskId, questionId: anchored.questionId },
+    };
+  }
+  return target;
 }

@@ -161,6 +161,7 @@ export function buildStepWorkspaceInstructions(
   if (step.askQuestions) {
     lines.push(
       `- When you need a decision from the developer, do not guess: write the questions to \`${LOOP_STEP_WORK_DIR}/${LoopStepFile.Questions}\` as a JSON array of \`{"id": "q1", "question": "...", "options": ["..."]}\` (options optional), then stop. The run resumes this session with the answers.`,
+      '- If you already asked a question as a comment on the ticket, put that comment\'s id in its "commentId".',
       `- Limits of that file: at most ${LOOP_STEP_QUESTIONS_MAX} questions; each question at most ${LOOP_STEP_QUESTION_MAX} characters; at most ${LOOP_STEP_OPTIONS_MAX} options per question, each at most ${LOOP_STEP_OPTION_MAX} characters (keep options short, put the reasoning in the question).`
     );
   } else {

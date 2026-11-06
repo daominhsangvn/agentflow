@@ -203,7 +203,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.TaskGet,
     title: "Read a task",
     description:
-      "A task of this case: its status (queued, running, succeeded, failed, cancelled), its answer, the questions it asks, its error and its files.",
+      "A task of this case: its status (queued, running, succeeded, failed, cancelled), its answer, the questions it asks (a question with commentId was already asked on the item by its agent), its error and its files.",
     inputSchema: {
       type: "object",
       properties: { taskId: { type: "string" } },

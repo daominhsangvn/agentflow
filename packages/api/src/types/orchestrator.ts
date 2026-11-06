@@ -71,6 +71,8 @@ export const OrchestratorMessageKind = {
   Handoff: "handoff",
   /** The side conversation's record that it sent a confirmed summary (case_handoff; audit, never wakes a turn). */
   HandoffSent: "handoff_sent",
+  /** A task's agent asked questions on the item itself (questions.json commentId); the Case's record. Internal, never wakes a turn on its own. */
+  TaskAsked: "task_asked",
 } as const;
 export type OrchestratorMessageKind =
   (typeof OrchestratorMessageKind)[keyof typeof OrchestratorMessageKind];
@@ -349,7 +351,12 @@ export type OrchestratorCaseTask = {
   reply: string | null;
   files: OrchestratorCaseTaskFile[];
   filesOmitted: number;
-  questions: Array<{ id: string; question: string; options?: string[] }>;
+  questions: Array<{
+    id: string;
+    question: string;
+    options?: string[];
+    commentId?: string;
+  }>;
   error: string | null;
   /** Why a queued task has not started (a busy runner). */
   waiting: string | null;

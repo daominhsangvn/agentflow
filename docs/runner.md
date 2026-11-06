@@ -672,7 +672,9 @@ already in use, since both would be the same computer in AgentFlow.
   nobody is at the terminal to approve a prompt.
 - Questions work like any step with `questions: ask`: the command writes
   `$AGENTFLOW_WORKDIR/questions.json` and stops; the run shows them in
-  AgentFlow, and the answers resume the same session.
+  AgentFlow, and the answers resume the same session. A question may carry
+  `commentId` when the command already commented it on the ticket (see
+  "Writing commands for a personal runner").
 - The folder is never removed or reset; worktree clean-up skips it.
 - A workflow chooses a person's runner per item with runner rules
   (docs/workflows.md "Runner rules"), e.g. the assignee's. A personal runner
@@ -694,13 +696,18 @@ runs it by hand.
    When you need a decision you cannot make from the ticket or the code:
    - If `$AGENTFLOW_WORKDIR` is set (an AgentFlow run), write the questions to
      `$AGENTFLOW_WORKDIR/questions.json` as a JSON array, e.g.
-     `[{"id": "q1", "question": "Export CSV or XLSX?", "options": ["CSV", "XLSX"]}]`,
+     `[{"id": "q1", "question": "Export CSV or XLSX?", "options": ["CSV", "XLSX"]}]`
+     (with `"commentId": "10234"` when you already commented it, see below),
      then stop. Do not ask in the terminal.
    - Otherwise ask the user as usual.
    ```
 
    At most 30 questions, 2,000 characters each, 10 options of 500
-   characters. The answers come back as the next prompt of the same session:
+   characters. When the command itself comments the question on the ticket
+   with the person's Jira tools, it writes that comment's id as `commentId`
+   (`[{"id": "q1", "question": "...", "commentId": "10234"}]`, at most 255
+   characters); AgentFlow does not post it again and takes the reply to that
+   comment as the answer. Without `commentId` nothing changes. The answers come back as the next prompt of the same session:
    pick up where the command stopped (write the answers where the command
    keeps them, e.g. `clarifications.md`, then go on).
 2. **Never wait for a confirmation.** Decide with a stated default, or ask

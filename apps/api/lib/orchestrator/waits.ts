@@ -2,10 +2,12 @@ import {
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
   OrchestratorTaskStatus,
+  OrchestratorToolName,
   OrchestratorWaitKind,
 } from "@repo/api/src/types/orchestrator";
 import { withDb } from "@repo/database";
 import { z } from "zod";
+import { askedOnItem, askedQuestionNote } from "./asked-questions";
 import { describeTaskFiles } from "./task-files";
 import { readTaskResult, type TaskResult } from "./task-result";
 
@@ -331,12 +333,20 @@ function questionLines(task: WaitTask, result: TaskResult | null): string[] {
     task.status === OrchestratorTaskStatus.Cancelled
       ? "  It was cancelled: do not resume it; start a new task if the work is still needed."
       : `  To answer, run a task with resumeTaskId ${task.id} and the answers as its prompt.`;
+  const askedNote =
+    task.status !== OrchestratorTaskStatus.Cancelled &&
+    askedOnItem(result.questions).length > 0
+      ? [
+          `  Questions marked "already asked on the item" were posted there by the agent: ${OrchestratorToolName.WaitHuman} for the replies, then resume this task (no fork) with all the answers.`,
+        ]
+      : [];
   return [
     "  Questions it asks:",
     ...result.questions.map(
       (question) =>
-        `  - ${question.id}: ${question.question}${question.options?.length ? ` (options: ${question.options.join(" | ")})` : ""}`
+        `  - ${question.id}: ${question.question}${question.options?.length ? ` (options: ${question.options.join(" | ")})` : ""}${askedQuestionNote(question)}`
     ),
+    ...askedNote,
     hint,
   ];
 }

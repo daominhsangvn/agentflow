@@ -138,6 +138,25 @@ describe("renderCase task lines", () => {
     expect(await renderCase("c1")).toContain("answers ref 10500");
   });
 
+  it("marks questions asked on the item", async () => {
+    mockCase([
+      task("t1", [], {
+        status: OrchestratorTaskStatus.Succeeded,
+        result: {
+          reply: null,
+          questions: [
+            { id: "q1", question: "A?", commentId: "10234" },
+            { id: "q2", question: "B?" },
+          ],
+          error: null,
+        },
+      }),
+    ]);
+    expect(await renderCase("c1")).toContain(
+      "questions: q1 (asked on the item, comment 10234), q2"
+    );
+  });
+
   it("ends a task line with the names of its files", async () => {
     mockCase([
       task("t1", [], {

@@ -192,6 +192,51 @@ describe("routeToOrchestrator", () => {
     expect(fake.conversations).toHaveLength(1);
   });
 
+  it("tags a reply to an agent's own comment with the task and question it answers", async () => {
+    const [first] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention(),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: WORKFLOWS,
+    });
+    fake.addAnchor(
+      first?.conversationId ?? "",
+      IntegrationProviderKey.Jira,
+      "910",
+      { taskId: "task-1", questionId: "q1" }
+    );
+    fake.addAnchor(
+      first?.conversationId ?? "",
+      IntegrationProviderKey.Jira,
+      "911"
+    );
+
+    const reply = (id: string, parentId: string) =>
+      routeToOrchestrator({
+        connection: connection(),
+        event: mention({
+          triggerType: "jira.comment_reply",
+          dedupKey: `LD-7:reply:${id}`,
+          message: { id, parentId, text: "answer" },
+        }),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: [],
+      });
+    const [tagged] = await reply("920", "910");
+    const [plain] = await reply("921", "911");
+
+    expect(tagged?.conversationId).toBe(first?.conversationId);
+    expect(plain?.conversationId).toBe(first?.conversationId);
+    const payloads = fake.messages.map(
+      (m) => m.payload as Record<string, unknown>
+    );
+    expect(payloads.at(-2)).toMatchObject({
+      taskId: "task-1",
+      questionId: "q1",
+    });
+    expect(payloads.at(-1)).not.toHaveProperty("taskId");
+  });
+
   it("opens a conversation per comment thread replied to that is not its own", async () => {
     const [routed] = await routeToOrchestrator({
       connection: connection(),

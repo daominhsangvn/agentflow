@@ -87,7 +87,15 @@ vi.mock("@/lib/orchestrator/case-render", async () =>
   ).caseRenderModule()
 );
 
-beforeEach(resetTaskMocks);
+const recordAsked = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+vi.mock("@/lib/orchestrator/task-asked", () => ({
+  recordAskedQuestions: recordAsked,
+}));
+
+beforeEach(() => {
+  resetTaskMocks();
+  recordAsked.mockClear();
+});
 
 describe("startTask", () => {
   it("runs the command as a STEP loop on the case's Issue for that runner", async () => {
@@ -601,6 +609,66 @@ describe("advanceTasks", () => {
         error: null,
       },
     });
+  });
+
+  it("keeps a question's commentId and records it as asked on the item", async () => {
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+    });
+    const questions = [{ id: "q1", question: "Which?", commentId: "10234" }];
+    mocks.loops.set("loop-1", {
+      status: LoopStatus.Completed,
+      completedAt: new Date(),
+      revivalCount: 0,
+      error: null,
+      uploadedArtifacts: {
+        step: { stepId: "task-1", questions, files: [], questionsError: null },
+      },
+    });
+
+    await advanceTasks(new Date());
+
+    expect(mocks.tasks[0]?.result).toMatchObject({ questions });
+    expect(recordAsked).toHaveBeenCalledTimes(1);
+    expect(recordAsked).toHaveBeenCalledWith("task-1", questions);
+  });
+
+  it("does not record asked questions when the task was cancelled before it settled", async () => {
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+    });
+    const questions = [{ id: "q1", question: "Which?", commentId: "10234" }];
+    const loop = {
+      status: LoopStatus.Completed,
+      completedAt: new Date(),
+      revivalCount: 0,
+      error: null,
+      get uploadedArtifacts() {
+        // The cancel lands after the task was read as running.
+        const row = mocks.tasks[0];
+        if (row) {
+          row.status = OrchestratorTaskStatus.Cancelled;
+        }
+        return {
+          step: {
+            stepId: "task-1",
+            questions,
+            files: [],
+            questionsError: null,
+          },
+        };
+      },
+    };
+    mocks.loops.set("loop-1", loop);
+
+    await advanceTasks(new Date());
+
+    expect(mocks.tasks[0]?.status).toBe(OrchestratorTaskStatus.Cancelled);
+    expect(recordAsked).not.toHaveBeenCalled();
   });
 
   it("fails a task whose loop failed, with the loop's error", async () => {

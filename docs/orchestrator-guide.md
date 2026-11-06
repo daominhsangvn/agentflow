@@ -126,6 +126,12 @@ decisions to pass to later tasks that use the same file.
 Platform: each comment thread is its own conversation; `reply replyTo` and
 `task_run replyTo` keep an answer that waits for a task in the thread it
 answers.
+Write: *"A question the agent already asked on the ticket (marked already
+asked): do not post it again; wait for the reply to that comment; when every
+question of the task has an answer, resume it with the answers."*
+Platform: the question's `commentId` becomes an anchor; a reply to that comment
+reaches the orchestrator even without a mention and carries `task` and
+`question`.
 
 **BLOCKED.**
 Write: *"A task answer that starts with BLOCKED: did nothing. Comment what is

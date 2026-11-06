@@ -31,6 +31,14 @@ LD-6 case 1: the admin answered questions 1 to 4 and asked about privacy. The or
 - `wait_human` ends the turn waiting for people. An answer, a decision or the next request wakes the conversation.
 - Several comments in the debounce window: with `concurrency: supersede` (the default), the running turn is superseded and its writes are refused. The next turn sees all messages, each with its comment reference, and answers each in its own thread.
 
+## Questions the agent asked on the ticket
+
+A personal Agent may comment its question on the ticket with the person's own account and give the comment id (`commentId`) in `questions.json`. The case conversation records it as "Asked on item". A reply to that comment reaches the orchestrator even without a mention. The orchestrator does not repost the question, waits, and resumes the task once every question has an answer.
+
+```text
+- A task question marked already asked on the item: do not post it again; wait for the reply; resume the task when all its questions are answered.
+```
+
 ## Answer on the case page
 
 Anyone in the organization can answer a task's questions on the case page (**Send answers**) or message the orchestrator. The orchestrator answers on the case page and posts on the ticket only when the rules say so ([Cases](/docs/guides/operate/cases#answer-questions)).

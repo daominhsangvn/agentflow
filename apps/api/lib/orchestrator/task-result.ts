@@ -7,7 +7,7 @@ import { z } from "zod";
 
 export type TaskResult = {
   reply: string | null;
-  questions: Array<{ id: string; question: string; options?: string[] }>;
+  questions: TaskQuestion[];
   error: string | null;
   /** Why a queued task has not started (a busy runner). */
   waiting?: string | null;
@@ -90,6 +90,7 @@ const taskResultSchema = z.object({
         id: z.string(),
         question: z.string(),
         options: z.array(z.string()).optional(),
+        commentId: z.string().optional(),
       })
     )
     .default([]),
@@ -138,3 +139,14 @@ export function mergeTaskResult(
   }
   return { ...kept, ...next };
 }
+
+/**
+ * A question a task's agent asked. `commentId` is set when the agent already
+ * asked it on the source item itself (questions.json commentId).
+ */
+export type TaskQuestion = {
+  id: string;
+  question: string;
+  options?: string[];
+  commentId?: string;
+};
