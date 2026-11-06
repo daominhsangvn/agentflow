@@ -70,6 +70,7 @@ const RE_1 = /^BA,/;
 const RE_2 = /^Boss,/;
 const RE_3 = /^Boss, orchestrator/;
 const RE_4 = /^Dev,/;
+const RE_ASKS = /Orchestrator asks/;
 
 describe("AgentMap", () => {
   it("renders pressed state and labels", () => {
@@ -118,6 +119,31 @@ describe("AgentMap", () => {
     expect(
       screen.getByText("Orchestrator asks: Which env?")
     ).toBeInTheDocument();
+  });
+
+  it("hides the asked banner once the selected case needs no person", () => {
+    renderMap({ selectedCase: makeCase({ needsPerson: false }) });
+    expect(screen.queryByText(RE_ASKS)).not.toBeInTheDocument();
+  });
+
+  it("animates an edge with both open questions and active tasks", () => {
+    renderMap({
+      cases: [
+        makeCase({
+          agents: [
+            {
+              computeTargetId: "ba",
+              activeTaskCount: 1,
+              openQuestionCount: 1,
+            },
+          ],
+        }),
+      ],
+    });
+    const edge = screen
+      .getAllByTestId("agent-map-edge")
+      .find((el) => el.getAttribute("class")?.includes("stroke-warning"));
+    expect(edge?.getAttribute("class")).toContain("animate-edge-flow");
   });
 
   it("shows a fallback without an orchestrator and an empty state", () => {

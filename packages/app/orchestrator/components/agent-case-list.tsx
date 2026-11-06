@@ -21,7 +21,7 @@ export function AgentCaseList({
   nodeLabel,
   onSelect,
   isLoading,
-}: AgentCaseListProps) {
+}: Readonly<AgentCaseListProps>) {
   const rows = sortInbox(cases);
   return (
     <div className="flex flex-col gap-2">

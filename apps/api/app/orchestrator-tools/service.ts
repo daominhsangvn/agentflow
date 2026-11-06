@@ -114,7 +114,11 @@ const closeInputSchema = z.object({
   summary: z.string().trim().max(2000).optional(),
 });
 const waitHumanInputSchema = z.object({
-  asked: z.string().trim().min(1).max(ORCHESTRATOR_ASKED_HUMAN_MAX).optional(),
+  asked: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.string().trim().max(ORCHESTRATOR_ASKED_HUMAN_MAX).optional()
+  ),
 });
 const COMMAND_RE = /^\/[\w:.-]{1,100}$/;
 const taskRunInputSchema = z.object({
@@ -759,21 +763,19 @@ async function endTurn(
   ended: OrchestratorTurnEnd,
   askedHuman: string | null = null
 ): Promise<void> {
-  await withDb((db) =>
-    db.orchestratorTurn.updateMany({
+  await withDb.tx(async (tx) => {
+    await tx.orchestratorTurn.updateMany({
       where: { id: context.turnId, status: OrchestratorTurnStatus.Running },
       data: { ended },
-    })
-  );
-  await withDb((db) =>
-    db.orchestratorConversation.updateMany({
+    });
+    await tx.orchestratorConversation.updateMany({
       where: {
         id: context.conversationId,
         organizationId: context.organizationId,
       },
       data: { askedHuman },
-    })
-  );
+    });
+  });
 }
 
 /** A write on the conversation's own item: needs its grant and connection. */

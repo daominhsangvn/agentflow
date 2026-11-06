@@ -113,7 +113,8 @@ vi.mock("@repo/database", () => {
       },
     },
   };
-  return { withDb: (fn: (client: unknown) => unknown) => fn(db) };
+  const run = (fn: (client: unknown) => unknown) => fn(db);
+  return { withDb: Object.assign(run, { tx: run }) };
 });
 vi.mock("@/lib/integrations/project-connections", () => ({
   loadProjectConnectionRuntime: () =>
@@ -508,14 +509,17 @@ describe("orchestratorToolService", () => {
     await orchestratorToolService.call(TOKEN, OrchestratorToolName.WaitHuman, {
       asked: "  Which policy version applies?  ",
     });
-    await orchestratorToolService.call(
-      TOKEN,
-      OrchestratorToolName.WaitHuman,
-      {}
-    );
-    expect(mocks.conversationUpdates).toEqual([
-      { askedHuman: "Which policy version applies?" },
-      { askedHuman: null },
+    for (const input of [{}, { asked: "   " }] as Record<string, string>[]) {
+      await orchestratorToolService.call(
+        TOKEN,
+        OrchestratorToolName.WaitHuman,
+        input
+      );
+    }
+    expect(mocks.conversationUpdates.map((u) => u.askedHuman)).toEqual([
+      "Which policy version applies?",
+      null,
+      null,
     ]);
   });
 

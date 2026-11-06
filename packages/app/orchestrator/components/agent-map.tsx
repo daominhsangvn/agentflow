@@ -34,7 +34,7 @@ export function AgentMap({
   selectedNodeId,
   selectedCase,
   onSelect,
-}: AgentMapProps) {
+}: Readonly<AgentMapProps>) {
   if (map.agents.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground text-sm">
@@ -229,11 +229,13 @@ function edgeClass(
   cases: OrchestratorCaseListItem[],
   agent: WorkflowAgentMapAgent
 ): string {
+  const active = agentHasActiveTasks(cases, agent.computeTargetId);
+  const flow = active ? " motion-safe:animate-edge-flow" : "";
   if (agentHasOpenQuestions(cases, agent.computeTargetId)) {
-    return "stroke-warning";
+    return `stroke-warning${flow}`;
   }
-  if (agentHasActiveTasks(cases, agent.computeTargetId)) {
-    return "stroke-primary motion-safe:animate-edge-flow";
+  if (active) {
+    return `stroke-primary${flow}`;
   }
   return "stroke-muted-foreground/40";
 }
@@ -277,7 +279,7 @@ function askedBanner(
   selectedCase: OrchestratorCaseListItem | null
 ): string | null {
   if (selectedCase) {
-    return selectedCase.askedHuman;
+    return selectedCase.needsPerson ? selectedCase.askedHuman : null;
   }
   const newest = cases
     .filter((item) => item.needsPerson && item.askedHuman)
