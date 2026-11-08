@@ -9,7 +9,8 @@ import {
   OrchestratorDecisionStatus,
   OrchestratorTaskStatus,
 } from "@repo/api/src/types/orchestrator";
-import { type Prisma, withDb } from "@repo/database";
+import { Prisma, withDb } from "@repo/database";
+import { z } from "zod";
 import { caseNeedsPersonWhere } from "@/lib/orchestrator/case-needs-person";
 
 /**
@@ -39,6 +40,14 @@ export type CaseAgentGroup = {
   status: string;
   _count: { _all: number };
   _sum: { openQuestionCount: number | null };
+};
+
+export type LatestAgentTask = {
+  caseId: string;
+  computeTargetId: string;
+  status: string;
+  error: string | null;
+  waiting: string | null;
 };
 
 export type WaitingForInput = {
@@ -101,65 +110,70 @@ export async function loadCaseWaitState(
   if (caseIds.length === 0) {
     return state;
   }
-  const [conversations, waits, tasks, agentGroups] = await Promise.all([
-    withDb((db) =>
-      db.orchestratorConversation.findMany({
-        where: {
-          organizationId,
-          caseId: { in: caseIds },
-          OR: [
-            { status: OrchestratorConversationStatus.Waiting },
-            { askedHuman: { not: null } },
-            { nextWakeAt: { not: null } },
-          ],
-        },
-        select: {
-          caseId: true,
-          status: true,
-          askedHuman: true,
-          nextWakeAt: true,
-        },
-        orderBy: { updatedAt: "desc" },
-      })
-    ),
-    withDb((db) =>
-      db.orchestratorWait.findMany({
-        where: {
-          organizationId,
-          firedAt: null,
-          conversation: { caseId: { in: caseIds } },
-        },
-        select: { conversation: { select: { caseId: true } } },
-      })
-    ),
-    withDb((db) =>
-      db.orchestratorTask.findMany({
-        where: {
-          organizationId,
-          caseId: { in: caseIds },
-          status: {
-            in: [OrchestratorTaskStatus.Queued, OrchestratorTaskStatus.Running],
+  const [conversations, waits, tasks, agentGroups, latestTasks] =
+    await Promise.all([
+      withDb((db) =>
+        db.orchestratorConversation.findMany({
+          where: {
+            organizationId,
+            caseId: { in: caseIds },
+            OR: [
+              { status: OrchestratorConversationStatus.Waiting },
+              { askedHuman: { not: null } },
+              { nextWakeAt: { not: null } },
+            ],
           },
-        },
-        select: {
-          caseId: true,
-          computeTarget: { select: { machineName: true } },
-        },
-      })
-    ),
-    withDb((db) =>
-      db.orchestratorTask.groupBy({
-        by: ["caseId", "computeTargetId", "status"],
-        where: {
-          organizationId,
-          caseId: { in: caseIds },
-          computeTargetId: { not: null },
-        },
-        _count: { _all: true },
-        _sum: { openQuestionCount: true },
-      })
-    ),
-  ]);
+          select: {
+            caseId: true,
+            status: true,
+            askedHuman: true,
+            nextWakeAt: true,
+          },
+          orderBy: { updatedAt: "desc" },
+        })
+      ),
+      withDb((db) =>
+        db.orchestratorWait.findMany({
+          where: {
+            organizationId,
+            firedAt: null,
+            conversation: { caseId: { in: caseIds } },
+          },
+          select: { conversation: { select: { caseId: true } } },
+        })
+      ),
+      withDb((db) =>
+        db.orchestratorTask.findMany({
+          where: {
+            organizationId,
+            caseId: { in: caseIds },
+            status: {
+              in: [
+                OrchestratorTaskStatus.Queued,
+                OrchestratorTaskStatus.Running,
+              ],
+            },
+          },
+          select: {
+            caseId: true,
+            computeTarget: { select: { machineName: true } },
+          },
+        })
+      ),
+      withDb((db) =>
+        db.orchestratorTask.groupBy({
+          by: ["caseId", "computeTargetId", "status"],
+          where: {
+            organizationId,
+            caseId: { in: caseIds },
+            computeTargetId: { not: null },
+          },
+          _count: { _all: true },
+          _sum: { openQuestionCount: true },
+        })
+      ),
+      loadLatestAgentTasks(organizationId, caseIds),
+    ]);
   for (const row of conversations) {
     foldConversation(state, row, now);
   }
@@ -177,13 +191,14 @@ export async function loadCaseWaitState(
   for (const [caseId, set] of names) {
     state.agents.set(caseId, [...set].sort());
   }
-  state.caseAgents = foldCaseAgents(agentGroups);
+  state.caseAgents = foldCaseAgents(agentGroups, latestTasks);
   return state;
 }
 
 /** Every agent with a task in each case, sorted by compute target id. */
 export function foldCaseAgents(
-  groups: CaseAgentGroup[]
+  groups: CaseAgentGroup[],
+  latest: LatestAgentTask[] = []
 ): Map<string, OrchestratorCaseAgent[]> {
   const byCase = new Map<string, Map<string, OrchestratorCaseAgent>>();
   for (const group of groups) {
@@ -194,14 +209,31 @@ export function foldCaseAgents(
     const agent: OrchestratorCaseAgent = agents.get(group.computeTargetId) ?? {
       computeTargetId: group.computeTargetId,
       activeTaskCount: 0,
+      runningTaskCount: 0,
+      queuedTaskCount: 0,
       openQuestionCount: 0,
+      latestTaskStatus: null,
+      latestTaskError: null,
+      latestTaskWaiting: null,
     };
+    if (group.status === OrchestratorTaskStatus.Running) {
+      agent.runningTaskCount += group._count._all;
+    }
+    if (group.status === OrchestratorTaskStatus.Queued) {
+      agent.queuedTaskCount += group._count._all;
+    }
     if (isActiveTaskStatus(group.status)) {
       agent.activeTaskCount += group._count._all;
     }
     agent.openQuestionCount += group._sum.openQuestionCount ?? 0;
     agents.set(group.computeTargetId, agent);
     byCase.set(group.caseId, agents);
+  }
+  for (const row of latest) {
+    const agent = byCase.get(row.caseId)?.get(row.computeTargetId);
+    if (agent) {
+      applyLatestTask(agent, row);
+    }
   }
   const folded = new Map<string, OrchestratorCaseAgent[]>();
   for (const [caseId, agents] of byCase) {
@@ -313,5 +345,38 @@ function foldConversation(
   }
   if (row.nextWakeAt && row.nextWakeAt.getTime() <= now.getTime()) {
     state.wakeDue.add(row.caseId);
+  }
+}
+
+/** The newest task per case and agent, one query; error/waiting are cut in SQL. */
+export function loadLatestAgentTasks(
+  organizationId: string,
+  caseIds: string[]
+): Promise<LatestAgentTask[]> {
+  return withDb((db) =>
+    db.$queryRaw<LatestAgentTask[]>(Prisma.sql`
+      SELECT DISTINCT ON ("case_id", "compute_target_id")
+        "case_id"::text AS "caseId", "compute_target_id"::text AS "computeTargetId", "status",
+        LEFT("result"->>'error', 2000) AS "error", LEFT("result"->>'waiting', 2000) AS "waiting"
+      FROM "orchestrator_tasks"
+      WHERE "organization_id" = ${organizationId}::uuid
+        AND "case_id" = ANY(${caseIds}::uuid[])
+        AND "compute_target_id" IS NOT NULL
+      ORDER BY "case_id", "compute_target_id", "created_at" DESC, "id" DESC
+    `)
+  );
+}
+
+function applyLatestTask(
+  agent: OrchestratorCaseAgent,
+  row: LatestAgentTask
+): void {
+  const parsed = z.enum(OrchestratorTaskStatus).safeParse(row.status);
+  agent.latestTaskStatus = parsed.success ? parsed.data : null;
+  if (agent.latestTaskStatus === OrchestratorTaskStatus.Failed) {
+    agent.latestTaskError = row.error;
+  }
+  if (agent.latestTaskStatus === OrchestratorTaskStatus.Queued) {
+    agent.latestTaskWaiting = row.waiting;
   }
 }

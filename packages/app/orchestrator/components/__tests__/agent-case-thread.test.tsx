@@ -168,13 +168,24 @@ describe("AgentCaseThread", () => {
     expect(screen.getByRole("combobox")).toBeTruthy();
   });
 
-  it("shows the agent questions and rows, and posts with toAgentId", async () => {
-    const user = userEvent.setup();
+  it("shows the agent questions and rows, and hides the composer", () => {
     renderThread({ id: BA_ID, name: "BA" });
 
     expect(screen.getByText("BA asks (1)")).toBeTruthy();
     expect(screen.getByText("Orchestrator → BA")).toBeTruthy();
     expect(screen.getByText("BA → Orchestrator")).toBeTruthy();
+    expect(screen.getByTestId("agent-ask-locked")).toBeTruthy();
+    expect(screen.queryByLabelText("Ask BA about PROJ-7")).toBeNull();
+  });
+
+  it("posts with toAgentId once the questions are answered", async () => {
+    const user = userEvent.setup();
+    const detail = makeDetail();
+    detail.tasks[0].openQuestionCount = 0;
+    mocks.data = detail;
+    renderThread({ id: BA_ID, name: "BA" });
+
+    expect(screen.queryByTestId("agent-ask-locked")).toBeNull();
 
     await user.type(
       screen.getByLabelText("Ask BA about PROJ-7"),

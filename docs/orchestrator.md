@@ -392,8 +392,19 @@ that Agent's latest task in the case with `fork: true`, `replyTo` the
 message, then `wait_for`, then a `reply` on the case page with what the Agent
 said. The relay does not change the original task or its open questions.
 
+If that Agent has a task in the case with open questions, the stored `toAgent`
+also carries `openQuestionTaskId`, and the turn prompt writes the message with
+`open-questions-task="<task>"`. The message then counts as the answers: the
+orchestrator resumes that task without fork (`task_run` with `resumeTaskId`,
+same runner), `replyTo` the message, then `wait_for`.
+
 The inbox lists the cases that need a person first, then the others by last
-update. The counters count the cases that need a person per node.
+update. The orchestrator
+node's number is the cases that need a person. An Agent node's number is its
+queued plus running tasks across the cases; its question icon means it has open
+questions and its red alert icon means its latest task in an open case failed.
+The Agent's inbox rows show Running or Queued (with the wait reason) and the
+same icons.
 
 The tick (`advanceDueConversations`) launches queued tasks, settles running
 ones whose loop ended (`isLoopSettled`: a revivable timed-out loop is still

@@ -211,7 +211,10 @@ function formatMessage(message: TurnPromptMessage): string {
     ? ` ref="${escapeAttribute(message.externalRef)}"`
     : "";
   const toAgent = readMessageToAgent(message.payload);
-  const to = toAgent ? ` to="${escapeAttribute(toAgent.name)}"` : "";
+  const openTask = toAgent?.openQuestionTaskId
+    ? ` open-questions-task="${escapeAttribute(toAgent.openQuestionTaskId)}"`
+    : "";
+  const to = toAgent ? ` to="${escapeAttribute(toAgent.name)}"${openTask}` : "";
   const answered = answeredQuestionOf(message);
   const task = answered ? ` task="${escapeAttribute(answered.taskId)}"` : "";
   const question = answered?.questionId
@@ -384,12 +387,15 @@ function describeAgentMessages(messages: TurnPromptMessage[]): string[] {
   if (!messages.some((m) => readMessageToAgent(m.payload) !== null)) {
     return [];
   }
-  return [
-    section(
-      "Messages for an agent",
-      `A message with to="<agent>" was written on the case page for that agent. Pass it on: ${OrchestratorToolName.TaskRun} on that agent resuming its latest task in this case (resumeTaskId, fork: true; mode read unless your rules allow changes), with replyTo the message's ref, then ${OrchestratorToolName.WaitFor} that task, and answer on the case page (${OrchestratorToolName.Reply} where ${OrchestratorReplyTarget.CasePage}) with what the agent said.`
-    ),
-  ];
+  const relay = `A message with to="<agent>" was written on the case page for that agent. Pass it on: ${OrchestratorToolName.TaskRun} on that agent resuming its latest task in this case (resumeTaskId, fork: true; mode read unless your rules allow changes), with replyTo the message's ref, then ${OrchestratorToolName.WaitFor} that task, and answer on the case page (${OrchestratorToolName.Reply} where ${OrchestratorReplyTarget.CasePage}) with what the agent said.`;
+  const answersQuestions = messages.some(
+    (m) => readMessageToAgent(m.payload)?.openQuestionTaskId !== undefined
+  )
+    ? ` A message with to="<agent>" and open-questions-task="<task>" was written while that agent's task <task> had questions no answer covers: it answers them.` +
+      ` Do not fork: resume that task with ${OrchestratorToolName.TaskRun} resumeTaskId <task> (no fork, same runner) with the message as the answers,` +
+      ` replyTo the message's ref, then ${OrchestratorToolName.WaitFor} that task.`
+    : "";
+  return [section("Messages for an agent", relay + answersQuestions)];
 }
 
 /** Only a reply message carries answered-question attributes, not the task_asked record. */

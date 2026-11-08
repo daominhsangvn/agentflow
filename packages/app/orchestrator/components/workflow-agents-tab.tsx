@@ -83,6 +83,7 @@ export function WorkflowAgentsTab({
         />
       ) : (
         <AgentCaseList
+          agentId={agent ? agent.computeTargetId : null}
           cases={casesForNode(cases, nodeId)}
           isLoading={casesQuery.isLoading}
           nodeLabel={nodeName}

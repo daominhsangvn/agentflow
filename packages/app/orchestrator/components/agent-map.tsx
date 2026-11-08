@@ -8,10 +8,13 @@ import type {
 } from "@repo/api/src/types/orchestrator";
 import { Badge } from "@repo/design-system/components/ui/badge";
 import { cn } from "@repo/design-system/lib/utils";
+import { CircleAlert, MessageCircleQuestion } from "lucide-react";
 import {
+  agentActiveTaskCount,
   agentHasActiveTasks,
   agentHasOpenQuestions,
-  agentNeedsCount,
+  agentLatestError,
+  agentNeedsPerson,
   agentsInCase,
   ORCHESTRATOR_NODE_ID,
   orchestratorNeedsCount,
@@ -87,13 +90,15 @@ export function AgentMap({
         {map.agents.map((agent, index) => (
           <AgentNode
             agent={agent}
-            count={agentNeedsCount(cases, agent.computeTargetId)}
             dimmed={involved !== null && !involved.has(agent.computeTargetId)}
+            error={agentLatestError(cases, agent.computeTargetId)}
             highlighted={involved?.has(agent.computeTargetId) === true}
             key={agent.computeTargetId}
+            needsPerson={agentNeedsPerson(cases, agent.computeTargetId)}
             onSelect={onSelect}
             point={layout.agents[index]}
             selected={selectedNodeId === agent.computeTargetId}
+            taskCount={agentActiveTaskCount(cases, agent.computeTargetId)}
             working={agentHasActiveTasks(cases, agent.computeTargetId)}
           />
         ))}
@@ -119,7 +124,7 @@ function OrchestratorNode({
   const online = map.orchestrator?.isOnline ?? false;
   return (
     <button
-      aria-label={buildLabel(name, "orchestrator", online, count)}
+      aria-label={orchestratorLabel(name, online, count)}
       aria-pressed={selected}
       className={cn(
         nodeClass(selected),
@@ -141,7 +146,9 @@ function OrchestratorNode({
 
 function AgentNode({
   agent,
-  count,
+  taskCount,
+  needsPerson,
+  error,
   point,
   selected,
   dimmed,
@@ -150,7 +157,9 @@ function AgentNode({
   onSelect,
 }: {
   agent: WorkflowAgentMapAgent;
-  count: number;
+  taskCount: number;
+  needsPerson: boolean;
+  error: string | null;
   point: Point;
   selected: boolean;
   dimmed: boolean;
@@ -162,14 +171,14 @@ function AgentNode({
   const role = [agent.role, kind].filter(Boolean).join(" · ");
   return (
     <button
-      aria-label={buildLabel(
-        agent.name,
-        `${kind.toLowerCase()} agent`,
-        agent.isOnline,
-        count,
-        agent.declared,
-        working
-      )}
+      aria-label={agentLabel({
+        agent,
+        kind,
+        taskCount,
+        needsPerson,
+        error,
+        working,
+      })}
       aria-pressed={selected}
       className={cn(
         nodeClass(selected),
@@ -194,7 +203,8 @@ function AgentNode({
         </span>
       )}
       {working ? <WorkingBorder /> : null}
-      <CountBadge count={count} />
+      <TaskCountBadge count={taskCount} />
+      <AgentStateIcons error={error} needsPerson={needsPerson} />
     </button>
   );
 }
@@ -248,6 +258,59 @@ function CountBadge({ count }: { count: number }) {
   );
 }
 
+function TaskCountBadge({ count }: { count: number }) {
+  if (count <= 0) {
+    return null;
+  }
+  return (
+    <Badge
+      className="absolute -top-2 -right-2"
+      data-testid="agent-map-task-count"
+      variant="default"
+    >
+      {count}
+    </Badge>
+  );
+}
+
+function AgentStateIcons({
+  needsPerson,
+  error,
+}: {
+  needsPerson: boolean;
+  error: string | null;
+}) {
+  if (!(needsPerson || error)) {
+    return null;
+  }
+  return (
+    <span className="absolute -top-2 left-2 flex gap-1">
+      {needsPerson ? (
+        <span
+          aria-label="Needs a person"
+          className="rounded-full border bg-card p-0.5 text-warning"
+          data-testid="agent-map-needs-person"
+          role="img"
+          title="Needs a person"
+        >
+          <MessageCircleQuestion aria-hidden="true" className="size-3.5" />
+        </span>
+      ) : null}
+      {error ? (
+        <span
+          aria-label="Latest task failed"
+          className="rounded-full border bg-card p-0.5 text-destructive"
+          data-testid="agent-map-error"
+          role="img"
+          title={error}
+        >
+          <CircleAlert aria-hidden="true" className="size-3.5" />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function edgeClass(
   cases: OrchestratorCaseListItem[],
   agent: WorkflowAgentMapAgent
@@ -276,25 +339,47 @@ function kindLabel(kind: AgentKind): string {
   return kind === AgentKind.Personal ? "Personal" : "Automatic";
 }
 
-function buildLabel(
+function orchestratorLabel(
   name: string,
-  role: string,
   online: boolean,
-  count: number,
-  declared = true,
-  working = false
+  count: number
 ): string {
-  const parts = [`${name}, ${role}`, online ? "online" : "offline"];
-  if (!declared) {
+  const parts = [`${name}, orchestrator`, online ? "online" : "offline"];
+  if (count > 0) {
+    parts.push(
+      `${count} ${count === 1 ? "case needs" : "cases need"} an answer`
+    );
+  }
+  return parts.join(", ");
+}
+
+function agentLabel(options: {
+  agent: WorkflowAgentMapAgent;
+  kind: string;
+  taskCount: number;
+  needsPerson: boolean;
+  error: string | null;
+  working: boolean;
+}): string {
+  const { agent, kind, taskCount, needsPerson, error, working } = options;
+  const parts = [
+    `${agent.name}, ${kind.toLowerCase()} agent`,
+    agent.isOnline ? "online" : "offline",
+  ];
+  if (!agent.declared) {
     parts.push("not declared");
   }
   if (working) {
     parts.push("running a task");
   }
-  if (count > 0) {
-    parts.push(
-      `${count} ${count === 1 ? "case needs" : "cases need"} an answer`
-    );
+  if (taskCount > 0) {
+    parts.push(`${taskCount} active ${taskCount === 1 ? "task" : "tasks"}`);
+  }
+  if (needsPerson) {
+    parts.push("needs a person");
+  }
+  if (error) {
+    parts.push("latest task failed");
   }
   return parts.join(", ");
 }

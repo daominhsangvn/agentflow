@@ -149,7 +149,11 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       expect(item.needsPerson).toBe(true);
       expect(item.askedHuman).toBe("The BA needs the target environment.");
       expect(item.agents).toEqual([
-        { computeTargetId: ba.id, activeTaskCount: 0, openQuestionCount: 1 },
+        expect.objectContaining({
+          computeTargetId: ba.id,
+          activeTaskCount: 0,
+          openQuestionCount: 1,
+        }),
       ]);
       const workflow = await env.workflowRead();
       expect(workflow.caseCounts?.needsPerson).toBe(1);
@@ -190,7 +194,8 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
           .getByLabel("1 case needs a person")
       ).toBeVisible();
       const baNode = agentNode(page, ba.name);
-      await expect(baNode.getByTestId("agent-map-count")).toHaveText("1");
+      // The block's icon says the BA waits for a person (its task count stays a number).
+      await expect(baNode.getByTestId("agent-map-needs-person")).toBeVisible();
       await selectAgentCase(page, ba);
       const thread = page.getByTestId("agent-case-thread");
       await expect(thread).toBeVisible({ timeout: 30_000 });
@@ -215,7 +220,7 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       expect(ba.loops()[1]?.step?.stepId).toBe(ids.task2);
       await page.reload();
       await expect(
-        agentNode(page, ba.name).getByTestId("agent-map-count")
+        agentNode(page, ba.name).getByTestId("agent-map-needs-person")
       ).toHaveCount(0, { timeout: 30_000 });
       env.expectNoAgentErrors();
     });

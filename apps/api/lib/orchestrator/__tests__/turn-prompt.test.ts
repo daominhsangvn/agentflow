@@ -348,6 +348,32 @@ describe("buildTurnPrompt writes", () => {
       `via="agentflow" to="BA runner" ref="agentflow-1"`
     );
     expect(relayed).toContain(OrchestratorToolName.TaskRun);
+    expect(relayed).not.toContain("open-questions-task");
+    expect(relayed).not.toContain("Do not fork");
+
+    const answering = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          origin: OrchestratorMessageOrigin.External,
+          kind: OrchestratorMessageKind.Message,
+          actor: "An",
+          text: "REST",
+          createdAt: new Date("2026-10-23T08:00:00.000Z"),
+          externalRef: "agentflow-2",
+          payload: {
+            via: OrchestratorMessageVia.AgentFlow,
+            toAgent: {
+              computeTargetId: "ct-1",
+              name: "BA runner",
+              openQuestionTaskId: "t9",
+            },
+          },
+        },
+      ],
+    });
+    expect(answering).toContain(`to="BA runner" open-questions-task="t9"`);
+    expect(answering).toContain("Do not fork");
   });
 
   it("tells the orchestrator to set asked when it asked people", () => {

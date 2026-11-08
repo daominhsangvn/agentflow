@@ -121,12 +121,19 @@ export async function postCaseMessage(
   return Result.ok({ messageId, conversationId });
 }
 
-/** The agent of the case's newest task on that compute target, or null. */
+/**
+ * The agent of the case's newest task on that compute target, or null. When
+ * that agent has a task with open questions, the marker names the newest one.
+ */
 async function findAddressedAgent(
   organizationId: string,
   caseId: string,
   computeTargetId: string
-): Promise<{ computeTargetId: string; name: string } | null> {
+): Promise<{
+  computeTargetId: string;
+  name: string;
+  openQuestionTaskId?: string;
+} | null> {
   const task = await withDb((db) =>
     db.orchestratorTask.findFirst({
       where: { organizationId, caseId, computeTargetId },
@@ -137,9 +144,22 @@ async function findAddressedAgent(
   if (!task?.computeTarget) {
     return null;
   }
+  const open = await withDb((db) =>
+    db.orchestratorTask.findFirst({
+      where: {
+        organizationId,
+        caseId,
+        computeTargetId,
+        openQuestionCount: { gt: 0 },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    })
+  );
   return {
     computeTargetId: task.computeTarget.id,
     name: task.computeTarget.machineName,
+    ...(open ? { openQuestionTaskId: open.id } : {}),
   };
 }
 

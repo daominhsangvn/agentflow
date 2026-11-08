@@ -59,6 +59,19 @@ Org admins have two buttons.
 
 Active time is the summed duration of the sessions of the case's tasks (a loop's start to end when it has no session) plus the orchestrator's turns. Elapsed time is opened to closed. Tokens and cost are summed the same way and include personal Agents' sessions.
 
+## The workflow's Agents tab
+
+The diagram shows the orchestrator and each Agent of the workflow. Edge colours show which Agents have work, and a moving dashed border marks an Agent that is running a task.
+
+- The orchestrator's number is the cases that need a person.
+- An Agent's number is its queued and running tasks across the workflow's cases.
+- A question bubble means the Agent needs a person: it asked questions no answer covers.
+- A red alert means the Agent's latest task in an open case failed. Hover it to see the error.
+
+Picking a node lists its cases and clears the open case. In an Agent's inbox each row shows Running or Queued (hover Queued to see why it waits, for example a busy personal Agent) and the same icons.
+
+In a case, "<Agent> asks (N)" holds the open questions, and **Send answers** resumes the task. "Ask <Agent> about <key>" sends a question to a read-only copy (fork) of the Agent's latest task. It stays hidden until the Agent's questions are answered.
+
 ## See also
 
 - [Home](/docs/guides/operate/home)

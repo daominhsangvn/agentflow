@@ -34,14 +34,37 @@ describe("useAgentsTabParams", () => {
     expect(result.current.caseId).toBe("c-1");
   });
 
-  it("selectAgent writes the agent and keeps the case", () => {
+  it("selectAgent to another agent clears the case", () => {
     const { result, nav } = renderParams("/w?case=c-1");
 
     act(() => result.current.selectAgent("ct-2"));
 
     const params = queryOf(nav.getCurrentHref());
     expect(params.get("agent")).toBe("ct-2");
+    expect(params.get("case")).toBeNull();
+  });
+
+  it("selecting the same agent keeps the case", () => {
+    const { result, nav } = renderParams("/w?agent=ct-1&case=c-1");
+
+    act(() => result.current.selectAgent("ct-1"));
+
+    const params = queryOf(nav.getCurrentHref());
+    expect(params.get("agent")).toBe("ct-1");
     expect(params.get("case")).toBe("c-1");
+  });
+
+  it("clears the case when moving between the orchestrator and an agent", () => {
+    const { result, nav } = renderParams("/w?case=c-1");
+
+    act(() => result.current.selectAgent("ct-1"));
+    expect(queryOf(nav.getCurrentHref()).get("case")).toBeNull();
+
+    const other = renderParams("/w?agent=ct-1&case=c-1");
+    act(() => other.result.current.selectAgent(ORCHESTRATOR_NODE_ID));
+    const params = queryOf(other.nav.getCurrentHref());
+    expect(params.get("agent")).toBeNull();
+    expect(params.get("case")).toBeNull();
   });
 
   it("omits agent when the orchestrator is selected", () => {

@@ -171,20 +171,57 @@ function AgentThread({
       {timeline.entries.map((entry) => (
         <AgentEntryRow entry={entry} key={entry.id} name={node.name} />
       ))}
-      {timeline.conversationId ? (
-        <ConversationMessageForm
-          caseId={detail.id}
-          conversationId={timeline.conversationId}
-          key={timeline.conversationId}
-          label={`Ask ${node.name} about ${detail.sourceKey ?? "this case"}`}
-          toAgentId={node.id}
-        />
-      ) : (
-        <p className="text-muted-foreground text-sm">
-          {node.name} has no task in this case yet.
-        </p>
-      )}
+      <AgentComposer
+        caseId={detail.id}
+        conversationId={timeline.conversationId}
+        hasOpenQuestions={timeline.openQuestionTasks.length > 0}
+        node={node}
+        sourceKey={detail.sourceKey ?? "this case"}
+      />
     </div>
+  );
+}
+
+function AgentComposer({
+  caseId,
+  conversationId,
+  hasOpenQuestions,
+  node,
+  sourceKey,
+}: Readonly<{
+  caseId: string;
+  conversationId: string | null | undefined;
+  hasOpenQuestions: boolean;
+  node: { id: string; name: string };
+  sourceKey: string;
+}>) {
+  if (!conversationId) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        {node.name} has no task in this case yet.
+      </p>
+    );
+  }
+  if (hasOpenQuestions) {
+    return (
+      <p
+        className="border-t pt-3 text-muted-foreground text-sm"
+        data-testid="agent-ask-locked"
+      >
+        Answer {node.name}'s questions above. You can ask {node.name} about{" "}
+        {sourceKey} once they are answered: a question now would go to a
+        read-only copy of its task and leave these questions open.
+      </p>
+    );
+  }
+  return (
+    <ConversationMessageForm
+      caseId={caseId}
+      conversationId={conversationId}
+      key={conversationId}
+      label={`Ask ${node.name} about ${sourceKey}`}
+      toAgentId={node.id}
+    />
   );
 }
 

@@ -3,6 +3,7 @@ import {
   type OrchestratorCaseListItem,
   OrchestratorCaseStatus,
   OrchestratorCaseWaitingFor,
+  OrchestratorTaskStatus,
   type WorkflowAgentMap,
   type WorkflowAgentMapAgent,
 } from "@repo/api/src/types/orchestrator";
@@ -99,7 +100,60 @@ export const ActiveTasks: Story = {
     cases: [
       makeCase({
         agents: [
-          { computeTargetId: "dev", activeTaskCount: 2, openQuestionCount: 0 },
+          {
+            computeTargetId: "dev",
+            activeTaskCount: 2,
+            runningTaskCount: 2,
+            queuedTaskCount: 0,
+            openQuestionCount: 0,
+            latestTaskStatus: null,
+            latestTaskError: null,
+            latestTaskWaiting: null,
+          },
+        ],
+      }),
+    ],
+  },
+};
+
+export const QueuedAndRunning: Story = {
+  args: {
+    map: three,
+    cases: [
+      makeCase({
+        agents: [
+          {
+            computeTargetId: "dev",
+            activeTaskCount: 2,
+            runningTaskCount: 1,
+            queuedTaskCount: 1,
+            openQuestionCount: 0,
+            latestTaskStatus: OrchestratorTaskStatus.Running,
+            latestTaskError: null,
+            latestTaskWaiting: null,
+          },
+        ],
+      }),
+    ],
+  },
+};
+
+export const FailedTask: Story = {
+  args: {
+    map: three,
+    cases: [
+      makeCase({
+        agents: [
+          {
+            computeTargetId: "dev",
+            activeTaskCount: 0,
+            runningTaskCount: 0,
+            queuedTaskCount: 0,
+            openQuestionCount: 0,
+            latestTaskStatus: OrchestratorTaskStatus.Failed,
+            latestTaskError: "Loop failed: exit code 1",
+            latestTaskWaiting: null,
+          },
         ],
       }),
     ],
@@ -113,7 +167,16 @@ export const OpenQuestions: Story = {
       makeCase({
         needsPerson: true,
         agents: [
-          { computeTargetId: "ba", activeTaskCount: 0, openQuestionCount: 2 },
+          {
+            computeTargetId: "ba",
+            activeTaskCount: 0,
+            runningTaskCount: 0,
+            queuedTaskCount: 0,
+            openQuestionCount: 2,
+            latestTaskStatus: null,
+            latestTaskError: null,
+            latestTaskWaiting: null,
+          },
         ],
       }),
     ],
@@ -123,7 +186,18 @@ export const OpenQuestions: Story = {
 const selected = makeCase({
   needsPerson: true,
   askedHuman: "Which environment should the fix target?",
-  agents: [{ computeTargetId: "ba", activeTaskCount: 0, openQuestionCount: 1 }],
+  agents: [
+    {
+      computeTargetId: "ba",
+      activeTaskCount: 0,
+      runningTaskCount: 0,
+      queuedTaskCount: 0,
+      openQuestionCount: 1,
+      latestTaskStatus: null,
+      latestTaskError: null,
+      latestTaskWaiting: null,
+    },
+  ],
 });
 
 export const CaseSelected: Story = {

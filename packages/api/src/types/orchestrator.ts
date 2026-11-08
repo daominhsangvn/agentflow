@@ -529,8 +529,17 @@ export type OrchestratorCaseListItem = OrchestratorCaseSummary & {
 
 export type OrchestratorCaseAgent = {
   computeTargetId: string;
+  /** Queued + running tasks of this agent in the case. */
   activeTaskCount: number;
+  runningTaskCount: number;
+  queuedTaskCount: number;
   openQuestionCount: number;
+  /** Status of the agent's newest task in the case. */
+  latestTaskStatus: OrchestratorTaskStatus | null;
+  /** The newest task's error when it failed. */
+  latestTaskError: string | null;
+  /** Why the newest task is still queued (e.g. a busy personal runner). */
+  latestTaskWaiting: string | null;
 };
 
 export const orchestratorCaseListQuerySchema = z

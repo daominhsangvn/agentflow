@@ -3,6 +3,7 @@ import {
   type OrchestratorCaseListItem,
   OrchestratorCaseStatus,
   OrchestratorCaseWaitingFor,
+  OrchestratorTaskStatus,
   type WorkflowAgentMap,
 } from "@repo/api/src/types/orchestrator";
 import { render, screen } from "@testing-library/react";
@@ -44,10 +45,35 @@ function makeCase(
     askedHuman: "Which env?",
     updatedAt: "2026-10-26T08:10:00.000Z",
     agents: [
-      { computeTargetId: "ba", activeTaskCount: 0, openQuestionCount: 1 },
+      {
+        computeTargetId: "ba",
+        activeTaskCount: 0,
+        runningTaskCount: 0,
+        queuedTaskCount: 0,
+        openQuestionCount: 1,
+        latestTaskStatus: null,
+        latestTaskError: null,
+        latestTaskWaiting: null,
+      },
     ],
     ...overrides,
   } as OrchestratorCaseListItem;
+}
+
+function agentEntry(
+  overrides: Partial<OrchestratorCaseListItem["agents"][number]> = {}
+): OrchestratorCaseListItem["agents"][number] {
+  return {
+    computeTargetId: "ba",
+    activeTaskCount: 0,
+    runningTaskCount: 0,
+    queuedTaskCount: 0,
+    openQuestionCount: 1,
+    latestTaskStatus: null,
+    latestTaskError: null,
+    latestTaskWaiting: null,
+    ...overrides,
+  };
 }
 
 function renderMap(props: Partial<Parameters<typeof AgentMap>[0]> = {}) {
@@ -81,7 +107,7 @@ describe("AgentMap", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: "BA, personal agent, online, 1 case needs an answer",
+        name: "BA, personal agent, online, needs a person",
       })
     ).toHaveAttribute("aria-pressed", "false");
     expect(
@@ -101,7 +127,47 @@ describe("AgentMap", () => {
 
   it("shows counters", () => {
     renderMap();
-    expect(screen.getAllByTestId("agent-map-count")).toHaveLength(2);
+    expect(screen.getAllByTestId("agent-map-count")).toHaveLength(1);
+    expect(screen.getByTestId("agent-map-needs-person")).toBeInTheDocument();
+  });
+
+  it("shows the summed active task count on an agent", () => {
+    renderMap({
+      cases: [
+        makeCase({ agents: [agentEntry({ activeTaskCount: 2 })] }),
+        makeCase({
+          id: "c2",
+          agents: [agentEntry({ activeTaskCount: 1, openQuestionCount: 0 })],
+        }),
+      ],
+    });
+    expect(screen.getByTestId("agent-map-task-count")).toHaveTextContent("3");
+  });
+
+  it("shows an error icon for a failed latest task in an open case only", () => {
+    const failed = agentEntry({
+      latestTaskStatus: OrchestratorTaskStatus.Failed,
+      latestTaskError: "Loop failed",
+      openQuestionCount: 0,
+    });
+    renderMap({ cases: [makeCase({ agents: [failed], needsPerson: false })] });
+    expect(screen.getByTestId("agent-map-error")).toHaveAttribute(
+      "title",
+      "Loop failed"
+    );
+  });
+
+  it("ignores a failed task in a closed case", () => {
+    const failed = agentEntry({
+      latestTaskStatus: OrchestratorTaskStatus.Failed,
+      latestTaskError: "Loop failed",
+    });
+    renderMap({
+      cases: [
+        makeCase({ agents: [failed], status: OrchestratorCaseStatus.Closed }),
+      ],
+    });
+    expect(screen.queryByTestId("agent-map-error")).not.toBeInTheDocument();
   });
 
   it("dims agents outside the selected case", () => {
@@ -134,7 +200,12 @@ describe("AgentMap", () => {
             {
               computeTargetId: "ba",
               activeTaskCount: 1,
+              runningTaskCount: 1,
+              queuedTaskCount: 0,
               openQuestionCount: 1,
+              latestTaskStatus: null,
+              latestTaskError: null,
+              latestTaskWaiting: null,
             },
           ],
         }),
@@ -164,7 +235,16 @@ describe("AgentMap", () => {
       cases: [
         makeCase({
           agents: [
-            { computeTargetId: "ba", activeTaskCount: 0, openQuestionCount: 1 },
+            {
+              computeTargetId: "ba",
+              activeTaskCount: 0,
+              runningTaskCount: 0,
+              queuedTaskCount: 0,
+              openQuestionCount: 1,
+              latestTaskStatus: null,
+              latestTaskError: null,
+              latestTaskWaiting: null,
+            },
           ],
         }),
       ],

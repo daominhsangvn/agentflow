@@ -47,6 +47,8 @@ const BA_QUESTION = "Which environment?";
 const BA_QUESTION_ID = "env";
 const BA_ANSWER = "staging";
 const ASK_TEXT = "Is the PRD final?";
+const QC_ERROR = "Loop failed: exit code 1";
+const CASE_PARAM_PATTERN = /case=/;
 
 test("orchestrator agents tab: select an agent, answer its question and ask it", {
   tag: E2ETag.Smoke,
@@ -70,7 +72,16 @@ test("orchestrator agents tab: select an agent, answer its question and ask it",
     const baNode = page.getByRole("button", {
       name: new RegExp(`^${BA_NAME}, automatic agent`),
     });
-    await expect(baNode.getByTestId("agent-map-count")).toHaveText("1");
+    await expect(baNode.getByTestId("agent-map-needs-person")).toBeVisible();
+    await expect(baNode.getByTestId("agent-map-count")).toHaveCount(0);
+    const qcNode = page.getByRole("button", {
+      name: new RegExp(`^${QC_NAME}`),
+    });
+    await expect(qcNode.getByTestId("agent-map-task-count")).toHaveText("1");
+    await expect(qcNode.getByTestId("agent-map-error")).toHaveAttribute(
+      "title",
+      QC_ERROR
+    );
     await expect(
       page.getByRole("button", {
         name: new RegExp(`^${QC_NAME}.*not declared`),
@@ -112,6 +123,10 @@ test("orchestrator agents tab: select an agent, answer its question and ask it",
 
     const thread = page.getByTestId("agent-case-thread");
     await expect(thread).toBeVisible({ timeout: 30_000 });
+    await expect(thread.getByTestId("agent-ask-locked")).toBeVisible();
+    await expect(
+      thread.getByLabel(`Ask ${BA_NAME} about ${SOURCE_KEY}`)
+    ).toHaveCount(0);
     await thread.getByLabel(BA_QUESTION).fill(BA_ANSWER);
     await thread.getByRole("button", { name: "Send answers" }).click();
     await expect
@@ -140,6 +155,20 @@ test("orchestrator agents tab: select an agent, answer its question and ask it",
       });
     await expect(page).toHaveURL(new RegExp(`agent=${served.baTargetId}`));
     await expect(page).toHaveURL(new RegExp(`case=${served.caseId}`));
+
+    // Picking another agent clears the open case; its inbox rows show the
+    // agent's own task state.
+    await qcNode.click();
+    await expect(page).toHaveURL(new RegExp(`agent=${served.qcTargetId}`));
+    await expect(page).not.toHaveURL(CASE_PARAM_PATTERN);
+    const qcRows = page.getByTestId("agent-case-row");
+    await expect(qcRows).toHaveCount(2);
+    await expect(
+      qcRows.filter({ hasText: "PRO-22" }).getByTestId("agent-case-running")
+    ).toBeVisible();
+    await expect(
+      qcRows.filter({ hasText: "PRO-23" }).getByTestId("agent-case-error")
+    ).toBeVisible();
   } finally {
     await fixture.cleanUp(request, token);
   }
@@ -210,6 +239,7 @@ type ServedAgents = {
   conversationId: string;
   questionTaskId: string;
   baTargetId: string;
+  qcTargetId: string;
   /** Bodies POSTed to the case message endpoint. */
   messages: unknown[];
 };
@@ -272,7 +302,16 @@ async function serveAgents(
     runningAgents: [],
   };
   const needsAgents: OrchestratorCaseAgent[] = [
-    { computeTargetId: baTargetId, activeTaskCount: 0, openQuestionCount: 1 },
+    {
+      computeTargetId: baTargetId,
+      activeTaskCount: 0,
+      runningTaskCount: 0,
+      queuedTaskCount: 0,
+      openQuestionCount: 1,
+      latestTaskStatus: OrchestratorTaskStatus.Succeeded,
+      latestTaskError: null,
+      latestTaskWaiting: null,
+    },
   ];
   const needsItem: OrchestratorCaseListItem = {
     ...baseItem,
@@ -298,9 +337,42 @@ async function serveAgents(
     askedHuman: null,
     // QC runs a task: its edge is the active (primary, flowing) one.
     agents: [
-      { computeTargetId: qcTargetId, activeTaskCount: 1, openQuestionCount: 0 },
+      {
+        computeTargetId: qcTargetId,
+        activeTaskCount: 1,
+        runningTaskCount: 1,
+        queuedTaskCount: 0,
+        openQuestionCount: 0,
+        latestTaskStatus: OrchestratorTaskStatus.Running,
+        latestTaskError: null,
+        latestTaskWaiting: null,
+      },
     ],
   };
+  const failedItem: OrchestratorCaseListItem = {
+    ...baseItem,
+    id: randomUUID(),
+    title: "Fix the export",
+    sourceKey: "PRO-23",
+    activeTaskCount: 0,
+    turnRunning: false,
+    waitingFor: OrchestratorCaseWaitingFor.NextMessage,
+    needsPerson: false,
+    askedHuman: null,
+    agents: [
+      {
+        computeTargetId: qcTargetId,
+        activeTaskCount: 0,
+        runningTaskCount: 0,
+        queuedTaskCount: 0,
+        openQuestionCount: 0,
+        latestTaskStatus: OrchestratorTaskStatus.Failed,
+        latestTaskError: QC_ERROR,
+        latestTaskWaiting: null,
+      },
+    ],
+  };
+  let answered = false;
   const detail: OrchestratorCaseDetail = {
     ...needsItem,
     notes: "",
@@ -362,14 +434,27 @@ async function serveAgents(
   );
   await page.route("**/orchestrator/cases?workflowId=*", (route) =>
     route.fulfill({
-      json: { success: true, data: [needsItem, activeItem] },
+      json: { success: true, data: [needsItem, activeItem, failedItem] },
     })
   );
-  await page.route(`**/orchestrator/cases/${caseId}`, (route) =>
-    route.fulfill({ json: { success: true, data: detail } })
-  );
+  await page.route(`**/orchestrator/cases/${caseId}`, (route) => {
+    const served = answered
+      ? {
+          ...detail,
+          tasks: detail.tasks.map((task) => ({
+            ...task,
+            openQuestionCount: 0,
+          })),
+        }
+      : detail;
+    return route.fulfill({ json: { success: true, data: served } });
+  });
   await page.route(`**/orchestrator/cases/${caseId}/messages`, (route) => {
-    messages.push(route.request().postDataJSON());
+    const body = route.request().postDataJSON();
+    messages.push(body);
+    if (body && typeof body === "object" && "answers" in body) {
+      answered = true;
+    }
     return route.fulfill({
       json: {
         success: true,
@@ -377,5 +462,12 @@ async function serveAgents(
       },
     });
   });
-  return { baTargetId, caseId, conversationId, messages, questionTaskId };
+  return {
+    baTargetId,
+    caseId,
+    conversationId,
+    messages,
+    qcTargetId,
+    questionTaskId,
+  };
 }

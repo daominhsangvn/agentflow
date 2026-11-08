@@ -160,9 +160,11 @@ describe("postCaseMessage", () => {
   });
 
   it("addresses an agent with a task in the case", async () => {
-    mocks.taskFindFirst.mockResolvedValue({
-      computeTarget: { id: AGENT, machineName: "BA-runner" },
-    });
+    mocks.taskFindFirst
+      .mockResolvedValueOnce({
+        computeTarget: { id: AGENT, machineName: "BA-runner" },
+      })
+      .mockResolvedValueOnce(null);
     const result = await postCaseMessage(ORG, USER, CASE_ID, {
       conversationId: CONVERSATION,
       text: "Ask more",
@@ -177,6 +179,30 @@ describe("postCaseMessage", () => {
     expect(mocks.messageCreate.mock.calls[0][0].data.payload.toAgent).toEqual({
       computeTargetId: AGENT,
       name: "BA-runner",
+    });
+  });
+
+  it("marks the message with the agent's task that has open questions", async () => {
+    mocks.taskFindFirst
+      .mockResolvedValueOnce({
+        computeTarget: { id: AGENT, machineName: "BA-runner" },
+      })
+      .mockResolvedValueOnce({ id: TASK });
+    await postCaseMessage(ORG, USER, CASE_ID, {
+      conversationId: CONVERSATION,
+      text: "REST",
+      toAgentId: AGENT,
+    });
+    expect(mocks.taskFindFirst.mock.calls[1][0].where).toEqual({
+      organizationId: ORG,
+      caseId: CASE_ID,
+      computeTargetId: AGENT,
+      openQuestionCount: { gt: 0 },
+    });
+    expect(mocks.messageCreate.mock.calls[0][0].data.payload.toAgent).toEqual({
+      computeTargetId: AGENT,
+      name: "BA-runner",
+      openQuestionTaskId: TASK,
     });
   });
 

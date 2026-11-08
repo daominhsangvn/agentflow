@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   waitFindMany: vi.fn(),
   taskFindMany: vi.fn(),
   taskGroupBy: vi.fn(),
+  taskQueryRaw: vi.fn().mockResolvedValue([]),
   turnFindMany: vi.fn(),
   loadCaseStats: vi.fn(),
 }));
@@ -32,8 +33,10 @@ vi.mock("@/app/orchestrator/cases/service/case-messages", () => ({
 }));
 
 vi.mock("@repo/database", () => ({
+  Prisma: { sql: (...parts: unknown[]) => parts },
   withDb: (fn: (db: unknown) => unknown) =>
     fn({
+      $queryRaw: mocks.taskQueryRaw,
       orchestratorCase: { findMany: mocks.caseFindMany },
       orchestratorConversation: { findMany: mocks.conversationFindMany },
       orchestratorWait: { findMany: mocks.waitFindMany },
@@ -140,6 +143,7 @@ describe("loadCaseWaitState", () => {
     expect(mocks.waitFindMany).not.toHaveBeenCalled();
     expect(mocks.taskFindMany).not.toHaveBeenCalled();
     expect(mocks.taskGroupBy).not.toHaveBeenCalled();
+    expect(mocks.taskQueryRaw).not.toHaveBeenCalled();
   });
 
   it("collects waits and dedupes sorted agent names", async () => {
@@ -229,7 +233,16 @@ describe("loadCaseWaitState asked and due", () => {
     const state = await loadCaseWaitState(ORG, ["a"], NOW);
 
     expect(state.caseAgents.get("a")).toEqual([
-      { computeTargetId: "t2", activeTaskCount: 1, openQuestionCount: 0 },
+      {
+        computeTargetId: "t2",
+        activeTaskCount: 1,
+        runningTaskCount: 1,
+        queuedTaskCount: 0,
+        openQuestionCount: 0,
+        latestTaskStatus: null,
+        latestTaskError: null,
+        latestTaskWaiting: null,
+      },
     ]);
     expect(mocks.taskGroupBy.mock.calls[0][0].where).toEqual({
       organizationId: ORG,
@@ -251,12 +264,91 @@ describe("foldCaseAgents", () => {
     ]);
 
     expect(folded.get("a")).toEqual([
-      { computeTargetId: "t1", activeTaskCount: 0, openQuestionCount: 2 },
-      { computeTargetId: "t2", activeTaskCount: 3, openQuestionCount: 1 },
+      {
+        computeTargetId: "t1",
+        activeTaskCount: 0,
+        runningTaskCount: 0,
+        queuedTaskCount: 0,
+        openQuestionCount: 2,
+        latestTaskStatus: null,
+        latestTaskError: null,
+        latestTaskWaiting: null,
+      },
+      {
+        computeTargetId: "t2",
+        activeTaskCount: 3,
+        runningTaskCount: 2,
+        queuedTaskCount: 1,
+        openQuestionCount: 1,
+        latestTaskStatus: null,
+        latestTaskError: null,
+        latestTaskWaiting: null,
+      },
     ]);
     expect(folded.get("b")).toEqual([
-      { computeTargetId: "t1", activeTaskCount: 0, openQuestionCount: 0 },
+      {
+        computeTargetId: "t1",
+        activeTaskCount: 0,
+        runningTaskCount: 0,
+        queuedTaskCount: 0,
+        openQuestionCount: 0,
+        latestTaskStatus: null,
+        latestTaskError: null,
+        latestTaskWaiting: null,
+      },
     ]);
+  });
+});
+
+describe("foldCaseAgents latest task", () => {
+  const groups = [group("a", "t1", OrchestratorTaskStatus.Queued, 1, 0)];
+  const latest = (
+    status: string,
+    error: string | null,
+    waiting: string | null
+  ) => [{ caseId: "a", computeTargetId: "t1", status, error, waiting }];
+
+  it("carries the error of a failed latest task", () => {
+    const [agent] =
+      foldCaseAgents(
+        groups,
+        latest(OrchestratorTaskStatus.Failed, "boom", "w")
+      ).get("a") ?? [];
+
+    expect(agent.latestTaskStatus).toBe(OrchestratorTaskStatus.Failed);
+    expect(agent.latestTaskError).toBe("boom");
+    expect(agent.latestTaskWaiting).toBeNull();
+  });
+
+  it("carries the waiting note of a queued latest task", () => {
+    const [agent] =
+      foldCaseAgents(
+        groups,
+        latest(OrchestratorTaskStatus.Queued, "e", "runner busy")
+      ).get("a") ?? [];
+
+    expect(agent.latestTaskStatus).toBe(OrchestratorTaskStatus.Queued);
+    expect(agent.latestTaskWaiting).toBe("runner busy");
+    expect(agent.latestTaskError).toBeNull();
+  });
+
+  it("carries neither for a succeeded latest task", () => {
+    const [agent] =
+      foldCaseAgents(
+        groups,
+        latest(OrchestratorTaskStatus.Succeeded, "e", "w")
+      ).get("a") ?? [];
+
+    expect(agent.latestTaskStatus).toBe(OrchestratorTaskStatus.Succeeded);
+    expect(agent.latestTaskError).toBeNull();
+    expect(agent.latestTaskWaiting).toBeNull();
+  });
+
+  it("ignores an unknown status", () => {
+    const [agent] =
+      foldCaseAgents(groups, latest("weird", null, null)).get("a") ?? [];
+
+    expect(agent.latestTaskStatus).toBeNull();
   });
 });
 
@@ -376,7 +468,11 @@ describe("orchestratorCaseService.listForOrg", () => {
       needsPerson: false,
       askedHuman: "Which policy?",
       agents: [
-        { computeTargetId: "ct-1", activeTaskCount: 1, openQuestionCount: 1 },
+        expect.objectContaining({
+          computeTargetId: "ct-1",
+          activeTaskCount: 1,
+          openQuestionCount: 1,
+        }),
       ],
       inputTokens: 0,
       closedAt: null,

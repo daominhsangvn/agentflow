@@ -2,13 +2,21 @@
 
 import type { OrchestratorCaseListItem } from "@repo/api/src/types/orchestrator";
 import { formatRelativeTime } from "@repo/app/shared/lib/date-utils";
+import { Badge } from "@repo/design-system/components/ui/badge";
 import { Skeleton } from "@repo/design-system/components/ui/skeleton";
 import { cn } from "@repo/design-system/lib/utils";
-import { sortInbox } from "../lib/agent-counters";
+import { CircleAlert, MessageCircleQuestion } from "lucide-react";
+import {
+  type CaseAgentState,
+  caseAgentState,
+  sortInbox,
+} from "../lib/agent-counters";
 import { CASE_WAITING_FOR_LABELS } from "../lib/case-waiting-labels";
 
 export type AgentCaseListProps = {
   cases: OrchestratorCaseListItem[];
+  /** The selected agent's compute target id; null for the orchestrator. */
+  agentId: string | null;
   nodeLabel: string;
   onSelect: (caseId: string) => void;
   isLoading: boolean;
@@ -18,6 +26,7 @@ const SKELETON_KEYS = ["a", "b", "c"];
 
 export function AgentCaseList({
   cases,
+  agentId,
   nodeLabel,
   onSelect,
   isLoading,
@@ -63,6 +72,9 @@ export function AgentCaseList({
                 ) : null}
                 {item.title}
               </span>
+              {agentId ? (
+                <AgentRowState state={caseAgentState(item, agentId)} />
+              ) : null}
               <span className="shrink-0 text-muted-foreground text-xs">
                 {item.needsPerson
                   ? "Needs answer"
@@ -75,4 +87,54 @@ export function AgentCaseList({
           ))}
     </div>
   );
+}
+
+function AgentRowState({ state }: { state: CaseAgentState | null }) {
+  if (!state) {
+    return null;
+  }
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      {state.running > 0 ? (
+        <Badge data-testid="agent-case-running" variant="default">
+          {countLabel("Running", state.running)}
+        </Badge>
+      ) : null}
+      {state.queued > 0 ? (
+        <Badge
+          data-testid="agent-case-queued"
+          title={state.waiting ?? undefined}
+          variant="muted"
+        >
+          {countLabel("Queued", state.queued)}
+        </Badge>
+      ) : null}
+      {state.needsPerson ? (
+        <span
+          aria-label="Needs a person"
+          className="text-warning"
+          data-testid="agent-case-needs-person"
+          role="img"
+          title="Needs a person"
+        >
+          <MessageCircleQuestion aria-hidden="true" className="size-4" />
+        </span>
+      ) : null}
+      {state.error ? (
+        <span
+          aria-label="Latest task failed"
+          className="text-destructive"
+          data-testid="agent-case-error"
+          role="img"
+          title={state.error}
+        >
+          <CircleAlert aria-hidden="true" className="size-4" />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function countLabel(label: string, count: number): string {
+  return count > 1 ? `${label} · ${count}` : label;
 }

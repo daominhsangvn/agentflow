@@ -22,12 +22,14 @@ export function useAgentsTabParams() {
   const caseId = searchParams.get(CASE_PARAM) || null;
 
   const write = useCallback(
-    (key: string, value: string | null) => {
+    (updates: Record<string, string | null>) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (value === null) {
-        params.delete(key);
-      } else {
-        params.set(key, value);
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === null) {
+          params.delete(key);
+        } else {
+          params.set(key, value);
+        }
       }
       const qs = params.toString();
       navigation.replace(qs ? `${pathname}?${qs}` : pathname, {
@@ -38,11 +40,18 @@ export function useAgentsTabParams() {
   );
 
   const selectAgent = useCallback(
-    (id: string) => write(AGENT_PARAM, id === ORCHESTRATOR_NODE_ID ? null : id),
-    [write]
+    (id: string) => {
+      const next = id === ORCHESTRATOR_NODE_ID ? null : id;
+      if (id === agent) {
+        write({ [AGENT_PARAM]: next });
+        return;
+      }
+      write({ [AGENT_PARAM]: next, [CASE_PARAM]: null });
+    },
+    [agent, write]
   );
   const selectCase = useCallback(
-    (id: string | null) => write(CASE_PARAM, id),
+    (id: string | null) => write({ [CASE_PARAM]: id }),
     [write]
   );
 
