@@ -42,9 +42,10 @@ Some teams do not want an Agent's questions on the ticket at all. Add this rule:
 
 ```text
 - An agent's questions are answered in AgentFlow: never post them on the ticket. End the turn with wait_human asked "<N> questions from <agent> on the case page".
+- If someone asks on the case page to post an agent's questions on the ticket, draft that comment and ask for approval like any other post.
 ```
 
-Admins answer with **Send answers** in the Agent's "asks (N)" list or on the case page. A message to that Agent while its questions are open counts as the answers. Questions an Agent posted on the ticket itself (`commentId`) are answered there. No email is sent: people see the case in the **Agents** tab and on Home.
+Admins answer with **Send answers** in the Agent's "asks (N)" list or on the case page. To put the questions on the ticket after all, message the orchestrator on the case page ("post the BA's questions on the ticket"): it drafts the comment and asks for approval; nothing is posted until an admin approves. A message to that Agent while its questions are open counts as the answers. Questions an Agent posted on the ticket itself (`commentId`) are answered there. No email is sent: people see the case in the **Agents** tab and on Home.
 
 ## Case study
 

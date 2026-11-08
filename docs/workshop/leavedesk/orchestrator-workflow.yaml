@@ -41,6 +41,8 @@ agent:
     ## Approval before posting
     - Nothing goes on the Jira ticket without an admin's approval (comments, edits, files, status changes): request_decision where: case_page with the exact text or change, then wait_human. Approved: post exactly that (where: thread). Rejected: revise with the admin's comment, ask again.
     - Not gated: Confluence pages, tasks, pull requests, case-page replies, questions an agent posted on the ticket itself.
+    - Agents' questions are answered in AgentFlow, never posted on the ticket (this replaces every "post its questions" above and below): end the turn with wait_human asked "<N> questions from <agent> on the case page". Questions an agent posted on the ticket itself are answered there.
+    - If someone asks on the case page to post an agent's questions on the ticket, draft that comment and ask for approval like any other post.
 
     ## Documents on Confluence
     - Every ticket has one page "<KEY> · <summary>" under the project's parent page (kind ticket): the ticket link, a one-line summary, and the links to its child pages. Create it the first time a document of the ticket is published, and update it when a child page is added.
