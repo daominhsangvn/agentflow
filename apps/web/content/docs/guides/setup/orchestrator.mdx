@@ -63,7 +63,7 @@ agent:
     ...
 ```
 
-The settings (`concurrency`, `debounceSeconds`, `turnTimeoutMinutes`, `cancelOn`) are described in [Workflow YAML](/docs/guides/setup/workflow-yaml#agentorchestrator). `agent.process` and `agent.runners` are refused; `actions` never run. The rules may be up to 8000 characters.
+The settings (`concurrency`, `debounceSeconds`, `turnTimeoutMinutes`, `cancelOn`, `mentionOnly`, `caseLookup`, `caseHandoff`) are described in [Workflow YAML](/docs/guides/setup/workflow-yaml#agentorchestrator). `agent.process` and `agent.runners` are refused; `actions` never run. `mentionOnly`, `caseLookup` and `caseHandoff` are explained in [Side conversations](/docs/guides/recipes/side-conversations). The rules may be up to 16000 characters; the YAML editor warns above 8000 (they are sent with every turn).
 
 ## What each turn sees
 
@@ -223,6 +223,8 @@ For a flow driven by labels instead of statuses, write one line per label ("labe
 
 **How it works.** A command with `asks: true` may end with questions; the task comes back with them. Resume the task (`resumeTaskId`, no `fork`) with the answers: the same session continues.
 
+For agents' questions that only people in AgentFlow should answer, see [the variant of approval before posting](/docs/guides/recipes/approval-before-posting#variant-agents-questions-answered-only-in-agentflow) and [Asking an Agent](/docs/guides/recipes/asking-an-agent).
+
 **Tools.** `reply { text, replyTo?, attachments? }` (text up to 20,000); `task_run replyTo` (the comment a task answers; it comes back with the result).
 
 ```markdown
@@ -317,7 +319,7 @@ Limits: the blocker's workflow needs a status-changed trigger, or no turn runs w
 
 ### Approvals
 
-**Tools.** `request_decision { question }` posts the question with the case's link and creates a pending decision (on the ticket it needs `comment`; from a message sent on the case page it needs no grant). `record_decision { decisionId, approved, decidedBy, comment? }` records a decision someone gave in the thread. End the turn with `wait_human`.
+**Tools.** `request_decision { question, where? }` creates a pending decision and posts the question. `where: thread` posts on the ticket with the case's link and needs `comment`; `where: case_page` stays in AgentFlow and needs no grant. Default: where the answered message came from. `record_decision { decisionId, approved, decidedBy, comment? }` records a decision someone gave in the thread. End the turn with `wait_human`.
 
 There are three ways to approve. Write the rule for the one your team uses.
 
@@ -329,6 +331,12 @@ There are three ways to approve. Write the rule for the one your team uses.
 ## Approvals
 - Before Dev implements, ask for a decision ("Implement LD-6 from plan v2?") with request_decision and wait. Start the implementation only when it is approved in AgentFlow.
 ```
+
+```markdown
+- Before anything goes on the ticket, ask for approval with request_decision where: case_page and wait. Post only what was approved.
+```
+
+The full pattern is in [Approval before posting](/docs/guides/recipes/approval-before-posting).
 
 ```markdown
 - When someone answers a request_decision in a comment ("approved", "go ahead", "no"), record it with record_decision (decidedBy: the author) and continue as if it was approved or rejected in AgentFlow.
@@ -384,7 +392,7 @@ With a `microsoft_teams.bot_mentioned` trigger, each Teams thread is a conversat
 | Confluence | Writes stay in the project's spaces; publishing never drops a person's edit unless `overwrite` |
 | Refusals recorded | Every refused call is a "Refused" message on the case |
 
-Not guarded yet: who may approve in the thread (`record_decision`), budgets per case or project (turns, tasks, cost) and cancelling only on backward moves (your rules decide). Ticket text is marked untrusted in the prompt but not otherwise filtered.
+Not guarded yet: who may approve in the thread (`record_decision`), approval before posting (rules only), budgets per case or project (turns, tasks, cost) and cancelling only on backward moves (your rules decide). Ticket text is marked untrusted in the prompt but not otherwise filtered.
 
 ## The case page
 
@@ -396,3 +404,7 @@ A message from the case page is answered by `reply` with `where: case_page`: the
 ## Messages from AgentFlow
 - A message from the case page is answered on the case page. Post the answer on the ticket (reply where: thread) only when it changes what people there must know, for example a decision.
 ```
+
+## Recipes and case studies
+
+Patterns with rule text are in [Recipes](/docs/guides/recipes); real runs written up are in [Case studies](/docs/guides/case-studies).

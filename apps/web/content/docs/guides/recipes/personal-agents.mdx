@@ -1,0 +1,41 @@
+---
+title: "Personal Agents in the flow"
+description: "Use a developer's own machine as the Dev Agent: its questions, queueing, sessions, pushes and Windows setup."
+---
+
+A personal Agent runs on a developer's computer with that person's tools and credentials. In a LeaveDesk-style flow it is the Dev Agent, while automatic Agents do BA and QC.
+
+## Questions it posts itself
+
+The Agent's command may comment its question on the ticket with the person's own account and write the comment id (`commentId`) in `questions.json`. The case records it as "Asked on item". A reply to that comment reaches the case even with `mentionOnly`. The orchestrator does not repost the question and needs no approval for it. See [Integrate an existing Agent](/docs/guides/setup/integrate-existing-agent).
+
+## One task at a time
+
+A personal Agent runs one task at a time by default. Other tasks stay Queued with "Waiting for `<name>`: it runs one task at a time and is running another one." Hover Queued in the Agents tab to read it. `AGENTFLOW_RUNNER_PARALLEL=true` runs several at once and needs a git worktree per ticket: see [Agents](/docs/guides/setup/agents).
+
+## Sessions stay on their machine
+
+A task resumes only on the Agent that ran it: its session is there. When an Agent is removed, start the work again on the new Agent, with the current pages in its files.
+
+## Pushes and pull requests
+
+The personal Agent pushes and opens its pull request with the person's credentials. A Gitea token needs `write:repository` and `write:issue`. `pull_request_open` only works for tasks AgentFlow pushed, so the orchestrator does not open the pull request of a personal Agent's task.
+
+## Windows
+
+Run `doctor.bat --project <KEY>` first and fix every `FAIL` line. Use native Claude Code, not the npm package. To start the Agent with Windows, set it up as a Windows service: [Personal Agent](/docs/guides/setup/personal-agent).
+
+## Rule text
+
+```text
+- Dev runs on a personal Agent: a queued task is waiting for it, say so; do not start the same work on another Agent.
+```
+
+## Case study
+
+[A real test on a Windows development machine](/docs/guides/case-studies/real-test-windows-dev).
+
+## See also
+
+- [Personal Agent](/docs/guides/setup/personal-agent)
+- [Questions and answers](/docs/guides/recipes/questions-and-answers)

@@ -36,7 +36,7 @@ Set in the workflow (editor or YAML) with `agent.mode: orchestrated`.
 |---|---|
 | `enabled` (workflow) | The orchestrator takes the workflow's requests. Needs a runner; when the project has Agents, it must be one of them (saving refuses otherwise; a turn fails otherwise). |
 | `agent.runner` | The computer its turns run on (Claude Code with the orchestrator's tools only). A computer the admin owns or one shared with the organization. |
-| `agent.instructions` | The rules (up to 8000 characters): which runner handles what, the order of the work, what needs an admin's approval. Sent with every turn. |
+| `agent.instructions` | The rules (up to 16000 characters; the YAML editor warns above 8000): which runner handles what, the order of the work, what needs an admin's approval. Sent with every turn. |
 | `agent.orchestrator.concurrency` | `supersede` (default): a new message on a thread whose turn is running stops that turn, and the next turn answers both. `queue`: the running turn finishes, the next one takes every new message. Messages on different threads always run in parallel. |
 | `agent.orchestrator.debounceSeconds` | Seconds a thread stays quiet before a turn starts, so a burst of messages is one turn (default 20). |
 | `agent.orchestrator.turnTimeoutMinutes` | Minutes one turn may take (default 10). |
@@ -222,7 +222,7 @@ tools for that token from `GET /orchestrator-tools/session` and
 | `source_item_label` | `{ add, remove }`: adds and removes labels on the ticket (grant `source: label`) |
 | `source_item_link` | `{ url, title }`: adds a link to the ticket (grant `source: link`) |
 | `case_notify` | `{ itemKey, message }`: an internal message on the item conversation of another case of the same workflow (same connection), which wakes it after its debounce and reopens it if closed; refused when no case exists for that key, for the case's own item, when the calling conversation has no source item, or when the target case has no conversation on this project connection. No grant |
-| `request_decision` | Asks people to approve or reject: a decision row, and the question posted in the thread with the case's link |
+| `request_decision` | `{ question, where? }`: asks people to approve or reject: a decision row, and the question posted with `where: thread` (the item's thread, with the case's link; needs the `comment` grant) or `where: case_page` (the case page only, no grant). Default: where the message it answers came from |
 | `record_decision` | Records a decision someone gave in the thread (`via: message`) |
 | `page_publish` | (grant: the Confluence key `[publish]`) Publishes a task's Markdown file as a Confluence page, with attachments ("Confluence documents" below) |
 | `page_get` | (grant: the Confluence key `read` or `[publish]`) Reads a Confluence page as Markdown, with its version and last editor |
@@ -245,7 +245,7 @@ says what the orchestrator may write. Default `{}`.
 
 | Key | Values | Allows |
 |---|---|---|
-| `source` | `comment`, `attach` (needs `comment`), `transition`, `label`, `link` | `reply` / `edit_reply` / `request_decision` on the ticket; `reply attachments`; `source_item_transition`; `source_item_label`; `source_item_link` |
+| `source` | `comment`, `attach` (needs `comment`), `transition`, `label`, `link` | `reply` / `edit_reply` / `request_decision` (`where: thread`) on the ticket; `reply attachments`; `source_item_transition`; `source_item_label`; `source_item_link` |
 | a Confluence key | `read` or `[publish]` | `page_get` and page files; `page_publish` (publish implies read). With several granted connections the call names `connection` |
 | `pull_requests` | `[open]` | `pull_request_open` |
 
@@ -518,6 +518,19 @@ question. It is decided once (`lib/orchestrator/decisions.ts`), either way:
   `record_decision` (`via: message`, who as written); it already knows, so
   no message wakes it again. Who may decide this way is one of the guards
   (phase 8).
+
+`request_decision` takes an optional `where` (`thread` or `case_page`), like
+`reply`. With `where: thread` the question is posted on the item's thread
+with the case's link and needs the `comment` grant. With `where: case_page`
+it stays in AgentFlow: it is posted on the case page only, ends with "Approve
+or reject it under Decisions, or answer here.", and needs no grant. Without
+`where` it goes where the message it answers came from. A decision asked on
+the case page is approved or rejected with the Decisions card (on the case
+page, or on the orchestrator node's case in the Agents tab), or answered by a
+case-page message that the orchestrator records with `record_decision`.
+Rules use this for "nothing goes on the ticket without an admin's approval";
+the platform does not enforce that rule, the rules do (see
+[orchestrator-guide.md](orchestrator-guide.md) section 3).
 
 ## What runners can do (AGENTFLOW.md)
 

@@ -3,7 +3,7 @@ title: "Writing orchestrator rules"
 description: "How to structure the rules (agent.instructions) of an orchestrated workflow: what to write in each part and what the platform already does."
 ---
 
-The rules are plain text in `agent.instructions`, up to 8000 characters. They are sent with every turn. Keep them to the process: AgentFlow writes the rest of the prompt (the case, the Agents and their commands, the ticket changes, the new messages).
+The rules are plain text in `agent.instructions`, up to 16000 characters. They are sent with every turn and repeat in a resumed session, so the YAML editor warns above 8000: long rules cost tokens and attention. Keep them to the process: AgentFlow writes the rest of the prompt (the case, the Agents and their commands, the ticket changes, the new messages).
 
 ## Structure
 

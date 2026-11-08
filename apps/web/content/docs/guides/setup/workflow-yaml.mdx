@@ -78,7 +78,7 @@ These keys decide **which Agent works, how, and on what**.
 | `stopOnOpenQuestions` | `true` or `false` | `true` | Without a process: when the plan has open questions, wait for people (`input.needed`). `false` implements the plan as it is. A process step's `questions:` replaces it. |
 | `prd` | mapping | none | Which items are imported as a **PRD** instead of an Issue (below). |
 | `titleTemplate` | text with variables, up to 300 | `{{source.key}}: {{source.title}}` | Title of the imported PRD or Issue. |
-| `instructions` | text, up to 8000 characters | none | Run-based: appended to every imported PRD or Issue under "Additional instructions", so every loop reads it. **Orchestrated**: the Orchestrator Agent's **rules**, sent with every turn. |
+| `instructions` | text, up to 16000 characters (the editor warns above 8000) | none | Run-based: appended to every imported PRD or Issue under "Additional instructions", so every loop reads it. **Orchestrated**: the Orchestrator Agent's **rules**, sent with every turn. |
 | `repository` | `{ fullName, branch }` | every project repository | A repository of the team pool to use instead of the project's repositories: `fullName` (`owner/name`) and `branch` (the base branch). |
 | `process` | mapping | the project's process | The workflow's own process: `toolkit` and `steps`, written like Project → Process ([Process YAML](/docs/guides/setup/process-yaml)). Without one, the project's process; a project without one runs `mode`. Not allowed in orchestrated mode. |
 | `orchestrator` | mapping | the defaults | Orchestrated mode only: how the orchestrator takes a thread's messages (below). |
@@ -129,6 +129,9 @@ agent:
 | `debounceSeconds` | 0 to 600 | `20` | Quiet time after the last message of a thread before a turn starts, so a burst (a status flipped twice, a comment and its edit) is one turn. `0` starts at once. |
 | `turnTimeoutMinutes` | 1 to 60 | `10` | A turn running longer is stopped. |
 | `cancelOn` | list of `status_changed`, `label_added`, `label_removed` | `[status_changed, label_removed]` | Which ticket changes let a turn cancel tasks (`task_cancel`) started for the status or label the ticket left. `[]`: the orchestrator never cancels. A comment, question or reply never cancels. |
+| `mentionOnly` | `true` or `false` | `false` | A thread reply that no trigger matched (no mention of the Agent) does not wake a turn. See [Side conversations](/docs/guides/recipes/side-conversations). |
+| `caseLookup` | `true` or `false` | `false` | Turns the `case_lookup` tool on, which reads another item's case in the project. |
+| `caseHandoff` | `true` or `false` | `false` | Turns the `case_handoff` tool on, which sends an approved summary to another item's case. |
 | `connections` | mapping of connection key to a list of operations (or `read`) | `{}` | What the orchestrator may write. `source` (the ticket the conversation is about): `comment`, `attach` (needs `comment`), `transition`, `label`, `link`. A Confluence connection key: `read` or `[publish]`. `pull_requests`: `[open]`. The default `{}` only reads the ticket. Checked at save (a trigger's connection must offer each `source` operation; a Teams thread takes only `comment`) and on every tool call. Only with `agent.mode: orchestrated`. |
 
 See [Orchestrator](/docs/guides/setup/orchestrator) for the rules and tools.

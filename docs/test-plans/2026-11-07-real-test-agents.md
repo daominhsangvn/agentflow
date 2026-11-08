@@ -15,6 +15,8 @@ and Windows.
 | Questions an agent asks on the item (commentId) | 39acf3e, 678f39a | docs/orchestrator.md, docs/agent-integration.md |
 | Windows service, uninstall script | 6060f33 | docs/runner.md "Option D: Windows" |
 
+Approval before posting on LeaveDesk is a separate plan: [2026-11-08-leavedesk-approval.md](2026-11-08-leavedesk-approval.md).
+
 Each case has an id, steps, the expected result and what to keep as evidence.
 Record results in the table at the end.
 

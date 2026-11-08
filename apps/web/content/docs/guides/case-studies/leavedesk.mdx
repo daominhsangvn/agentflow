@@ -1,0 +1,193 @@
+---
+title: "LeaveDesk end to end"
+description: "The LeaveDesk team, its ticket flow and the orchestrator rules, one section at a time with the reason for each."
+---
+
+LeaveDesk is the reference project for an orchestrated flow. This page describes the team, what happened on its tickets, and the complete rules text with the reason for each rule.
+
+## The team
+
+| Role | Agent | Runs on |
+|---|---|---|
+| BA | automatic Agent | `runner-1` |
+| QC | automatic Agent | `runner-qc` |
+| Dev | personal Agent | the developer's own machine |
+| Orchestrator | automatic Agent, no repository clone | `runner-orch` |
+
+Tickets move through the Jira statuses To Do → PRD → Planning → Implement → Testing → Review → Done.
+
+On Confluence each ticket has one ticket page with child pages: PRD, Implementation plan, Test plan and one Test run N page per test round. Pull requests go to three repositories: `leavedesk-app` (Dev code), `leavedesk-qa` (QC tests) and `leavedesk-knowledge` (the BA's archive of the approved PRD).
+
+Every setup file (workflow YAML, process, `AGENTFLOW.md` files) is in [the LeaveDesk example](/docs/guides/setup/leavedesk-example).
+
+## What happened
+
+LD-6 (a team calendar) went through eight cases:
+
+1. **PRD, v1 to v4 on the same page.** 8 questions, answered in two rounds; the BA's own Confluence edit was kept in v4.
+2. **Planning.** BA archive, Dev plan and QC test plan started in parallel, each from the current PRD page.
+3. **Implement.** The Dev Agent implemented the plan with TDD and opened its own pull request.
+4. **Testing.** Round 1 passed 32 of 33 cases; after a fix, round 2 passed 33 of 33. Test run 1 stays on Confluence.
+5. **Review to Done.** Three pull requests listed, people merged them and closed the ticket.
+6. **Several comments in one debounce window.** Each comment was answered in its own thread.
+7. **Accidental status flip.** Two moves ten seconds apart became one turn that acted on the final status.
+8. **Coming back to a status.** After Testing went back to Implement, nothing started until a person wrote "fix D-1".
+
+LD-7 and LD-8 ran later with a Dev Agent on Windows: see [the real test](/docs/guides/case-studies/real-test-windows-dev).
+
+## The rules, rule by rule
+
+These are the rules of the LeaveDesk workflow as exported to the YAML in the example. Each section is followed by why it exists and, where a record exists, the incident behind it.
+
+### Roles
+
+```text
+## Roles
+- BA: writes the PRD of a ticket, archives the approved PRD in the knowledge base (a branch AgentFlow pushes) and answers questions about requirements.
+- Dev: writes the implementation plan, implements it and opens its own pull request (never merges); answers questions about the plan and the code.
+- QC: designs the test plan (test cases); separately, automates and runs the approved test plan and reports each test round with evidence screenshots (a branch AgentFlow pushes); answers questions about tests.
+- People (BA, Dev, QC, admin) review the documents on Confluence and the pull requests, ask questions as Jira comments, merge the pull requests and move the ticket.
+- runners_list says which runner does what; follow what each command declares (needs, produces, files).
+```
+
+**Why.** Without roles the orchestrator would guess which runner does what. The rules give the short version and defer to what each command declares.
+
+**Incident.** Commands renamed in a toolkit (`/ba-requirement archive` became `/ba-archive`) keep working, because the orchestrator reads `runners_list` instead of a command name in the rules (orchestrator guide, section 3).
+
+### The ticket
+
+```text
+## The ticket
+- Runners do not see the Jira ticket: their files only hold the case. Before the first task of a ticket (and whenever the ticket's description changed), read the ticket with source_item_get and put it in the task prompt as people wrote it: key, title, description, acceptance criteria, and the names of its attachments. Later tasks of the same ticket get it again in their prompt.
+```
+
+**Why.** Agents run in their own folders and never see Jira. Whatever the ticket says must reach the task through its prompt.
+
+**Incident.** QC rewrote answered questions as assumptions until confirmed answers were passed on to later tasks. That is why the Questions section says "A confirmed answer is a decision".
+
+### Approval before posting
+
+```text
+## Approval before posting
+- Nothing goes on the Jira ticket without an admin's approval (comments, edits, files, status changes): request_decision where: case_page with the exact text or change, then wait_human. Approved: post exactly that (where: thread). Rejected: revise with the admin's comment, ask again.
+- Not gated: Confluence pages, tasks, pull requests, case-page replies, questions an agent posted on the ticket itself.
+```
+
+**Why.** Admins want to see every write on the ticket before it happens. Approving happens in AgentFlow (see [Approval before posting](/docs/guides/recipes/approval-before-posting)); the approved text is posted unchanged.
+
+**Incident.** Added on 2026-11-08 at the user's request. In the LD-7 test one turn posted an announcement on the case page and the same text on Jira, because a reply's default target followed the last case-page message. The rule now names `where` on every call.
+
+### Documents on Confluence
+
+```text
+## Documents on Confluence
+- Every ticket has one page "<KEY> · <summary>" under the project's parent page (kind ticket): the ticket link, a one-line summary, and the links to its child pages. Create it the first time a document of the ticket is published, and update it when a child page is added.
+- Child pages of the ticket page: "<KEY> · PRD" (kind prd), "<KEY> · Implementation plan" (kind plan), "<KEY> · Test plan" (kind test_plan). Each test round is a child page of the test plan: "<KEY> · Test run <N> · <YYYY-MM-DD>" (kind test_run; N counts the rounds in the case's Documents), with the results file as the body and the evidence screenshots as attachments.
+- Publish with page_publish from the newest succeeded task that produced the file. Later versions update the SAME page: pass page (the page id from the case's Documents).
+- Before a task works from a document, hand it the page's CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence): PRD-<KEY>.md, PLAN-<KEY>.md, TESTCASES-<KEY>.md.
+- If page_publish refuses because people edited the page: run the task again with that page in its files so their edits are kept, then publish. Use overwrite only when a person asked to replace the page.
+- On Jira, write short comments with the page title, its link, its version and one or two lines on what changed. Do not attach files to Jira comments.
+- To answer a question about a document, read the page first (page_get).
+```
+
+**Why.** People edit the pages, so the page, not the task's last file, is the source of truth. One page per document keeps versions in one place.
+
+**Incident.** LD-6 case 1: the BA's Confluence edit survived into v4 because the next task got the current page. Files moved from Jira attachments to Confluence pages; the 2026-10-28 rules had a section "Files on the ticket".
+
+### Flow (Jira status order)
+
+```text
+## Flow (Jira status order)
+To Do → PRD → Planning → Implement → Testing → Review → Done
+- To Do: nothing.
+- PRD: BA writes the PRD from the ticket. Post its questions as one numbered comment. When the PRD is ready, publish the ticket page and the PRD page, comment the link and ask people to review the PRD on Confluence and to ask their questions here; they move the ticket to Planning when it is approved. When people ask for changes, resume the BA task with their feedback and the current PRD page in its files, publish the same page and comment what changed.
+- Planning: at the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-<KEY>.md in their files. When the archive is done, open its pull request (pull_request_open with that task) and comment the link for Review. Post each one's questions in its own comment. When each is done, publish its page, update the ticket page and comment the links; ask people to review both. When people ask for changes, resume that task with the feedback and the current page in its files, publish the same page and comment what changed. People move the ticket to Implement when both are approved.
+- Implement: Dev implements from the plan page (PLAN-<KEY>.md in its files) and opens its pull request itself. Post its questions. When done, comment the pull request link with its summary (from the pull request body file) and say the ticket can move to Testing. Nobody merges yet.
+- Testing: QC automates and runs the approved tests from the test plan page (TESTCASES-<KEY>.md) with the PRD page (PRD-<KEY>.md) in its files and the prompt "Automate and run the approved test cases against the Dev branch <KEY> (its pull request is not merged yet); do not redesign them." When done, publish the test round as a child page of the test plan with the results file and the evidence screenshots as attachments, open the pull request of the QC test code (pull_request_open with that task), then comment: verdict, passed/failed counts, each failure with its reason, the test run page link and the pull request link. If tests failed, ask people what to do (back to Implement for a fix, then Testing again as a new test round, or accept).
+- Review: start nothing new. People (Dev and QC) review the pull requests of the ticket (Dev code, QC tests, BA archive) and ask questions here: answer in the thread from the runner that knows (Dev: resume its implementation task with fork, or its read-only command; QC: its review command; BA: its research command). People merge the pull requests themselves and move the ticket to Done.
+- Done: close the case.
+```
+
+**Why.** The statuses are the process. Each status says what starts, what the orchestrator posts, and who moves the ticket on.
+
+**Incident.** LD-6 cases 1 to 5 walk the flow from PRD to Done.
+
+### Questions and answers (every status)
+
+```text
+## Questions and answers (every status)
+- Answer each comment in its own thread (replyTo). A question about the PRD, the plan, the test plan or the results: read the page, ask the runner that wrote it when needed, answer in the thread with the page link.
+- A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+- A confirmed answer is a decision: pass it in the prompt of later tasks.
+- A question never stops or restarts a running task.
+- Announce finished work (PRD ready, plan / test plan ready, pull request, test verdict) and a runner's questions in a NEW top-level comment (no replyTo), even if you said in a thread that you would post it there. Threads are only for answering the comment they reply to.
+```
+
+**Why.** Questions arrive at any time and must not disturb running work. Threads keep answers next to their questions; announcements need to be seen.
+
+**Incident.** LD-6 case 1: a reply answered some questions and asked a privacy question; the rule "answer the new ones first" comes from it. "Announce ... in a NEW top-level comment" was added on 2026-11-05.
+
+### Blocked tasks
+
+```text
+## Blocked tasks
+- A task answer that starts with "BLOCKED:" did nothing. Comment what is missing and who produces it (from that line). If the missing document exists on Confluence or from an earlier task, pass it in the task's files and run the task again (once); otherwise wait for it.
+```
+
+**Why.** A command that lacks an input answers `BLOCKED:` and does nothing. The orchestrator must report it and retry once with the missing file, not loop.
+
+**Incident.** The recorded line is `BLOCKED: missing PRD-<KEY>.md`. See [Blocked tasks](/docs/guides/recipes/blocked-tasks).
+
+### Work belongs to its status
+
+```text
+## Work belongs to its status
+- Start a writing task only for the work of the ticket's CURRENT status (PRD: the PRD; Planning: archive, plan, test plan; Implement: code and fixes; Testing: test rounds). If someone asks in a comment for work of another status (e.g. "fix the code" while in Testing), do not start it: answer that the ticket must move to that status first, and do it when it is there. Reading tasks (questions, research, reviews) are allowed in every status.
+```
+
+**Why.** A comment such as "fix the code" while in Testing should not start a writing task of another status.
+
+**Incident.** LD-6 cases 4 and 8.
+
+### Coming back to a status
+
+```text
+## Coming back to a status
+- When the ticket moves back to a status whose work was already done in this case (e.g. Testing → Implement after a failed test round, Planning → PRD), start NOTHING on your own. Comment what that status already produced (pages, pull request, last results) and ask what to change. Start the work only when a person says what to do in a comment (e.g. "fix D-1"), then resume the task that did that work with their instruction.
+- The first time the ticket enters a status, follow the Flow as written.
+```
+
+**Why.** Moving a ticket back is often a question, not an order. The orchestrator reports what exists and waits.
+
+**Incident.** LD-6 cases 4 and 8: after Testing went back to Implement, nothing started until a person wrote "fix D-1".
+
+### Cancelling
+
+```text
+## Cancelling
+- Only a status change cancels tasks. Moving forward in the flow keeps running tasks (say they are still running).
+- Moving backward or to a status outside the flow: cancel the tasks started for the statuses being left and say so on the ticket.
+- Several changes in one turn: act on the final status only.
+```
+
+**Why.** Cancelling is expensive and a comment must never do it. Only status changes cancel, and only for statuses being left.
+
+**Incident.** LD-6 case 7: an accidental flip Implement to Planning to Testing ten seconds apart was merged by the debounce into one turn that acted on the final status.
+
+### Language
+
+```text
+## Language
+- Default language: Vietnamese. A comment written in another language is answered in that language. Page titles, file names, ticket keys and code stay as they are.
+```
+
+**Why.** The team writes Vietnamese; the rules say so once instead of per command.
+
+## Not in these rules
+
+- **Blockers.** Waiting for another ticket to finish was left out earlier, when the limit was 8000 characters. See the recipe [Waiting for blockers](/docs/guides/recipes/waiting-for-blockers).
+- **Side conversations.** Threads about other items are covered by a recipe: [Side conversations](/docs/guides/recipes/side-conversations).
+
+## Length
+
+These rules are about 8400 characters. The limit is 16000, and the YAML editor warns above 8000: the rules are sent with every turn and repeat in a resumed session, which costs tokens and attention. Keep rules to the process.

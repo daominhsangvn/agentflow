@@ -10,6 +10,9 @@ example throughout is LeaveDesk:
 [workshop/leavedesk/orchestrator-workflow.yaml](workshop/leavedesk/orchestrator-workflow.yaml).
 A full ticket, To Do to Done, step by step with LikeC4 diagrams:
 [case-studies/ld-6-team-calendar](case-studies/ld-6-team-calendar/README.md).
+Rule recipes and case studies for new projects: the web Guides
+`/docs/guides/recipes` and `/docs/guides/case-studies`
+(`apps/web/content/docs/guides/`).
 
 ## 1. Concepts
 
@@ -21,7 +24,7 @@ A full ticket, To Do to Done, step by step with LikeC4 diagrams:
 | **Turn** | One run of the orchestrator (Claude Code `-p`, MCP tools only, empty folder) that takes every new message of a conversation and acts with its tools. |
 | **Task** | One command of one runner, started with `task_run`, run as a loop on that runner. Its answer, questions and files come back to the case. |
 | **Wait** | `wait_for` (tasks) or `wait_human` (people) ends a turn. A wait on tasks is evaluated in code; the next turn starts only when it fires. |
-| **Decision** | An approval asked with `request_decision`, given with the button in AgentFlow or recorded from the thread with `record_decision`. |
+| **Decision** | An approval asked with `request_decision` (on the ticket's thread, or kept in AgentFlow with `where: case_page`), given with the button in AgentFlow or recorded from the thread with `record_decision`. |
 | **Ticket change** | A status move or label change, stored as a message of the item conversation (`Status changed: A → B (by X)`). |
 | **supersede / queue** | What a new message does to a running turn of the same thread: `supersede` stops it (its write tools are refused at once), `queue` lets it finish. |
 | **Side conversation** | A thread about another item (e.g. a Teams thread about LD-6). It stays its own case. With `caseLookup` the orchestrator can read the other item's case; with `caseHandoff` it can send people-approved text there as a `handoff` message. |
@@ -135,6 +138,20 @@ Platform: the question's `commentId` becomes an anchor; a reply to that comment
 reaches the orchestrator even without a mention and carries `task` and
 `question`.
 
+**Approval before posting on the ticket.**
+Write: *"Nothing goes on the Jira ticket without an admin's approval
+(comments, edits, files, status changes): request_decision where: case_page
+with the exact text or change, then wait_human. Approved: post exactly that
+(where: thread). Rejected: revise with the admin's comment, ask again. Not
+gated: Confluence pages, tasks, pull requests, case-page replies, questions an
+agent posted on the ticket itself."*
+Why: a bot posts under one identity; an admin reads the text before it is
+public.
+Platform: rules only. `request_decision where: case_page` keeps the request
+off the ticket and shows it under Decisions; nothing refuses an unapproved
+reply. The only hard limit is the grants (leave out `transition` if the
+orchestrator must never move the ticket).
+
 **BLOCKED.**
 Write: *"A task answer that starts with BLOCKED: did nothing. Comment what is
 missing and who produces it. If the missing file exists from an earlier task
@@ -214,7 +231,8 @@ ticket keys stay as they are.
   runners with the person's (for Gitea, a `tea` login whose token has
   `write:repository` and `write:issue`).
 - [ ] **Try it** on one ticket through every status, with a question in a
-  comment at each review step, before using it on real work.
+  comment at each review step, before using it on real work. Decide where
+  approvals live (rule text in the web recipe "Approval before posting").
 
 Rules advice: when a rule makes the orchestrator ask people something and
 wait, tell it to end with `wait_human` and set `asked` (one line: what was
@@ -254,5 +272,6 @@ Not yet:
 - Budgets per case or project (turns per hour, tasks, cost).
 - Write grants for the orchestrator's replies and posts per integration.
 - Cancelling only on backward moves: the rules decide, not the platform.
+- Approval before posting: the rules decide; no server check.
 - Hardening against untrusted ticket text beyond marking it untrusted in the
   prompt.

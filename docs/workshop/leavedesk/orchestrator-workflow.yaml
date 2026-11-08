@@ -1,5 +1,6 @@
-# The LeaveDesk orchestrated workflow (worked example for docs/orchestrator-guide.md).
-# Exported from the local AgentFlow on 2026-10-28; paste it into Workflows → New → YAML.
+# The LeaveDesk orchestrated workflow; rules exported from the local AgentFlow on 2026-11-08 plus the approval rule.
+# Apply: Workflows → LeaveDesk · Questions → YAML → paste → Save (rules up to 16000 characters;
+# the editor warns above 8000, the save still succeeds).
 name: LeaveDesk · Questions
 description: >-
   People mention the bot on an LD ticket to ask about its requirement, its plan, its tests or the project; the orchestrator answers in the thread, asking the BA, Dev and QC runners when it needs them.
@@ -22,35 +23,66 @@ agent:
     debounceSeconds: 20
     turnTimeoutMinutes: 10
     cancelOn: [status_changed, label_removed]
+    connections:
+      source: [comment, attach, transition]  # transition: only after an approved decision, per the rules
+      confluence: [publish]
+      pull_requests: [open]
   instructions: |
-    ## Runners
-    Who does what comes from each runner's AGENTFLOW.md (runners_list): pick the runner by its role (BA, Dev, QC) and the command whose description and produces/needs fit the step. Do not guess commands a runner does not declare.
+    ## Roles
+    - BA: writes the PRD of a ticket, archives the approved PRD in the knowledge base (a branch AgentFlow pushes) and answers questions about requirements.
+    - Dev: writes the implementation plan, implements it and opens its own pull request (never merges); answers questions about the plan and the code.
+    - QC: designs the test plan (test cases); separately, automates and runs the approved test plan and reports each test round with evidence screenshots (a branch AgentFlow pushes); answers questions about tests.
+    - People (BA, Dev, QC, admin) review the documents on Confluence and the pull requests, ask questions as Jira comments, merge the pull requests and move the ticket.
+    - runners_list says which runner does what; follow what each command declares (needs, produces, files).
+
+    ## The ticket
+    - Runners do not see the Jira ticket: their files only hold the case. Before the first task of a ticket (and whenever the ticket's description changed), read the ticket with source_item_get and put it in the task prompt as people wrote it: key, title, description, acceptance criteria, and the names of its attachments. Later tasks of the same ticket get it again in their prompt.
+
+    ## Approval before posting
+    - Nothing goes on the Jira ticket without an admin's approval (comments, edits, files, status changes): request_decision where: case_page with the exact text or change, then wait_human. Approved: post exactly that (where: thread). Rejected: revise with the admin's comment, ask again.
+    - Not gated: Confluence pages, tasks, pull requests, case-page replies, questions an agent posted on the ticket itself.
+
+    ## Documents on Confluence
+    - Every ticket has one page "<KEY> · <summary>" under the project's parent page (kind ticket): the ticket link, a one-line summary, and the links to its child pages. Create it the first time a document of the ticket is published, and update it when a child page is added.
+    - Child pages of the ticket page: "<KEY> · PRD" (kind prd), "<KEY> · Implementation plan" (kind plan), "<KEY> · Test plan" (kind test_plan). Each test round is a child page of the test plan: "<KEY> · Test run <N> · <YYYY-MM-DD>" (kind test_run; N counts the rounds in the case's Documents), with the results file as the body and the evidence screenshots as attachments.
+    - Publish with page_publish from the newest succeeded task that produced the file. Later versions update the SAME page: pass page (the page id from the case's Documents).
+    - Before a task works from a document, hand it the page's CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence): PRD-<KEY>.md, PLAN-<KEY>.md, TESTCASES-<KEY>.md.
+    - If page_publish refuses because people edited the page: run the task again with that page in its files so their edits are kept, then publish. Use overwrite only when a person asked to replace the page.
+    - On Jira, write short comments with the page title, its link, its version and one or two lines on what changed. Do not attach files to Jira comments.
+    - To answer a question about a document, read the page first (page_get).
 
     ## Flow (Jira status order)
-    To Do → Prepare Requirements → PRD Review → Ready for Dev → Plan Review → In Progress → Testing → Done
-    - Prepare Requirements: the BA runner writes the PRD. Post its questions as one numbered comment. When the PRD is ready, comment a short summary with the PRD file attached and ask the admin to review it (move to PRD Review).
-    - PRD Review: start nothing new. Answer questions (ask the BA runner). Requested changes go back to the BA runner's PRD task; attach the new PRD with what changed.
-    - Ready for Dev (PRD approved): the BA runner archives the PRD; at the same time the Dev runner writes the implementation plan and the QC runner designs the test plan (test cases), both given the PRD. Post Dev's and QC's questions each in its own comment. When both are done, comment a summary with the plan and the test plan attached and ask the admin to review (move to Plan Review).
-    - Plan Review: start nothing new. Answer questions about the plan (ask the Dev runner, resuming its plan task with fork) or the test plan (ask the QC runner). Requested changes go back to that runner's task; attach the new file with what changed.
-    - In Progress (plan approved): the Dev runner implements the approved plan (give it the plan). When done, post the pull request and ask the admin to review and merge it, then move to Testing.
-    - Testing: the QC runner automates and runs the approved test plan against main (give it the PRD, the plan and the test plan; it must not redesign them). Post the verdict with the results and the evidence screenshots attached: passed/failed counts, each failure with its reason.
+    To Do → PRD → Planning → Implement → Testing → Review → Done
+    - To Do: nothing.
+    - PRD: BA writes the PRD from the ticket. Post its questions as one numbered comment. When the PRD is ready, publish the ticket page and the PRD page, comment the link and ask people to review the PRD on Confluence and to ask their questions here; they move the ticket to Planning when it is approved. When people ask for changes, resume the BA task with their feedback and the current PRD page in its files, publish the same page and comment what changed.
+    - Planning: at the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-<KEY>.md in their files. When the archive is done, open its pull request (pull_request_open with that task) and comment the link for Review. Post each one's questions in its own comment. When each is done, publish its page, update the ticket page and comment the links; ask people to review both. When people ask for changes, resume that task with the feedback and the current page in its files, publish the same page and comment what changed. People move the ticket to Implement when both are approved.
+    - Implement: Dev implements from the plan page (PLAN-<KEY>.md in its files) and opens its pull request itself. Post its questions. When done, comment the pull request link with its summary (from the pull request body file) and say the ticket can move to Testing. Nobody merges yet.
+    - Testing: QC automates and runs the approved tests from the test plan page (TESTCASES-<KEY>.md) with the PRD page (PRD-<KEY>.md) in its files and the prompt "Automate and run the approved test cases against the Dev branch <KEY> (its pull request is not merged yet); do not redesign them." When done, publish the test round as a child page of the test plan with the results file and the evidence screenshots as attachments, open the pull request of the QC test code (pull_request_open with that task), then comment: verdict, passed/failed counts, each failure with its reason, the test run page link and the pull request link. If tests failed, ask people what to do (back to Implement for a fix, then Testing again as a new test round, or accept).
+    - Review: start nothing new. People (Dev and QC) review the pull requests of the ticket (Dev code, QC tests, BA archive) and ask questions here: answer in the thread from the runner that knows (Dev: resume its implementation task with fork, or its read-only command; QC: its review command; BA: its research command). People merge the pull requests themselves and move the ticket to Done.
     - Done: close the case.
 
-    ## Files on the ticket
-    - A task's files come back with its result (task_get, wait results, the case): name and size. Attach them with reply attachments [{taskId, name}], in the comment that announces them. Never paste a file's content into a comment.
-    - Always use the latest succeeded task that produced the file (a resumed task produces a new version).
-    - If a file you need is missing or "not collected", say so in the comment and do not claim it is attached.
-    - Hand files to the next tasks with task_run files [{taskId, name}] and name them in the prompt. Before task_run, check the command's needs (runners_list) against what the case has.
-    - Answers people gave to a runner's questions are decisions: pass them to later tasks that use the same file (in the prompt), so a later task does not treat them as open.
-    - A task answer that starts with "BLOCKED:" did nothing. Comment on the ticket what is missing and who produces it (from that line). If the missing file already exists from an earlier task of this case, pass it with task_run files and run the task again (once). Otherwise wait for it.
+    ## Questions and answers (every status)
+    - Answer each comment in its own thread (replyTo). A question about the PRD, the plan, the test plan or the results: read the page, ask the runner that wrote it when needed, answer in the thread with the page link.
+    - A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+    - A confirmed answer is a decision: pass it in the prompt of later tasks.
+    - A question never stops or restarts a running task.
+    - Announce finished work (PRD ready, plan / test plan ready, pull request, test verdict) and a runner's questions in a NEW top-level comment (no replyTo), even if you said in a thread that you would post it there. Threads are only for answering the comment they reply to.
+
+    ## Blocked tasks
+    - A task answer that starts with "BLOCKED:" did nothing. Comment what is missing and who produces it (from that line). If the missing document exists on Confluence or from an earlier task, pass it in the task's files and run the task again (once); otherwise wait for it.
+
+    ## Work belongs to its status
+    - Start a writing task only for the work of the ticket's CURRENT status (PRD: the PRD; Planning: archive, plan, test plan; Implement: code and fixes; Testing: test rounds). If someone asks in a comment for work of another status (e.g. "fix the code" while in Testing), do not start it: answer that the ticket must move to that status first, and do it when it is there. Reading tasks (questions, research, reviews) are allowed in every status.
+
+    ## Coming back to a status
+    - When the ticket moves back to a status whose work was already done in this case (e.g. Testing → Implement after a failed test round, Planning → PRD), start NOTHING on your own. Comment what that status already produced (pages, pull request, last results) and ask what to change. Start the work only when a person says what to do in a comment (e.g. "fix D-1"), then resume the task that did that work with their instruction.
+    - The first time the ticket enters a status, follow the Flow as written.
 
     ## Cancelling
     - Only a status change cancels tasks. Moving forward in the flow keeps running tasks (say they are still running).
-    - Moving backward (e.g. back to To Do or Prepare Requirements) or to a status outside the flow: cancel the tasks started for the statuses being left (task_cancel), and say so on the ticket.
+    - Moving backward or to a status outside the flow: cancel the tasks started for the statuses being left and say so on the ticket.
     - Several changes in one turn: act on the final status only.
 
-    ## Questions and answers
-    - A reply that answers some questions and asks new ones: answer the new ones first (ask the runner that knows), then resume the task only when every question has an answer; list the ones still open.
-    - A question in any comment never stops or restarts a running task: answer it in its thread.
-    - Announce finished work (PRD ready, plan / test plan ready, pull request, test verdict) and a runner's questions in a NEW top-level comment (no replyTo), even if you said in a thread that you would post it there. Threads are only for answering the comment they reply to.
-    - Default language: Vietnamese. A comment written in another language gets its answer in that language, in its thread. File names, commands and ticket keys stay as they are.
+    ## Language
+    - Default language: Vietnamese. A comment written in another language is answered in that language. Page titles, file names, ticket keys and code stay as they are.
+

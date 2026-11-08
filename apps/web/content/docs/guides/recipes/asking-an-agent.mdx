@@ -1,0 +1,40 @@
+---
+title: "Asking an Agent"
+description: "Ask an Agent about its earlier work from the workflow's Agents tab without disturbing the original task."
+---
+
+An Agent has already written the PRD or the code, and you want to know why. Ask it from the case page: the orchestrator relays the question to a copy of the Agent's session and answers on the case page.
+
+## The pattern
+
+1. Open the workflow, then **Agents**, pick the Agent and open the case.
+2. Use "Ask `<Agent>` about `<key>`" and send the question. The message carries the Agent (`toAgentId`).
+3. The orchestrator resumes the Agent's latest task in the case with `fork: true`: a copy of its session, read only unless the rules allow changes. It waits for the answer and replies on the case page.
+4. The original task and its open questions are untouched.
+
+An Agent with no task in the case cannot be asked.
+
+## While the Agent has open questions
+
+The Ask composer is replaced by "Answer `<Agent>`'s questions above…". Use the questions form and **Send answers**. A message to that Agent while its questions are open counts as the answers: the task is resumed without a fork.
+
+## Rule text
+
+```text
+- A message to an agent from AgentFlow: ask that agent (resume its latest task with fork, read only) and answer on the case page; post on the ticket only when asked.
+```
+
+## What the platform does
+
+- The orchestrator receives the message with the Agent it is for. A relay is a `task_run` that resumes the Agent's latest task in the case with `fork: true`, `replyTo` the message, then `wait_for`, then a `reply` on the case page.
+- When the Agent has a task with open questions, the message is marked with that task (`open-questions-task`) and the orchestrator resumes it without a fork, on the same Agent.
+- A task resumes only on the Agent that ran it, because its session is there. Resuming on another Agent is refused.
+
+## Case study
+
+[A real test on a Windows development machine](/docs/guides/case-studies/real-test-windows-dev) asks a personal Agent about its work.
+
+## See also
+
+- [The workflow's Agents tab](/docs/guides/operate/cases#the-workflows-agents-tab)
+- [Questions and answers](/docs/guides/recipes/questions-and-answers)

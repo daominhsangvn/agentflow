@@ -1,0 +1,52 @@
+---
+title: "Side conversations"
+description: "Keep a Teams thread or another ticket's thread about an item as its own case, and hand an approved summary to the item's case."
+---
+
+A Teams thread, or another ticket's thread, about LD-6 stays its own case: it is not merged into LD-6. Three switches under `agent.orchestrator` decide how the orchestrator behaves there. All default to `false`.
+
+```yaml
+agent:
+  orchestrator:
+    mentionOnly: true
+    caseLookup: true
+    caseHandoff: true
+```
+
+## mentionOnly
+
+A reply in a thread the orchestrator talks in wakes it only when it mentions the bot, replies to a message the bot posted, or replies to a comment an Agent asked in. Other replies are dropped, not stored. The orchestrator reads the thread when it needs it.
+
+## caseLookup
+
+Adds `case_lookup`: the orchestrator reads the case of another item of the project, in any workflow, read only. A Teams thread asking about LD-6 can be answered from LD-6's case.
+
+## caseHandoff
+
+Adds `case_handoff`. The steps:
+
+1. `source_item_get` reads the whole thread.
+2. `request_decision` carries the summary. It is exactly what is sent. Choose `where` per your [approval rule](/docs/guides/recipes/approval-before-posting).
+3. `wait_human`.
+4. Approved: `case_handoff { decisionId, itemKey, caseId? }`.
+
+The server checks that the decision belongs to this case and is approved, sends it once, and requires the target to be in the same project. With several cases on the item and no `caseId`, it is refused with a list. The text sent is the decision's question, not the model's. The target case gets a `handoff` message and reopens if it was closed.
+
+## Rule text
+
+```text
+## Side conversations
+- A thread about another item stays its own case. Answer there when mentioned; use case_lookup to read the item's case.
+- On "record this in <KEY>": read the thread (source_item_get), request_decision with the summary, wait_human; when approved, case_handoff to that item. Never hand off without an approved decision.
+```
+
+## Not done
+
+- There is no report back to the thread after the target case acts.
+- Approval in the thread trusts the model's reading of who wrote it.
+
+## See also
+
+- [Orchestrator setup](/docs/guides/setup/orchestrator)
+- [Approval before posting](/docs/guides/recipes/approval-before-posting)
+- [Workflow YAML](/docs/guides/setup/workflow-yaml)
