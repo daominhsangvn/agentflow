@@ -9,6 +9,7 @@ import {
 import { Status } from "@repo/api/src/types/result";
 import { RunnerCommandMode } from "@repo/api/src/types/runner-capabilities";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildConnectionRuntime } from "@/__tests__/support/orchestrator-tools/connection-runtime.test-fixtures";
 import { orchestratorToolService } from "@/app/orchestrator-tools/service";
 import { hashOrchestratorToken } from "@/app/orchestrator-tools/token";
 import { TURN_SUPERSEDED_ERROR } from "@/lib/orchestrator/supersede";
@@ -118,18 +119,7 @@ vi.mock("@repo/database", () => {
 });
 vi.mock("@/lib/integrations/project-connections", () => ({
   loadProjectConnectionRuntime: () =>
-    Promise.resolve({
-      connection: {
-        provider: {
-          replyOnItem: mocks.replyOnItem,
-          editOnItem: mocks.editOnItem,
-          source: mocks.hasAttachFile
-            ? { attachFile: mocks.attachFile }
-            : undefined,
-        },
-        runtime: { secrets: {} },
-      },
-    }),
+    Promise.resolve(buildConnectionRuntime(mocks)),
 }));
 vi.mock("@/lib/integrations/connection-service", () => ({
   createProviderContext: () => ({}),
@@ -314,6 +304,7 @@ describe("orchestratorToolService", () => {
     expect(mocks.anchors).toMatchObject([
       {
         conversationId: "conversation-1",
+        connectionId: "connection-1",
         provider: "jira",
         externalRef: "900",
       },

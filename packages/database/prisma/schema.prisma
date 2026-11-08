@@ -809,6 +809,8 @@ model OrchestratorAnchor {
   id             String   @id @default(uuid(7)) @db.Uuid
   organizationId String   @map("organization_id") @db.Uuid
   conversationId String   @map("conversation_id") @db.Uuid
+  // The integration connection it was posted through: provider ids are per site.
+  connectionId   String   @map("connection_id") @db.Uuid
   provider       String   @db.VarChar(32)
   externalRef    String   @map("external_ref") @db.VarChar(255)
   // What it is about (plan, testcases, answer, ...) and its version.
@@ -822,8 +824,9 @@ model OrchestratorAnchor {
   organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   conversation OrchestratorConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   task         OrchestratorTask?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  connection   IntegrationConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
-  @@unique([organizationId, provider, externalRef])
+  @@unique([organizationId, connectionId, externalRef])
   @@map("orchestrator_anchors")
 }
 
@@ -5093,6 +5096,7 @@ model IntegrationConnection {
   runs                WorkflowRun[]
   projectRepositories ProjectRepository[]
   projectConnections  ProjectConnection[]
+  orchestratorAnchors OrchestratorAnchor[]
 
   @@index([organizationId, provider])
   @@index([deliveryMode, nextPollAt])

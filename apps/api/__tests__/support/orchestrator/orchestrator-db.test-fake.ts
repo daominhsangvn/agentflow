@@ -96,9 +96,9 @@ export function createOrchestratorDbFake() {
   const db = {
     orchestratorAnchor: {
       findUnique: (args: {
-        where: { organizationId_provider_externalRef: Row };
+        where: { organizationId_connectionId_externalRef: Row };
       }) => {
-        const key = args.where.organizationId_provider_externalRef;
+        const key = args.where.organizationId_connectionId_externalRef;
         const anchor = anchors.find((row) => matches(row, key));
         if (!anchor) {
           return Promise.resolve(null);
@@ -120,7 +120,8 @@ export function createOrchestratorDbFake() {
         if (
           anchors.some(
             (row) =>
-              row.provider === args.data.provider &&
+              row.organizationId === args.data.organizationId &&
+              row.connectionId === args.data.connectionId &&
               row.externalRef === args.data.externalRef
           )
         ) {
@@ -352,12 +353,17 @@ export function createOrchestratorDbFake() {
       conversationId: string,
       provider: string,
       externalRef: string,
-      extras: { taskId?: string; questionId?: string } = {}
+      extras: {
+        taskId?: string;
+        questionId?: string;
+        connectionId?: string;
+      } = {}
     ) {
       anchors.push({
         id: nextId("anchor"),
         organizationId: ORG_ID,
         conversationId,
+        connectionId: CONNECTION_ID,
         provider,
         externalRef,
         ...extras,
@@ -365,3 +371,6 @@ export function createOrchestratorDbFake() {
     },
   };
 }
+
+/** The integration connection the fake anchors belong to unless a test says otherwise. */
+export const CONNECTION_ID = "conn-1";

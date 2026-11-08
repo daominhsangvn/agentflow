@@ -104,6 +104,7 @@ vi.mock("@/lib/integrations/project-connections", () => ({
   loadProjectConnectionRuntime: () =>
     Promise.resolve({
       connection: {
+        record: { id: "connection-1" },
         provider: { replyOnItem: mocks.replyOnItem },
         runtime: { secrets: {} },
       },

@@ -406,7 +406,10 @@ ticket itself and write that comment's id as `commentId` in its
 `questions.json`; it flows into `TaskResult.questions`. When the task settles,
 `task-asked.ts` records the `task_asked` message and one anchor per `commentId`
 (`orchestrator_anchors.task_id`, `question_id`; provider = the conversation's
-item provider; idempotent on the unique key). A reply to that comment routes by
+item provider; idempotent on (organization, connection, comment id)). Anchors are
+scoped to the integration connection because provider ids such as Jira comment
+ids are per site, so a reply is looked up with the connection that received it.
+A reply to that comment routes by
 the anchor, whatever the triggers and `mentionOnly`, and its message payload
 carries `taskId` and `questionId` (`task="..." question="..."` in the prompt).
 The orchestrator collects the answers in a turn and resumes the task (no fork,

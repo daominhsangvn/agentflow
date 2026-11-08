@@ -49,7 +49,12 @@ async function writeAskedQuestions(
         command: true,
         args: true,
         computeTarget: { select: { machineName: true } },
-        conversation: { select: { channel: true } },
+        conversation: {
+          select: {
+            channel: true,
+            projectConnection: { select: { connectionId: true } },
+          },
+        },
       },
     })
   );
@@ -58,12 +63,20 @@ async function writeAskedQuestions(
   }
   const { organizationId, conversationId } = task;
   const channel = readChannel(task.conversation.channel);
-  if (channel) {
+  const connectionId = task.conversation.projectConnection?.connectionId;
+  if (channel && !connectionId) {
+    log.warn(
+      "[orchestrator/task-asked] no connection: questions not anchored",
+      { taskId }
+    );
+  }
+  if (channel && connectionId) {
     await withDb((db) =>
       db.orchestratorAnchor.createMany({
         data: asked.map((q) => ({
           organizationId,
           conversationId,
+          connectionId,
           provider: channel.item.provider,
           externalRef: q.commentId,
           taskId,

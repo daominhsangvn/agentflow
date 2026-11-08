@@ -80,12 +80,12 @@ const ASKED_HUMAN = "Confirm the PRD is final before planning.";
 const DELIM_QUESTION = "Which CSV delimiter?";
 /**
  * Comment ids are per Jira site, and the orchestrator's anchors are unique per
- * org and provider: runs in parallel must not reuse them.
+ * org, connection and comment id. Each run creates its own Jira connection, so
+ * runs may reuse the same ids.
  */
-const COMMENT_BASE = randomInt(1_000_000, 9_000_000);
-const PLAIN_COMMENT_ID = String(COMMENT_BASE);
-const DELIM_COMMENT_ID = String(COMMENT_BASE + 1);
-const DELIM_REPLY_ID = String(COMMENT_BASE + 2);
+const PLAIN_COMMENT_ID = "7000001";
+const DELIM_COMMENT_ID = "7000002";
+const DELIM_REPLY_ID = "7000003";
 const DELIM_ANSWER = "Semicolon";
 
 // A UI action that cannot happen fails the step instead of the whole flow.

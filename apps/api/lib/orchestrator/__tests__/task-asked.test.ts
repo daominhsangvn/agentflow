@@ -31,14 +31,20 @@ const channel = {
   extras: null,
 };
 
-function taskWith(channelValue: unknown) {
+function taskWith(
+  channelValue: unknown,
+  connectionId: string | null = "conn-1"
+) {
   return {
     organizationId: "org",
     conversationId: "conv",
     command: "/plan",
     args: "",
     computeTarget: { machineName: "runner-1" },
-    conversation: { channel: channelValue },
+    conversation: {
+      channel: channelValue,
+      projectConnection: connectionId ? { connectionId } : null,
+    },
   };
 }
 
@@ -66,6 +72,7 @@ describe("recordAskedQuestions", () => {
       data: [
         expect.objectContaining({
           provider: IntegrationProviderKey.Jira,
+          connectionId: "conn-1",
           externalRef: "10",
           taskId: "t1",
           questionId: "q1",
@@ -86,6 +93,13 @@ describe("recordAskedQuestions", () => {
 
   it("records the message but no anchors without a channel", async () => {
     state.task = taskWith(null);
+    await recordAskedQuestions("t1", QUESTIONS);
+    expect(state.createMany).not.toHaveBeenCalled();
+    expect(state.createMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the message but no anchors without a project connection", async () => {
+    state.task = taskWith(channel, null);
     await recordAskedQuestions("t1", QUESTIONS);
     expect(state.createMany).not.toHaveBeenCalled();
     expect(state.createMessage).toHaveBeenCalledTimes(1);

@@ -136,9 +136,9 @@ async function resolveTargets(
     ? await withDb((db) =>
         db.orchestratorAnchor.findUnique({
           where: {
-            organizationId_provider_externalRef: {
+            organizationId_connectionId_externalRef: {
               organizationId,
-              provider: event.item.provider,
+              connectionId: input.connection.record.id,
               externalRef: parentId,
             },
           },

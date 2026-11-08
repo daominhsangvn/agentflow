@@ -5,6 +5,7 @@ import {
 } from "@repo/api/src/types/orchestrator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CONNECTION_ID,
   createOrchestratorDbFake,
   ORG_ID,
   type OrchestratorDbFake,
@@ -48,9 +49,12 @@ beforeEach(() => {
   fake.addWorkflow(WORKFLOW_ID, "Questions on tickets");
 });
 
-function connection(answerReply?: (event: InboundEvent) => string | null) {
+function connection(
+  answerReply?: (event: InboundEvent) => string | null,
+  id: string = CONNECTION_ID
+) {
   return {
-    record: { id: "conn-1", organizationId: ORG_ID },
+    record: { id, organizationId: ORG_ID },
     provider: { answerReply },
   } as unknown as LoadedConnection;
 }
@@ -190,6 +194,71 @@ describe("routeToOrchestrator", () => {
     expect(reply?.conversationId).toBe(first?.conversationId);
     expect(reply?.caseId).toBe(first?.caseId);
     expect(fake.conversations).toHaveLength(1);
+  });
+
+  it("routes a reply by the anchor of its own connection", async () => {
+    const [first] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention(),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: WORKFLOWS,
+    });
+    fake.addAnchor(
+      first?.conversationId ?? "",
+      IntegrationProviderKey.Jira,
+      "900"
+    );
+    const reply = (through: LoadedConnection) =>
+      routeToOrchestrator({
+        connection: through,
+        event: mention({
+          triggerType: "jira.comment_reply",
+          dedupKey: "LD-7:reply:901",
+          message: { id: "901", parentId: "900", text: "ok" },
+        }),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: [],
+      });
+
+    expect(await reply(connection(undefined, "conn-2"))).toEqual([]);
+    const [own] = await reply(connection());
+    expect(own?.conversationId).toBe(first?.conversationId);
+  });
+
+  it("keeps anchors with the same comment id on different connections apart", async () => {
+    const [first] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention(),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: WORKFLOWS,
+    });
+    const [second] = await routeToOrchestrator({
+      connection: connection(undefined, "conn-2"),
+      event: mention({ dedupKey: "LD-7:mention:comment-600" }),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: WORKFLOWS,
+    });
+    const provider = IntegrationProviderKey.Jira;
+    fake.addAnchor(first?.conversationId ?? "", provider, "900");
+    fake.addAnchor(second?.conversationId ?? "", provider, "900", {
+      connectionId: "conn-2",
+    });
+
+    const route = (through: LoadedConnection, id: string) =>
+      routeToOrchestrator({
+        connection: through,
+        event: mention({
+          triggerType: "jira.comment_reply",
+          dedupKey: `LD-7:reply:${id}`,
+          message: { id, parentId: "900", text: "ok" },
+        }),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: [],
+      });
+    const [a] = await route(connection(), "901");
+    const [b] = await route(connection(undefined, "conn-2"), "902");
+    expect(a?.conversationId).toBe(first?.conversationId);
+    expect(b?.conversationId).toBe(second?.conversationId);
   });
 
   it("tags a reply to an agent's own comment with the task and question it answers", async () => {

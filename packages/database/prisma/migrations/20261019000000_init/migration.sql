@@ -2023,7 +2023,8 @@ CREATE TABLE public.orchestrator_anchors (
     version integer,
     created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     task_id uuid,
-    question_id character varying(64)
+    question_id character varying(64),
+    connection_id uuid NOT NULL
 );
 
 CREATE TABLE public.orchestrator_cases (
@@ -3757,7 +3758,7 @@ CREATE INDEX oauth_revoked_tokens_expires_at_idx ON public.oauth_revoked_tokens 
 
 CREATE UNIQUE INDEX oauth_revoked_tokens_token_fingerprint_key ON public.oauth_revoked_tokens USING btree (token_fingerprint);
 
-CREATE UNIQUE INDEX orchestrator_anchors_organization_id_provider_external_ref_key ON public.orchestrator_anchors USING btree (organization_id, provider, external_ref);
+CREATE UNIQUE INDEX orchestrator_anchors_organization_id_connection_id_external_ref ON public.orchestrator_anchors USING btree (organization_id, connection_id, external_ref);
 
 CREATE UNIQUE INDEX orchestrator_cases_workflow_id_source_key_key ON public.orchestrator_cases USING btree (workflow_id, source_key);
 
@@ -4478,6 +4479,9 @@ ALTER TABLE ONLY public.loops
 
 ALTER TABLE ONLY public.loops
     ADD CONSTRAINT loops_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+ALTER TABLE ONLY public.orchestrator_anchors
+    ADD CONSTRAINT orchestrator_anchors_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES public.integration_connections(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 ALTER TABLE ONLY public.orchestrator_anchors
     ADD CONSTRAINT orchestrator_anchors_conversation_id_fkey FOREIGN KEY (conversation_id) REFERENCES public.orchestrator_conversations(id) ON UPDATE CASCADE ON DELETE CASCADE;

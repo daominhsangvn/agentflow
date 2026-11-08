@@ -104,7 +104,7 @@ export async function reply(
       retryable: posted.retryable,
     };
   }
-  await recordReply(context, text, posted.externalRef);
+  await recordReply(context, text, posted.externalRef, connection.record.id);
   return {
     ok: true,
     output: {
@@ -175,7 +175,8 @@ export async function editReply(
 async function recordReply(
   context: TurnContext,
   text: string,
-  externalRef: string | null
+  externalRef: string | null,
+  connectionId: string
 ): Promise<void> {
   const provider = context.channel?.item.provider ?? "agentflow";
   await withDb((db) =>
@@ -202,6 +203,7 @@ async function recordReply(
         data: {
           organizationId: context.organizationId,
           conversationId: context.conversationId,
+          connectionId,
           provider,
           externalRef,
         },
