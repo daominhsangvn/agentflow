@@ -76,6 +76,27 @@ test("orchestrator agents tab: select an agent, answer its question and ask it",
         name: new RegExp(`^${QC_NAME}.*not declared`),
       })
     ).toBeVisible();
+    // Every edge is drawn (an edge class Tailwind never generated once
+    // rendered as stroke: none), and the agent at work has the moving dashed
+    // border, drawn in a generated colour.
+    const strokes = await page
+      .getByTestId("agent-map-edge")
+      .evaluateAll((paths) =>
+        paths.map((path) => getComputedStyle(path).stroke)
+      );
+    expect(strokes).toHaveLength(2);
+    expect(strokes).not.toContain("none");
+    const working = page.getByTestId("agent-map-working");
+    await expect(working).toHaveCount(1);
+    await expect(
+      page.getByRole("button", {
+        name: new RegExp(`^${QC_NAME}.*running a task`),
+      })
+    ).toBeVisible();
+    const borderStroke = await working
+      .locator("rect")
+      .evaluate((rect) => getComputedStyle(rect).stroke);
+    expect(borderStroke).not.toBe("none");
 
     await baNode.click();
     await expect(baNode).toHaveAttribute("aria-pressed", "true");
@@ -275,7 +296,10 @@ async function serveAgents(
     waitingFor: OrchestratorCaseWaitingFor.Turn,
     needsPerson: false,
     askedHuman: null,
-    agents: [],
+    // QC runs a task: its edge is the active (primary, flowing) one.
+    agents: [
+      { computeTargetId: qcTargetId, activeTaskCount: 1, openQuestionCount: 0 },
+    ],
   };
   const detail: OrchestratorCaseDetail = {
     ...needsItem,

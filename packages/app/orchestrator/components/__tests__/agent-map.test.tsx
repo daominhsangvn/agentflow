@@ -126,7 +126,7 @@ describe("AgentMap", () => {
     expect(screen.queryByText(RE_ASKS)).not.toBeInTheDocument();
   });
 
-  it("animates an edge with both open questions and active tasks", () => {
+  it("marks an agent running a task with a moving dashed border, not a moving edge", () => {
     renderMap({
       cases: [
         makeCase({
@@ -140,10 +140,36 @@ describe("AgentMap", () => {
         }),
       ],
     });
-    const edge = screen
-      .getAllByTestId("agent-map-edge")
-      .find((el) => el.getAttribute("class")?.includes("stroke-warning"));
-    expect(edge?.getAttribute("class")).toContain("animate-edge-flow");
+    const edges = screen.getAllByTestId("agent-map-edge");
+    const edge = edges.find((el) =>
+      el.getAttribute("class")?.includes("stroke-warning")
+    );
+    expect(edge).toBeDefined();
+    for (const each of edges) {
+      expect(each.getAttribute("class")).not.toContain("animate");
+      expect(each.getAttribute("stroke-dasharray")).toBeNull();
+    }
+    const working = screen.getAllByTestId("agent-map-working");
+    expect(working).toHaveLength(1);
+    expect(working[0]?.closest("button")?.getAttribute("aria-label")).toContain(
+      "running a task"
+    );
+    expect(working[0]?.querySelector("rect")?.getAttribute("class")).toContain(
+      "animate-edge-flow"
+    );
+  });
+
+  it("draws no working border for an agent without active tasks", () => {
+    renderMap({
+      cases: [
+        makeCase({
+          agents: [
+            { computeTargetId: "ba", activeTaskCount: 0, openQuestionCount: 1 },
+          ],
+        }),
+      ],
+    });
+    expect(screen.queryByTestId("agent-map-working")).not.toBeInTheDocument();
   });
 
   it("shows a fallback without an orchestrator and an empty state", () => {

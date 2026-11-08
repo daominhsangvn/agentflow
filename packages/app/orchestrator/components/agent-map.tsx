@@ -72,11 +72,6 @@ export function AgentMap({
               data-testid="agent-map-edge"
               fill="none"
               key={agent.computeTargetId}
-              strokeDasharray={
-                agentHasActiveTasks(cases, agent.computeTargetId)
-                  ? "6 6"
-                  : undefined
-              }
               strokeWidth={2}
               vectorEffect="non-scaling-stroke"
             />
@@ -99,6 +94,7 @@ export function AgentMap({
             onSelect={onSelect}
             point={layout.agents[index]}
             selected={selectedNodeId === agent.computeTargetId}
+            working={agentHasActiveTasks(cases, agent.computeTargetId)}
           />
         ))}
       </div>
@@ -150,6 +146,7 @@ function AgentNode({
   selected,
   dimmed,
   highlighted,
+  working,
   onSelect,
 }: {
   agent: WorkflowAgentMapAgent;
@@ -158,6 +155,7 @@ function AgentNode({
   selected: boolean;
   dimmed: boolean;
   highlighted: boolean;
+  working: boolean;
   onSelect: (nodeId: string) => void;
 }) {
   const kind = kindLabel(agent.kind);
@@ -169,14 +167,16 @@ function AgentNode({
         `${kind.toLowerCase()} agent`,
         agent.isOnline,
         count,
-        agent.declared
+        agent.declared,
+        working
       )}
       aria-pressed={selected}
       className={cn(
         nodeClass(selected),
         dimmed && "opacity-50",
         highlighted && "border-primary",
-        !agent.declared && "border-dashed text-muted-foreground"
+        !agent.declared && "border-dashed text-muted-foreground",
+        working && "border-transparent"
       )}
       data-dimmed={dimmed}
       onClick={() => onSelect(agent.computeTargetId)}
@@ -193,8 +193,31 @@ function AgentNode({
           not declared
         </span>
       )}
+      {working ? <WorkingBorder /> : null}
       <CountBadge count={count} />
     </button>
+  );
+}
+
+/** An agent running a task: its border becomes travelling dashes (the edge stays still). */
+function WorkingBorder() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 size-full overflow-visible"
+      data-testid="agent-map-working"
+      focusable="false"
+    >
+      <rect
+        className="stroke-primary motion-safe:animate-edge-flow"
+        fill="none"
+        height="100%"
+        rx="8"
+        strokeDasharray="6 6"
+        strokeWidth={2}
+        width="100%"
+      />
+    </svg>
   );
 }
 
@@ -229,13 +252,11 @@ function edgeClass(
   cases: OrchestratorCaseListItem[],
   agent: WorkflowAgentMapAgent
 ): string {
-  const active = agentHasActiveTasks(cases, agent.computeTargetId);
-  const flow = active ? " motion-safe:animate-edge-flow" : "";
   if (agentHasOpenQuestions(cases, agent.computeTargetId)) {
-    return `stroke-warning${flow}`;
+    return "stroke-warning";
   }
-  if (active) {
-    return `stroke-primary${flow}`;
+  if (agentHasActiveTasks(cases, agent.computeTargetId)) {
+    return "stroke-primary";
   }
   return "stroke-muted-foreground/40";
 }
@@ -260,11 +281,15 @@ function buildLabel(
   role: string,
   online: boolean,
   count: number,
-  declared = true
+  declared = true,
+  working = false
 ): string {
   const parts = [`${name}, ${role}`, online ? "online" : "offline"];
   if (!declared) {
     parts.push("not declared");
+  }
+  if (working) {
+    parts.push("running a task");
   }
   if (count > 0) {
     parts.push(
