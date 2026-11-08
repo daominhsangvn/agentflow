@@ -418,3 +418,6 @@ export type PostActionYaml = z.infer<typeof postActionYamlSchema>;
 function isPostActionEvent(event: WorkflowRunEvent): boolean {
   return WORKFLOW_POST_ACTION_EVENTS.includes(event);
 }
+
+/** Rules longer than this still save, with a warning: they are sent with every orchestrator turn. */
+export const WORKFLOW_INSTRUCTIONS_WARN_LENGTH = 8000;

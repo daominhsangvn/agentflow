@@ -142,6 +142,7 @@ const taskCancelInputSchema = z.object({
 });
 const requestDecisionInputSchema = z.object({
   question: z.string().trim().min(1).max(4000),
+  where: z.enum(OrchestratorReplyTarget).optional(),
 });
 const recordDecisionInputSchema = z.object({
   decisionId: z.uuid(),
@@ -558,9 +559,15 @@ const HANDLERS: Record<string, Handler> = {
   [OrchestratorToolName.RequestDecision]: async (context, input) => {
     const parsed = requestDecisionInputSchema.safeParse(input);
     if (!parsed.success) {
-      return refused("question: what people must approve or reject.");
+      return refused(
+        "question: what people must approve or reject; optional where: thread or case_page."
+      );
     }
-    const target = await resolveReplyTarget(context);
+    const target = await resolveReplyTarget(
+      context,
+      undefined,
+      parsed.data.where
+    );
     if (
       target === OrchestratorReplyTarget.Thread &&
       !context.grants.source.has(OrchestratorSourceOperation.Comment)
@@ -573,10 +580,13 @@ const HANDLERS: Record<string, Handler> = {
       conversationId: context.conversationId,
       question: parsed.data.question,
     });
-    const link = await caseLink(context);
+    const link =
+      target === OrchestratorReplyTarget.Thread
+        ? await caseLink(context)
+        : null;
     const posted = await reply(
       context,
-      `${parsed.data.question}\n\nApprove or reject${link ? ` in AgentFlow (${link})` : " in AgentFlow"}, or answer here.`,
+      decisionText(parsed.data.question, link, target),
       [],
       undefined,
       target
@@ -586,6 +596,7 @@ const HANDLERS: Record<string, Handler> = {
       output: {
         decisionId,
         posted: posted.ok,
+        where: target,
         next: "End the turn with wait_human: the decision wakes you.",
       },
     };
@@ -846,3 +857,15 @@ const SUPERSEDABLE_TOOLS: ReadonlySet<string> = new Set<string>([
   OrchestratorToolName.CaseNotify,
   OrchestratorToolName.CaseHandoff,
 ]);
+
+function decisionText(
+  question: string,
+  link: string | null,
+  target: OrchestratorReplyTarget
+): string {
+  if (target === OrchestratorReplyTarget.CasePage) {
+    return `${question}\n\nApprove or reject it under Decisions, or answer here.`;
+  }
+  const where = link ? ` in AgentFlow (${link})` : " in AgentFlow";
+  return `${question}\n\nApprove or reject${where}, or answer here.`;
+}

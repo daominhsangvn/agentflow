@@ -260,11 +260,17 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.RequestDecision,
     title: "Ask people to decide",
     description:
-      "Asks for an approval (a plan, a go to implement): posts the question in the thread with the case's link, where an admin approves or rejects. Someone may also answer in the thread: record_decision then. End the turn with wait_human.",
+      "Asks for an approval (a plan, a go to implement, a comment before it is posted): stores a pending decision and posts the question with where: thread (on the item, with the case's link; needs source: comment) or case_page (in AgentFlow only; no grant). Default: where the message you answer came from. An admin approves or rejects in AgentFlow; someone may also answer in the thread or on the case page: record_decision then. End the turn with wait_human.",
     inputSchema: {
       type: "object",
       properties: {
         question: { type: "string", minLength: 1, maxLength: 4000 },
+        where: {
+          type: "string",
+          enum: Object.values(OrchestratorReplyTarget),
+          description:
+            "thread (the item's thread) or case_page (only the case page in AgentFlow; nothing is posted on the item). Default: where the message you answer came from.",
+        },
       },
       required: ["question"],
       additionalProperties: false,

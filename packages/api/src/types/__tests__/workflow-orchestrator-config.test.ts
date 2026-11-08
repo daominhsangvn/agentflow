@@ -5,6 +5,7 @@ import {
 } from "../orchestrator.ts";
 import {
   resolveWorkflowOrchestratorConfig,
+  WORKFLOW_INSTRUCTIONS_MAX,
   workflowAgentConfigSchema,
   workflowOrchestratorConfigSchema,
 } from "../workflow.ts";
@@ -71,5 +72,21 @@ describe("workflow orchestrator config", () => {
     expect(parsed.mentionOnly).toBe(true);
     expect(parsed.caseHandoff).toBe(true);
     expect(parsed.caseLookup).toBe(false);
+  });
+
+  it("accepts rules up to the limit and rejects longer ones", () => {
+    const rules = (length: number) => ({
+      ...BASE,
+      instructions: "x".repeat(length),
+    });
+    expect(WORKFLOW_INSTRUCTIONS_MAX).toBe(16_000);
+    expect(
+      workflowAgentConfigSchema.safeParse(rules(WORKFLOW_INSTRUCTIONS_MAX))
+        .success
+    ).toBe(true);
+    expect(
+      workflowAgentConfigSchema.safeParse(rules(WORKFLOW_INSTRUCTIONS_MAX + 1))
+        .success
+    ).toBe(false);
   });
 });

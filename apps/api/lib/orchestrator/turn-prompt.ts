@@ -261,7 +261,7 @@ function describeWrites(grants: OrchestratorGrantSet): string {
   }
   lines.push(
     "",
-    `A message from AgentFlow (the case page) is answered with ${OrchestratorToolName.Reply} on the case page; it needs no grant. Post it on the ticket too only when your rules say so (${OrchestratorToolName.Reply} where: thread).`
+    `A message from AgentFlow (the case page) is answered with ${OrchestratorToolName.Reply} on the case page; it needs no grant. So does ${OrchestratorToolName.RequestDecision} where: case_page (the approval request stays in AgentFlow). Post it on the ticket too only when your rules say so (${OrchestratorToolName.Reply} where: thread).`
   );
   return lines.join("\n");
 }

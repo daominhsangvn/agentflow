@@ -75,6 +75,11 @@ const BASE = {
 };
 
 describe("buildTurnPrompt", () => {
+  it("keeps rules longer than 8000 characters uncut", () => {
+    const rules = "r".repeat(9000);
+    expect(buildTurnPrompt({ ...BASE, rules })).toContain(rules);
+  });
+
   it("carries the rules, the thread, the case, the runners and the messages", () => {
     const prompt = buildTurnPrompt(BASE);
     expect(prompt).toContain(
@@ -92,6 +97,12 @@ describe("buildTurnPrompt", () => {
     const prompt = buildTurnPrompt(BASE);
     expect(prompt).toContain("attachments [{taskId, name}]");
     expect(prompt).toContain("files [{taskId, name}]");
+  });
+
+  it("tells the turn a decision request on the case page needs no grant", () => {
+    expect(buildTurnPrompt(BASE)).toContain(
+      `${OrchestratorToolName.RequestDecision} where: case_page`
+    );
   });
 
   it("tells the turn how to use Confluence pages", () => {

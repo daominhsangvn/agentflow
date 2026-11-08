@@ -546,6 +546,30 @@ postActions:
     expect(result.input).not.toBeNull();
   });
 
+  it("warns when the instructions are over 8000 characters, without blocking the save", () => {
+    const result = parseWorkflowYaml(yamlWithInstructions(8001), CATALOG);
+
+    expect(result.problems).toEqual([
+      expect.objectContaining({
+        severity: YamlProblemSeverity.Warning,
+        message: expect.stringContaining("8001 characters"),
+      }),
+    ]);
+    expect(result.input?.agent.instructions).toHaveLength(8001);
+  });
+
+  it("does not warn at 8000 characters and rejects over 16000", () => {
+    expect(
+      parseWorkflowYaml(yamlWithInstructions(8000), CATALOG).problems
+    ).toEqual([]);
+
+    const tooLong = parseWorkflowYaml(yamlWithInstructions(16_001), CATALOG);
+    expect(tooLong.problems).toEqual([
+      expect.objectContaining({ severity: YamlProblemSeverity.Error }),
+    ]);
+    expect(tooLong.input).toBeNull();
+  });
+
   it("validates the workflow's own process like a project's", () => {
     const valid = `${VALID_YAML.replace(
       "  mode: plan\n",
@@ -892,3 +916,10 @@ function withAgentLines(lines: string): string {
 
 /** The `actions:` list to the end of VALID_YAML. */
 const ACTIONS_LIST_RE = /actions:\n[\s\S]*$/;
+
+function yamlWithInstructions(length: number): string {
+  return VALID_YAML.replace(
+    "  mode: plan\n",
+    `  mode: plan\n  instructions: ${JSON.stringify("x".repeat(length))}\n`
+  );
+}

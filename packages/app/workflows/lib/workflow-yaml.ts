@@ -9,11 +9,12 @@ import {
   type ProjectProcess,
   projectProcessSchema,
 } from "@repo/api/src/types/project-process";
-import type {
-  SaveWorkflowInput,
-  Workflow,
-  WorkflowTrigger,
-  WorkflowTriggerInput,
+import {
+  type SaveWorkflowInput,
+  WORKFLOW_INSTRUCTIONS_MAX,
+  type Workflow,
+  type WorkflowTrigger,
+  type WorkflowTriggerInput,
 } from "@repo/api/src/types/workflow";
 import {
   parseRunnerCondition,
@@ -49,6 +50,7 @@ import {
 import {
   BUILT_IN_HTTP_REFERENCE,
   type TriggerYaml,
+  WORKFLOW_INSTRUCTIONS_WARN_LENGTH,
   WORKFLOW_YAML_KEYS,
   type WorkflowYaml,
   type WorkflowYamlCatalog,
@@ -263,6 +265,7 @@ function resolveWorkflow(
       YamlProblemSeverity.Warning
     );
   }
+  warnLongInstructions(context, workflow.agent.instructions);
   const runners = resolveRunnerRules(context, workflow.agent.runners);
   const runAs = workflow.agent.runAs
     ? resolveUser(context, [...agentPath, "runAs"], workflow.agent.runAs)
@@ -812,4 +815,20 @@ function actionResolver(context: ResolveContext): ActionResolver {
     resolveConfig: (path, fields, config) =>
       resolveConfig(context, path, fields, config),
   };
+}
+
+function warnLongInstructions(
+  context: ResolveContext,
+  instructions: string | null | undefined
+): void {
+  const length = instructions?.length ?? 0;
+  if (length <= WORKFLOW_INSTRUCTIONS_WARN_LENGTH) {
+    return;
+  }
+  report(
+    context,
+    ["agent", "instructions"],
+    `instructions is ${length} characters, over ${WORKFLOW_INSTRUCTIONS_WARN_LENGTH}: they are sent with every orchestrator turn (and every imported item) and repeat in a resumed session, which costs tokens and attention. It still saves, up to ${WORKFLOW_INSTRUCTIONS_MAX}.`,
+    YamlProblemSeverity.Warning
+  );
 }

@@ -16,6 +16,7 @@ import { CONNECTIONS_GRANT_DOC } from "@repo/app/integrations/lib/connection-gra
 import {
   BUILT_IN_HTTP_REFERENCE,
   BUILT_IN_HTTPS_CALL_TYPE,
+  WORKFLOW_INSTRUCTIONS_WARN_LENGTH,
 } from "./workflow-yaml-schema";
 
 /**
@@ -123,8 +124,8 @@ export const WORKFLOW_YAML_KEY_DOCS: Record<string, WorkflowYamlKeyDoc> = {
     info: `Title of the imported PRD or Issue. Default: ${WORKFLOW_DEFAULT_TITLE_TEMPLATE}.`,
   },
   instructions: {
-    detail: `text, up to ${WORKFLOW_INSTRUCTIONS_MAX} characters`,
-    info: 'Appended to every imported PRD or Issue under "Additional instructions". Orchestrated: the orchestrator\'s rules, sent with every turn.',
+    detail: `text, up to ${WORKFLOW_INSTRUCTIONS_MAX} characters (warning above ${WORKFLOW_INSTRUCTIONS_WARN_LENGTH})`,
+    info: 'Appended to every imported PRD or Issue under "Additional instructions". Orchestrated: the orchestrator\'s rules, sent with every turn. Long rules cost tokens on every turn: keep them to the process.',
   },
   orchestrator: {
     detail: "mapping, orchestrated mode",

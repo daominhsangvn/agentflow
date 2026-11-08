@@ -219,4 +219,45 @@ describe("request_decision and the grant", () => {
     expect(outcome).toMatchObject({ ok: true, output: { posted: true } });
     expect(mocks.replyOnItem).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps the request on the case page with where: case_page", async () => {
+    mocks.external = [FROM_JIRA];
+    const outcome = await call(OrchestratorToolName.RequestDecision, {
+      ...question,
+      where: OrchestratorReplyTarget.CasePage,
+    });
+    expect(outcome).toMatchObject({
+      ok: true,
+      output: { where: OrchestratorReplyTarget.CasePage },
+    });
+    expect(mocks.replyOnItem).not.toHaveBeenCalled();
+    expect(
+      mocks.messages.some(
+        (m) =>
+          m.kind === OrchestratorMessageKind.Reply &&
+          String(m.text).includes("under Decisions")
+      )
+    ).toBe(true);
+  });
+
+  it("posts on the ticket with where: thread", async () => {
+    mocks.connections = { source: [OrchestratorSourceOperation.Comment] };
+    const outcome = await call(OrchestratorToolName.RequestDecision, {
+      ...question,
+      where: OrchestratorReplyTarget.Thread,
+    });
+    expect(outcome.ok).toBe(true);
+    expect(mocks.replyOnItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an unknown where", async () => {
+    const outcome = await call(OrchestratorToolName.RequestDecision, {
+      ...question,
+      where: "comment",
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("optional where"),
+    });
+  });
 });
