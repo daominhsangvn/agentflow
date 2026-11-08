@@ -29,6 +29,8 @@ import type {
   WorkflowEventPayload,
   WorkflowEventsResponse,
 } from "@repo/api/src/types/workflow-event";
+// Cross-slice: a save creates or removes the workflow's managed HTTP connection.
+import { integrationKeys } from "@repo/app/integrations/hooks/integration-keys";
 // Cross-slice: the integrations slice owns the server-message error handling
 // shared by both slices' mutations.
 import { mutationErrorOptions } from "@repo/app/integrations/lib/mutation-error";
@@ -159,6 +161,9 @@ export function useCreateWorkflow() {
     onSuccess: (workflow) => {
       queryClient.setQueryData(workflowKeys.detail(workflow.id), workflow);
       queryClient.invalidateQueries({ queryKey: workflowKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.connectionList(),
+      });
     },
     ...mutationErrorOptions(WorkflowMutationErrorTitle.Create),
   });
@@ -179,6 +184,9 @@ export function useUpdateWorkflow() {
     onSuccess: (workflow) => {
       queryClient.setQueryData(workflowKeys.detail(workflow.id), workflow);
       queryClient.invalidateQueries({ queryKey: workflowKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.connectionList(),
+      });
     },
     ...mutationErrorOptions(WorkflowMutationErrorTitle.Update),
   });

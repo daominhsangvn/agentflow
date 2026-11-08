@@ -1,6 +1,6 @@
 /**
  * Smoke test of the event-driven workflow engine (docs/workflows.md):
- * generic HTTPS ("webhook") trigger -> pre action -> run -> post action, end
+ * the workflow's own HTTP endpoint trigger -> pre action -> run -> post action, end
  * to end against the real API and its in-process scheduler
  * (apps/api/server.ts).
  *
@@ -15,10 +15,6 @@
 
 import { randomUUID } from "node:crypto";
 import type { APIRequestContext } from "@playwright/test";
-import {
-  IntegrationDeliveryMode,
-  IntegrationProviderKey,
-} from "@repo/api/src/types/integration";
 import {
   WORKFLOW_RUN_FINAL_STATUSES,
   type WorkflowActionRun,
@@ -43,10 +39,6 @@ import {
   startHttpSink,
 } from "./helpers/http-sink";
 import {
-  createIntegrationConnection,
-  createProjectConnection,
-  deleteIntegrationConnection,
-  deleteProjectConnection,
   getIntegrationInboundDetails,
   toLocalInboundUrl,
 } from "./helpers/integrations";
@@ -72,7 +64,6 @@ const ITEM_TITLE = "E2E workflow item";
 const ITEM_DESCRIPTION =
   "Created by e2e/workflows.spec.ts. The run is expected to fail because the compute target has no desktop app.";
 const SINK_PATH = "/workflow-events";
-const WEBHOOK_KEY = "e2e-webhook";
 const HttpStatus = { Ok: 200, Unauthorized: 401 } as const;
 const TEST_TIMEOUT_MS = 240_000;
 const RUN_FAILURE_TIMEOUT_MS = 90_000;
@@ -99,8 +90,6 @@ const runEventDeliverySchema = z.object({
 type WorkflowFixture = {
   projectId: string | null;
   computeTargetId: string | null;
-  connectionId: string | null;
-  projectConnectionId: string | null;
   workflowId: string | null;
   documentIds: string[];
 };
@@ -119,8 +108,6 @@ test.describe("workflows", { tag: E2ETag.Smoke }, () => {
     const fixture: WorkflowFixture = {
       projectId: null,
       computeTargetId: null,
-      connectionId: null,
-      projectConnectionId: null,
       workflowId: null,
       documentIds: [],
     };
@@ -137,35 +124,6 @@ test.describe("workflows", { tag: E2ETag.Smoke }, () => {
         token,
       });
       fixture.computeTargetId = computeTarget.id;
-
-      const connection = await createIntegrationConnection(request, {
-        input: {
-          provider: IntegrationProviderKey.Webhook,
-          name: createUniqueName("e2e-webhook"),
-          deliveryMode: IntegrationDeliveryMode.Webhook,
-          config: {},
-          secrets: {},
-        },
-        token,
-      });
-      fixture.connectionId = connection.id;
-      // Workflows name the project's connections by key.
-      const projectConnection = await createProjectConnection(request, {
-        projectId: project.id,
-        input: {
-          connectionId: connection.id,
-          key: WEBHOOK_KEY,
-          name: connection.name,
-          settings: {},
-        },
-        token,
-      });
-      fixture.projectConnectionId = projectConnection.id;
-      const inbound = await getIntegrationInboundDetails(
-        request,
-        connection.id,
-        token
-      );
 
       const workflowName = createUniqueName("e2e-workflow");
       const sinkConfig = {
@@ -185,14 +143,14 @@ test.describe("workflows", { tag: E2ETag.Smoke }, () => {
           },
           triggers: [
             {
-              connectionKey: WEBHOOK_KEY,
+              connectionKey: null,
               type: WebhookIntegrationKey.RequestTrigger,
               config: {},
             },
           ],
           actions: [
             {
-              connectionKey: WEBHOOK_KEY,
+              connectionKey: null,
               type: WebhookIntegrationKey.PostAction,
               stage: WorkflowActionStage.Pre,
               config: sinkConfig,
@@ -200,7 +158,7 @@ test.describe("workflows", { tag: E2ETag.Smoke }, () => {
               continueOnError: false,
             },
             {
-              connectionKey: WEBHOOK_KEY,
+              connectionKey: null,
               type: WebhookIntegrationKey.PostAction,
               stage: WorkflowActionStage.Post,
               config: sinkConfig,
@@ -211,6 +169,12 @@ test.describe("workflows", { tag: E2ETag.Smoke }, () => {
         token,
       });
       fixture.workflowId = workflow.id;
+      expect(workflow.httpEndpointConnectionId).toBeTruthy();
+      const inbound = await getIntegrationInboundDetails(
+        request,
+        workflow.httpEndpointConnectionId as string,
+        token
+      );
 
       const delivery = buildDelivery(inbound.inboundSecret);
       const inboundUrl = toLocalInboundUrl(inbound.inboundUrl);
@@ -417,15 +381,8 @@ async function cleanupFixture(
   fixture: WorkflowFixture,
   token: string
 ): Promise<void> {
-  // Dependents first: the connection answers 409 while a workflow uses it.
+  // The workflow's own HTTP connection is deleted with it.
   await deleteWorkflow(request, fixture.workflowId, token);
-  await deleteProjectConnection(
-    request,
-    fixture.projectId,
-    fixture.projectConnectionId,
-    token
-  );
-  await deleteIntegrationConnection(request, fixture.connectionId, token);
   await deleteComputeTarget(request, fixture.computeTargetId, token);
   for (const documentId of fixture.documentIds) {
     await deleteDocument(request, documentId, token);

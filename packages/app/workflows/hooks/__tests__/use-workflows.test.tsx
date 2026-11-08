@@ -6,6 +6,7 @@ import {
   type WorkflowRunsResponse,
 } from "@repo/api/src/types/workflow";
 import type { WorkflowEventsResponse } from "@repo/api/src/types/workflow-event";
+import { integrationKeys } from "@repo/app/integrations/hooks/integration-keys";
 import { ApiError } from "@repo/app/shared/api/api-error";
 import { makeQueryClient } from "@repo/app/shared/query/query-client";
 import {
@@ -365,6 +366,18 @@ describe("workflow mutations", () => {
       workflow
     );
     expect(invalidate).toHaveBeenCalledWith({ queryKey: workflowKeys.lists() });
+  });
+
+  it("refreshes the connection list after a save: it may create the managed HTTP connection", async () => {
+    mockApiClient.post.mockResolvedValue(makeWorkflow());
+    const { wrapper, invalidate } = setup();
+    const { result } = renderHook(() => useCreateWorkflow(), { wrapper });
+
+    await act(() => result.current.mutateAsync(saveInput()));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: integrationKeys.connectionList(),
+    });
   });
 
   it("updates with PUT", async () => {

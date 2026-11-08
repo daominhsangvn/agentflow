@@ -63,7 +63,11 @@ test("project repositories: empty state, add form and the admin API", {
     const runners = await request.get(`${api}/projects/${project.id}/runners`, {
       headers,
     });
-    expect((await runners.json()).data).toEqual({ runners: [] });
+    expect((await runners.json()).data).toEqual({
+      runners: [],
+      waiting: [],
+      projectKey: expect.any(String),
+    });
     const unknownRunner = await request.put(
       `${api}/projects/${project.id}/runners`,
       { data: { runnerIds: [MISSING_CONNECTION_ID] }, headers }

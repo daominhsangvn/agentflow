@@ -100,7 +100,7 @@ test("orchestrator cases: open a case from the workflow and approve its decision
     await expect(detail.getByText(TASK_FILE_NAME)).toBeVisible();
 
     await expect(
-      page.getByRole("link", { name: workflow.name })
+      detail.getByRole("link", { name: workflow.name })
     ).toHaveAttribute("href", `/${orgSlug}/workflows/${workflow.id}?tab=cases`);
 
     await detail.getByRole("button", { name: "Approve" }).click();
@@ -331,7 +331,8 @@ async function serveCases(
         reply: null,
         files: [],
         filesOmitted: 0,
-        openQuestionCount: 0,
+        // The server's count of unanswered questions gates the answer form.
+        openQuestionCount: 1,
         questions: [{ id: PENDING_QUESTION_ID, question: PENDING_QUESTION }],
         error: null,
         waiting: null,
