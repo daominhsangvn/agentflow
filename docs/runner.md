@@ -280,9 +280,22 @@ pnpm -C apps/desktop package:headless --windows
 ```
 
 Unzip it on the Windows machine. The folder holds `runner.mjs`,
-`agent-plugins/`, `start-runner.cmd`, `setup-runner.cmd`,
-`uninstall-runner.cmd`, `README.txt` and `winsw/` (`WinSW.exe` and its
-`LICENSE.txt`). Run `start-runner.cmd`. The first start
+`agent-plugins/`, `doctor.bat` (with `doctor.ps1`), `start-runner.cmd`,
+`setup-runner.cmd`, `uninstall-runner.cmd`, `README.txt` and `winsw/`
+(`WinSW.exe` and its `LICENSE.txt`).
+
+Run `doctor.bat` first (`doctor.bat --project PRO-1` for a personal Agent). It
+checks Node.js 22+, Git for Windows and its `bin\bash.exe`, that the first
+`claude` on PATH is the native Claude Code (an npm install is a `.cmd`/`.ps1`
+or shell wrapper, which breaks the loops' multi-line prompts), that Git Bash
+keeps a `/command` argument as typed when it is excluded with
+`MSYS2_ARG_CONV_EXCL` (the runner does this for a prompt's slash command), jq,
+Python 3 with PyYAML, gh, the Claude login, long paths and, once `runner.env`
+exists, the API URL (plain http needs `AGENTFLOW_ALLOW_HTTP_HOSTS` in that
+file, which is all the Windows service reads) and that the API answers. It
+exits with code 1 while a required check fails.
+
+Run `start-runner.cmd`. The first start
 asks four questions, then connects:
 
 | Question | Default |
@@ -314,6 +327,11 @@ ConnectionStrings__DefaultConnection=Server=localhost;Database=App_Agent;Trusted
   on the loops' PATH: `python3` (the first of `python3`, `python`, `py -3`
   that runs Python 3), `jq` (with `--binary`), and a `sitecustomize.py` on
   `PYTHONPATH` that makes Python print `\n`. Loops also get `PYTHONUTF8=1`.
+- Git Bash rewrites arguments that look like POSIX paths for the native
+  programs it starts (`/writing-plans LD-7` would reach `claude.exe` as
+  `C:/Program Files/Git/writing-plans LD-7`). A step whose prompt starts with
+  a slash command lists that command in `MSYS2_ARG_CONV_EXCL` for its `claude`
+  invocation only, so the command is expanded and other paths still convert.
 - Stopping a loop ends its whole process tree with `taskkill /T /F`; Windows
   has no graceful equivalent, so the scripts get no chance to clean up.
 - The Claude Code version set in AgentFlow is not installed: loops run the

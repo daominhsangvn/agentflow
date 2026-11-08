@@ -7,7 +7,7 @@ A **personal Agent** runs AgentFlow's tasks on a person's own computer, in the p
 
 ## What the computer needs
 
-- Node.js 22 or newer, `bash`, `git`, `jq` and `python3` with PyYAML. The Agent checks them when it starts and exits with code `3` naming the missing one. On Windows: Git for Windows (its `bash.exe` runs the scripts), `jq` and Python 3.
+- Node.js 22 or newer, `bash`, `git`, `jq` and `python3` with PyYAML. The Agent checks them when it starts and exits with code `3` naming the missing one. On Windows: Git for Windows (its `bash.exe` runs the scripts), `jq` and Python 3. Install Claude Code with the native installer (`irm https://claude.ai/install.ps1 | iex`), not npm. Before the setup, run `doctor.bat --project PRO-1` from the unzipped folder: it checks these tools, that the first `claude` on PATH is the native one, how Git Bash passes the loops' prompts, and, once set up, the Agent's `runner.env` and API URL. Fix every `FAIL` line first.
 - Claude Code on `PATH`, with the version the Agent is pinned to in AgentFlow if one is pinned (see [After it starts](#after-it-starts)). A personal Agent never installs Claude Code.
 - The person's own tools the project's commands use, signed in: `gh` (or `tea` for Gitea, with a token that has `write:repository` and `write:issue`), SSH keys or a credential helper for `git push`, and any MCP servers in `~/.claude`.
 - The project folder, already cloned, with an `AGENTFLOW.md` that declares its commands ([Agent capabilities](/docs/guides/setup/agent-capabilities)).

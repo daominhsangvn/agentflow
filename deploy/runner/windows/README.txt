@@ -16,6 +16,18 @@ Install once (PowerShell):
 
 Open a new terminal afterwards so PATH includes the new tools.
 
+Check the machine (run it again after a change):
+
+  doctor.bat                  before setting up the automatic Agent
+  doctor.bat --project PRO-1  before (or after) setting up a personal Agent
+
+It checks Node.js 22+, Git for Windows and its bash, that `claude` is the
+native Claude Code (an npm install is a script wrapper that breaks the
+loops' multi-line prompts), that Git Bash keeps a /command argument as typed,
+jq, Python 3 with PyYAML, gh, the Claude login and, once runner.env exists,
+the API URL (plain http needs AGENTFLOW_ALLOW_HTTP_HOSTS in runner.env) and
+that the API answers. Fix every FAIL line before the setup.
+
 Run a dedicated, non-administrator Windows account for the runner when you
 can: the agents can do anything that account can.
 

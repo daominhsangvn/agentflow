@@ -23,6 +23,7 @@
  *     agentflow-runner/
  *       runner.mjs, healthcheck.mjs      the bundle
  *       agent-plugins/                   the vendored Claude Code plugins
+ *       doctor.bat, doctor.ps1           checks the machine before the setup
  *       start-runner.cmd                 starts it (asks the setup questions
  *                                        on the first start)
  *       setup-runner.cmd                 asks the setup questions again
@@ -57,6 +58,8 @@ const stageDir = path.join(stageRoot, "agentflow-runner");
 const deployDir = path.join(repoRoot, "deploy/runner");
 const EXCLUDED_PLUGIN_DIRS = new Set(["tests", "__pycache__", ".pytest_cache"]);
 const WINDOWS_FILES = [
+  "doctor.bat",
+  "doctor.ps1",
   "start-runner.cmd",
   "setup-runner.cmd",
   "uninstall-runner.cmd",
