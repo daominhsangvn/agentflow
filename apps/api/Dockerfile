@@ -128,7 +128,10 @@ RUN pnpm --filter @repo/database exec prisma generate --no-hints --schema=./pris
 # runs migrate, which needs a live DB.
 RUN pnpm --filter @agentflow-ai/telemetry-contract build
 # The api build runs with --only, and **/dist is not in the build context, so
-# build the design-system package (its exports point at dist/) first.
+# build the dist-backed packages it imports first: loops-api (its exports point
+# at dist/; a fresh clone has none, .dockerignore only lets a local build's
+# copy through), then design-system, whose type build imports loops-api.
+RUN pnpm --filter @agentflow-ai/loops-api build
 RUN pnpm --filter @agentflow-ai/design-system build
 # api build = `next build` + `server:import-smoke` (apps/api/package.json).
 RUN --mount=type=secret,id=turbo_token,required=false \
