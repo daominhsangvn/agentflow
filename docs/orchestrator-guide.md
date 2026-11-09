@@ -141,7 +141,8 @@ reaches the orchestrator even without a mention and carries `task` and
 **Approval before posting on the ticket.**
 Write: *"Nothing goes on the Jira ticket without an admin's approval
 (comments, edits, files, status changes): request_decision where: case_page
-with the exact text or change, then wait_human. Approved: post exactly that
+with the full draft verbatim as the question (the whole comment text, never a
+summary; for a status change, the move), then wait_human. Approved: post exactly that
 (where: thread). Rejected: revise with the admin's comment, ask again. Not
 gated: Confluence pages, tasks, pull requests, case-page replies, questions an
 agent posted on the ticket itself."*
