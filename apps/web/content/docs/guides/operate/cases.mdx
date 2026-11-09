@@ -68,7 +68,15 @@ The diagram shows the orchestrator and each Agent of the workflow. Edge colours 
 - A question bubble means the Agent needs a person: it asked questions no answer covers.
 - A red alert means the Agent's latest task in an open case failed. Hover it to see the error.
 
-Picking a node lists its cases and clears the open case. In an Agent's inbox each row shows Running or Queued (hover Queued to see why it waits, for example a busy personal Agent) and the same icons.
+Picking a node lists its cases, newest first, and clears the open case. Each row can show these badges:
+
+- **Decision pending**: the case waits for an approve/reject.
+- **N questions** (an Agent's inbox) or **Questions from `Agent name`** (the orchestrator's inbox): open questions no answer covers.
+- **Asked**: the orchestrator asked a person. Hover to read the question.
+- **Running** / **Queued**: the Agent's tasks in the case. Hover Queued to see why it waits, for example a busy personal Agent.
+- **Failed**: the Agent's latest task in the case failed. Hover for the error.
+
+The yellow badges show only while the case needs a person (the orchestrator is not working on it). Otherwise the row shows what the case waits for, in grey.
 
 In a case, "`<Agent> asks (N)`" holds the open questions, and **Send answers** resumes the task. "`Ask <Agent> about <key>`" sends a question to a read-only copy (fork) of the Agent's latest task. It stays hidden until the Agent's questions are answered. More in [Asking an Agent](/docs/guides/recipes/asking-an-agent).
 

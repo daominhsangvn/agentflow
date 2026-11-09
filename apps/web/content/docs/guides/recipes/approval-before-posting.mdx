@@ -33,7 +33,7 @@ When the orchestrator posts as a bot, a wrong comment or status change lands und
 - `request_decision` takes `where`: `thread` or `case_page`. Without it, the request goes where the latest message came from.
 - Only `thread` needs the `comment` grant on the ticket. With `case_page` nothing is posted on the ticket; the case-page text ends with "Approve or reject it under Decisions, or answer here."
 - A decision wakes the conversation with an internal message such as `Decision <id> was approved by <who> (<via>)` followed by `It asked: <question>`, so the next turn knows exactly what was approved.
-- A pending decision makes the case need a person (warning dot and "Needs answer" in the case list, the orchestrator node's number, Home).
+- A pending decision makes the case need a person (a **Decision pending** badge in the Agents tab case list, the orchestrator node's number, Home).
 - The platform does **not** refuse an unapproved reply. The rules do the gating; if the model ignores them, it can still post with the `comment` grant. Grants are the only hard limit: leave out `transition` if the orchestrator must never move the ticket.
 
 ## Variant: agents' questions answered only in AgentFlow

@@ -23,14 +23,36 @@ function item(
   } as unknown as OrchestratorCaseListItem;
 }
 
+const agentBase = {
+  computeTargetId: "ba",
+  activeTaskCount: 0,
+  runningTaskCount: 0,
+  queuedTaskCount: 0,
+  openQuestionCount: 0,
+  latestTaskStatus: null,
+  latestTaskError: null,
+  latestTaskWaiting: null,
+};
+
 describe("AgentCaseList", () => {
-  it("lists needs-person cases first with labels", () => {
+  it("lists newest first without a needs-answer text", () => {
     render(
       <AgentCaseList
         agentId={null}
+        agentNames={{}}
         cases={[
-          item({ id: "a", title: "Quiet", sourceKey: "PRO-1" }),
-          item({ id: "b", title: "Asking", needsPerson: true }),
+          item({
+            id: "a",
+            title: "Asking",
+            needsPerson: true,
+            updatedAt: "2026-01-01T00:00:00Z",
+          }),
+          item({
+            id: "b",
+            title: "Quiet",
+            sourceKey: "PRO-1",
+            updatedAt: "2026-01-02T00:00:00Z",
+          }),
         ]}
         isLoading={false}
         nodeLabel="BA"
@@ -38,11 +60,111 @@ describe("AgentCaseList", () => {
       />
     );
     const rows = screen.getAllByTestId("agent-case-row");
-    expect(rows[0]).toHaveTextContent("Asking");
-    expect(rows[0]).toHaveTextContent("Needs answer");
-    expect(rows[1]).toHaveTextContent("PRO-1");
-    expect(rows[1]).toHaveTextContent("Agent tasks");
+    expect(rows[0]).toHaveTextContent("PRO-1");
+    expect(rows[0]).toHaveTextContent("Agent tasks");
+    expect(rows[1]).toHaveTextContent("Asking");
+    expect(screen.queryByText("Needs answer")).not.toBeInTheDocument();
     expect(screen.getByText("BA · 2 cases")).toBeInTheDocument();
+  });
+
+  it("names a pending decision and hides the waiting text", () => {
+    render(
+      <AgentCaseList
+        agentId={null}
+        agentNames={{}}
+        cases={[item({ needsPerson: true, pendingDecisionCount: 1 })]}
+        isLoading={false}
+        nodeLabel="Orchestrator"
+        onSelect={vi.fn()}
+      />
+    );
+    const row = screen.getByTestId("agent-case-row");
+    expect(screen.getByTestId("agent-case-decision")).toHaveTextContent(
+      "Decision pending"
+    );
+    expect(row).not.toHaveTextContent("Agent tasks");
+  });
+
+  it("shows Asked with the question as title", () => {
+    render(
+      <AgentCaseList
+        agentId={null}
+        agentNames={{}}
+        cases={[item({ needsPerson: true, askedHuman: "Which date?" })]}
+        isLoading={false}
+        nodeLabel="Orchestrator"
+        onSelect={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("agent-case-asked")).toHaveAttribute(
+      "title",
+      "Which date?"
+    );
+  });
+
+  it("names the asking agent on the orchestrator inbox", () => {
+    render(
+      <AgentCaseList
+        agentId={null}
+        agentNames={{ ba: "BA" }}
+        cases={[
+          item({
+            needsPerson: true,
+            agents: [{ ...agentBase, openQuestionCount: 2 }],
+          }),
+        ]}
+        isLoading={false}
+        nodeLabel="Orchestrator"
+        onSelect={vi.fn()}
+      />
+    );
+    const badge = screen.getByTestId("agent-case-questions");
+    expect(badge).toHaveTextContent("Questions from BA");
+    expect(badge).toHaveAttribute("title", "2 questions");
+  });
+
+  it("counts the selected agent's questions", () => {
+    render(
+      <AgentCaseList
+        agentId="ba"
+        agentNames={{}}
+        cases={[
+          item({
+            needsPerson: true,
+            agents: [{ ...agentBase, openQuestionCount: 1 }],
+          }),
+        ]}
+        isLoading={false}
+        nodeLabel="BA"
+        onSelect={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("agent-case-questions")).toHaveTextContent(
+      "1 question"
+    );
+  });
+
+  it("shows no person badges when the case does not need a person", () => {
+    render(
+      <AgentCaseList
+        agentId={null}
+        agentNames={{ ba: "BA" }}
+        cases={[
+          item({
+            agents: [{ ...agentBase, openQuestionCount: 2 }],
+          }),
+        ]}
+        isLoading={false}
+        nodeLabel="Orchestrator"
+        onSelect={vi.fn()}
+      />
+    );
+    expect(
+      screen.queryByTestId("agent-case-questions")
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-case-row")).toHaveTextContent(
+      "Agent tasks"
+    );
   });
 
   it("calls onSelect with the case id", async () => {
@@ -50,6 +172,7 @@ describe("AgentCaseList", () => {
     render(
       <AgentCaseList
         agentId={null}
+        agentNames={{}}
         cases={[item({ id: "a" })]}
         isLoading={false}
         nodeLabel="BA"
@@ -64,6 +187,7 @@ describe("AgentCaseList", () => {
     render(
       <AgentCaseList
         agentId={null}
+        agentNames={{}}
         cases={[]}
         isLoading={false}
         nodeLabel="BA"
@@ -77,6 +201,7 @@ describe("AgentCaseList", () => {
     render(
       <AgentCaseList
         agentId={null}
+        agentNames={{}}
         cases={[]}
         isLoading
         nodeLabel="BA"
@@ -88,19 +213,11 @@ describe("AgentCaseList", () => {
   });
 
   it("shows the agent's task status and icons on its rows", () => {
-    const base = {
-      computeTargetId: "ba",
-      activeTaskCount: 0,
-      runningTaskCount: 0,
-      queuedTaskCount: 0,
-      openQuestionCount: 0,
-      latestTaskStatus: null,
-      latestTaskError: null,
-      latestTaskWaiting: null,
-    };
+    const base = agentBase;
     render(
       <AgentCaseList
         agentId="ba"
+        agentNames={{}}
         cases={[
           item({
             id: "r",
@@ -141,17 +258,22 @@ describe("AgentCaseList", () => {
       "title",
       "Runner busy"
     );
-    expect(screen.getByTestId("agent-case-error")).toHaveAttribute(
+    expect(screen.getByTestId("agent-case-failed")).toHaveTextContent("Failed");
+    expect(screen.getByTestId("agent-case-failed")).toHaveAttribute(
       "title",
       "Loop failed"
     );
-    expect(screen.getByTestId("agent-case-needs-person")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-case-error")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agent-case-needs-person")
+    ).not.toBeInTheDocument();
   });
 
   it("adds nothing per row for the orchestrator", () => {
     render(
       <AgentCaseList
         agentId={null}
+        agentNames={{}}
         cases={[item({})]}
         isLoading={false}
         nodeLabel="Orchestrator"

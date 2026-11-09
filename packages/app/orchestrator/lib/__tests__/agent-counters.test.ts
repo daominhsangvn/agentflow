@@ -78,8 +78,8 @@ describe("agent counters", () => {
     expect(casesForNode(cases, "b").map((c) => c.id)).toEqual(["c2", "c3"]);
   });
 
-  it("sorts needs-person first, then newest", () => {
-    expect(sortInbox(cases).map((c) => c.id)).toEqual(["c3", "c2", "c4", "c1"]);
+  it("sorts newest first", () => {
+    expect(sortInbox(cases).map((c) => c.id)).toEqual(["c4", "c3", "c2", "c1"]);
   });
 
   it("lists agent ids of a case", () => {

@@ -109,6 +109,14 @@ test("orchestrator agents tab: select an agent, answer its question and ask it",
       .evaluate((rect) => getComputedStyle(rect).stroke);
     expect(borderStroke).not.toBe("none");
 
+    // The orchestrator's row names the Agent that asked.
+    await expect(
+      page
+        .getByTestId("agent-case-row")
+        .filter({ hasText: SOURCE_KEY })
+        .getByTestId("agent-case-questions")
+    ).toHaveText(`Questions from ${BA_NAME}`);
+
     await baNode.click();
     await expect(baNode).toHaveAttribute("aria-pressed", "true");
     await expect(page).toHaveURL(new RegExp(`agent=${served.baTargetId}`), {
@@ -118,6 +126,9 @@ test("orchestrator agents tab: select an agent, answer its question and ask it",
     // The BA inbox holds only the case it has a task in.
     const rows = page.getByTestId("agent-case-row");
     await expect(rows).toHaveCount(1);
+    await expect(rows.first().getByTestId("agent-case-questions")).toHaveText(
+      "1 question"
+    );
     await rows.first().click();
     await expect(page).toHaveURL(new RegExp(`case=${served.caseId}`));
 
@@ -167,8 +178,8 @@ test("orchestrator agents tab: select an agent, answer its question and ask it",
       qcRows.filter({ hasText: "PRO-22" }).getByTestId("agent-case-running")
     ).toBeVisible();
     await expect(
-      qcRows.filter({ hasText: "PRO-23" }).getByTestId("agent-case-error")
-    ).toBeVisible();
+      qcRows.filter({ hasText: "PRO-23" }).getByTestId("agent-case-failed")
+    ).toHaveAttribute("title", QC_ERROR);
   } finally {
     await fixture.cleanUp(request, token);
   }

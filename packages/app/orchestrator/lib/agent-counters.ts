@@ -42,16 +42,13 @@ export function casesForNode(
   return cases.filter((item) => findAgent(item, nodeId) !== undefined);
 }
 
-/** Needs-a-person cases first, then newest update first. */
+/** Newest update first. */
 export function sortInbox(
   cases: OrchestratorCaseListItem[]
 ): OrchestratorCaseListItem[] {
-  return [...cases].sort((a, b) => {
-    if (a.needsPerson !== b.needsPerson) {
-      return a.needsPerson ? -1 : 1;
-    }
-    return String(b.updatedAt).localeCompare(String(a.updatedAt));
-  });
+  return [...cases].sort((a, b) =>
+    String(b.updatedAt).localeCompare(String(a.updatedAt))
+  );
 }
 
 export function agentsInCase(item: OrchestratorCaseListItem): string[] {

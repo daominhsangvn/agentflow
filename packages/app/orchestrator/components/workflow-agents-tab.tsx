@@ -60,6 +60,9 @@ export function WorkflowAgentsTab({
   const nodeName = agent
     ? agent.name
     : (map.orchestrator?.name ?? ORCHESTRATOR_LABEL);
+  const agentNames = Object.fromEntries(
+    map.agents.map((item) => [item.computeTargetId, item.name])
+  );
   const selectedCase = cases.find((item) => item.id === params.caseId) ?? null;
 
   return (
@@ -84,6 +87,7 @@ export function WorkflowAgentsTab({
       ) : (
         <AgentCaseList
           agentId={agent ? agent.computeTargetId : null}
+          agentNames={agentNames}
           cases={casesForNode(cases, nodeId)}
           isLoading={casesQuery.isLoading}
           nodeLabel={nodeName}

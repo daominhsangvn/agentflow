@@ -4,19 +4,20 @@ import type { OrchestratorCaseListItem } from "@repo/api/src/types/orchestrator"
 import { formatRelativeTime } from "@repo/app/shared/lib/date-utils";
 import { Badge } from "@repo/design-system/components/ui/badge";
 import { Skeleton } from "@repo/design-system/components/ui/skeleton";
-import { cn } from "@repo/design-system/lib/utils";
-import { CircleAlert, MessageCircleQuestion } from "lucide-react";
 import {
   type CaseAgentState,
   caseAgentState,
   sortInbox,
 } from "../lib/agent-counters";
+import { CasePersonBadgeKind, casePersonBadges } from "../lib/case-row-badges";
 import { CASE_WAITING_FOR_LABELS } from "../lib/case-waiting-labels";
 
 export type AgentCaseListProps = {
   cases: OrchestratorCaseListItem[];
   /** The selected agent's compute target id; null for the orchestrator. */
   agentId: string | null;
+  /** Agent display names by compute target id, for the orchestrator's question badges. */
+  agentNames: Readonly<Record<string, string>>;
   nodeLabel: string;
   onSelect: (caseId: string) => void;
   isLoading: boolean;
@@ -27,6 +28,7 @@ const SKELETON_KEYS = ["a", "b", "c"];
 export function AgentCaseList({
   cases,
   agentId,
+  agentNames,
   nodeLabel,
   onSelect,
   isLoading,
@@ -57,13 +59,6 @@ export function AgentCaseList({
               onClick={() => onSelect(item.id)}
               type="button"
             >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "size-2 shrink-0 rounded-full",
-                  item.needsPerson ? "bg-warning" : "bg-transparent"
-                )}
-              />
               <span className="min-w-0 flex-1 truncate text-sm">
                 {item.sourceKey ? (
                   <span className="mr-2 font-mono text-muted-foreground">
@@ -72,14 +67,11 @@ export function AgentCaseList({
                 ) : null}
                 {item.title}
               </span>
-              {agentId ? (
-                <AgentRowState state={caseAgentState(item, agentId)} />
-              ) : null}
-              <span className="shrink-0 text-muted-foreground text-xs">
-                {item.needsPerson
-                  ? "Needs answer"
-                  : CASE_WAITING_FOR_LABELS[item.waitingFor]}
-              </span>
+              <CaseRowBadges
+                agentId={agentId}
+                agentNames={agentNames}
+                item={item}
+              />
               <span className="shrink-0 text-muted-foreground text-xs">
                 {formatRelativeTime(item.updatedAt)}
               </span>
@@ -89,12 +81,48 @@ export function AgentCaseList({
   );
 }
 
+function CaseRowBadges({
+  item,
+  agentId,
+  agentNames,
+}: {
+  item: OrchestratorCaseListItem;
+  agentId: string | null;
+  agentNames: Readonly<Record<string, string>>;
+}) {
+  const badges = casePersonBadges(item, agentId, agentNames);
+  return (
+    <>
+      <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+        {badges.map((badge) => (
+          <Badge
+            data-testid={PERSON_BADGE_TEST_IDS[badge.kind]}
+            key={badge.key}
+            title={badge.title ?? undefined}
+            variant="warning"
+          >
+            {badge.label}
+          </Badge>
+        ))}
+        {agentId ? (
+          <AgentRowState state={caseAgentState(item, agentId)} />
+        ) : null}
+      </span>
+      {badges.length === 0 ? (
+        <span className="shrink-0 text-muted-foreground text-xs">
+          {CASE_WAITING_FOR_LABELS[item.waitingFor]}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 function AgentRowState({ state }: { state: CaseAgentState | null }) {
   if (!state) {
     return null;
   }
   return (
-    <span className="flex shrink-0 items-center gap-1.5">
+    <>
       {state.running > 0 ? (
         <Badge data-testid="agent-case-running" variant="default">
           {countLabel("Running", state.running)}
@@ -109,32 +137,25 @@ function AgentRowState({ state }: { state: CaseAgentState | null }) {
           {countLabel("Queued", state.queued)}
         </Badge>
       ) : null}
-      {state.needsPerson ? (
-        <span
-          aria-label="Needs a person"
-          className="text-warning"
-          data-testid="agent-case-needs-person"
-          role="img"
-          title="Needs a person"
-        >
-          <MessageCircleQuestion aria-hidden="true" className="size-4" />
-        </span>
-      ) : null}
       {state.error ? (
-        <span
-          aria-label="Latest task failed"
-          className="text-destructive"
-          data-testid="agent-case-error"
-          role="img"
+        <Badge
+          data-testid="agent-case-failed"
           title={state.error}
+          variant="error"
         >
-          <CircleAlert aria-hidden="true" className="size-4" />
-        </span>
+          Failed
+        </Badge>
       ) : null}
-    </span>
+    </>
   );
 }
 
 function countLabel(label: string, count: number): string {
   return count > 1 ? `${label} · ${count}` : label;
 }
+
+const PERSON_BADGE_TEST_IDS: Record<CasePersonBadgeKind, string> = {
+  [CasePersonBadgeKind.Decision]: "agent-case-decision",
+  [CasePersonBadgeKind.Questions]: "agent-case-questions",
+  [CasePersonBadgeKind.Asked]: "agent-case-asked",
+};
