@@ -107,6 +107,27 @@ describe("readConnectionItem", () => {
     expect(mocks.loadRuntime).toHaveBeenCalledWith("org-1", "pc-1");
   });
 
+  it("returns the assignee's and reporter's emails when the provider shares them", async () => {
+    mocks.fetchItem.mockResolvedValue({
+      ...item("OPS-12", "OPS"),
+      assignee: "Dev One",
+      assigneeEmail: "dev1@example.com",
+      reporter: "PO",
+    });
+
+    const outcome = await readConnectionItem(CONTEXT, PLAN);
+
+    expect(outcome).toMatchObject({
+      ok: true,
+      output: {
+        assignee: "Dev One",
+        assigneeEmail: "dev1@example.com",
+        reporter: "PO",
+        reporterEmail: null,
+      },
+    });
+  });
+
   it("refuses an item of another project of the same site", async () => {
     const outcome = await readConnectionItem(CONTEXT, {
       ...PLAN,

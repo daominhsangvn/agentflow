@@ -8,7 +8,9 @@
 #   local-git  Gitea plus the `local-git-init` job (admin user + API token,
 #              written to a shared volume the api reads via LOCAL_GIT_TOKEN_FILE)
 #   mailpit    Mailpit mail catcher (UI behind MAILPIT_UI_USER/PASSWORD)
-# Select them with --profile or COMPOSE_PROFILES=local-git,mailpit in .env.
+#   orchestrator  The Orchestrator Agent (an automatic Agent, image from
+#              deploy/runner/Dockerfile), with ORCHESTRATOR_AGENT_API_KEY
+# Select them with --profile or COMPOSE_PROFILES=orchestrator,local-git,mailpit in .env.
 #
 #   cp deploy/compose/.env.prod.example deploy/compose/.env   # then edit it
 #   docker compose -f deploy/compose/docker-compose.prod.yml up -d --build
@@ -315,9 +317,45 @@ services:
       api:
         condition: service_started
 
+  # The Orchestrator Agent (profile `orchestrator`): an automatic Agent that runs
+  # the orchestrator turns of orchestrated workflows. It reaches the api and mcp
+  # inside this network, so it needs no public URL. Its API key is created in
+  # the app (Settings → API Keys, scope write) after the first `up`: set
+  # ORCHESTRATOR_AGENT_API_KEY, then `up -d` with the profile.
+  orchestrator-agent:
+    build:
+      context: ../..
+      dockerfile: deploy/runner/Dockerfile
+    image: ${AGENTFLOW_IMAGE_NAMESPACE:-agentflow-prod}/runner:local
+    profiles: ["orchestrator"]
+    restart: unless-stopped
+    environment:
+      AGENTFLOW_API_URL: http://api:3002
+      AGENTFLOW_MCP_URL: http://mcp:3010/mcp
+      AGENTFLOW_ALLOW_HTTP_HOSTS: api,mcp
+      # Required with the profile (a `:?` check would fail every `up`, profile or not).
+      AGENTFLOW_API_KEY: ${ORCHESTRATOR_AGENT_API_KEY:-}
+      AGENTFLOW_RUNNER_NAME: ${ORCHESTRATOR_AGENT_NAME:-af-orch}
+    volumes:
+      - orchestrator_workspace:/workspace
+      - orchestrator_data:/home/runner/.agentflow-runner
+      - orchestrator_claude:/home/runner/.claude
+      - orchestrator_learnings:/home/runner/.agentflow-ai
+      - orchestrator_claude_versions:/home/runner/.local/share/claude
+    depends_on:
+      api:
+        condition: service_healthy
+      mcp:
+        condition: service_started
+
 volumes:
   postgres_data:
   rustfs_data:
   local_git_data:
   local_git_token:
   mailpit_data:
+  orchestrator_workspace:
+  orchestrator_data:
+  orchestrator_claude:
+  orchestrator_learnings:
+  orchestrator_claude_versions:

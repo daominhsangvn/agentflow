@@ -13,7 +13,7 @@ The tool `runners_list` lists Agents: the name keeps the old word.
 |---|---|---|
 | `case_get` | Reads the case as AgentFlow records it: notes, conversations with their latest messages, tasks and decisions | none |
 | `case_update_notes` | Replaces the case's notes: what later turns must know. Read them with `case_get` first and keep what still holds | `notes` (up to 20 000 characters) |
-| `source_item_get` | Reads the conversation's item (the ticket or Teams thread): title, status, description, latest comments, attachment names, and the `blockedBy` / `blocks` relations | none |
+| `source_item_get` | Reads the conversation's item (the ticket or Teams thread): title, status, description, assignee and reporter (names, plus `assigneeEmail` and `reporterEmail` when the provider shares them), latest comments, attachment names, and the `blockedBy` / `blocks` relations | none |
 | `case_notify` | Leaves a message on another case of the same workflow (same connection) and wakes it, reopening it if closed. Refused when no case exists for that key, for this case's own item, when the calling conversation has no source item, or when the target case has no conversation on this connection | `itemKey`, `message` |
 | `runners_list` | Lists the project's Agents with their `AGENTFLOW.md`: declared commands (mode, what each produces and needs), skills and whether each is online | none |
 

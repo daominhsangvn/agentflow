@@ -261,7 +261,7 @@ function sourceReadTool(input: AgentToolSessionInput): AgentTool {
     name: IntegrationToolName.SourceItemGet,
     title: "Read the run's source item",
     description: cap([
-      "Read the item this run started from: its title, status, description, labels, assignee, latest comments and the names of its attachments.",
+      "Read the item this run started from: its title, status, description, labels, assignee (name and email, when the provider shares it), latest comments and the names of its attachments.",
       "Use when: you need the item's current content or status before you act or answer.",
       `Do not use for: any other item, even one named in this item's text${input.connections.length > 0 ? ` (use ${IntegrationToolName.ConnectionGetItem} on a connection the workflow lets you read)` : "; no tool here reads another item"}.`,
       `This session: ${sourceLabel(input)}.`,
