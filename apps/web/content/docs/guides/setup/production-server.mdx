@@ -244,6 +244,23 @@ afc --profile local-git up -d
 
 The `local-git-init` job creates the admin user and an access token, and the api reads the token from `LOCAL_GIT_TOKEN_FILE` (`/run/local-git/token`, set by the Compose file). You do not paste a token into `.env`; `LOCAL_GIT_TOKEN` is only an override. The api reaches Gitea at `http://local-git:3000` (`LOCAL_GIT_SERVER_URL`). See [Accounts](#accounts) for rotation and [Local Git](/docs/integrations/local-git).
 
+## Orchestrator Agent (optional)
+
+An orchestrated workflow needs an automatic Agent for its Orchestrator Agent ([Orchestrator](/docs/guides/setup/orchestrator)). The profile `orchestrator` runs one in this stack: the service `orchestrator-agent`, built from `deploy/runner/Dockerfile`, reaching the api (`http://api:3002`) and the MCP server (`http://mcp:3010/mcp`) inside the Compose network, so it needs no public URL and no published port.
+
+1. After the first `up`, sign in and create an API key with the `write` scope (Settings → API Keys). Its owner owns the Agent; a dedicated bot user is a good owner.
+2. In `deploy/compose/.env` set `ORCHESTRATOR_AGENT_API_KEY` (required with the profile) and optionally `ORCHESTRATOR_AGENT_NAME` (default `af-orch`), and add `orchestrator` to `COMPOSE_PROFILES`.
+3. Start it:
+
+   ```bash
+   afc --profile orchestrator up -d --build orchestrator-agent
+   afc logs -f orchestrator-agent
+   ```
+
+4. Under **Agents**, the Agent appears online: set its **Model provider**, share it with the organization when workflows run as other users, add it in Project → **Agents**, and name it in the workflow (`agent.runner`).
+
+Its volumes (`agentflow-prod_orchestrator_*`) keep its identity and Claude Code sessions across restarts. The orchestrator's turns need no project toolchain; Agents that build and test code run elsewhere ([Agents](/docs/guides/setup/agents)).
+
 ## Mailpit (optional)
 
 Mailpit catches outgoing mail so you can read invitations and password resets without a mail server. Add `--profile mailpit` to the `afc` commands (or `COMPOSE_PROFILES=mailpit`), set `MAILPIT_UI_PASSWORD` (required, no spaces) and optionally `MAILPIT_UI_USER` (default `admin`), and point the api at it with `SMTP_URL=smtp://mailpit:1025`. The UI is on `127.0.0.1:8025` (`MAILPIT_UI_PORT`) behind that login; reach it through an SSH tunnel or your proxy. The SMTP port is published on `127.0.0.1:1025` (`MAILPIT_SMTP_PORT`).
