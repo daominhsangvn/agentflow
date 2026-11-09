@@ -1,0 +1,41 @@
+---
+title: "Blocked tasks"
+description: "A task that answers BLOCKED: did nothing. How it shows in AgentFlow and what the rules should tell the orchestrator to do."
+---
+
+A command should check its inputs first. When something it needs is missing, it writes one line as the first line of its answer and stops:
+
+```text
+BLOCKED: missing PRD-<KEY>.md (needs prd: produced by /ba-requirement analyze <KEY> on BA (LeaveDesk))
+```
+
+AgentFlow does not treat this as a failure: the task is `succeeded` and its answer starts with `BLOCKED:`. Nothing else is special-cased, so what happens next is up to the rules.
+
+## How it shows
+
+- **Home**: counted in **Blocked tasks** (last 7 days) and listed as a **Blocked task** under Needs attention, while the case is open ([Home](/docs/guides/operate/home)).
+- **Cases**: Home counts "With blocked or failed tasks" among cases, and the task and its answer are on the case page ([Cases](/docs/guides/operate/cases)).
+- The orchestrator reads the answer in the wait result or with `task_get`.
+
+## What the rules should say
+
+LD-6:
+
+```text
+## Blocked tasks
+- A task answer that starts with "BLOCKED:" did nothing. Comment what is missing and who produces it (from that line). If the missing document exists on Confluence or from an earlier task, pass it in the task's files and run the task again (once); otherwise wait for it.
+```
+
+Three parts: comment what is missing and who produces it, retry **once** with the missing file passed in, otherwise wait.
+
+## What prevents it
+
+- AgentFlow checks `needs` before it starts a task. A command whose needed file is neither passed, nor a page input, nor attached to the ticket is refused ([Agent capabilities](/docs/guides/setup/agent-capabilities)). Resumed tasks are not checked.
+- The command checks again on the Agent. This second check is what produces `BLOCKED:`.
+
+## See also
+
+- [Waiting for blockers](/docs/guides/recipes/waiting-for-blockers)
+- [Files and Confluence pages](/docs/guides/recipes/files-and-pages)
+- [Home](/docs/guides/operate/home)
+- [Writing orchestrator rules](/docs/guides/recipes/orchestrator-rules)

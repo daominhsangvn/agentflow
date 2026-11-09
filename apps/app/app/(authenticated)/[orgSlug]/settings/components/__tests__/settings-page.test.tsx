@@ -16,7 +16,10 @@ const mockToastSuccess = vi.fn();
 const mockToastError = vi.fn();
 const mockUserProfile = vi.fn();
 const mockOrganizationProfile = vi.fn();
-const mockIntegrationConnectionsSection = vi.fn();
+
+vi.mock("@/hooks/use-org-slug", () => ({
+  useOrgSlug: () => "acme",
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/settings",
@@ -99,22 +102,6 @@ vi.mock("../cloud-compute-mode-card", () => ({
 
 vi.mock("../google-integration-card", () => ({
   GoogleIntegrationCard: () => null,
-}));
-
-// Observable mock: the generic connections section must mount in the Compute &
-// Integrations tab with the current admin state (admins edit, members read).
-vi.mock("../integration-connections-section", () => ({
-  IntegrationConnectionsSection: (props: { isAdmin: boolean }) => {
-    mockIntegrationConnectionsSection(props);
-    // Carries the section anchor so the fragment scroll has a target.
-    return (
-      <div
-        data-testid="integration-connections-section"
-        id={INTEGRATION_CONNECTIONS_ANCHOR}
-        tabIndex={-1}
-      />
-    );
-  },
 }));
 
 vi.mock("../local-compute-targets-card", () => ({
@@ -309,7 +296,7 @@ describe("SettingsPage tab list", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("mounts the integration connections section in the integrations tab with the admin state", () => {
+  it("links to the Connections page from the integrations tab", () => {
     render(
       <QueryClientProvider
         client={
@@ -321,27 +308,8 @@ describe("SettingsPage tab list", () => {
     );
 
     expect(
-      screen.getByTestId("integration-connections-section")
-    ).toBeInTheDocument();
-    expect(mockIntegrationConnectionsSection).toHaveBeenCalledWith(
-      expect.objectContaining({ isAdmin: true })
-    );
-  });
-
-  it("passes the member state through to the integration connections section", () => {
-    render(
-      <QueryClientProvider
-        client={
-          new QueryClient({ defaultOptions: { queries: { retry: false } } })
-        }
-      >
-        <SettingsPage initialTab={SettingsTab.Integrations} isAdmin={false} />
-      </QueryClientProvider>
-    );
-
-    expect(mockIntegrationConnectionsSection).toHaveBeenCalledWith(
-      expect.objectContaining({ isAdmin: false })
-    );
+      screen.getByRole("link", { name: "Open Connections" })
+    ).toHaveAttribute("href", "/acme/connections");
   });
 
   it("does not render the empty More Integrations placeholder (FEA-3976)", () => {

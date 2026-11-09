@@ -88,6 +88,14 @@ Legitimate: subscriptions (prefer `useSyncExternalStore`), post-render DOM measu
 - Use `Link` from `@repo/navigation/link` for in-app navigation — never a raw internal `<a href="/…">` or a navigation-only `onClick` (`next/link` is banned here by `biome.jsonc`). Enforced by `pnpm check:source-gates`.
 - Do not remove the `/api/gateway/*` proxy guard or reimplement gateway operations in `apps/app`; gateway operations require local filesystem/process access and belong in `apps/desktop`.
 
+### Navigation
+
+- The sidebar groups (Home, Work, Setup, Projects, Labs) come from `packages/app/shared/lib/primary-nav-destinations.ts`.
+- Home is served at `/dashboard`. `/agents/[agentId]` is the agent detail; the agent-components catalog lives at `/skills` and `/skills/[slug]`, and a non-UUID `/agents/<slug>` redirects there.
+- A new top-level route must also be added to `AUTHENTICATED_ROUTE_DIRECTORIES` in `apps/app/lib/app-route-redirects.ts`.
+- No feature flags in the self-hosted edition (Labs stays container-flagged).
+- User-facing text says "Agent", never "Runner".
+
 ## E2E Coverage for UI Surfaces (MANDATORY)
 
 E2E coverage for user-facing surfaces is part of "done" here, the same way the Parker Protocol design pass is — not a soft suggestion. This extends the repo-wide Test Practices in the root `AGENTS.md`; it does not replace the unit/render coverage those rules already require.

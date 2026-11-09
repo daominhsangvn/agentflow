@@ -1,0 +1,50 @@
+---
+title: "Status flows"
+description: "Map ticket statuses to work, absorb quick status flips, and handle a ticket that returns to a status whose work is done."
+---
+
+An orchestrated workflow acts on ticket changes. The rules say what each status means. LD-6 uses the Jira statuses To Do → PRD → Planning → Implement → Testing → Review → Done.
+
+## Map statuses to work
+
+Write one line per status:
+
+| Status | Work in LD-6 |
+|---|---|
+| To Do | Nothing |
+| PRD | BA writes the PRD; questions are posted as one comment; people review the page and move the ticket on |
+| Planning | In parallel: BA archives the PRD, Dev writes the plan, QC designs the test plan |
+| Implement | Dev implements from the plan page and opens its pull request |
+| Testing | QC automates and runs the approved tests against the Dev branch |
+| Review | Start nothing new; people review and merge the pull requests |
+| Done | Close the case |
+
+Add a rule that ties work to the current status:
+
+```text
+- Start a writing task only for the work of the ticket's CURRENT status (PRD: the PRD; Planning: archive, plan, test plan; Implement: code and fixes; Testing: test rounds). If someone asks in a comment for work of another status (e.g. "fix the code" while in Testing), do not start it: answer that the ticket must move to that status first, and do it when it is there. Reading tasks (questions, research, reviews) are allowed in every status.
+```
+
+A comment asking for work of another status is answered ("move the ticket to that status first") and done when the ticket is there. Reading tasks stay allowed.
+
+## Quick flips
+
+The workflow's `debounceSeconds` merges a burst of changes into one turn. If an admin moves a ticket from Implement to Planning by mistake and to Testing ten seconds later, one turn sees the final status. The rule that makes this safe: "Several changes in one turn: act on the final status only." Nothing is started for Planning and nothing needs cancelling. See [Workflow YAML](/docs/guides/setup/workflow-yaml#agentorchestrator) for the setting.
+
+## Coming back to a status
+
+A ticket may return to a status whose work is done, for example Testing → Implement after a failed test round. Without a rule, the orchestrator might start the work again on its own. LD-6 says:
+
+```text
+## Coming back to a status
+- When the ticket moves back to a status whose work was already done in this case (e.g. Testing → Implement after a failed test round, Planning → PRD), start NOTHING on your own. Comment what that status already produced (pages, pull request, last results) and ask what to change. Start the work only when a person says what to do in a comment (e.g. "fix D-1"), then resume the task that did that work with their instruction.
+- The first time the ticket enters a status, follow the Flow as written.
+```
+
+In LD-6, after test round 1 failed (32/33), the admin moved the ticket to Implement. The orchestrator listed what existed (the pull request, Test run 1, defect D-1) and started nothing. "fix D-1" resumed the Dev task, and a new test round on return to Testing gave 33/33.
+
+## See also
+
+- [Cancelling](/docs/guides/recipes/cancelling)
+- [Writing orchestrator rules](/docs/guides/recipes/orchestrator-rules)
+- [LeaveDesk example](/docs/guides/setup/leavedesk-example)

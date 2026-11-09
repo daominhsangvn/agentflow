@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { InboundRequest } from "../../../types";
+import { HttpMethod, type InboundRequest } from "../../../types";
+import { jiraRequest } from "../client";
 import {
   JIRA_WEBHOOK_IDENTIFIER_HEADER,
   JiraEventAttribute,
@@ -8,7 +9,8 @@ import {
   JiraTriggerType,
 } from "../constants";
 import { parseJiraRequest } from "../inbound";
-import { jiraAnswerReply } from "../issue-events";
+import { jiraAnswerReply, jiraCommentMessage } from "../issue-events";
+import { jiraCommentPageSchema, jiraIssueSchema } from "../schemas";
 import {
   HUMAN_USER,
   WEBHOOK_TIMESTAMP,
@@ -18,6 +20,7 @@ import {
   BOT_ACCOUNT_ID,
   CLOUD_BOT_ACCOUNT,
   cloudConfig,
+  jsonResponse,
   makeJiraContext,
   routedHttp,
 } from "./jira.test-helpers";
@@ -95,6 +98,78 @@ function parse(body: unknown) {
   });
   return parseJiraRequest(request, ctx);
 }
+
+describe("shared comment helpers", () => {
+  it("builds a comment message from wiki markup, ADF and a missing parent", () => {
+    expect(
+      jiraCommentMessage({ id: "1", parentId: "0", body: "wiki" })
+    ).toEqual({
+      id: "1",
+      parentId: "0",
+      text: "wiki",
+    });
+    const adf = {
+      type: "doc",
+      version: 1,
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "adf text" }] },
+      ],
+    };
+    expect(jiraCommentMessage({ id: "2", body: adf })).toEqual({
+      id: "2",
+      parentId: null,
+      text: "adf text",
+    });
+  });
+
+  it("parses fields.comment and drops invalid comments", () => {
+    const issue = jiraIssueSchema.parse({
+      id: "1",
+      key: "PROJ-1",
+      fields: {
+        comment: {
+          comments: [
+            {
+              id: "10",
+              parentId: "9",
+              updated: "2026-10-04T11:59:00.000+0000",
+              updateAuthor: HUMAN_USER,
+              body: "x",
+            },
+            { bad: true },
+          ],
+          total: 3,
+        },
+      },
+    });
+
+    expect(issue.fields.comment?.comments).toHaveLength(1);
+    expect(issue.fields.comment?.comments?.[0]?.parentId).toBe("9");
+    expect(issue.fields.comment?.total).toBe(3);
+  });
+
+  it("reads Cloud through REST v2 when asked to", async () => {
+    const fake = routedHttp([
+      {
+        method: HttpMethod.Get,
+        path: "/rest/api/2/issue/1/comment",
+        respond: jsonResponse(200, { comments: [] }),
+      },
+    ]);
+    const ctx = makeJiraContext({ http: fake.http, config: cloudConfig() });
+
+    const result = await jiraRequest(
+      ctx,
+      { method: HttpMethod.Get, path: "issue/1/comment", restVersion: "2" },
+      jiraCommentPageSchema
+    );
+
+    expect(result.ok).toBe(true);
+    expect(new URL(fake.requests[0]!.url).pathname).toBe(
+      "/rest/api/2/issue/1/comment"
+    );
+  });
+});
 
 /** Jira Cloud `comment_created` webhook of a reply to comment 10800. */
 function replyWebhook(body: string, overrides: { event?: string } = {}) {

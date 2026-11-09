@@ -5,6 +5,7 @@ import {
 } from "@repo/api/src/types/orchestrator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CONNECTION_ID,
   createOrchestratorDbFake,
   ORG_ID,
   type OrchestratorDbFake,
@@ -48,9 +49,12 @@ beforeEach(() => {
   fake.addWorkflow(WORKFLOW_ID, "Questions on tickets");
 });
 
-function connection(answerReply?: (event: InboundEvent) => string | null) {
+function connection(
+  answerReply?: (event: InboundEvent) => string | null,
+  id: string = CONNECTION_ID
+) {
   return {
-    record: { id: "conn-1", organizationId: ORG_ID },
+    record: { id, organizationId: ORG_ID },
     provider: { answerReply },
   } as unknown as LoadedConnection;
 }
@@ -91,6 +95,7 @@ describe("routeToOrchestrator", () => {
     });
 
     expect(routed?.created).toBe(true);
+    expect(routed?.caseId).toBe(fake.cases[0]?.id);
     expect(fake.cases).toMatchObject([
       {
         projectId: PROJECT_ID,
@@ -139,6 +144,7 @@ describe("routeToOrchestrator", () => {
     });
 
     expect(second?.conversationId).toBe(first?.conversationId);
+    expect(second?.caseId).toBe(first?.caseId);
     expect(fake.cases).toHaveLength(1);
     expect(fake.messages).toHaveLength(2);
   });
@@ -186,7 +192,176 @@ describe("routeToOrchestrator", () => {
     });
 
     expect(reply?.conversationId).toBe(first?.conversationId);
+    expect(reply?.caseId).toBe(first?.caseId);
     expect(fake.conversations).toHaveLength(1);
+  });
+
+  it("routes a reply by the anchor of its own connection", async () => {
+    const [first] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention(),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: WORKFLOWS,
+    });
+    fake.addAnchor(
+      first?.conversationId ?? "",
+      IntegrationProviderKey.Jira,
+      "900"
+    );
+    const reply = (through: LoadedConnection) =>
+      routeToOrchestrator({
+        connection: through,
+        event: mention({
+          triggerType: "jira.comment_reply",
+          dedupKey: "LD-7:reply:901",
+          message: { id: "901", parentId: "900", text: "ok" },
+        }),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: [],
+      });
+
+    expect(await reply(connection(undefined, "conn-2"))).toEqual([]);
+    const [own] = await reply(connection());
+    expect(own?.conversationId).toBe(first?.conversationId);
+  });
+
+  it("keeps anchors with the same comment id on different connections apart", async () => {
+    const [first] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention(),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: WORKFLOWS,
+    });
+    const [second] = await routeToOrchestrator({
+      connection: connection(undefined, "conn-2"),
+      event: mention({ dedupKey: "LD-7:mention:comment-600" }),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: WORKFLOWS,
+    });
+    const provider = IntegrationProviderKey.Jira;
+    fake.addAnchor(first?.conversationId ?? "", provider, "900");
+    fake.addAnchor(second?.conversationId ?? "", provider, "900", {
+      connectionId: "conn-2",
+    });
+
+    const route = (through: LoadedConnection, id: string) =>
+      routeToOrchestrator({
+        connection: through,
+        event: mention({
+          triggerType: "jira.comment_reply",
+          dedupKey: `LD-7:reply:${id}`,
+          message: { id, parentId: "900", text: "ok" },
+        }),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: [],
+      });
+    const [a] = await route(connection(), "901");
+    const [b] = await route(connection(undefined, "conn-2"), "902");
+    expect(a?.conversationId).toBe(first?.conversationId);
+    expect(b?.conversationId).toBe(second?.conversationId);
+  });
+
+  it("tags a reply to an agent's own comment with the task and question it answers", async () => {
+    const [first] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention(),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: WORKFLOWS,
+    });
+    fake.addAnchor(
+      first?.conversationId ?? "",
+      IntegrationProviderKey.Jira,
+      "910",
+      { taskId: "task-1", questionId: "q1" }
+    );
+    fake.addAnchor(
+      first?.conversationId ?? "",
+      IntegrationProviderKey.Jira,
+      "911"
+    );
+
+    const reply = (id: string, parentId: string) =>
+      routeToOrchestrator({
+        connection: connection(),
+        event: mention({
+          triggerType: "jira.comment_reply",
+          dedupKey: `LD-7:reply:${id}`,
+          message: { id, parentId, text: "answer" },
+        }),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: [],
+      });
+    const [tagged] = await reply("920", "910");
+    const [plain] = await reply("921", "911");
+
+    expect(tagged?.conversationId).toBe(first?.conversationId);
+    expect(plain?.conversationId).toBe(first?.conversationId);
+    const payloads = fake.messages.map(
+      (m) => m.payload as Record<string, unknown>
+    );
+    expect(payloads.at(-2)).toMatchObject({
+      taskId: "task-1",
+      questionId: "q1",
+    });
+    expect(payloads.at(-1)).not.toHaveProperty("taskId");
+  });
+
+  describe("open questions of an agent's task", () => {
+    async function setUp() {
+      const [first] = await routeToOrchestrator({
+        connection: connection(),
+        event: mention(),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: WORKFLOWS,
+      });
+      const conversationId = first?.conversationId ?? "";
+      fake.addTask("task-1", 2);
+      fake.addAnchor(conversationId, IntegrationProviderKey.Jira, "910", {
+        taskId: "task-1",
+        questionId: "q1",
+      });
+      fake.addAnchor(conversationId, IntegrationProviderKey.Jira, "912", {
+        taskId: "task-1",
+      });
+      return (id: string, parentId: string, dedupKey = `LD-7:reply:${id}`) =>
+        routeToOrchestrator({
+          connection: connection(),
+          event: mention({
+            triggerType: "jira.comment_reply",
+            dedupKey,
+            message: { id, parentId, text: "answer" },
+          }),
+          projectConnectionId: PROJECT_CONNECTION_ID,
+          workflows: [],
+        });
+    }
+
+    it("counts the first reply to a question and not the second", async () => {
+      const reply = await setUp();
+
+      await reply("920", "910");
+      expect(fake.tasks[0]?.openQuestionCount).toBe(1);
+
+      await reply("921", "910");
+      expect(fake.tasks[0]?.openQuestionCount).toBe(1);
+    });
+
+    it("does not count a duplicate delivery", async () => {
+      const reply = await setUp();
+
+      await reply("920", "910");
+      await reply("920", "910", "LD-7:reply:920-again");
+
+      expect(fake.tasks[0]?.openQuestionCount).toBe(1);
+    });
+
+    it("does not count a reply to an anchor that is not a question", async () => {
+      const reply = await setUp();
+
+      await reply("920", "912");
+
+      expect(fake.tasks[0]?.openQuestionCount).toBe(2);
+    });
   });
 
   it("opens a conversation per comment thread replied to that is not its own", async () => {
@@ -300,6 +475,83 @@ describe("routeToOrchestrator", () => {
       "and for interns?",
     ]);
   });
+  it("drops an unmentioned thread reply when the workflow is mention-only", async () => {
+    const mentionOnly = "0199a5f0-0000-7000-8000-0000000000f3";
+    fake.addWorkflow(mentionOnly, "Mention only", {
+      agentConfig: { orchestrator: { debounceSeconds: 20, mentionOnly: true } },
+    });
+    const workflows = [{ workflowId: mentionOnly, projectId: PROJECT_ID }];
+    const thread = {
+      item: {
+        provider: IntegrationProviderKey.MicrosoftTeams,
+        externalId: "team|channel|root|msg",
+        key: "teams-abc123",
+        url: null,
+        title: "Can part-timers take half a day?",
+        container: "channel",
+      },
+    };
+    await routeToOrchestrator({
+      connection: connection(),
+      event: mention({
+        ...thread,
+        triggerType: "microsoft_teams.bot_mentioned",
+        message: { id: "m1", parentId: null, text: "@bot hello" },
+      }),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows,
+    });
+
+    const replies = await routeToOrchestrator({
+      connection: connection(),
+      event: mention({
+        ...thread,
+        triggerType: "microsoft_teams.thread_reply",
+        dedupKey: "thread:reply:m2",
+        message: { id: "m2", parentId: "m1", text: "and for interns?" },
+      }),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: [],
+    });
+
+    expect(replies).toEqual([]);
+    expect(fake.messages.map((message) => message.text)).toEqual([
+      "@bot hello",
+    ]);
+  });
+
+  it("still takes a reply to its own message when mention-only", async () => {
+    const mentionOnly = "0199a5f0-0000-7000-8000-0000000000f3";
+    fake.addWorkflow(mentionOnly, "Mention only", {
+      agentConfig: { orchestrator: { debounceSeconds: 20, mentionOnly: true } },
+    });
+    const [first] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention(),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: [{ workflowId: mentionOnly, projectId: PROJECT_ID }],
+    });
+    fake.addAnchor(
+      first?.conversationId ?? "",
+      IntegrationProviderKey.Jira,
+      "900"
+    );
+
+    const [reply] = await routeToOrchestrator({
+      connection: connection(),
+      event: mention({
+        triggerType: "jira.comment_reply",
+        dedupKey: "LD-7:reply:901",
+        message: { id: "901", parentId: "900", text: "ok, change step 2" },
+      }),
+      projectConnectionId: PROJECT_CONNECTION_ID,
+      workflows: [],
+    });
+
+    expect(reply?.conversationId).toBe(first?.conversationId);
+    expect(fake.messages).toHaveLength(2);
+  });
+
   it("opens a case and a conversation per orchestrated workflow that matched", async () => {
     const other = "0199a5f0-0000-7000-8000-0000000000f2";
     fake.addWorkflow(other, "Second orchestrator");

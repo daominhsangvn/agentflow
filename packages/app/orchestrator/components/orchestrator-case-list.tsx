@@ -4,9 +4,16 @@ import {
   OrchestratorCaseStatus,
   type OrchestratorCaseSummary,
 } from "@repo/api/src/types/orchestrator";
+// Cross-slice: same provider icon as the workflow runs table.
+import { ProviderIcon } from "@repo/app/integrations/components/provider-icon";
 // Cross-slice: same retryable error block as the repositories list.
 import { QueryErrorMessage } from "@repo/app/integrations/components/query-error-message";
 import { formatRelativeTime } from "@repo/app/shared/lib/date-utils";
+import { formatActiveTime } from "@repo/app/shared/lib/format-active-time";
+import {
+  formatCostPrecise,
+  formatTokenCount,
+} from "@repo/app/shared/lib/format-utils";
 import { Badge } from "@repo/design-system/components/ui/badge";
 import { EmptyState } from "@repo/design-system/components/ui/empty-state";
 import { Skeleton } from "@repo/design-system/components/ui/skeleton";
@@ -21,7 +28,14 @@ import {
 import { Link } from "@repo/navigation/link";
 import { useOrgPath } from "@repo/navigation/use-org-path";
 import { InboxIcon } from "lucide-react";
-import { useWorkflowOrchestratorCases } from "../hooks/use-orchestrator-cases";
+import {
+  isCaseActive,
+  useWorkflowOrchestratorCases,
+} from "../hooks/use-orchestrator-cases";
+import { caseSourceProvider } from "../lib/case-source";
+
+const ACTIVE_TIME_HINT =
+  "Summed duration of the agent sessions and orchestrator turns of the case";
 
 export type OrchestratorCaseListProps = {
   workflowId: string;
@@ -65,16 +79,21 @@ export function OrchestratorCaseList({
   }
 
   return (
-    <div data-testid="orchestrator-case-list">
+    <div
+      className="overflow-x-auto rounded-md border"
+      data-testid="orchestrator-case-list"
+    >
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Case</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Source</TableHead>
-            <TableHead>Pending decisions</TableHead>
-            <TableHead>Activity</TableHead>
-            <TableHead>Updated</TableHead>
+            <TableHead>Last activity</TableHead>
+            <TableHead>Tasks</TableHead>
+            <TableHead>Turns</TableHead>
+            <TableHead title={ACTIVE_TIME_HINT}>Active time</TableHead>
+            <TableHead>Tokens</TableHead>
+            <TableHead>Cost</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -95,43 +114,69 @@ function CaseRow({
   item,
   href,
 }: Readonly<{ item: OrchestratorCaseSummary; href: string }>) {
-  const isRunning = item.turnRunning || item.activeTaskCount > 0;
+  const provider = caseSourceProvider(item.sourceKey);
 
   return (
     <TableRow>
-      <TableCell>
-        <Link className="font-medium hover:underline" href={href}>
-          {item.title}
-        </Link>
+      <TableCell className="max-w-[24rem]">
+        <div className="flex min-w-0 items-center gap-2">
+          {provider ? <ProviderIcon provider={provider} /> : null}
+          <Link
+            className="min-w-0 truncate font-medium hover:underline"
+            href={href}
+          >
+            {item.title}
+          </Link>
+        </div>
       </TableCell>
       <TableCell>
-        <Badge
-          variant={
-            item.status === OrchestratorCaseStatus.Open ? "default" : "outline"
-          }
-        >
-          {item.status === OrchestratorCaseStatus.Open ? "Open" : "Closed"}
-        </Badge>
+        <CaseStatus item={item} />
       </TableCell>
-      <TableCell className="text-muted-foreground">
-        {item.sourceKey ?? "—"}
-      </TableCell>
-      <TableCell>
-        <PendingDecisions count={item.pendingDecisionCount} />
-      </TableCell>
-      <TableCell className="text-muted-foreground">
-        {isRunning ? "Running" : "—"}
-      </TableCell>
-      <TableCell className="text-muted-foreground">
+      <TableCell className="whitespace-nowrap text-muted-foreground">
         {formatRelativeTime(item.updatedAt)}
+      </TableCell>
+      <TableCell className="whitespace-nowrap tabular-nums">
+        {item.taskCount}
+        {item.activeTaskCount > 0 ? (
+          <span className="text-muted-foreground">
+            {" "}
+            · {item.activeTaskCount} active
+          </span>
+        ) : null}
+      </TableCell>
+      <TableCell className="tabular-nums">{item.turnCount}</TableCell>
+      <TableCell className="whitespace-nowrap tabular-nums">
+        {formatActiveTime(item.activeMs)}
+      </TableCell>
+      <TableCell className="whitespace-nowrap tabular-nums">
+        {formatTokenCount(item.inputTokens + item.outputTokens)}
+      </TableCell>
+      <TableCell className="whitespace-nowrap tabular-nums">
+        <CaseCost costUsd={item.costUsd} />
       </TableCell>
     </TableRow>
   );
 }
 
-function PendingDecisions({ count }: Readonly<{ count: number }>) {
-  if (count > 0) {
-    return <Badge variant="secondary">{count}</Badge>;
+function CaseStatus({ item }: Readonly<{ item: OrchestratorCaseSummary }>) {
+  const isOpen = item.status === OrchestratorCaseStatus.Open;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <Badge variant={isOpen ? "default" : "outline"}>
+        {isOpen ? "Open" : "Closed"}
+      </Badge>
+      {isCaseActive(item) ? <Badge variant="info">Running</Badge> : null}
+      {item.pendingDecisionCount > 0 ? (
+        <Badge variant="secondary">{item.pendingDecisionCount} pending</Badge>
+      ) : null}
+    </div>
+  );
+}
+
+function CaseCost({ costUsd }: Readonly<{ costUsd: number | null }>) {
+  if (costUsd === null) {
+    return <span className="text-muted-foreground">-</span>;
   }
-  return <span className="text-muted-foreground">—</span>;
+  return <>{formatCostPrecise(costUsd)}</>;
 }

@@ -176,6 +176,17 @@ describe("resolveRedirect — reserved top-level routes", () => {
   });
 });
 
+describe("resolveRedirect: org-level nav routes", () => {
+  it("prefixes a bare /skills and /cases with the org", () => {
+    expect(redirectPath("/skills", ORG)).toBe("/acme/skills");
+    expect(redirectPath("/cases", ORG)).toBe("/acme/cases");
+  });
+
+  it("leaves an org-scoped /acme/cases alone", () => {
+    expect(redirectPath("/acme/cases", ORG)).toBeNull();
+  });
+});
+
 describe("requiresOrgSlugResolution (keeps auth() lazy in the proxy)", () => {
   it("is true only when the first segment is an org-scoped route directory", () => {
     expect(requiresOrgSlugResolution("/issues/ISS-6")).toBe(true);

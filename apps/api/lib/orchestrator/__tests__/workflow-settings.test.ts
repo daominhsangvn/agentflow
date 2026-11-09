@@ -1,4 +1,5 @@
 import {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "@repo/api/src/types/orchestrator";
@@ -62,6 +63,31 @@ describe("loadOrchestratorWorkflows", () => {
         OrchestratorTicketChange.LabelRemoved,
       ],
       enabled: true,
+      connections: {},
+      mentionOnly: false,
+      caseLookup: false,
+      caseHandoff: false,
+      approvals: OrchestratorApprovals.Optional,
+    });
+  });
+
+  it("reads the side-conversation switches", async () => {
+    mocks.findMany.mockResolvedValue([
+      row("w1", {
+        mode: WorkflowAgentMode.Orchestrated,
+        computeTargetId: RUNNER,
+        orchestrator: {
+          mentionOnly: true,
+          caseLookup: true,
+          caseHandoff: true,
+        },
+      }),
+    ]);
+    const settings = (await loadOrchestratorWorkflows(ORG, ["w1"])).get("w1");
+    expect(settings).toMatchObject({
+      mentionOnly: true,
+      caseLookup: true,
+      caseHandoff: true,
     });
   });
 

@@ -1,0 +1,47 @@
+---
+title: "Home"
+description: "The Home dashboard: organization counts, usage, and the Needs attention list that links to the case or Agent that needs a person."
+---
+
+**Home** (`/dashboard`) is the first page of the app. It shows what is happening in the organization and what needs a person.
+
+## Needs attention
+
+The top card, **Attention**, has a row of numbers and the **Needs attention** list.
+
+| Number | Meaning |
+|---|---|
+| Task success (7 days) | Succeeded tasks as a percentage of succeeded, failed and blocked tasks in the last 7 days |
+| Failed tasks | Tasks that failed in the last 7 days |
+| Blocked tasks | Tasks that succeeded with an answer starting with `BLOCKED:` in the last 7 days ([Blocked tasks](/docs/guides/recipes/blocked-tasks)) |
+| Failed runs (7 days) | Runs that failed in the last 7 days |
+| Guard refusals (7 days) | Calls the orchestrator made that a guard refused ([Orchestrator](/docs/guides/setup/orchestrator#guards)) |
+
+Each item in the list has a kind, its age, a title, and the project and workflow it belongs to. The title links to the case, or to the Agent for an offline Agent.
+
+| Kind | Meaning |
+|---|---|
+| Waiting for a person | A case waits for someone's answer |
+| Pending decision | A decision waits for an admin to approve or reject it |
+| Blocked task | A task in an open case answered `BLOCKED:` in the last 7 days |
+| Failed task | A task in an open case failed in the last 7 days |
+| Offline agent | An Agent is not connected |
+
+When the list is empty, the card says "Nothing needs attention."
+
+## Counts
+
+| Card | Shows | Link |
+|---|---|---|
+| **Cases** | Open, Waiting for a person, With blocked or failed tasks, Closed in 7 days, Closed in 30 days, and median and total active time | View cases |
+| **Agents** | Online, Offline, Automatic, Personal, and Claude Code version mismatches | View agents |
+| **Usage** | Input tokens, output tokens and cost for the last 7 and last 30 days, and the top cost lists (cases and runs active in the last 30 days) for Cases, Workflows, Projects and Agents | |
+| **Workflows** | Total, Orchestrated, Process, Enabled, Disabled | View workflows |
+| **Projects** | Total, and Active in 7 days | View projects |
+| **Sessions** | Last 7 days, Last 30 days | View sessions |
+
+## See also
+
+- [Cases](/docs/guides/operate/cases)
+- [Agents](/docs/guides/operate/agents)
+- [Sessions](/docs/guides/operate/sessions)

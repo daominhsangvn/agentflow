@@ -44,7 +44,7 @@ export const POST = withAnyAuth<
       body
     );
     if (result.ok) {
-      return successResponse(result.value);
+      return successResponse({ conversationId: result.value.conversationId });
     }
     return NextResponse.json(
       failure(

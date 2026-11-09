@@ -1,7 +1,9 @@
 import type {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "@repo/api/src/types/orchestrator";
+import type { OrchestratorConnectionGrants } from "@repo/api/src/types/orchestrator-grants";
 import { resolveWorkflowOrchestratorConfig } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
 import { withDb } from "@repo/database";
@@ -26,6 +28,16 @@ export type OrchestratorWorkflow = {
   debounceSeconds: number;
   turnTimeoutMinutes: number;
   cancelOn: OrchestratorTicketChange[];
+  /** agent.orchestrator.mentionOnly */
+  mentionOnly: boolean;
+  /** agent.orchestrator.caseLookup */
+  caseLookup: boolean;
+  /** agent.orchestrator.caseHandoff */
+  caseHandoff: boolean;
+  /** agent.orchestrator.approvals */
+  approvals: OrchestratorApprovals;
+  /** What the orchestrator may write (agent.orchestrator.connections). */
+  connections: OrchestratorConnectionGrants;
 };
 
 /** The orchestrated workflows among the ids, by id (others are left out). */
@@ -67,6 +79,11 @@ export async function loadOrchestratorWorkflows(
       debounceSeconds: settings.debounceSeconds,
       turnTimeoutMinutes: settings.turnTimeoutMinutes,
       cancelOn: settings.cancelOn,
+      mentionOnly: settings.mentionOnly,
+      caseLookup: settings.caseLookup,
+      caseHandoff: settings.caseHandoff,
+      approvals: settings.approvals,
+      connections: settings.connections,
     });
   }
   return result;

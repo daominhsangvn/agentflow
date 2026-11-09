@@ -81,7 +81,7 @@ export function AgentOnboardingCard() {
               <p className="text-muted-foreground text-xs">
                 <Link
                   className="underline"
-                  href={`/${orgSlug}/agents?from=onboarding`}
+                  href={`/${orgSlug}/skills?from=onboarding`}
                 >
                   View progress
                 </Link>
@@ -92,7 +92,7 @@ export function AgentOnboardingCard() {
           <div className="flex items-center gap-2">
             {onboarding.prereqsMet ? (
               <Button asChild>
-                <Link href={`/${orgSlug}/agents?from=onboarding`}>
+                <Link href={`/${orgSlug}/skills?from=onboarding`}>
                   <SparklesIcon className="h-4 w-4" />
                   Generate Agents
                 </Link>

@@ -11,7 +11,7 @@ import { createUniqueName } from "./helpers/utils";
 import { expect, test } from "./test";
 
 /**
- * Adding a project connection (Project → Integrations). Regression: a Jira
+ * Adding a project connection (Project → Connections & Repos). Regression: a Jira
  * project key typed without Enter is kept when the input loses focus; that
  * used to put a chip above the input on mousedown of "Add connection",
  * pushing the button down so the click never landed and nothing was saved.
@@ -58,11 +58,10 @@ test("project connections: a project key typed without Enter is saved", {
     });
 
     await page.goto(`/${orgSlug}/projects/${project.id}`);
-    await page.getByRole("radio", { name: "Integrations" }).click();
+    await page.getByRole("radio", { name: "Connections & Repos" }).click();
     await expect(page).toHaveURL(INTEGRATIONS_TAB_RE);
     await page.getByRole("button", { name: "Add connection" }).click();
-    await page.getByRole("combobox", { name: "Connection" }).click();
-    await page.getByRole("option", { name: "E2E Jira" }).click();
+    await page.getByRole("checkbox", { name: "E2E Jira" }).check();
     await page.getByLabel(JIRA_PROJECTS_RE).fill("SCRUM");
     // No Enter: the click on the button commits the typed key and submits.
     await page
@@ -74,11 +73,10 @@ test("project connections: a project key typed without Enter is saved", {
       .poll(() => posted)
       .toEqual([
         {
-          connectionId: CONNECTION_ID,
-          key: "e2e-jira",
-          name: "E2E Jira",
+          connections: [
+            { connectionId: CONNECTION_ID, key: "e2e-jira", name: "E2E Jira" },
+          ],
           settings: { projectKeys: ["SCRUM"] },
-          override: null,
         },
       ]);
   } finally {

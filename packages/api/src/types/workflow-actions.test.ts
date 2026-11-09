@@ -9,7 +9,7 @@ import {
   workflowRunEventSchema,
 } from "./workflow";
 
-const CONNECTION_ID = "0199a5f0-0000-7000-8000-0000000000e1";
+const CONNECTION_KEY = "jira";
 
 describe("workflowRunEventSchema", () => {
   it("accepts the event names after AgentFlow's phases", () => {
@@ -42,7 +42,7 @@ describe("workflowRunEventSchema", () => {
 describe("workflowActionInputSchema", () => {
   it("maps old event names of a saved action", () => {
     const action = workflowActionInputSchema.parse({
-      connectionId: CONNECTION_ID,
+      connectionKey: CONNECTION_KEY,
       type: "jira.add_comment",
       events: ["run.plan_ready", "run.succeeded"],
     });
@@ -55,7 +55,7 @@ describe("workflowActionInputSchema", () => {
 
   it("accepts an instruction whose connection is chosen when it runs", () => {
     const action = workflowActionInputSchema.parse({
-      connectionId: null,
+      connectionKey: null,
       automaticConnection: true,
       type: WORKFLOW_INSTRUCTION_ACTION_TYPE,
       config: { instruction: "Move the issue to In Progress." },
@@ -63,14 +63,14 @@ describe("workflowActionInputSchema", () => {
     });
 
     expect(action).toMatchObject({
-      connectionId: null,
+      connectionKey: null,
       automaticConnection: true,
     });
   });
 
   it("refuses an automatic connection that names a connection", () => {
     const parsed = workflowActionInputSchema.safeParse({
-      connectionId: CONNECTION_ID,
+      connectionKey: CONNECTION_KEY,
       automaticConnection: true,
       type: WORKFLOW_INSTRUCTION_ACTION_TYPE,
       config: { instruction: "Summarize." },
@@ -82,7 +82,7 @@ describe("workflowActionInputSchema", () => {
 
   it("refuses workflow.triggered on a post action", () => {
     const parsed = workflowActionInputSchema.safeParse({
-      connectionId: CONNECTION_ID,
+      connectionKey: CONNECTION_KEY,
       type: "jira.add_comment",
       events: ["run.triggered"],
     });

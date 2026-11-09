@@ -1,4 +1,8 @@
 import {
+  OrchestratorPageOperation,
+  OrchestratorSourceOperation,
+} from "@repo/api/src/types/orchestrator-grants";
+import {
   type SaveWorkflowInput,
   saveWorkflowInputSchema,
 } from "@repo/api/src/types/workflow";
@@ -45,6 +49,17 @@ vi.mock("@repo/database", () => {
             connectionId: "conn-jira",
             credentialsEncrypted: null,
             connection: { provider: "fake" },
+          },
+          {
+            id: "pc-wiki",
+            projectId: IDS.project,
+            key: "wiki",
+            name: "wiki",
+            provider: "confluence",
+            settings: {},
+            connectionId: "conn-wiki",
+            credentialsEncrypted: null,
+            connection: { provider: "confluence" },
           },
         ]),
     },
@@ -99,6 +114,47 @@ describe("validateWorkflowInput — orchestrated", () => {
     expect(result.ok ? "" : result.error).toContain("remove agent.runners");
   });
 
+  it("accepts a Confluence connection granted publish", async () => {
+    const result = await validate(WorkflowAgentMode.Orchestrated, null, [], {
+      wiki: [OrchestratorPageOperation.Publish],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses an unknown connection key", async () => {
+    const result = await validate(WorkflowAgentMode.Orchestrated, null, [], {
+      missing: [OrchestratorPageOperation.Publish],
+    });
+    expect(result.ok ? "" : result.error).toContain(
+      'has no connection "missing"'
+    );
+  });
+
+  it("refuses a connection that is not Confluence", async () => {
+    const result = await validate(WorkflowAgentMode.Orchestrated, null, [], {
+      jira: [OrchestratorPageOperation.Publish],
+    });
+    expect(result.ok ? "" : result.error).toContain(
+      "writes only Confluence pages"
+    );
+  });
+
+  it("refuses a source operation no trigger connection offers", async () => {
+    const result = await validate(WorkflowAgentMode.Orchestrated, null, [], {
+      source: [OrchestratorSourceOperation.Transition],
+    });
+    expect(result.ok ? "" : result.error).toContain("can transition its items");
+  });
+
+  it("refuses grants on a workflow that is not orchestrated", async () => {
+    const result = await validate(WorkflowAgentMode.Plan, null, [], {
+      source: [OrchestratorSourceOperation.Comment],
+    });
+    expect(result.ok ? "" : result.error).toContain(
+      "only an orchestrated workflow"
+    );
+  });
+
   it("leaves the other modes unaffected", async () => {
     const result = await validate(WorkflowAgentMode.Plan);
     expect(result.ok).toBe(true);
@@ -108,12 +164,19 @@ describe("validateWorkflowInput — orchestrated", () => {
 function validate(
   mode: WorkflowAgentMode,
   process: unknown = null,
-  runners: unknown[] = []
+  runners: unknown[] = [],
+  connections: Record<string, string[]> = {}
 ) {
   const input: SaveWorkflowInput = saveWorkflowInputSchema.parse({
     name: "Questions to the orchestrator",
     projectId: IDS.project,
-    agent: { computeTargetId: IDS.target, mode, process, runners },
+    agent: {
+      computeTargetId: IDS.target,
+      mode,
+      process,
+      runners,
+      orchestrator: { connections },
+    },
     triggers: [{ connectionKey: "jira", type: FAKE_TRIGGER_TYPE }],
     actions: [],
   });

@@ -1,4 +1,0 @@
-{
-  "title": "Tags",
-  "pages": ["listTags", "createTag", "updateTag", "deleteTag"]
-}

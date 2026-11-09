@@ -1,12 +1,15 @@
+import { readFileSync } from "node:fs";
 import type { JsonObject } from "@repo/api/src/types/common";
 import { IntegrationProviderKey } from "@repo/api/src/types/integration";
+import { log } from "@repo/observability/log";
 import { LOCAL_GIT_DEFAULT_URL } from "./providers/local-git/schemas";
 
 /**
  * Connections the server provides to every organization, so nobody adds
  * them in Settings → Connections: today Local Git, the `local-git` service
  * of docker-compose.yml, once the API knows its access token
- * (`LOCAL_GIT_TOKEN`, written by `pnpm local-git:init`).
+ * (`LOCAL_GIT_TOKEN`, written by `pnpm local-git:init`, or the file named by
+ * `LOCAL_GIT_TOKEN_FILE`, written by the compose `local-git-init` job).
  *
  * The environment is the only place they are configured: the connection
  * service creates each organization's connection on first use (or adopts a
@@ -32,7 +35,9 @@ export type ServerConnectionSpec = {
 export function getServerConnectionSpecs(
   env: ServerEnv = process.env
 ): ServerConnectionSpec[] {
-  const token = readEnv(env, "LOCAL_GIT_TOKEN");
+  const token =
+    readEnv(env, "LOCAL_GIT_TOKEN") ??
+    readTokenFile(readEnv(env, "LOCAL_GIT_TOKEN_FILE"));
   if (!token) {
     return [];
   }
@@ -86,7 +91,7 @@ export function serverConnectionLockKey(
 export const LOCAL_GIT_CONNECTION_NAME = "Local Git";
 
 export const SERVER_CONNECTION_READ_ONLY_MESSAGE =
-  "This connection is provided by the server: change it in the API's environment (LOCAL_GIT_SERVER_URL, LOCAL_GIT_RUNNER_URL, LOCAL_GIT_TOKEN, LOCAL_GIT_OWNER; `pnpm local-git:init` writes them) and restart the API.";
+  "This connection is provided by the server: change it in the API's environment (LOCAL_GIT_SERVER_URL, LOCAL_GIT_RUNNER_URL, LOCAL_GIT_TOKEN or LOCAL_GIT_TOKEN_FILE, LOCAL_GIT_OWNER; `pnpm local-git:init` or the compose `local-git-init` job writes them) and restart the API.";
 
 /** Providers whose connection the server can provide. */
 const SERVER_PROVIDER_KEYS: readonly string[] = [
@@ -96,4 +101,21 @@ const SERVER_PROVIDER_KEYS: readonly string[] = [
 function readEnv(env: ServerEnv, key: string): string | null {
   const value = env[key]?.trim();
   return value ? value : null;
+}
+
+function readTokenFile(file: string | null): string | null {
+  if (!file) {
+    return null;
+  }
+  try {
+    const token = readFileSync(file, "utf8").trim();
+    return token ? token : null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      log.warn("Cannot read LOCAL_GIT_TOKEN_FILE", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return null;
+  }
 }

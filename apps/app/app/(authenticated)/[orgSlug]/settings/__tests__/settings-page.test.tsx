@@ -27,6 +27,10 @@ const ARIA_SELECTED = "aria-selected";
 // window, so this is the steady state throughout.
 const CLERK_USER_ID = "user_settings_soft_nav";
 
+vi.mock("@/hooks/use-org-slug", () => ({
+  useOrgSlug: () => "acme",
+}));
+
 vi.mock("@repo/auth/client", () => ({
   OrganizationProfile: () => <div data-testid="clerk-organization-profile" />,
   UserProfile: () => <div data-testid="clerk-user-profile" />,

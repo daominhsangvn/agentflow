@@ -13,6 +13,7 @@ import {
   loadConnectionRuntime,
 } from "./connection-service";
 import { type AnyProvider, getIntegrationProvider } from "./registry";
+import type { PollScope } from "./types";
 
 /**
  * Project connections at run time: the organization connection's runtime
@@ -171,4 +172,46 @@ function warnUnloadable(record: ProjectConnectionRecord, reason: string) {
     connectionId: record.connectionId,
     reason,
   });
+}
+
+/** The containers and settings the project connections of a connection claim, oldest first. */
+export async function loadConnectionPollScopes(
+  organizationId: string,
+  connectionId: string,
+  provider: AnyProvider
+): Promise<PollScope[]> {
+  const rows = await withDb((db) =>
+    db.projectConnection.findMany({
+      where: { organizationId, connectionId },
+      select: {
+        id: true,
+        settings: true,
+        organizationId: true,
+        connectionId: true,
+      },
+      orderBy: { createdAt: "asc" },
+    })
+  );
+  const scopes: PollScope[] = [];
+  for (const row of rows) {
+    const parsed = parseProjectSettings(provider, toJsonObject(row.settings));
+    if (!parsed.ok) {
+      log.warn("[integrations/project-connections] Poll scope skipped", {
+        organizationId,
+        projectConnectionId: row.id,
+        connectionId,
+        reason: parsed.error,
+      });
+      continue;
+    }
+    const containers = provider.project?.containers(parsed.value) ?? [];
+    if (containers.length > 0) {
+      scopes.push({
+        projectConnectionId: row.id,
+        containers,
+        settings: parsed.value,
+      });
+    }
+  }
+  return scopes;
 }

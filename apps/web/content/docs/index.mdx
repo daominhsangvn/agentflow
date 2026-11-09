@@ -1,75 +1,47 @@
 ---
-title: "Documentation"
-description: "The full reference for AgentFlow — the spec-driven, AI-first delivery platform that closes the loop on your SDLC."
+title: "Introduction"
+description: "AgentFlow is a self-hosted platform where AI Agents deliver tickets and people review at milestones."
 ---
 
-Welcome to the AgentFlow documentation hub.
+AgentFlow is a self-hosted platform where AI Agents deliver tickets and people review at milestones. You connect your Jira, Confluence and Git server, describe in plain language how a ticket should be handled, and a team of Agents does the work. People stay in charge: they answer questions, move statuses, edit pages and merge pull requests.
 
-AgentFlow is a platform for team-based agentic software development. It combines a browser-based control plane, a desktop execution client, and a suite of Claude Code plugins into a single system that turns scoped intent into shipped code through repeatable, artifact-bound loops.
+## How a ticket flows
 
-This documentation is organized so both humans and AI agents can use it as ground truth:
+```
+Jira ticket ──▶ Workflow ──▶ Orchestrator Agent ──▶ BA / Dev / QC Agents run commands
+ (status move,   (triggers)    (follows your rules     (Claude Code on their machine)
+  @mention)                     in plain language)                │
+       ▲                                                          ▼
+       └──── people answer, move statuses, edit pages, merge ◀── Confluence pages,
+                                                                  Git pull requests,
+                                                                  ticket comments
+```
 
-- **Getting started** — the fastest path from install to a first completed loop.
-- **Mechanisms** — how the control plane, desktop gateway, runtime, loops, judges, and self-learning actually work.
-- **Concepts** — the mental models behind the product and the philosophy of spec-driven AI-first delivery.
-- **Workflows** — the delivery paths from PRD to PR, including parallel features, code review, and cross-repo coordination.
-- **Resources** — troubleshooting, FAQs, reference tables, comparisons, and templates.
-- **Glossary** — precise, reusable definitions of every first-class concept.
+A **workflow** decides what starts work. In an orchestrated workflow, every request goes to the **Orchestrator Agent**, which reads your rules and the history of the ticket, then sends commands to the BA, Dev and QC **Agents**. Their results are written back as Confluence pages, pull requests and ticket comments. People review each milestone and the Orchestrator Agent continues from their answer.
 
-## Start here
+## An example: LD-6
 
-<CardGroup>
-  <Card title="Install and onboard" href="/getting-started/index">
-    Install the desktop client, install the Claude Code plugins, and prepare your environment for your first loop.
-  </Card>
+The running example is LeaveDesk ticket LD-6, "As a manager I want a calendar of who in my team is off". One ticket goes from To Do to Done: the BA Agent writes a PRD that people refine through four versions (v1 to v4), planning runs in parallel, there are two test rounds, then review and Done. The ticket produced Confluence pages (PRD, implementation plan, test plan, test runs), three pull requests and short comments in Jira.
 
-  <Card title="Understand the control plane" href="/concepts/control-plane">
-    Learn why AgentFlow treats coordination, artifacts, and execution as one coherent system.
-  </Card>
+## What runs where
 
-  <Card title="Run the canonical workflow" href="/workflows/planning-with-codex">
-    Walk through the PRD → plan → critics → implementation → judges → PR path.
-  </Card>
-</CardGroup>
+| Part | What it is |
+|---|---|
+| Server | The web app (:3000), the API (:3002) and the MCP server (:3010), plus Postgres, RustFS (object storage), Mailpit (development mail) and Local Git from `docker-compose.yml` |
+| Automatic Agent | A headless Agent on a server or in a container. It clones the project's repositories and works with AgentFlow's credentials |
+| Personal Agent | An Agent on a person's own machine, in the project folder they already use, with their own credentials |
 
-## What ships with AgentFlow
+Every Agent runs Claude Code. Agents reach the API and the MCP server, and never hold your Jira, Confluence or Git credentials: AgentFlow calls those systems for them.
 
-| Surface | What it does |
-| --- | --- |
-| **Web app (control plane)** | Defines work, stores artifacts, coordinates teams, launches loops, surfaces approvals, renders activity. |
-| **Desktop client** | Electron app that exposes a signed localhost HTTP gateway and a cloud relay so the control plane can safely drive local git, filesystem, code review, and AI coding sessions. |
-| **Claude Code plugins** | Six installable plugins — `bootstrap`, `code`, `code-review`, `judges`, `platform`, `self-learning` — that ship the multi-agent orchestration used by loops. |
-| **Runtime** | The execution layer (your machine plus cloud-assisted orchestration) that runs loops inside a sandbox and returns reviewable output. |
-| **Artifacts** | PRDs, implementation plans, critic reviews, judge reports, code maps, learnings, and code review findings — stored per-session and per-org. |
+## Where to go next
 
-## Why AgentFlow exists
-
-LLMs are extraordinary at generating content. They are unreliable at being repeatably correct.
-
-AgentFlow closes that gap by attaching every loop to a durable artifact, gating every phase with deterministic validation, and grading every output with LLM-as-judge evaluators that score against the original intent.
-
-The result is a system where tickets _are_ the work (not just tracking the work that's done elsewhere), context is captured, the progress of work across a team is immediately visible to everyone, and sprints of scope can land in a few PRs with minimal revisions.
-
-## Read this next
-
-<CardGroup>
-  <Card title="Spec-driven, AI-first delivery" href="/concepts/spec-driven-ai-first-delivery">
-    The philosophical foundation for how AgentFlow works and why.
-  </Card>
-
-  <Card title="The closed loop" href="/concepts/closed-loop-sdlc">
-    How phased, artifact-bound gates replace ad-hoc chat workflows.
-  </Card>
-
-  <Card title="Commands reference" href="/resources/commands-reference">
-    Every slash command exposed by the Claude Code plugins.
-  </Card>
-
-  <Card title="Sessions" href="/docs/mechanisms/sessions">
-    The list, detail, and trace of every AI coding run AgentFlow observes, plus the filters, status model, cost buckets, and PR/branch attribution behind it.
-  </Card>
-
-  <Card title="Agent components" href="/docs/mechanisms/agent-components">
-    The catalog of agentic building blocks — sub-agents, commands, skills, tools, and more — that each session uses.
-  </Card>
-</CardGroup>
+| Section | What it covers |
+|---|---|
+| [Getting started](/docs/getting-started) | Install the server, create the first admin, install an Agent, run a first ticket |
+| [Concepts](/docs/concepts/how-agentflow-works) | Workflow, Orchestrator Agent, Agent, case, run, task, session |
+| [Setup](/docs/guides/setup) | Connections, Agents, workflows, processes and the orchestrator rules |
+| [Operate](/docs/guides/operate) | Home, Cases, Runs, Agents, Sessions and email notifications |
+| [Recipes](/docs/guides/recipes) | Patterns for writing orchestrator rules, taken from LD-6 |
+| [Integrations](/docs/integrations) | Jira, Confluence, Git servers, Microsoft Teams, webhooks and email |
+| [Reference](/docs/reference/orchestrator-tools) | Orchestrator and Agent tools, Agent CLI, server variables, glossary |
+| [Resources](/docs/resources/faq) | FAQ, troubleshooting and release notes |

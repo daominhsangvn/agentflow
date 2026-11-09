@@ -1,0 +1,2183 @@
+// Views of the LD-6 case study. Click an element to drill down a level;
+// open a case (L5) to follow its flow from the first event to the result.
+
+views {
+
+  // ── L1 · Context ──────────────────────────────────────────────────────────
+  view index {
+    title 'L1 · LD-6 case study: context'
+    description 'People work in Jira; AgentFlow coordinates AI agents and writes back to Jira, Confluence and Git. Click AgentFlow to drill down.'
+    include team, jira, confluence, git
+    include
+      agentflow with {
+        navigateTo agentflowL2
+      }
+    include
+      ld6 with {
+        navigateTo cases
+      }
+    exclude agentflow -> ld6
+    autoLayout LeftRight
+  }
+
+  // ── L2 · AgentFlow ────────────────────────────────────────────────────────
+  view agentflowL2 of agentflow {
+    title 'L2 · AgentFlow'
+    description 'The workflow holds the process rules; the Orchestrator Agent turns events into decisions; the Agents do the work; the API keeps the case and talks to the tools.'
+    include *
+    include jira, confluence, git
+    include
+      agentflow.orchestrator with {
+        navigateTo orchestratorL3
+      }
+    include
+      agentflow.api with {
+        navigateTo apiL3
+      }
+    include
+      agentflow.agents with {
+        navigateTo agentsL3
+      }
+  }
+
+  // ── L3 · Inside ───────────────────────────────────────────────────────────
+  view orchestratorL3 of agentflow.orchestrator {
+    title 'L3 · Orchestrator Agent'
+    description 'An event becomes a message; after the debounce one turn runs; it acts only through tools, every write is guarded, and it ends with a wait.'
+    include *
+    include agentflow.workflow, agentflow.api.caseStore, agentflow.api.engine, agentflow.api.integrations
+    include agentflow.agents.baAgent, agentflow.agents.devAgent, agentflow.agents.qcAgent
+    include agentflow.orchestrator.decides with {
+      navigateTo heart
+    }
+    exclude ld6, agentflow.orchestrator.decides -> *
+    autoLayout LeftRight
+  }
+
+  view apiL3 of agentflow.api {
+    title 'L3 · AgentFlow API'
+    description 'Events in, the case kept, files stored, Jira / Confluence / Git written.'
+    include *
+    include jira, confluence, git, agentflow.orchestrator.tools
+  }
+
+  view agentsL3 of agentflow.agents {
+    title 'L3 · Agents'
+    description 'Three agents. Each declares its commands in AGENTFLOW.md (produces, needs, attach, push, read/write); the Orchestrator Agent only runs what is declared.'
+    include *
+    include agentflow.orchestrator.tools, agentflow.api.fileStore, git.appRepo, git.qaRepo, git.knowledgeRepo
+    include
+      agentflow.agents.baAgent with {
+        navigateTo baAgentL4
+      }
+    include
+      agentflow.agents.devAgent with {
+        navigateTo devAgentL4
+      }
+    include
+      agentflow.agents.qcAgent with {
+        navigateTo qcAgentL4
+      }
+  }
+
+  // ── L4 · One agent ────────────────────────────────────────────────────────
+  view baAgentL4 of agentflow.agents.baAgent {
+    title 'L4 · BA Agent'
+    include *
+    include agentflow.agents.baAgent.baCapabilities.*
+  }
+  view devAgentL4 of agentflow.agents.devAgent {
+    title 'L4 · Dev Agent'
+    include *
+    include agentflow.agents.devAgent.devCapabilities.*
+  }
+  view qcAgentL4 of agentflow.agents.qcAgent {
+    title 'L4 · QC Agent'
+    include *
+    include agentflow.agents.qcAgent.qcCapabilities.*
+  }
+
+  // ── L4 · Lifecycles ───────────────────────────────────────────────────────
+  dynamic view taskLifecycle {
+    title 'L4 · Life of a task'
+    description 'From task_run to the next turn: guards, inputs, the command’s own input check, files, the wait.'
+    variant sequence
+    agentflow.orchestrator.turn -> agentflow.orchestrator.tools 'task_run(agent, command, files: task files or Confluence pages, replyTo)'
+    agentflow.orchestrator.tools -> agentflow.orchestrator.guards 'declared? read/write? needs met (e.g. PRD-<KEY>.md)?'
+    agentflow.orchestrator.tools -> agentflow.api.caseStore 'records the task (queued if the agent is busy)'
+    agentflow.orchestrator.tools -> agentflow.agents.qcAgent 'the command runs; files are in inputs/'
+    agentflow.agents.qcAgent -> agentflow.agents.qcAgent 'checks its inputs first (else answers BLOCKED: missing …)'
+    agentflow.agents.qcAgent -> agentflow.api.fileStore 'leaves the files AGENTFLOW.md lists under attach'
+    agentflow.agents.qcAgent -> agentflow.api.engine 'done: answer, questions'
+    agentflow.api.engine -> agentflow.api.caseStore 'the wait fires once (all / any / deadline)'
+    agentflow.api.engine -> agentflow.orchestrator.debounce 'the conversation is due'
+    agentflow.orchestrator.debounce -> agentflow.orchestrator.turn 'next turn: the task results, answered in the right thread'
+  }
+
+  dynamic view documentLifecycle {
+    title 'L4 · Life of a document'
+    description 'A file of a task becomes a Confluence page; people review and edit it there; the next task gets the page as it is now.'
+    variant sequence
+    agentflow.agents.baAgent -> agentflow.api.fileStore 'leaves PRD-LD-6.md'
+    agentflow.orchestrator.tools -> agentflow.api.integrations 'page_publish(file, title, parent: ticket page)'
+    agentflow.api.integrations -> confluence.prdPage 'creates the page, or updates the same page (new version)'
+    ba -> confluence.prdPage 'reviews and edits it on Confluence'
+    agentflow.orchestrator.tools -> agentflow.api.integrations 'page_get / task_run files: [{page, name: PRD-LD-6.md}]'
+    agentflow.api.integrations -> agentflow.agents.devAgent 'the page as it is now (with people’s edits) in inputs/'
+    agentflow.orchestrator.guards -> confluence.prdPage 'publishing never drops a person’s edit'
+  }
+
+  // ── L5 · Cases ────────────────────────────────────────────────────────────
+  view cases of ld6 {
+    title 'L5 · LD-6 cases'
+    description 'Open a case to follow it step by step, from the first event to the result.'
+    include *
+    include
+      ld6.case1 with {
+        navigateTo case1Prd
+      }
+    include
+      ld6.case2 with {
+        navigateTo case2Planning
+      }
+    include
+      ld6.case3 with {
+        navigateTo case3Implement
+      }
+    include
+      ld6.case4 with {
+        navigateTo case4Testing
+      }
+    include
+      ld6.case5 with {
+        navigateTo case5Review
+      }
+    include
+      ld6.case6 with {
+        navigateTo case6Comments
+      }
+    include
+      ld6.case7 with {
+        navigateTo case7Flip
+      }
+    include
+      ld6.case8 with {
+        navigateTo case8Reentry
+      }
+    include
+      ld6.full with {
+        navigateTo fullFlow
+      }
+    exclude agentflow
+  }
+
+  dynamic view case1Prd {
+    title 'Case 1 · PRD: v1 → v4 on the same page'
+    description 'The BA Agent writes the PRD from the ticket; people answer in parts, ask more, edit the page; the same page gets new versions.'
+    variant sequence
+    admin -> jira 'moves LD-6 to PRD'
+    jira -> agentflow.api.inbound 'status changed: To Do → PRD'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'turn 1 (after the 20 s debounce)'
+    agentflow.orchestrator.turn -> agentflow.api.integrations 'reads the ticket: title, description, comments' {
+      notes '''
+        **Why this step**
+
+        *Rules › The ticket*
+
+        > Before the first task of a ticket (and whenever the ticket’s description changed), read the ticket with source_item_get and put it in the task prompt as people wrote it.
+
+        → Context (H1)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'task_run /ba-requirement LD-6 + the ticket' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > BA writes the PRD from the ticket.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /ba-requirement · analyze &lt;KEY&gt; · write · produces prd · asks · attach PRD-*.md: Analyse a ticket into questions and a reviewed PRD; ask again with answers or review feedback to revise.
+
+        *Rules › Roles*
+
+        > BA: writes the PRD of a ticket, archives the approved PRD in the knowledge base and answers questions about requirements.
+
+        *Platform*
+
+        > task_run is checked before dispatch: /ba-requirement is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Agent selection (H2)
+      '''
+      navigateTo taskLifecycle
+    }
+    agentflow.orchestrator.turn -> jira 'reply: the BA Agent is writing the PRD' {
+      notes '''
+        **Why this step**
+
+        *Built-in prompt*
+
+        > Be brief and concrete; say what you are doing when work will take a while.
+
+        → Conversations (H3)
+      '''
+    }
+    agentflow.agents.baAgent -> agentflow.orchestrator.turn 'task done: PRD-LD-6.md + 8 questions, each with an assumption'
+    agentflow.orchestrator.turn -> confluence.ticketPage 'page_publish: ticket page "LD-6 · Team calendar"' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Every ticket has one page “&lt;KEY&gt; · &lt;summary&gt;” under the project’s parent page … Create it the first time a document of the ticket is published, and update it when a child page is added.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.prdPage 'page_publish: "LD-6 · PRD" v1' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > When the PRD is ready, publish the ticket page and the PRD page, comment the link and ask people to review the PRD on Confluence and to ask their questions here.
+
+        *Rules › Documents on Confluence*
+
+        > Later versions update the SAME page: pass page (the page id from the case’s Documents).
+
+        → Documents (H7)
+      '''
+      navigateTo documentLifecycle
+    }
+    agentflow.orchestrator.turn -> jira 'reply: PRD link + the 8 numbered questions' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > Post its questions as one numbered comment.
+
+        *Rules › Documents on Confluence*
+
+        > On Jira, write short comments with the page title, its link, its version and one or two lines on what changed.
+
+        → Conversations (H3)
+      '''
+    }
+    admin -> jira 'replies: answers 1–4, asks about privacy'
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'task_run /leavedesk-research (read), replyTo that comment' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /leavedesk-research · &lt;question&gt; · read · produces answer: Answer a question about the leave policy, decisions, change requests, meetings, earlier requirements or the app, with citations.
+
+        *Rules › Work belongs to its status*
+
+        > Reading tasks (questions, research, reviews) are allowed in every status.
+
+        *Built-in prompt*
+
+        > When a comment’s answer needs a task, pass that comment’s ref as task_run replyTo … and you reply with that replyTo when the result comes.
+
+        → Agent selection (H2)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply in that thread: answers 1–4 noted, 5–8 still open; privacy answer' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+
+        *Rules › Questions and answers*
+
+        > Answer each comment in its own thread (replyTo).
+
+        → Resume the right work (H5)
+      '''
+    }
+    admin -> jira 'replies: answers 5–8'
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'resumes the PRD task: all 8 answers + the PRD page' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /ba-requirement · analyze &lt;KEY&gt; · write · produces prd · asks · attach PRD-*.md: Analyse a ticket into questions and a reviewed PRD; ask again with answers or review feedback to revise.
+
+        *Built-in prompt*
+
+        > To answer the questions a task asked, resume it (without fork) with the answers.
+
+        *Rules › Documents on Confluence*
+
+        > Before a task works from a document, hand it the page’s CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence).
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.prdPage 'page_publish: v2 (same page)' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Later versions update the SAME page: pass page (the page id from the case’s Documents).
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: v2 link + 4 new questions from the ticket description (pending leave, HR filter, employees, month view)' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > Post its questions as one numbered comment.
+
+        *Rules › Documents on Confluence*
+
+        > On Jira, write short comments with the page title, its link, its version and one or two lines on what changed.
+
+        → Conversations (H3)
+      '''
+    }
+    ba -> confluence.prdPage 'edits the PRD on Confluence (v3)'
+    admin -> jira 'answers the 4 new questions'
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'resumes with the answers + the PRD page as edited (v3)' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > When people ask for changes, resume the BA task with their feedback and the current PRD page in its files, publish the same page and comment what changed.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /ba-requirement · analyze &lt;KEY&gt; · write · produces prd · asks · attach PRD-*.md: Analyse a ticket into questions and a reviewed PRD; ask again with answers or review feedback to revise.
+
+        *Rules › Documents on Confluence*
+
+        > Before a task works from a document, hand it the page’s CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence).
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.prdPage 'page_publish: v4, the person’s edit kept' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > If page_publish refuses because people edited the page: run the task again with that page in its files so their edits are kept, then publish.
+
+        *Platform*
+
+        > page_publish refuses to overwrite a page people edited since the last publish.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: v4 link + what changed' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > When people ask for changes, resume the BA task with their feedback and the current PRD page in its files, publish the same page and comment what changed.
+
+        *Rules › Documents on Confluence*
+
+        > On Jira, write short comments with the page title, its link, its version and one or two lines on what changed.
+
+        → Documents (H7)
+      '''
+    }
+  }
+
+  dynamic view case2Planning {
+    title 'Case 2 · Planning: three agents in parallel'
+    description 'All three start from the PRD page as it is on Confluence; each document gets its own page; the archive gets a pull request.'
+    variant sequence
+    admin -> jira 'moves LD-6 to Planning (PRD approved)'
+    jira -> agentflow.api.inbound 'status changed: PRD → Planning'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'one turn (after the 20 s debounce)'
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'task_run /ba-archive, files: PRD page v4' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > At the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-&lt;KEY&gt;.md in their files.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /ba-archive · &lt;KEY&gt; · write · needs prd · produces archive · push: Archive an approved PRD with its answers, decisions and change requests in the knowledge base; opens a pull request.
+
+        *Rules › Roles*
+
+        > BA: writes the PRD of a ticket, archives the approved PRD in the knowledge base and answers questions about requirements.
+
+        *Platform*
+
+        > task_run is checked before dispatch: /ba-archive is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.agents.devAgent 'task_run /writing-plans, files: PRD page v4' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > At the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-&lt;KEY&gt;.md in their files.
+
+        *AGENTFLOW.md › Dev (LeaveDesk, An)*
+
+        > /writing-plans · &lt;ticket-key&gt; · write · needs prd · produces plan · asks · attach PLAN-*.md: Write the implementation plan of a ticket from its PRD.
+
+        *Rules › Roles*
+
+        > Dev: writes the implementation plan, implements it and opens its own pull request (never merges).
+
+        *Platform*
+
+        > task_run is checked before dispatch: /writing-plans is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'task_run /qa-test (design), files: PRD page v4' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > At the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-&lt;KEY&gt;.md in their files.
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-test · &lt;KEY&gt; design · write · needs prd · produces testcases · asks · attach TESTCASES-*.md: Design the test cases of a ticket from its PRD (no run).
+
+        *Rules › Roles*
+
+        > QC: designs the test plan; separately, automates and runs the approved test plan and reports each test round with evidence screenshots.
+
+        *Platform*
+
+        > task_run is checked before dispatch: /qa-test is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.api.caseStore 'wait_for all three' {
+      notes '''
+        **Why this step**
+
+        *Built-in prompt*
+
+        > When a request needs several agents, start their tasks in the same turn, then wait_for all of them and answer once with what they found.
+
+        *Built-in prompt*
+
+        > End every turn with exactly one of: wait_for, wait_human or close_case. AgentFlow wakes you with the next message or the results; you never wait inside a turn.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.agents.baAgent -> git.knowledgeRepo 'pushes the archive branch'
+    agentflow.agents.devAgent -> agentflow.orchestrator.turn 'task done: PLAN-LD-6.md (6 TDD tasks, 22 AC mapped)'
+    agentflow.agents.qcAgent -> agentflow.orchestrator.turn 'task done: TESTCASES-LD-6.md (33 cases, 22 AC covered) + 1 question'
+    agentflow.orchestrator.turn -> agentflow.orchestrator.turn 'the wait fires once: all three done, next turn' {
+      notes '''
+        **Why this step**
+
+        *Platform*
+
+        > The engine evaluates the wait; it fires once and starts the next turn with the results.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.orchestrator.turn -> git.knowledgeRepo 'pull_request_open: archive PR #6' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > When the archive is done, open its pull request (pull_request_open with that task) and comment the link for Review.
+
+        → Agent selection (H2)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.planPage 'page_publish: "LD-6 · Implementation plan" v1' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > When each is done, publish its page, update the ticket page and comment the links; ask people to review both.
+
+        *Rules › Documents on Confluence*
+
+        > Every ticket has one page “&lt;KEY&gt; · &lt;summary&gt;” under the project’s parent page … Create it the first time a document of the ticket is published, and update it when a child page is added.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.testPlanPage 'page_publish: "LD-6 · Test plan" v1' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > When each is done, publish its page, update the ticket page and comment the links; ask people to review both.
+
+        *Rules › Documents on Confluence*
+
+        > Every ticket has one page “&lt;KEY&gt; · &lt;summary&gt;” under the project’s parent page … Create it the first time a document of the ticket is published, and update it when a child page is added.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'three replies: archive PR, plan link, test plan link + the QC question' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > Post each one’s questions in its own comment.
+
+        *Rules › Flow › Planning*
+
+        > When each is done, publish its page, update the ticket page and comment the links; ask people to review both.
+
+        → Conversations (H3)
+      '''
+    }
+    admin -> jira 'replies to the QC question: option (b)'
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'resumes the test design + the test plan page' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > When people ask for changes, resume that task with the feedback and the current page in its files, publish the same page and comment what changed.
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-test · &lt;KEY&gt; design · write · needs prd · produces testcases · asks · attach TESTCASES-*.md: Design the test cases of a ticket from its PRD (no run).
+
+        *Built-in prompt*
+
+        > To answer the questions a task asked, resume it (without fork) with the answers.
+
+        *Rules › Documents on Confluence*
+
+        > Before a task works from a document, hand it the page’s CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence).
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.testPlanPage 'page_publish: v2, no blocked case left' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Later versions update the SAME page: pass page (the page id from the case’s Documents).
+
+        *Rules › Flow › Planning*
+
+        > When people ask for changes, resume that task with the feedback and the current page in its files, publish the same page and comment what changed.
+
+        → Documents (H7)
+      '''
+    }
+  }
+
+  dynamic view case3Implement {
+    title 'Case 3 · Implement'
+    description 'The Dev Agent works on the developer’s own machine from the plan page and opens its own pull request; nobody merges yet.'
+    variant sequence
+    admin -> jira 'moves LD-6 to Implement (plans approved)'
+    jira -> agentflow.api.inbound 'status changed: Planning → Implement'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'one turn (after the 20 s debounce)'
+    agentflow.orchestrator.turn -> agentflow.agents.devAgent 'task_run /executing-plans, files: plan page + PRD page' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Implement*
+
+        > Dev implements from the plan page (PLAN-&lt;KEY&gt;.md in its files) and opens its pull request itself.
+
+        *AGENTFLOW.md › Dev (LeaveDesk, An)*
+
+        > /executing-plans · &lt;ticket-key&gt; · write · needs approved-plan · produces code · push · attach pr-body-*.md: Implement an approved plan with TDD, commit, push and open the PR.
+
+        *Rules › Roles*
+
+        > Dev: writes the implementation plan, implements it and opens its own pull request (never merges).
+
+        *Platform*
+
+        > task_run is checked before dispatch: /executing-plans is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Agent selection (H2)
+      '''
+      navigateTo taskLifecycle
+    }
+    agentflow.orchestrator.turn -> jira 'reply: the Dev Agent is implementing' {
+      notes '''
+        **Why this step**
+
+        *Built-in prompt*
+
+        > Be brief and concrete; say what you are doing when work will take a while.
+
+        → Conversations (H3)
+      '''
+    }
+    agentflow.agents.devAgent -> git.appRepo 'TDD on branch LD-6, pushes, opens PR #6 (512 tests pass)'
+    agentflow.agents.devAgent -> agentflow.orchestrator.turn 'task done + the PR body (next turn)'
+    agentflow.orchestrator.turn -> jira 'reply: PR #6 link + summary; ready for Testing' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Implement*
+
+        > When done, comment the pull request link with its summary (from the pull request body file) and say the ticket can move to Testing. Nobody merges yet.
+
+        → Status logic (H6)
+      '''
+    }
+  }
+
+  dynamic view case4Testing {
+    title 'Case 4 · Testing: round 1 fails, fix, round 2 passes'
+    description 'QC tests the unmerged Dev branch; every round is its own page; a fix goes back through Implement.'
+    variant sequence
+    admin -> jira 'moves LD-6 to Testing'
+    jira -> agentflow.api.inbound 'status changed: Implement → Testing'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'one turn (after the 20 s debounce)'
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'task_run /qa-run on branch LD-6, files: test plan page + PRD page' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > QC automates and runs the approved tests from the test plan page (TESTCASES-&lt;KEY&gt;.md) with the PRD page (PRD-&lt;KEY&gt;.md) in its files … against the Dev branch &lt;KEY&gt; (its pull request is not merged yet); do not redesign them.
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-run · &lt;KEY&gt; [fresh | rerun | report] · write · needs testcases · produces results · push · attach RESULTS-*.md, evidence-*/*.png: Run the designed tests of a ticket on its Dev branch (or main once merged); AgentFlow pushes the results, the orchestrator opens the pull request.
+
+        *Rules › Roles*
+
+        > QC: designs the test plan; separately, automates and runs the approved test plan and reports each test round with evidence screenshots.
+
+        *Platform*
+
+        > task_run is checked before dispatch: /qa-run is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Agent selection (H2)
+      '''
+    }
+    agentflow.agents.qcAgent -> git.qaRepo 'pushes the specs and results'
+    agentflow.agents.qcAgent -> agentflow.orchestrator.turn 'task done: RESULTS-LD-6.md (32/33, defect D-1) + 6 screenshots'
+    agentflow.orchestrator.turn -> confluence.testRunPages 'page_publish: "Test run 1" under the Test plan, screenshots attached' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > When done, publish the test round as a child page of the test plan with the results file and the evidence screenshots as attachments.
+
+        *Rules › Documents on Confluence*
+
+        > Each test round is a child page of the test plan: “&lt;KEY&gt; · Test run &lt;N&gt; · &lt;YYYY-MM-DD&gt;” (N counts the rounds in the case’s Documents).
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> git.qaRepo 'pull_request_open: QC PR #10' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > Open the pull request of the QC test code (pull_request_open with that task).
+
+        → Agent selection (H2)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: FAILED 32/33, D-1, page + PR links; fix or accept?' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > Then comment: verdict, passed/failed counts, each failure with its reason, the test run page link and the pull request link.
+
+        *Rules › Flow › Testing*
+
+        > If tests failed, ask people what to do (back to Implement for a fix, then Testing again as a new test round, or accept).
+
+        → Status logic (H6)
+      '''
+    }
+    admin -> jira 'moves LD-6 back to Implement'
+    agentflow.orchestrator.turn -> jira 'reply: what exists (PR #6, Test run 1, D-1); starts nothing, asks what to fix' {
+      notes '''
+        **Why this step**
+
+        *Rules › Coming back to a status*
+
+        > When the ticket moves back to a status whose work was already done in this case, start NOTHING on your own. Comment what that status already produced (pages, pull request, last results) and ask what to change.
+
+        → Status logic (H6)
+      '''
+      navigateTo case8Reentry
+    }
+    admin -> jira 'replies: fix D-1'
+    agentflow.orchestrator.turn -> agentflow.agents.devAgent 'resumes the implementation task with the instruction' {
+      notes '''
+        **Why this step**
+
+        *Rules › Coming back to a status*
+
+        > Start the work only when a person says what to do in a comment (e.g. “fix D-1”), then resume the task that did that work with their instruction.
+
+        *AGENTFLOW.md › Dev (LeaveDesk, An)*
+
+        > /executing-plans · &lt;ticket-key&gt; · write · needs approved-plan · produces code · push · attach pr-body-*.md: Implement an approved plan with TDD, commit, push and open the PR.
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.agents.devAgent -> git.appRepo 'fix on branch LD-6: PR #6 gets one more commit'
+    agentflow.orchestrator.turn -> jira 'reply: D-1 fixed' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Implement*
+
+        > When done, comment the pull request link with its summary (from the pull request body file) and say the ticket can move to Testing. Nobody merges yet.
+
+        *Built-in prompt*
+
+        > Be brief and concrete; say what you are doing when work will take a while.
+
+        → Conversations (H3)
+      '''
+    }
+    admin -> jira 'moves LD-6 to Testing, then: run test round 2'
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'task_run /qa-run again' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > If tests failed, ask people what to do (back to Implement for a fix, then Testing again as a new test round, or accept).
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-run · &lt;KEY&gt; [fresh | rerun | report] · write · needs testcases · produces results · push · attach RESULTS-*.md, evidence-*/*.png: Run the designed tests of a ticket on its Dev branch (or main once merged); AgentFlow pushes the results, the orchestrator opens the pull request.
+
+        *Rules › Coming back to a status*
+
+        > Start the work only when a person says what to do in a comment (e.g. “fix D-1”), then resume the task that did that work with their instruction.
+
+        *Rules › Flow › Testing*
+
+        > QC automates and runs the approved tests from the test plan page (TESTCASES-&lt;KEY&gt;.md) with the PRD page (PRD-&lt;KEY&gt;.md) in its files … against the Dev branch &lt;KEY&gt; (its pull request is not merged yet); do not redesign them.
+
+        → Status logic (H6)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.testRunPages 'page_publish: "Test run 2", Test run 1 kept' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Each test round is a child page of the test plan: “&lt;KEY&gt; · Test run &lt;N&gt; · &lt;YYYY-MM-DD&gt;” (N counts the rounds in the case’s Documents).
+
+        *Rules › Flow › Testing*
+
+        > When done, publish the test round as a child page of the test plan with the results file and the evidence screenshots as attachments.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: PASSED 33/33' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > Then comment: verdict, passed/failed counts, each failure with its reason, the test run page link and the pull request link.
+
+        → Conversations (H3)
+      '''
+    }
+  }
+
+  dynamic view case5Review {
+    title 'Case 5 · Review → Done'
+    description 'People review and merge; the agents only answer questions (reading tasks are allowed in every status).'
+    variant sequence
+    admin -> jira 'moves LD-6 to Review'
+    agentflow.orchestrator.turn -> jira 'reply: the three pull requests to review' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Review*
+
+        > Start nothing new. People (Dev and QC) review the pull requests of the ticket (Dev code, QC tests, BA archive) and ask questions here.
+
+        → Status logic (H6)
+      '''
+    }
+    dev -> git.appRepo 'reviews PR #6 (code)'
+    qc -> git.qaRepo 'reviews PR #10 (tests)'
+    ba -> git.knowledgeRepo 'reviews PR #6 (archived PRD)'
+    dev -> jira 'asks about the code'
+    agentflow.orchestrator.turn -> agentflow.agents.devAgent 'a reading task: resume the implementation with fork' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Review*
+
+        > Answer in the thread from the agent that knows (Dev: resume its implementation task with fork, or its read-only command; QC: its review command; BA: its research command).
+
+        *AGENTFLOW.md › Dev (LeaveDesk, An)*
+
+        > /executing-plans · &lt;ticket-key&gt; · write · needs approved-plan · produces code · push · attach pr-body-*.md: Implement an approved plan with TDD, commit, push and open the PR.
+
+        *Built-in prompt*
+
+        > To ask about work an earlier task did, run a task with resumeTaskId and fork: true: its session answers with all it knew, and stays as it was.
+
+        *Rules › Work belongs to its status*
+
+        > Reading tasks (questions, research, reviews) are allowed in every status.
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply in that thread' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > Answer each comment in its own thread (replyTo).
+
+        → Conversations (H3)
+      '''
+    }
+    dev -> git.appRepo 'merges'
+    qc -> git.qaRepo 'merges'
+    ba -> git.knowledgeRepo 'merges'
+    admin -> jira 'moves LD-6 to Done'
+    agentflow.orchestrator.turn -> confluence.ticketPage 'page_publish: the ticket page with every document' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Every ticket has one page “&lt;KEY&gt; · &lt;summary&gt;” under the project’s parent page … Create it the first time a document of the ticket is published, and update it when a child page is added.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: closing summary with the links' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Done*
+
+        > Close the case.
+
+        *Rules › Documents on Confluence*
+
+        > On Jira, write short comments with the page title, its link, its version and one or two lines on what changed.
+
+        → Status logic (H6)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.api.caseStore 'close_case' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Done*
+
+        > Close the case.
+
+        *Built-in prompt*
+
+        > End every turn with exactly one of: wait_for, wait_human or close_case. AgentFlow wakes you with the next message or the results; you never wait inside a turn.
+
+        → Status logic (H6)
+      '''
+    }
+  }
+
+  dynamic view case6Comments {
+    title 'Case 6 · Several comments in one debounce window'
+    description 'Two questions and two answers arrive within seconds; a turn already running is superseded; one turn answers each comment in its own thread.'
+    variant sequence
+    dev -> jira 'root comment: "Does the plan change the DB schema?"'
+    qc -> jira 'root comment: "Does the test plan cover an empty calendar?"'
+    admin -> jira 'replies under the test plan: option (b)'
+    jira -> agentflow.api.inbound 'webhooks: three comments'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'turn A starts with the three comments'
+    admin -> jira 'replies under the plan: D1–D5 ok'
+    jira -> agentflow.api.inbound 'a fourth comment while turn A runs'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'turn A is superseded: its reply is refused, it ends'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'turn B: all four comments, each with its ref'
+    agentflow.orchestrator.turn -> agentflow.api.integrations 'page_get: plan page, test plan page' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > To answer a question about a document, read the page first (page_get).
+
+        *Rules › Questions and answers*
+
+        > A question about the PRD, the plan, the test plan or the results: read the page, ask the agent that wrote it when needed, answer in the thread with the page link.
+
+        → Context (H1)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'task_run: update the test plan, replyTo the option (b) comment' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > When people ask for changes, resume that task with the feedback and the current page in its files, publish the same page and comment what changed.
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-test · &lt;KEY&gt; design · write · needs prd · produces testcases · asks · attach TESTCASES-*.md: Design the test cases of a ticket from its PRD (no run).
+
+        *Built-in prompt*
+
+        > When a comment’s answer needs a task, pass that comment’s ref as task_run replyTo … and you reply with that replyTo when the result comes.
+
+        *Rules › Documents on Confluence*
+
+        > Before a task works from a document, hand it the page’s CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence).
+
+        → Conversations (H3)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply under comment 1: no schema change' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > Answer each comment in its own thread (replyTo).
+
+        *Rules › Questions and answers*
+
+        > A question about the PRD, the plan, the test plan or the results: read the page, ask the agent that wrote it when needed, answer in the thread with the page link.
+
+        → Conversations (H3)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply under comment 2: yes, TC25' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > Answer each comment in its own thread (replyTo).
+
+        *Rules › Questions and answers*
+
+        > A question about the PRD, the plan, the test plan or the results: read the page, ask the agent that wrote it when needed, answer in the thread with the page link.
+
+        → Conversations (H3)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply under the plan: D1–D5 noted' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > Answer each comment in its own thread (replyTo).
+
+        *Rules › Questions and answers*
+
+        > A confirmed answer is a decision: pass it in the prompt of later tasks.
+
+        → Context (H1)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply under the option (b) comment: noted, QC is updating the test plan' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > Answer each comment in its own thread (replyTo).
+
+        *Built-in prompt*
+
+        > Be brief and concrete; say what you are doing when work will take a while.
+
+        → Conversations (H3)
+      '''
+    }
+    agentflow.agents.qcAgent -> agentflow.orchestrator.turn 'task done (it answers the option (b) comment)'
+    agentflow.orchestrator.turn -> confluence.testPlanPage 'page_publish: Test plan v2 (same page)' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Later versions update the SAME page: pass page (the page id from the case’s Documents).
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply under the option (b) comment: Test plan v2 link + what changed' {
+      notes '''
+        **Why this step**
+
+        *Built-in prompt*
+
+        > When a comment’s answer needs a task, pass that comment’s ref as task_run replyTo … and you reply with that replyTo when the result comes.
+
+        *Rules › Flow › Planning*
+
+        > When people ask for changes, resume that task with the feedback and the current page in its files, publish the same page and comment what changed.
+
+        → Conversations (H3)
+      '''
+    }
+  }
+
+  dynamic view case7Flip {
+    title 'Case 7 · Accidental status flip'
+    description 'Implement → Planning by mistake, then Testing seconds later: one turn sees the whole sequence and acts on the final status only.'
+    variant sequence
+    admin -> jira 'moves LD-6 to Planning (by mistake)'
+    admin -> jira 'moves LD-6 to Testing (10 s later)'
+    jira -> agentflow.api.inbound 'two status changes'
+    agentflow.orchestrator.debounce -> agentflow.orchestrator.turn 'one turn: Implement → Planning → Testing'
+    agentflow.orchestrator.turn -> agentflow.orchestrator.turn 'final status Testing: no Planning task, nothing to cancel' {
+      notes '''
+        **Why this step**
+
+        *Rules › Cancelling*
+
+        > Several changes in one turn: act on the final status only.
+
+        *Rules › Cancelling*
+
+        > Only a status change cancels tasks.
+
+        *Platform*
+
+        > The 20 s debounce merged both status changes into one turn; the prompt lists them and names the final status.
+
+        → Status logic (H6)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'task_run /qa-run' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > QC automates and runs the approved tests from the test plan page (TESTCASES-&lt;KEY&gt;.md) with the PRD page (PRD-&lt;KEY&gt;.md) in its files … against the Dev branch &lt;KEY&gt; (its pull request is not merged yet); do not redesign them.
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-run · &lt;KEY&gt; [fresh | rerun | report] · write · needs testcases · produces results · push · attach RESULTS-*.md, evidence-*/*.png: Run the designed tests of a ticket on its Dev branch (or main once merged); AgentFlow pushes the results, the orchestrator opens the pull request.
+
+        *Rules › Roles*
+
+        > QC: designs the test plan; separately, automates and runs the approved test plan and reports each test round with evidence screenshots.
+
+        *Platform*
+
+        > task_run is checked before dispatch: /qa-run is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Agent selection (H2)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: QC is testing' {
+      notes '''
+        **Why this step**
+
+        *Built-in prompt*
+
+        > Be brief and concrete; say what you are doing when work will take a while.
+
+        → Conversations (H3)
+      '''
+    }
+  }
+
+  dynamic view case8Reentry {
+    title 'Case 8 · Coming back to a status'
+    description 'A status whose work is already done: the Orchestrator Agent reports what exists and waits for a person’s instruction.'
+    variant sequence
+    admin -> jira 'moves LD-6 back to Implement (after a failed test round)'
+    jira -> agentflow.api.inbound 'status changed: Testing → Implement'
+    agentflow.orchestrator.debounce -> agentflow.orchestrator.turn 'one turn'
+    agentflow.orchestrator.turn -> agentflow.api.caseStore 'case_get: PR #6, Test run 1, defect D-1' {
+      notes '''
+        **Why this step**
+
+        *Platform*
+
+        > Every turn gets the case (CASE.md): notes, documents, tasks, decisions. “The case below is AgentFlow’s current record; it wins over what you remember.”
+
+        → Context (H1)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: what this status already produced; starts nothing; asks what to change' {
+      notes '''
+        **Why this step**
+
+        *Rules › Coming back to a status*
+
+        > When the ticket moves back to a status whose work was already done in this case, start NOTHING on your own. Comment what that status already produced (pages, pull request, last results) and ask what to change.
+
+        → Status logic (H6)
+      '''
+    }
+    admin -> jira 'replies: fix D-1'
+    agentflow.orchestrator.turn -> agentflow.agents.devAgent 'resumes the task that did the work, with the instruction' {
+      notes '''
+        **Why this step**
+
+        *Rules › Coming back to a status*
+
+        > Start the work only when a person says what to do in a comment (e.g. “fix D-1”), then resume the task that did that work with their instruction.
+
+        *AGENTFLOW.md › Dev (LeaveDesk, An)*
+
+        > /executing-plans · &lt;ticket-key&gt; · write · needs approved-plan · produces code · push · attach pr-body-*.md: Implement an approved plan with TDD, commit, push and open the PR.
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: the Dev Agent is fixing D-1' {
+      notes '''
+        **Why this step**
+
+        *Built-in prompt*
+
+        > Be brief and concrete; say what you are doing when work will take a while.
+
+        → Conversations (H3)
+      '''
+    }
+  }
+
+  dynamic view fullFlow {
+    title 'LD-6 end to end · PRD → Done'
+    description 'The whole ticket in one walkthrough: cases 1 to 5 in order (case 8, coming back to Implement, is inside Testing). Press Start; every decision of the Orchestrator Agent has a Why this step note.'
+    variant sequence
+    // ── PRD (from case1Prd)
+    admin -> jira 'moves LD-6 to PRD'
+    jira -> agentflow.api.inbound 'status changed: To Do → PRD'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'turn 1 (after the 20 s debounce)'
+    agentflow.orchestrator.turn -> agentflow.api.integrations 'reads the ticket: title, description, comments' {
+      notes '''
+        **Why this step**
+
+        *Rules › The ticket*
+
+        > Before the first task of a ticket (and whenever the ticket’s description changed), read the ticket with source_item_get and put it in the task prompt as people wrote it.
+
+        → Context (H1)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'task_run /ba-requirement LD-6 + the ticket' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > BA writes the PRD from the ticket.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /ba-requirement · analyze &lt;KEY&gt; · write · produces prd · asks · attach PRD-*.md: Analyse a ticket into questions and a reviewed PRD; ask again with answers or review feedback to revise.
+
+        *Rules › Roles*
+
+        > BA: writes the PRD of a ticket, archives the approved PRD in the knowledge base and answers questions about requirements.
+
+        *Platform*
+
+        > task_run is checked before dispatch: /ba-requirement is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Agent selection (H2)
+      '''
+      navigateTo taskLifecycle
+    }
+    agentflow.orchestrator.turn -> jira 'reply: the BA Agent is writing the PRD' {
+      notes '''
+        **Why this step**
+
+        *Built-in prompt*
+
+        > Be brief and concrete; say what you are doing when work will take a while.
+
+        → Conversations (H3)
+      '''
+    }
+    agentflow.agents.baAgent -> agentflow.orchestrator.turn 'task done: PRD-LD-6.md + 8 questions, each with an assumption'
+    agentflow.orchestrator.turn -> confluence.ticketPage 'page_publish: ticket page "LD-6 · Team calendar"' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Every ticket has one page “&lt;KEY&gt; · &lt;summary&gt;” under the project’s parent page … Create it the first time a document of the ticket is published, and update it when a child page is added.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.prdPage 'page_publish: "LD-6 · PRD" v1' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > When the PRD is ready, publish the ticket page and the PRD page, comment the link and ask people to review the PRD on Confluence and to ask their questions here.
+
+        *Rules › Documents on Confluence*
+
+        > Later versions update the SAME page: pass page (the page id from the case’s Documents).
+
+        → Documents (H7)
+      '''
+      navigateTo documentLifecycle
+    }
+    agentflow.orchestrator.turn -> jira 'reply: PRD link + the 8 numbered questions' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > Post its questions as one numbered comment.
+
+        *Rules › Documents on Confluence*
+
+        > On Jira, write short comments with the page title, its link, its version and one or two lines on what changed.
+
+        → Conversations (H3)
+      '''
+    }
+    admin -> jira 'replies: answers 1–4, asks about privacy'
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'task_run /leavedesk-research (read), replyTo that comment' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /leavedesk-research · &lt;question&gt; · read · produces answer: Answer a question about the leave policy, decisions, change requests, meetings, earlier requirements or the app, with citations.
+
+        *Rules › Work belongs to its status*
+
+        > Reading tasks (questions, research, reviews) are allowed in every status.
+
+        *Built-in prompt*
+
+        > When a comment’s answer needs a task, pass that comment’s ref as task_run replyTo … and you reply with that replyTo when the result comes.
+
+        → Agent selection (H2)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply in that thread: answers 1–4 noted, 5–8 still open; privacy answer' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+
+        *Rules › Questions and answers*
+
+        > Answer each comment in its own thread (replyTo).
+
+        → Resume the right work (H5)
+      '''
+    }
+    admin -> jira 'replies: answers 5–8'
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'resumes the PRD task: all 8 answers + the PRD page' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > A reply that answers some questions and asks new ones: answer the new ones first, then resume the task only when every question has an answer; list the ones still open.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /ba-requirement · analyze &lt;KEY&gt; · write · produces prd · asks · attach PRD-*.md: Analyse a ticket into questions and a reviewed PRD; ask again with answers or review feedback to revise.
+
+        *Built-in prompt*
+
+        > To answer the questions a task asked, resume it (without fork) with the answers.
+
+        *Rules › Documents on Confluence*
+
+        > Before a task works from a document, hand it the page’s CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence).
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.prdPage 'page_publish: v2 (same page)' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Later versions update the SAME page: pass page (the page id from the case’s Documents).
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: v2 link + 4 new questions from the ticket description (pending leave, HR filter, employees, month view)' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > Post its questions as one numbered comment.
+
+        *Rules › Documents on Confluence*
+
+        > On Jira, write short comments with the page title, its link, its version and one or two lines on what changed.
+
+        → Conversations (H3)
+      '''
+    }
+    ba -> confluence.prdPage 'edits the PRD on Confluence (v3)'
+    admin -> jira 'answers the 4 new questions'
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'resumes with the answers + the PRD page as edited (v3)' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > When people ask for changes, resume the BA task with their feedback and the current PRD page in its files, publish the same page and comment what changed.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /ba-requirement · analyze &lt;KEY&gt; · write · produces prd · asks · attach PRD-*.md: Analyse a ticket into questions and a reviewed PRD; ask again with answers or review feedback to revise.
+
+        *Rules › Documents on Confluence*
+
+        > Before a task works from a document, hand it the page’s CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence).
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.prdPage 'page_publish: v4, the person’s edit kept' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > If page_publish refuses because people edited the page: run the task again with that page in its files so their edits are kept, then publish.
+
+        *Platform*
+
+        > page_publish refuses to overwrite a page people edited since the last publish.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: v4 link + what changed' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › PRD*
+
+        > When people ask for changes, resume the BA task with their feedback and the current PRD page in its files, publish the same page and comment what changed.
+
+        *Rules › Documents on Confluence*
+
+        > On Jira, write short comments with the page title, its link, its version and one or two lines on what changed.
+
+        → Documents (H7)
+      '''
+    }
+    // ── Planning (from case2Planning)
+    admin -> jira 'moves LD-6 to Planning (PRD approved)'
+    jira -> agentflow.api.inbound 'status changed: PRD → Planning'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'one turn (after the 20 s debounce)'
+    agentflow.orchestrator.turn -> agentflow.agents.baAgent 'task_run /ba-archive, files: PRD page v4' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > At the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-&lt;KEY&gt;.md in their files.
+
+        *AGENTFLOW.md › BA (LeaveDesk)*
+
+        > /ba-archive · &lt;KEY&gt; · write · needs prd · produces archive · push: Archive an approved PRD with its answers, decisions and change requests in the knowledge base; opens a pull request.
+
+        *Rules › Roles*
+
+        > BA: writes the PRD of a ticket, archives the approved PRD in the knowledge base and answers questions about requirements.
+
+        *Platform*
+
+        > task_run is checked before dispatch: /ba-archive is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.agents.devAgent 'task_run /writing-plans, files: PRD page v4' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > At the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-&lt;KEY&gt;.md in their files.
+
+        *AGENTFLOW.md › Dev (LeaveDesk, An)*
+
+        > /writing-plans · &lt;ticket-key&gt; · write · needs prd · produces plan · asks · attach PLAN-*.md: Write the implementation plan of a ticket from its PRD.
+
+        *Rules › Roles*
+
+        > Dev: writes the implementation plan, implements it and opens its own pull request (never merges).
+
+        *Platform*
+
+        > task_run is checked before dispatch: /writing-plans is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'task_run /qa-test (design), files: PRD page v4' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > At the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD page as PRD-&lt;KEY&gt;.md in their files.
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-test · &lt;KEY&gt; design · write · needs prd · produces testcases · asks · attach TESTCASES-*.md: Design the test cases of a ticket from its PRD (no run).
+
+        *Rules › Roles*
+
+        > QC: designs the test plan; separately, automates and runs the approved test plan and reports each test round with evidence screenshots.
+
+        *Platform*
+
+        > task_run is checked before dispatch: /qa-test is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.api.caseStore 'wait_for all three' {
+      notes '''
+        **Why this step**
+
+        *Built-in prompt*
+
+        > When a request needs several agents, start their tasks in the same turn, then wait_for all of them and answer once with what they found.
+
+        *Built-in prompt*
+
+        > End every turn with exactly one of: wait_for, wait_human or close_case. AgentFlow wakes you with the next message or the results; you never wait inside a turn.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.agents.baAgent -> git.knowledgeRepo 'pushes the archive branch'
+    agentflow.agents.devAgent -> agentflow.orchestrator.turn 'task done: PLAN-LD-6.md (6 TDD tasks, 22 AC mapped)'
+    agentflow.agents.qcAgent -> agentflow.orchestrator.turn 'task done: TESTCASES-LD-6.md (33 cases, 22 AC covered) + 1 question'
+    agentflow.orchestrator.turn -> agentflow.orchestrator.turn 'the wait fires once: all three done, next turn' {
+      notes '''
+        **Why this step**
+
+        *Platform*
+
+        > The engine evaluates the wait; it fires once and starts the next turn with the results.
+
+        → Never blocks (H4)
+      '''
+    }
+    agentflow.orchestrator.turn -> git.knowledgeRepo 'pull_request_open: archive PR #6' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > When the archive is done, open its pull request (pull_request_open with that task) and comment the link for Review.
+
+        → Agent selection (H2)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.planPage 'page_publish: "LD-6 · Implementation plan" v1' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > When each is done, publish its page, update the ticket page and comment the links; ask people to review both.
+
+        *Rules › Documents on Confluence*
+
+        > Every ticket has one page “&lt;KEY&gt; · &lt;summary&gt;” under the project’s parent page … Create it the first time a document of the ticket is published, and update it when a child page is added.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.testPlanPage 'page_publish: "LD-6 · Test plan" v1' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > When each is done, publish its page, update the ticket page and comment the links; ask people to review both.
+
+        *Rules › Documents on Confluence*
+
+        > Every ticket has one page “&lt;KEY&gt; · &lt;summary&gt;” under the project’s parent page … Create it the first time a document of the ticket is published, and update it when a child page is added.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'three replies: archive PR, plan link, test plan link + the QC question' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > Post each one’s questions in its own comment.
+
+        *Rules › Flow › Planning*
+
+        > When each is done, publish its page, update the ticket page and comment the links; ask people to review both.
+
+        → Conversations (H3)
+      '''
+    }
+    admin -> jira 'replies to the QC question: option (b)'
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'resumes the test design + the test plan page' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Planning*
+
+        > When people ask for changes, resume that task with the feedback and the current page in its files, publish the same page and comment what changed.
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-test · &lt;KEY&gt; design · write · needs prd · produces testcases · asks · attach TESTCASES-*.md: Design the test cases of a ticket from its PRD (no run).
+
+        *Built-in prompt*
+
+        > To answer the questions a task asked, resume it (without fork) with the answers.
+
+        *Rules › Documents on Confluence*
+
+        > Before a task works from a document, hand it the page’s CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence).
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.testPlanPage 'page_publish: v2, no blocked case left' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Later versions update the SAME page: pass page (the page id from the case’s Documents).
+
+        *Rules › Flow › Planning*
+
+        > When people ask for changes, resume that task with the feedback and the current page in its files, publish the same page and comment what changed.
+
+        → Documents (H7)
+      '''
+    }
+    // ── Implement (from case3Implement)
+    admin -> jira 'moves LD-6 to Implement (plans approved)'
+    jira -> agentflow.api.inbound 'status changed: Planning → Implement'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'one turn (after the 20 s debounce)'
+    agentflow.orchestrator.turn -> agentflow.agents.devAgent 'task_run /executing-plans, files: plan page + PRD page' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Implement*
+
+        > Dev implements from the plan page (PLAN-&lt;KEY&gt;.md in its files) and opens its pull request itself.
+
+        *AGENTFLOW.md › Dev (LeaveDesk, An)*
+
+        > /executing-plans · &lt;ticket-key&gt; · write · needs approved-plan · produces code · push · attach pr-body-*.md: Implement an approved plan with TDD, commit, push and open the PR.
+
+        *Rules › Roles*
+
+        > Dev: writes the implementation plan, implements it and opens its own pull request (never merges).
+
+        *Platform*
+
+        > task_run is checked before dispatch: /executing-plans is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Agent selection (H2)
+      '''
+      navigateTo taskLifecycle
+    }
+    agentflow.orchestrator.turn -> jira 'reply: the Dev Agent is implementing' {
+      notes '''
+        **Why this step**
+
+        *Built-in prompt*
+
+        > Be brief and concrete; say what you are doing when work will take a while.
+
+        → Conversations (H3)
+      '''
+    }
+    agentflow.agents.devAgent -> git.appRepo 'TDD on branch LD-6, pushes, opens PR #6 (512 tests pass)'
+    agentflow.agents.devAgent -> agentflow.orchestrator.turn 'task done + the PR body (next turn)'
+    agentflow.orchestrator.turn -> jira 'reply: PR #6 link + summary; ready for Testing' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Implement*
+
+        > When done, comment the pull request link with its summary (from the pull request body file) and say the ticket can move to Testing. Nobody merges yet.
+
+        → Status logic (H6)
+      '''
+    }
+    // ── Testing (with the way back to Implement) (from case4Testing)
+    admin -> jira 'moves LD-6 to Testing'
+    jira -> agentflow.api.inbound 'status changed: Implement → Testing'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'one turn (after the 20 s debounce)'
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'task_run /qa-run on branch LD-6, files: test plan page + PRD page' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > QC automates and runs the approved tests from the test plan page (TESTCASES-&lt;KEY&gt;.md) with the PRD page (PRD-&lt;KEY&gt;.md) in its files … against the Dev branch &lt;KEY&gt; (its pull request is not merged yet); do not redesign them.
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-run · &lt;KEY&gt; [fresh | rerun | report] · write · needs testcases · produces results · push · attach RESULTS-*.md, evidence-*/*.png: Run the designed tests of a ticket on its Dev branch (or main once merged); AgentFlow pushes the results, the orchestrator opens the pull request.
+
+        *Rules › Roles*
+
+        > QC: designs the test plan; separately, automates and runs the approved test plan and reports each test round with evidence screenshots.
+
+        *Platform*
+
+        > task_run is checked before dispatch: /qa-run is declared in the agent’s AGENTFLOW.md, its mode allows writing, its needs are met.
+
+        → Agent selection (H2)
+      '''
+    }
+    agentflow.agents.qcAgent -> git.qaRepo 'pushes the specs and results'
+    agentflow.agents.qcAgent -> agentflow.orchestrator.turn 'task done: RESULTS-LD-6.md (32/33, defect D-1) + 6 screenshots'
+    agentflow.orchestrator.turn -> confluence.testRunPages 'page_publish: "Test run 1" under the Test plan, screenshots attached' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > When done, publish the test round as a child page of the test plan with the results file and the evidence screenshots as attachments.
+
+        *Rules › Documents on Confluence*
+
+        > Each test round is a child page of the test plan: “&lt;KEY&gt; · Test run &lt;N&gt; · &lt;YYYY-MM-DD&gt;” (N counts the rounds in the case’s Documents).
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> git.qaRepo 'pull_request_open: QC PR #10' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > Open the pull request of the QC test code (pull_request_open with that task).
+
+        → Agent selection (H2)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: FAILED 32/33, D-1, page + PR links; fix or accept?' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > Then comment: verdict, passed/failed counts, each failure with its reason, the test run page link and the pull request link.
+
+        *Rules › Flow › Testing*
+
+        > If tests failed, ask people what to do (back to Implement for a fix, then Testing again as a new test round, or accept).
+
+        → Status logic (H6)
+      '''
+    }
+    admin -> jira 'moves LD-6 back to Implement'
+    agentflow.orchestrator.turn -> jira 'reply: what exists (PR #6, Test run 1, D-1); starts nothing, asks what to fix' {
+      notes '''
+        **Why this step**
+
+        *Rules › Coming back to a status*
+
+        > When the ticket moves back to a status whose work was already done in this case, start NOTHING on your own. Comment what that status already produced (pages, pull request, last results) and ask what to change.
+
+        → Status logic (H6)
+      '''
+      navigateTo case8Reentry
+    }
+    admin -> jira 'replies: fix D-1'
+    agentflow.orchestrator.turn -> agentflow.agents.devAgent 'resumes the implementation task with the instruction' {
+      notes '''
+        **Why this step**
+
+        *Rules › Coming back to a status*
+
+        > Start the work only when a person says what to do in a comment (e.g. “fix D-1”), then resume the task that did that work with their instruction.
+
+        *AGENTFLOW.md › Dev (LeaveDesk, An)*
+
+        > /executing-plans · &lt;ticket-key&gt; · write · needs approved-plan · produces code · push · attach pr-body-*.md: Implement an approved plan with TDD, commit, push and open the PR.
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.agents.devAgent -> git.appRepo 'fix on branch LD-6: PR #6 gets one more commit'
+    agentflow.orchestrator.turn -> jira 'reply: D-1 fixed' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Implement*
+
+        > When done, comment the pull request link with its summary (from the pull request body file) and say the ticket can move to Testing. Nobody merges yet.
+
+        *Built-in prompt*
+
+        > Be brief and concrete; say what you are doing when work will take a while.
+
+        → Conversations (H3)
+      '''
+    }
+    admin -> jira 'moves LD-6 to Testing, then: run test round 2'
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'task_run /qa-run again' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > If tests failed, ask people what to do (back to Implement for a fix, then Testing again as a new test round, or accept).
+
+        *AGENTFLOW.md › QC (LeaveDesk)*
+
+        > /qa-run · &lt;KEY&gt; [fresh | rerun | report] · write · needs testcases · produces results · push · attach RESULTS-*.md, evidence-*/*.png: Run the designed tests of a ticket on its Dev branch (or main once merged); AgentFlow pushes the results, the orchestrator opens the pull request.
+
+        *Rules › Coming back to a status*
+
+        > Start the work only when a person says what to do in a comment (e.g. “fix D-1”), then resume the task that did that work with their instruction.
+
+        *Rules › Flow › Testing*
+
+        > QC automates and runs the approved tests from the test plan page (TESTCASES-&lt;KEY&gt;.md) with the PRD page (PRD-&lt;KEY&gt;.md) in its files … against the Dev branch &lt;KEY&gt; (its pull request is not merged yet); do not redesign them.
+
+        → Status logic (H6)
+      '''
+    }
+    agentflow.orchestrator.turn -> confluence.testRunPages 'page_publish: "Test run 2", Test run 1 kept' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Each test round is a child page of the test plan: “&lt;KEY&gt; · Test run &lt;N&gt; · &lt;YYYY-MM-DD&gt;” (N counts the rounds in the case’s Documents).
+
+        *Rules › Flow › Testing*
+
+        > When done, publish the test round as a child page of the test plan with the results file and the evidence screenshots as attachments.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: PASSED 33/33' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Testing*
+
+        > Then comment: verdict, passed/failed counts, each failure with its reason, the test run page link and the pull request link.
+
+        → Conversations (H3)
+      '''
+    }
+    // ── Review → Done (from case5Review)
+    admin -> jira 'moves LD-6 to Review'
+    agentflow.orchestrator.turn -> jira 'reply: the three pull requests to review' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Review*
+
+        > Start nothing new. People (Dev and QC) review the pull requests of the ticket (Dev code, QC tests, BA archive) and ask questions here.
+
+        → Status logic (H6)
+      '''
+    }
+    dev -> git.appRepo 'reviews PR #6 (code)'
+    qc -> git.qaRepo 'reviews PR #10 (tests)'
+    ba -> git.knowledgeRepo 'reviews PR #6 (archived PRD)'
+    dev -> jira 'asks about the code'
+    agentflow.orchestrator.turn -> agentflow.agents.devAgent 'a reading task: resume the implementation with fork' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Review*
+
+        > Answer in the thread from the agent that knows (Dev: resume its implementation task with fork, or its read-only command; QC: its review command; BA: its research command).
+
+        *AGENTFLOW.md › Dev (LeaveDesk, An)*
+
+        > /executing-plans · &lt;ticket-key&gt; · write · needs approved-plan · produces code · push · attach pr-body-*.md: Implement an approved plan with TDD, commit, push and open the PR.
+
+        *Built-in prompt*
+
+        > To ask about work an earlier task did, run a task with resumeTaskId and fork: true: its session answers with all it knew, and stays as it was.
+
+        *Rules › Work belongs to its status*
+
+        > Reading tasks (questions, research, reviews) are allowed in every status.
+
+        → Resume the right work (H5)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply in that thread' {
+      notes '''
+        **Why this step**
+
+        *Rules › Questions and answers*
+
+        > Answer each comment in its own thread (replyTo).
+
+        → Conversations (H3)
+      '''
+    }
+    dev -> git.appRepo 'merges'
+    qc -> git.qaRepo 'merges'
+    ba -> git.knowledgeRepo 'merges'
+    admin -> jira 'moves LD-6 to Done'
+    agentflow.orchestrator.turn -> confluence.ticketPage 'page_publish: the ticket page with every document' {
+      notes '''
+        **Why this step**
+
+        *Rules › Documents on Confluence*
+
+        > Every ticket has one page “&lt;KEY&gt; · &lt;summary&gt;” under the project’s parent page … Create it the first time a document of the ticket is published, and update it when a child page is added.
+
+        → Documents (H7)
+      '''
+    }
+    agentflow.orchestrator.turn -> jira 'reply: closing summary with the links' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Done*
+
+        > Close the case.
+
+        *Rules › Documents on Confluence*
+
+        > On Jira, write short comments with the page title, its link, its version and one or two lines on what changed.
+
+        → Status logic (H6)
+      '''
+    }
+    agentflow.orchestrator.turn -> agentflow.api.caseStore 'close_case' {
+      notes '''
+        **Why this step**
+
+        *Rules › Flow › Done*
+
+        > Close the case.
+
+        *Built-in prompt*
+
+        > End every turn with exactly one of: wait_for, wait_human or close_case. AgentFlow wakes you with the next message or the results; you never wait inside a turn.
+
+        → Status logic (H6)
+      '''
+    }
+  }
+
+  // ── Presentation: setup and the heart ─────────────────────────────────────
+  view setup {
+    title 'S · Project setup'
+    description 'What the team set up once for LD-6: connections, Jira statuses, agents, the workflow and its rules, and what each agent declares.'
+    include agentflow.project.*
+    include agentflow.workflow
+    include agentflow.orchestrator
+    include agentflow.agents.baAgent with {
+      navigateTo baAgentL4
+    }
+    include agentflow.agents.devAgent with {
+      navigateTo devAgentL4
+    }
+    include agentflow.agents.qcAgent with {
+      navigateTo qcAgentL4
+    }
+    include jira, confluence, git
+    exclude agentflow.agents.baAgent -> git.knowledgeRepo, agentflow.agents.devAgent -> git.appRepo, agentflow.agents.qcAgent -> git.qaRepo
+  }
+
+  view heart of agentflow.orchestrator.decides {
+    title 'H · The heart: why the Orchestrator Agent gets it right'
+    description 'Top: the rules the admin wrote, by section, and what each agent declares in its AGENTFLOW.md. Middle: the seven mechanisms they drive. Bottom: what the platform guarantees whatever the model does. Click a mechanism for the exact lines and the cases where it is seen.'
+    include agentflow.workflow, agentflow.workflow.*
+    include agentflow.agents.baAgent.baCapabilities, agentflow.agents.devAgent.devCapabilities, agentflow.agents.qcAgent.qcCapabilities
+    include agentflow.orchestrator.decides.mContext with {
+      navigateTo mechContext
+    }
+    include agentflow.orchestrator.decides.mSelection with {
+      navigateTo mechSelection
+    }
+    include agentflow.orchestrator.decides.mConversations with {
+      navigateTo mechConversations
+    }
+    include agentflow.orchestrator.decides.mNeverBlocks with {
+      navigateTo mechNeverBlocks
+    }
+    include agentflow.orchestrator.decides.mResume with {
+      navigateTo mechResume
+    }
+    include agentflow.orchestrator.decides.mStatus with {
+      navigateTo mechStatus
+    }
+    include agentflow.orchestrator.decides.mDocuments with {
+      navigateTo mechDocuments
+    }
+    include agentflow.orchestrator.debounce, agentflow.orchestrator.guards, agentflow.orchestrator.tools, agentflow.api.engine, agentflow.api.caseStore
+    exclude agentflow.orchestrator.tools -> agentflow.orchestrator.guards, agentflow.orchestrator.tools -> agentflow.api.caseStore
+    exclude agentflow.api.engine -> agentflow.api.caseStore, agentflow.api.engine -> agentflow.orchestrator.debounce
+    autoLayout TopBottom
+  }
+
+  view mechContext of agentflow.orchestrator.decides.mContext {
+    title 'H1 · Context'
+    description 'Every turn knows the ticket, the case and the answers so far.'
+    include agentflow.orchestrator.decides.mContext
+    group 'The rules, quoted' {
+      include agentflow.workflow.rTicket.qTicket, agentflow.workflow.rQuestions.qDecision
+    }
+    group 'The platform' {
+      include agentflow.api.caseStore
+    }
+    include ld6.case1 with {
+      navigateTo case1Prd
+    }
+    include ld6.case2 with {
+      navigateTo case2Planning
+    }
+    exclude ld6.* -> ld6.*
+    autoLayout TopBottom
+  }
+
+  view mechSelection of agentflow.orchestrator.decides.mSelection {
+    title 'H2 · Agent selection'
+    description 'The rules name the role; the agent with that role declares its commands in AGENTFLOW.md (description, needs, produces); guards refuse the rest.'
+    include agentflow.orchestrator.decides.mSelection
+    group 'Declared by each agent (AGENTFLOW.md)' {
+      include agentflow.agents.baAgent.baCapabilities.cResearch, agentflow.agents.baAgent.baCapabilities.cRequirement, agentflow.agents.baAgent.baCapabilities.cArchive, agentflow.agents.devAgent.devCapabilities.cWritingPlans, agentflow.agents.devAgent.devCapabilities.cExecutingPlans, agentflow.agents.devAgent.devCapabilities.cDebugging, agentflow.agents.qcAgent.qcCapabilities.cQaReview, agentflow.agents.qcAgent.qcCapabilities.cQaTest, agentflow.agents.qcAgent.qcCapabilities.cQaRun
+    }
+    group 'The rules, quoted' {
+      include agentflow.workflow.rRoles.qWho, agentflow.workflow.rRoles.qDeclared, agentflow.workflow.rQuestions.qWhoKnows, agentflow.workflow.rBlocked.qBlocked
+    }
+    group 'The platform' {
+      include agentflow.orchestrator.guards
+    }
+    include ld6.case1 with {
+      navigateTo case1Prd
+    }
+    include ld6.case2 with {
+      navigateTo case2Planning
+    }
+    include ld6.case3 with {
+      navigateTo case3Implement
+    }
+    include ld6.case4 with {
+      navigateTo case4Testing
+    }
+    exclude ld6.* -> ld6.*
+    autoLayout TopBottom
+  }
+
+  view mechConversations of agentflow.orchestrator.decides.mConversations {
+    title 'H3 · Conversations'
+    description 'Many requests at once: one conversation per thread, one turn sees them all, each answer in its thread.'
+    include agentflow.orchestrator.decides.mConversations
+    group 'The rules, quoted' {
+      include agentflow.workflow.rQuestions.qThread, agentflow.workflow.rQuestions.qNeverStops, agentflow.workflow.rLanguage.qLanguage
+    }
+    group 'The platform' {
+      include agentflow.orchestrator.debounce, agentflow.orchestrator.tools
+    }
+    include ld6.case6 with {
+      navigateTo case6Comments
+    }
+    include ld6.case7 with {
+      navigateTo case7Flip
+    }
+    exclude ld6.* -> ld6.*
+    autoLayout TopBottom
+  }
+
+  view mechNeverBlocks of agentflow.orchestrator.decides.mNeverBlocks {
+    title 'H4 · Never blocks'
+    description 'Tasks run in parallel; every turn ends with a wait the platform evaluates.'
+    include agentflow.orchestrator.decides.mNeverBlocks
+    group 'The rules, quoted' {
+      include agentflow.workflow.rFlow.qParallel, agentflow.workflow.rCancelling.qForward
+    }
+    group 'The platform' {
+      include agentflow.api.engine
+    }
+    include ld6.case2 with {
+      navigateTo case2Planning
+    }
+    include ld6.case4 with {
+      navigateTo case4Testing
+    }
+    exclude ld6.* -> ld6.*
+    autoLayout TopBottom
+  }
+
+  view mechResume of agentflow.orchestrator.decides.mResume {
+    title 'H5 · Resume the right work'
+    description 'Feedback, answers and fixes go back to the task that did the work.'
+    include agentflow.orchestrator.decides.mResume
+    group 'The rules, quoted' {
+      include agentflow.workflow.rQuestions.qPartial, agentflow.workflow.rFlow.qChanges, agentflow.workflow.rFlow.qFork, agentflow.workflow.rComingBack.qInstruction
+    }
+    group 'The platform' {
+      include agentflow.orchestrator.tools
+    }
+    include ld6.case1 with {
+      navigateTo case1Prd
+    }
+    include ld6.case4 with {
+      navigateTo case4Testing
+    }
+    include ld6.case5 with {
+      navigateTo case5Review
+    }
+    exclude ld6.* -> ld6.*
+    autoLayout TopBottom
+  }
+
+  view mechStatus of agentflow.orchestrator.decides.mStatus {
+    title 'H6 · Status logic'
+    description 'The status decides what may start; only a status change cancels; the final status counts.'
+    include agentflow.orchestrator.decides.mStatus
+    group 'The rules, quoted' {
+      include agentflow.workflow.rFlow.qOrder, agentflow.workflow.rStatusWork.qCurrentStatus, agentflow.workflow.rComingBack.qNothing, agentflow.workflow.rCancelling.qOnlyStatus, agentflow.workflow.rCancelling.qFinal
+    }
+    group 'The platform' {
+      include agentflow.orchestrator.guards
+    }
+    include ld6.case4 with {
+      navigateTo case4Testing
+    }
+    include ld6.case7 with {
+      navigateTo case7Flip
+    }
+    include ld6.case8 with {
+      navigateTo case8Reentry
+    }
+    exclude ld6.* -> ld6.*
+    autoLayout TopBottom
+  }
+
+  view mechDocuments of agentflow.orchestrator.decides.mDocuments {
+    title 'H7 · Documents'
+    description 'One Confluence page per document; tasks get it as people left it; their edits are kept.'
+    include agentflow.orchestrator.decides.mDocuments
+    group 'The rules, quoted' {
+      include agentflow.workflow.rDocuments.qPages, agentflow.workflow.rDocuments.qSamePage, agentflow.workflow.rDocuments.qCurrent, agentflow.workflow.rDocuments.qEdited, agentflow.workflow.rDocuments.qReadFirst
+    }
+    group 'The platform' {
+      include agentflow.orchestrator.guards
+    }
+    include ld6.case1 with {
+      navigateTo case1Prd
+    }
+    include ld6.case2 with {
+      navigateTo case2Planning
+    }
+    include ld6.case4 with {
+      navigateTo case4Testing
+    }
+    exclude ld6.* -> ld6.*
+    autoLayout TopBottom
+  }
+
+  dynamic view turnAnatomy {
+    title 'H · Anatomy of a turn'
+    description 'One real turn (turn B of case 6): four comments in, the right agent picked, four answers out, never blocking.'
+    variant sequence
+    jira -> agentflow.api.inbound 'four comments in one debounce window'
+    agentflow.api.inbound -> agentflow.orchestrator.turn 'one turn for the conversation'
+    agentflow.orchestrator.turn -> agentflow.orchestrator.decides.mContext 'reads the rules, CASE.md, the ticket and the four messages (with refs)'
+    agentflow.orchestrator.turn -> agentflow.orchestrator.decides.mSelection 'who knows? schema → the plan page; empty calendar → the test plan; option (b) → QC rewrites the test plan'
+    agentflow.orchestrator.turn -> confluence 'page_get: the plan page and the test plan page'
+    agentflow.orchestrator.turn -> agentflow.orchestrator.guards 'task_run QC /qa-test: declared ✓ write ✓ needs prd ✓'
+    agentflow.orchestrator.turn -> agentflow.agents.qcAgent 'the task starts, replyTo the option (b) comment' {
+      navigateTo taskLifecycle
+    }
+    agentflow.orchestrator.turn -> jira 'four replies, each in its own thread'
+    agentflow.orchestrator.turn -> agentflow.orchestrator.decides.mNeverBlocks 'wait_for the QC task: the turn ends'
+    agentflow.agents.qcAgent -> agentflow.orchestrator.turn 'task done: the next turn starts with the results'
+    agentflow.orchestrator.turn -> confluence 'page_publish: Test plan v2 (same page)' {
+      navigateTo documentLifecycle
+    }
+    agentflow.orchestrator.turn -> jira 'reply under the option (b) comment'
+  }
+}

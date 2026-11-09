@@ -1,19 +1,21 @@
 import { DesktopCommandStatus } from "@repo/api/src/types/compute-target";
 import {
   ORCHESTRATOR_TURN_STOPPED_ERROR,
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorConversationStatus,
   OrchestratorMessageKind,
-  OrchestratorMessageOrigin,
   OrchestratorTurnEnd,
   type OrchestratorTurnResult,
   OrchestratorTurnStatus,
   orchestratorTurnResultSchema,
 } from "@repo/api/src/types/orchestrator";
+import { resolveOrchestratorGrants } from "@repo/api/src/types/orchestrator-grants";
 import { type Prisma, withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
 import { z } from "zod";
 import { computeTargetCapabilitiesService } from "@/app/compute-targets/capabilities-service";
+import { loadProjectRunnerIds } from "@/app/projects/project-runner-selection";
 import { mapWithDbConcurrency } from "@/lib/db-fanout";
 import { desktopCommandStore } from "@/lib/desktop-command-store";
 import {
@@ -22,6 +24,7 @@ import {
 } from "@/lib/loops/loop-desktop";
 import { renderCase } from "./case-render";
 import { readChannel } from "./channel";
+import { newerMessageWaiting, supersedeRequested } from "./supersede";
 import { advanceTasks } from "./tasks";
 import { buildTurnPrompt } from "./turn-prompt";
 import { readTurnTimeoutMs } from "./turn-usage";
@@ -158,7 +161,7 @@ async function step(conversationId: string, now: Date): Promise<void> {
  */
 async function supersedeIfAsked(turn: TurnRow, now: Date): Promise<void> {
   if (
-    supersedeRequested(turn) ||
+    supersedeRequested(turn.usage) ||
     readCancelRequest(turn) ||
     !turn.computeTargetId
   ) {
@@ -183,16 +186,7 @@ async function supersedeIfAsked(turn: TurnRow, now: Date): Promise<void> {
   const workflowId = conversation.case.workflowId;
   const [workflows, newer] = await Promise.all([
     loadOrchestratorWorkflows(conversation.organizationId, [workflowId]),
-    withDb((db) =>
-      db.orchestratorMessage.findFirst({
-        where: {
-          conversationId: turn.conversationId,
-          turnId: null,
-          origin: OrchestratorMessageOrigin.External,
-        },
-        select: { id: true },
-      })
-    ),
+    newerMessageWaiting(turn.conversationId),
   ]);
   const concurrency = workflows.get(workflowId)?.concurrency;
   if (concurrency !== OrchestratorConcurrency.Supersede || !newer) {
@@ -221,12 +215,6 @@ async function supersedeIfAsked(turn: TurnRow, now: Date): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
     });
   }
-}
-
-const supersedeRequestSchema = z.object({ supersedeRequestedAt: z.string() });
-
-function supersedeRequested(turn: TurnRow): boolean {
-  return supersedeRequestSchema.safeParse(turn.usage).success;
 }
 
 /** An admin asked to stop the turn (`cancelTurn`): the turn is not retried. */
@@ -258,7 +246,14 @@ async function settleSuperseded(
     await tx.orchestratorMessage.updateMany({
       where: {
         turnId: turn.id,
-        kind: { not: OrchestratorMessageKind.Reply },
+        kind: {
+          notIn: [
+            OrchestratorMessageKind.Reply,
+            OrchestratorMessageKind.ToolRefused,
+            OrchestratorMessageKind.Document,
+            OrchestratorMessageKind.HandoffSent,
+          ],
+        },
       },
       data: { turnId: null },
     });
@@ -304,7 +299,7 @@ async function settleTurn(turn: TurnRow, now: Date): Promise<boolean> {
     });
     return true;
   }
-  if (supersedeRequested(turn)) {
+  if (supersedeRequested(turn.usage)) {
     await settleSuperseded(turn, progress.sessionId, now);
     return true;
   }
@@ -467,7 +462,16 @@ async function failTurn(
   // The messages wait for the next turn, a while later.
   await withDb.tx(async (tx) => {
     await tx.orchestratorMessage.updateMany({
-      where: { turnId: turn.id },
+      where: {
+        turnId: turn.id,
+        kind: {
+          notIn: [
+            OrchestratorMessageKind.ToolRefused,
+            OrchestratorMessageKind.Document,
+            OrchestratorMessageKind.HandoffSent,
+          ],
+        },
+      },
       data: { turnId: null },
     });
     await tx.orchestratorConversation.update({
@@ -563,15 +567,31 @@ async function startTurnIfDue(
     });
     await tx.orchestratorConversation.update({
       where: { id: conversationId },
-      data: { status: OrchestratorConversationStatus.Turn, nextWakeAt: null },
+      data: {
+        status: OrchestratorConversationStatus.Turn,
+        nextWakeAt: null,
+        askedHuman: null,
+      },
     });
     return created;
   });
+  if (
+    await refuseForeignOrchestratorAgent({
+      turnId: turn.id,
+      organizationId: conversation.organizationId,
+      projectId: conversation.projectId,
+      computeTargetId: settings.computeTargetId,
+      now,
+    })
+  ) {
+    return;
+  }
   const prompt = buildTurnPrompt({
     projectName: conversation.case.project.name,
     workflowName: settings.name,
     workflowDescription: settings.description,
     rules: settings.rules,
+    grants: resolveOrchestratorGrants(settings.connections),
     channel: readChannel(conversation.channel),
     caseMarkdown: await renderCase(conversation.caseId),
     messages,
@@ -581,6 +601,12 @@ async function startTurnIfDue(
     ),
     continuing: conversation._count.turns > 0 && !!conversation.sessionId,
     cancelOn: settings.cancelOn,
+    sideConversations: {
+      mentionOnly: settings.mentionOnly,
+      caseLookup: settings.caseLookup,
+      caseHandoff: settings.caseHandoff,
+    },
+    approvalsRequired: settings.approvals === OrchestratorApprovals.Required,
   });
   try {
     const commandId = await dispatchOrchestratorTurn({
@@ -617,4 +643,39 @@ async function startTurnIfDue(
 
 function turnFailure(error: string): OrchestratorTurnResult {
   return { type: "result", ok: false, error, retryable: true, sessionId: null };
+}
+
+const ORCHESTRATOR_AGENT_NOT_IN_PROJECT_ERROR =
+  "The orchestrator's Agent is not one of the project's Agents. Add it on Project → Agents, or choose one of the project's Agents for the workflow.";
+
+/**
+ * Fails the turn (not retried) when the project has Agents and the
+ * orchestrator's is not one of them; true when it did.
+ */
+async function refuseForeignOrchestratorAgent(input: {
+  turnId: string;
+  organizationId: string;
+  projectId: string;
+  computeTargetId: string;
+  now: Date;
+}): Promise<boolean> {
+  const runnerIds = await loadProjectRunnerIds(input.organizationId, {
+    projectId: input.projectId,
+  });
+  if (runnerIds.length === 0 || runnerIds.includes(input.computeTargetId)) {
+    return false;
+  }
+  const row = await withDb((db) =>
+    db.orchestratorTurn.findUnique({ where: { id: input.turnId } })
+  );
+  if (row) {
+    await failTurn(
+      row,
+      ORCHESTRATOR_AGENT_NOT_IN_PROJECT_ERROR,
+      false,
+      null,
+      input.now
+    );
+  }
+  return true;
 }

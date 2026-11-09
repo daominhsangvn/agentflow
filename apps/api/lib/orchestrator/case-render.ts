@@ -1,9 +1,17 @@
 import {
+  DOCUMENT_KIND_LABELS,
+  OrchestratorDraftOutcome,
   OrchestratorMessageOrigin,
+  OrchestratorMessageVia,
   OrchestratorTaskStatus,
+  orchestratorDecisionDraftResultSchema,
+  readOrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
 import { withDb } from "@repo/database";
+import { askedOnItem } from "./asked-questions";
+import { listCaseDocuments } from "./case-documents";
 import { readChannel } from "./channel";
+import { readStoredDraft, type StoredDecisionDraft } from "./decision-draft";
 import { readTaskResult } from "./task-result";
 import { isTicketChangeKind } from "./ticket-change";
 
@@ -12,6 +20,8 @@ import { isTicketChangeKind } from "./ticket-change";
  * prompt and `case_get` (docs/orchestrator.md). The orchestrator's session is
  * a cache; this is the record a turn trusts. Each task line says what started
  * it (a status, a label or a message), so task_cancel can stop the right ones.
+ * Tasks and Decisions come before the conversations so that the prompt's
+ * CASE_MAX slice (turn-prompt.ts) cuts conversations first.
  */
 
 const RECENT_MESSAGES = 5;
@@ -24,6 +34,7 @@ export async function renderCase(caseId: string): Promise<string> {
     db.orchestratorCase.findUnique({
       where: { id: caseId },
       select: {
+        organizationId: true,
         title: true,
         status: true,
         sourceKey: true,
@@ -37,7 +48,13 @@ export async function renderCase(caseId: string): Promise<string> {
             messages: {
               orderBy: { createdAt: "desc" },
               take: RECENT_MESSAGES,
-              select: { actor: true, kind: true, text: true, createdAt: true },
+              select: {
+                actor: true,
+                kind: true,
+                text: true,
+                payload: true,
+                createdAt: true,
+              },
             },
           },
         },
@@ -67,7 +84,14 @@ export async function renderCase(caseId: string): Promise<string> {
         },
         decisions: {
           orderBy: { createdAt: "desc" },
-          select: { id: true, question: true, status: true, decidedBy: true },
+          select: {
+            id: true,
+            question: true,
+            status: true,
+            decidedBy: true,
+            draft: true,
+            draftResult: true,
+          },
         },
       },
     })
@@ -82,18 +106,16 @@ export async function renderCase(caseId: string): Promise<string> {
     "## Notes",
     found.notes.trim() || "(none yet)",
     "",
-    "## Conversations",
+    "## Documents",
   ];
-  for (const conversation of found.conversations) {
-    const channel = readChannel(conversation.channel);
+  const documents = await listCaseDocuments(found.organizationId, caseId);
+  if (documents.length === 0) {
+    lines.push("(none yet)");
+  }
+  for (const document of documents) {
     lines.push(
-      `### ${conversation.channelKey} (${conversation.status})${channel?.item.url ? ` ${channel.item.url}` : ""}`
+      `- ${DOCUMENT_KIND_LABELS[document.kind]} "${document.title}" → ${document.url} (v${document.version}, page ${document.pageId})`
     );
-    for (const message of [...conversation.messages].reverse()) {
-      lines.push(
-        `- ${message.createdAt.toISOString()} ${message.actor ?? "AgentFlow"} (${message.kind}): ${preview(message.text)}`
-      );
-    }
   }
   lines.push("", "## Tasks");
   if (found.tasks.length === 0) {
@@ -101,7 +123,7 @@ export async function renderCase(caseId: string): Promise<string> {
   }
   for (const task of found.tasks) {
     lines.push(
-      `- ${task.id} ${task.command}${task.args ? ` ${task.args}` : ""} on ${task.computeTarget?.machineName ?? "a removed runner"} (${task.mode}): ${task.status}${taskNote(task)}${taskFilesNote(task)} — started for: ${startedFor(task)}`
+      `- ${task.id} ${task.command}${task.args ? ` ${task.args}` : ""} on ${task.computeTarget?.machineName ?? "a removed runner"} (${task.mode}): ${task.status}${taskNote(task)}${taskFilesNote(task)}${taskReplyToNote(task)}${taskQuestionsNote(task)} — started for: ${startedFor(task)}`
     );
   }
   lines.push("", "## Decisions");
@@ -110,8 +132,20 @@ export async function renderCase(caseId: string): Promise<string> {
   }
   for (const decision of found.decisions) {
     lines.push(
-      `- ${decision.id} ${decision.status}${decision.decidedBy ? ` by ${decision.decidedBy}` : ""}: ${preview(decision.question)}`
+      `- ${decision.id} ${decision.status}${decision.decidedBy ? ` by ${decision.decidedBy}` : ""}: ${preview(decision.question)}${decisionDraftNote(decision)}`
     );
+  }
+  lines.push("", "## Conversations");
+  for (const conversation of found.conversations) {
+    const channel = readChannel(conversation.channel);
+    lines.push(
+      `### ${conversation.channelKey} (${conversation.status})${channel?.item.url ? ` ${channel.item.url}` : ""}`
+    );
+    for (const message of [...conversation.messages].reverse()) {
+      lines.push(
+        `- ${message.createdAt.toISOString()} ${messageActor(message)} (${message.kind}): ${preview(message.text)}`
+      );
+    }
   }
   return lines.join("\n");
 }
@@ -148,6 +182,26 @@ function taskFilesNote(task: { result: unknown }): string {
   return ` — files: ${names.join(", ")}`;
 }
 
+/** The message ref a task answers, or nothing. */
+function taskReplyToNote(task: { result: unknown }): string {
+  const replyTo = readTaskResult(task.result)?.replyTo;
+  return replyTo ? ` — answers ref ${replyTo}` : "";
+}
+
+function taskQuestionsNote(task: { result: unknown }): string {
+  const questions = readTaskResult(task.result)?.questions ?? [];
+  if (questions.length === 0) {
+    return "";
+  }
+  const asked = new Map(askedOnItem(questions).map((q) => [q.id, q.commentId]));
+  const names = questions.map((q) =>
+    asked.has(q.id)
+      ? `${q.id} (asked on the item, comment ${asked.get(q.id)})`
+      : q.id
+  );
+  return ` — questions: ${names.join(", ")}`;
+}
+
 type StartedForTask = {
   conversation: { channelKey: string } | null;
   turn: { messages: Array<{ kind: string; text: string }> } | null;
@@ -169,4 +223,55 @@ function startedFor(task: StartedForTask): string {
     return `message in ${channelKey}: "${preview(last.text)}"`;
   }
   return channelKey;
+}
+
+function messageActor(message: {
+  actor: string | null;
+  payload: unknown;
+}): string {
+  const actor = message.actor ?? "AgentFlow";
+  return readOrchestratorMessageVia(message.payload) ===
+    OrchestratorMessageVia.AgentFlow
+    ? `${actor} (AgentFlow)`
+    : actor;
+}
+
+/** " — draft: comment (N chars) + move to X; posted (reference R)", or "" without a draft. */
+function decisionDraftNote(decision: {
+  draft: unknown;
+  draftResult: unknown;
+}): string {
+  const draft = readStoredDraft(decision.draft);
+  if (!draft) {
+    return "";
+  }
+  return ` — draft: ${draftWhat(draft)}; ${draftState(decision.draftResult)}`;
+}
+
+function draftWhat(draft: StoredDecisionDraft): string {
+  const parts: string[] = [];
+  if (draft.comment) {
+    parts.push(`comment (${draft.comment.text.length} chars)`);
+  }
+  if (draft.transitionName !== null) {
+    parts.push(`move to ${draft.transitionName}`);
+  }
+  return parts.join(" + ");
+}
+
+function draftState(value: unknown): string {
+  const parsed = orchestratorDecisionDraftResultSchema.safeParse(value);
+  if (!parsed.success) {
+    return "not posted";
+  }
+  const result = parsed.data;
+  if (result.outcome === OrchestratorDraftOutcome.Done) {
+    return result.commentRef === null
+      ? "done"
+      : `posted (reference ${result.commentRef})`;
+  }
+  if (result.outcome === OrchestratorDraftOutcome.Failed) {
+    return `failed: ${result.error ?? "unknown error"}`;
+  }
+  return "being carried out";
 }

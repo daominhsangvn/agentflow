@@ -1,8 +1,5 @@
 import { ROUTINES_FEATURE_FLAG_KEY } from "@repo/api/src/types/routines";
-import {
-  ArtifactFlag,
-  LABS_NAV_SECTION_FEATURE_FLAG_KEY,
-} from "@repo/app/shared/lib/feature-flags";
+import { LABS_NAV_SECTION_FEATURE_FLAG_KEY } from "@repo/app/shared/lib/feature-flags";
 import { cleanup, render } from "@testing-library/react";
 import type React from "react";
 import { renderToString } from "react-dom/server";
@@ -128,13 +125,6 @@ vi.mock("../sidebar-projects", () => ({
 
 vi.mock("../account-menu", () => ({
   AccountMenu: () => <div data-testid="account-menu">Account Menu</div>,
-}));
-
-// The Agents activity badge reads live session data through the auth/API stack;
-// this suite exercises nav structure/flag gating, not the badge, so stub it out
-// (its own behavior is covered in agents/components/__tests__/agents-nav-badge).
-vi.mock("@repo/app/agents/components/agents-nav-badge", () => ({
-  AgentsNavBadge: () => null,
 }));
 
 // Mock organization object matching Clerk's OrganizationResource shape
@@ -534,10 +524,9 @@ describe("GlobalSidebar - Agents nav (insights + admin catalog)", () => {
   });
 });
 
-describe("GlobalSidebar - Artifacts section flag gating", () => {
+describe("GlobalSidebar - Work and Setup sections", () => {
   afterEach(() => {
     cleanup();
-    // Restore the default (all flags enabled) so other suites are unaffected.
     mockUseFeatureFlag.mockImplementation((flag: string) =>
       flagResult(flag, true)
     );
@@ -546,7 +535,7 @@ describe("GlobalSidebar - Artifacts section flag gating", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseFeatureFlag.mockImplementation((flag: string) =>
-      flagResult(flag, true)
+      flagResult(flag, false)
     );
     mockUseOrganization.mockReturnValue({
       organization: createMockOrganization(),
@@ -554,54 +543,65 @@ describe("GlobalSidebar - Artifacts section flag gating", () => {
     });
   });
 
-  test("keeps the Artifacts section rendered for the always-on items even when every flag is off", () => {
-    // Agents (FEA-3994), Documents (FEA-4140), and — as of FEA-4155 —
-    // Branches/Sessions are all always-on (no flag), so the Artifacts section
-    // never fully empties. Only Issues stays flag-gated and hides when off.
-    mockUseFeatureFlag.mockImplementation((flag: string) =>
-      flagResult(flag, false)
-    );
-
-    const { getByText, queryByText } = render(
+  test("renders Cases and Sessions under Work with org-scoped hrefs and no flags", () => {
+    const { getByRole, getByText, queryByRole } = render(
       <GlobalSidebar>
         <div>Content</div>
       </GlobalSidebar>
     );
 
-    expect(getByText("Artifacts")).not.toBeNull();
-    expect(getByText("Agents")).not.toBeNull();
-    expect(getByText("Documents")).not.toBeNull();
-    // FEA-4155: always-on now — visible even with every flag off.
-    expect(getByText("Sessions")).not.toBeNull();
-    // Branches is hidden in the self-hosted edition (GitHub-App-only data).
-    expect(queryByText("Branches")).toBeNull();
-    // Issues is still gated, so it stays hidden with its flag off.
-    expect(queryByText("Issues")).toBeNull();
+    expect(getByText("Work")).toBeInTheDocument();
+    expect(getByRole("link", { name: "Cases" })).toHaveAttribute(
+      "href",
+      "/test-org/cases"
+    );
+    expect(queryByRole("link", { name: "Runs" })).toBeNull();
+    expect(getByRole("link", { name: "Sessions" })).toHaveAttribute(
+      "href",
+      "/test-org/sessions"
+    );
   });
 
-  test("hides only the still-gated Issues item when its flag is off (FEA-4155)", () => {
-    mockUseFeatureFlag.mockImplementation((flag: string) =>
-      flagResult(flag, flag !== ArtifactFlag.Issues)
-    );
-
-    const { queryByText } = render(
+  test("renders Workflows, Agents and Connections under Setup with org-scoped hrefs and no flags", () => {
+    const { getByRole, getByText } = render(
       <GlobalSidebar>
         <div>Content</div>
       </GlobalSidebar>
     );
 
-    expect(queryByText("Artifacts")).not.toBeNull();
-    // FEA-4155: Sessions is always-on regardless of flag state.
-    expect(queryByText("Sessions")).not.toBeNull();
-    expect(queryByText("Issues")).toBeNull();
+    expect(getByText("Setup")).toBeInTheDocument();
+    expect(getByRole("link", { name: "Workflows" })).toHaveAttribute(
+      "href",
+      "/test-org/workflows"
+    );
+    expect(getByRole("link", { name: "Agents" })).toHaveAttribute(
+      "href",
+      "/test-org/agents"
+    );
+    expect(getByRole("link", { name: "Connections" })).toHaveAttribute(
+      "href",
+      "/test-org/connections"
+    );
   });
 
-  test("hides the Routines nav item when the routines flag is OFF (FEA-4348 / ISS-4396)", () => {
-    // Routines is gated behind the PostHog `routines` flag (default off) until
-    // GA. Every OTHER flag is ON so only the routines gate can hide the row —
-    // if this assertion passed with all flags off it would prove nothing.
+  test("renders Home first, linking to the dashboard URL, with no Dashboard label", () => {
+    const { getAllByRole, getByRole, queryByRole } = render(
+      <GlobalSidebar>
+        <div>Content</div>
+      </GlobalSidebar>
+    );
+
+    expect(getAllByRole("link")[0]).toHaveTextContent("Home");
+    expect(getByRole("link", { name: "Home" })).toHaveAttribute(
+      "href",
+      "/test-org/dashboard"
+    );
+    expect(queryByRole("link", { name: "Dashboard" })).toBeNull();
+  });
+
+  test("does not list My Tasks, Documents or Issues", () => {
     mockUseFeatureFlag.mockImplementation((flag: string) =>
-      flagResult(flag, flag !== ROUTINES_FEATURE_FLAG_KEY)
+      flagResult(flag, true)
     );
 
     const { queryByRole } = render(
@@ -610,14 +610,51 @@ describe("GlobalSidebar - Artifacts section flag gating", () => {
       </GlobalSidebar>
     );
 
+    expect(queryByRole("link", { name: "My Tasks" })).toBeNull();
+    expect(queryByRole("link", { name: "Documents" })).toBeNull();
+    expect(queryByRole("link", { name: "Issues" })).toBeNull();
+  });
+});
+
+describe("GlobalSidebar - Labs skills catalog and routines", () => {
+  afterEach(() => {
+    cleanup();
+    mockUseFeatureFlag.mockImplementation((flag: string) =>
+      flagResult(flag, true)
+    );
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseOrganization.mockReturnValue({
+      organization: createMockOrganization(),
+      isLoaded: true,
+    });
+  });
+
+  test("shows Skills catalog with the Labs container flag on", () => {
+    mockUseFeatureFlag.mockImplementation(onlyLabsContainerEnabled);
+
+    const { getByRole, queryByRole } = render(
+      <GlobalSidebar>
+        <div>Content</div>
+      </GlobalSidebar>
+    );
+
+    expect(getByRole("link", { name: "Skills catalog" })).toHaveAttribute(
+      "href",
+      "/test-org/skills"
+    );
     expect(queryByRole("link", { name: "Routines" })).toBeNull();
   });
 
-  test("shows the Routines nav item when the routines flag is ON (FEA-4348 / ISS-4396)", () => {
-    // Mirror of the flag-OFF case: every OTHER flag is OFF and only routines is
-    // ON, so the Routines row surfacing is attributable to its own flag alone.
+  test("shows Routines when the container and its own flag are on", () => {
     mockUseFeatureFlag.mockImplementation((flag: string) =>
-      flagResult(flag, flag === ROUTINES_FEATURE_FLAG_KEY)
+      flagResult(
+        flag,
+        flag === LABS_NAV_SECTION_FEATURE_FLAG_KEY ||
+          flag === ROUTINES_FEATURE_FLAG_KEY
+      )
     );
 
     const { getByRole } = render(
@@ -632,24 +669,19 @@ describe("GlobalSidebar - Artifacts section flag gating", () => {
     );
   });
 
-  test("renders the Documents nav item linking to the org-scoped index (FEA-4140)", () => {
-    // The org-level Documents index shipped (FEA-4140): the primary "Documents"
-    // affordance is restored always-on and links to the real `/documents`
-    // index. Flags off proves it is not gated.
+  test("hides Skills catalog and Routines when the container flag is off", () => {
     mockUseFeatureFlag.mockImplementation((flag: string) =>
-      flagResult(flag, false)
+      flagResult(flag, flag !== LABS_NAV_SECTION_FEATURE_FLAG_KEY)
     );
 
-    const { getByRole } = render(
+    const { queryByRole } = render(
       <GlobalSidebar>
         <div>Content</div>
       </GlobalSidebar>
     );
 
-    expect(getByRole("link", { name: "Documents" })).toHaveAttribute(
-      "href",
-      "/test-org/documents"
-    );
+    expect(queryByRole("link", { name: "Skills catalog" })).toBeNull();
+    expect(queryByRole("link", { name: "Routines" })).toBeNull();
   });
 });
 

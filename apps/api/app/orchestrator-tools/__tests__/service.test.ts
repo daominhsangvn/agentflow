@@ -1,13 +1,18 @@
 import {
+  ORCHESTRATOR_ASKED_HUMAN_MAX,
+  OrchestratorCaseStatus,
   OrchestratorMessageKind,
   OrchestratorTaskStatus,
   OrchestratorToolName,
   OrchestratorTurnEnd,
 } from "@repo/api/src/types/orchestrator";
 import { Status } from "@repo/api/src/types/result";
+import { RunnerCommandMode } from "@repo/api/src/types/runner-capabilities";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildConnectionRuntime } from "@/__tests__/support/orchestrator-tools/connection-runtime.test-fixtures";
 import { orchestratorToolService } from "@/app/orchestrator-tools/service";
 import { hashOrchestratorToken } from "@/app/orchestrator-tools/token";
+import { TURN_SUPERSEDED_ERROR } from "@/lib/orchestrator/supersede";
 
 /**
  * The orchestrator's tools for one turn (docs/orchestrator.md): the token is
@@ -24,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   turn: null as Row | null,
   turnUpdates: [] as Row[],
   caseUpdates: [] as Row[],
+  conversationUpdates: [] as Row[],
   messages: [] as Row[],
   anchors: [] as Row[],
   replyOnItem: vi.fn(),
@@ -44,6 +50,7 @@ const mocks = vi.hoisted(() => ({
   getLoopAttachment: vi.fn(),
   hasAttachFile: true,
   taskRow: null as Row | null,
+  turnSuperseded: vi.fn(),
 }));
 
 vi.mock("@repo/database", () => {
@@ -57,6 +64,12 @@ vi.mock("@repo/database", () => {
         ),
       updateMany: (args: { data: Row }) => {
         mocks.turnUpdates.push(args.data);
+        return Promise.resolve({ count: 1 });
+      },
+    },
+    orchestratorConversation: {
+      updateMany: (args: { data: Row }) => {
+        mocks.conversationUpdates.push(args.data);
         return Promise.resolve({ count: 1 });
       },
     },
@@ -74,6 +87,12 @@ vi.mock("@repo/database", () => {
       findFirst: (args: { where: Row }) => {
         mocks.messageQueries.push(args.where);
         return Promise.resolve(mocks.latestMessage);
+      },
+      findMany: (args: { where: Row }) => {
+        mocks.messageQueries.push(args.where);
+        return Promise.resolve(
+          mocks.latestMessage ? [mocks.latestMessage] : []
+        );
       },
     },
     orchestratorTask: {
@@ -95,22 +114,12 @@ vi.mock("@repo/database", () => {
       },
     },
   };
-  return { withDb: (fn: (client: unknown) => unknown) => fn(db) };
+  const run = (fn: (client: unknown) => unknown) => fn(db);
+  return { withDb: Object.assign(run, { tx: run }) };
 });
 vi.mock("@/lib/integrations/project-connections", () => ({
   loadProjectConnectionRuntime: () =>
-    Promise.resolve({
-      connection: {
-        provider: {
-          replyOnItem: mocks.replyOnItem,
-          editOnItem: mocks.editOnItem,
-          source: mocks.hasAttachFile
-            ? { attachFile: mocks.attachFile }
-            : undefined,
-        },
-        runtime: { secrets: {} },
-      },
-    }),
+    Promise.resolve(buildConnectionRuntime(mocks)),
 }));
 vi.mock("@/lib/integrations/connection-service", () => ({
   createProviderContext: () => ({}),
@@ -124,6 +133,16 @@ vi.mock("@/lib/loops/loop-state", () => ({
 }));
 vi.mock("@/lib/orchestrator/case-render", () => ({
   renderCase: () => Promise.resolve("# LD-7"),
+}));
+vi.mock("@/lib/orchestrator/workflow-settings", async () => {
+  const { FULL_GRANTS, workflowsWith } = await import(
+    "@/__tests__/support/orchestrator-tools/grants.test-fixtures"
+  );
+  return { loadOrchestratorWorkflows: () => workflowsWith(FULL_GRANTS) };
+});
+vi.mock("@/lib/orchestrator/supersede", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/orchestrator/supersede")>()),
+  turnSuperseded: mocks.turnSuperseded,
 }));
 vi.mock("@/lib/orchestrator/tasks", () => ({ startTask: mocks.startTask }));
 vi.mock("@/lib/orchestrator/task-cancel", () => ({
@@ -156,6 +175,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.turnUpdates = [];
   mocks.caseUpdates = [];
+  mocks.conversationUpdates = [];
   mocks.messages = [];
   mocks.anchors = [];
   mocks.turn = {
@@ -168,12 +188,14 @@ beforeEach(() => {
       caseId: "case-1",
       projectConnectionId: "0199a5f0-0000-7000-8000-0000000000e1",
       channel: { item: ITEM, parentId: null, extras: null },
+      case: { workflowId: "workflow-1" },
     },
   };
   mocks.replyOnItem.mockResolvedValue({ ok: true, externalRef: "900" });
   mocks.taskCount = 0;
   mocks.hasAttachFile = true;
   mocks.taskRow = null;
+  mocks.turnSuperseded.mockResolvedValue(false);
   mocks.getLoopAttachment.mockResolvedValue(new Uint8Array([1]));
   mocks.anchor = null;
   mocks.anchorUpdates = [];
@@ -212,7 +234,47 @@ describe("orchestratorToolService", () => {
       OrchestratorToolName.EditReply,
       OrchestratorToolName.WaitHuman,
       OrchestratorToolName.CloseCase,
+      OrchestratorToolName.PagePublish,
+      OrchestratorToolName.PageGet,
+      OrchestratorToolName.PullRequestOpen,
+      OrchestratorToolName.CaseNotify,
     ]);
+  });
+
+  it("refuses task_run and reply once a newer message arrived", async () => {
+    mocks.turnSuperseded.mockResolvedValue(true);
+
+    const run = await orchestratorToolService.call(
+      TOKEN,
+      OrchestratorToolName.TaskRun,
+      { runner: "runner-qc", command: "/qa-test" }
+    );
+    const reply = await orchestratorToolService.call(
+      TOKEN,
+      OrchestratorToolName.Reply,
+      { text: "Answer." }
+    );
+
+    for (const result of [run, reply]) {
+      expect(result).toMatchObject({
+        ok: true,
+        value: { ok: false, error: TURN_SUPERSEDED_ERROR },
+      });
+    }
+    expect(mocks.startTask).not.toHaveBeenCalled();
+    expect(mocks.replyOnItem).not.toHaveBeenCalled();
+  });
+
+  it("still reads in a superseded turn", async () => {
+    mocks.turnSuperseded.mockResolvedValue(true);
+
+    const result = await orchestratorToolService.call(
+      TOKEN,
+      OrchestratorToolName.CaseGet,
+      {}
+    );
+
+    expect(result).toMatchObject({ ok: true, value: { ok: true } });
   });
 
   it("replies in the thread of the message it answers and keeps the reply as an anchor", async () => {
@@ -242,6 +304,7 @@ describe("orchestratorToolService", () => {
     expect(mocks.anchors).toMatchObject([
       {
         conversationId: "conversation-1",
+        connectionId: "connection-1",
         provider: "jira",
         externalRef: "900",
       },
@@ -392,8 +455,8 @@ describe("orchestratorToolService", () => {
         id: TASK_ID,
         command: "/ba-requirement",
         args: "LD-7",
-        mode: "write",
-        status: "succeeded",
+        mode: RunnerCommandMode.Write,
+        status: OrchestratorTaskStatus.Succeeded,
         computeTarget: { machineName: "runner-1" },
         result: {
           reply: null,
@@ -433,12 +496,52 @@ describe("orchestratorToolService", () => {
     ]);
   });
 
+  it("stores what wait_human asked, and null without it", async () => {
+    await orchestratorToolService.call(TOKEN, OrchestratorToolName.WaitHuman, {
+      asked: "  Which policy version applies?  ",
+    });
+    for (const input of [{}, { asked: "   " }] as Record<string, string>[]) {
+      await orchestratorToolService.call(
+        TOKEN,
+        OrchestratorToolName.WaitHuman,
+        input
+      );
+    }
+    expect(mocks.conversationUpdates.map((u) => u.askedHuman)).toEqual([
+      "Which policy version applies?",
+      null,
+      null,
+    ]);
+  });
+
+  it("refuses an asked over the limit and ends nothing", async () => {
+    const result = await orchestratorToolService.call(
+      TOKEN,
+      OrchestratorToolName.WaitHuman,
+      { asked: "x".repeat(ORCHESTRATOR_ASKED_HUMAN_MAX + 1) }
+    );
+    expect(JSON.stringify(result)).toContain("asked");
+    expect(mocks.turnUpdates).toEqual([]);
+    expect(mocks.conversationUpdates).toEqual([]);
+  });
+
+  it("clears asked when the turn ends with close_case", async () => {
+    await orchestratorToolService.call(
+      TOKEN,
+      OrchestratorToolName.CloseCase,
+      {}
+    );
+    expect(mocks.conversationUpdates).toEqual([{ askedHuman: null }]);
+  });
+
   it("closes the case", async () => {
     await orchestratorToolService.call(TOKEN, OrchestratorToolName.CloseCase, {
       summary: "Answered.",
     });
     expect(mocks.turnUpdates).toEqual([{ ended: OrchestratorTurnEnd.Close }]);
-    expect(mocks.caseUpdates).toEqual([{ status: "closed" }]);
+    expect(mocks.caseUpdates).toEqual([
+      { status: OrchestratorCaseStatus.Closed, closedAt: expect.any(Date) },
+    ]);
   });
 
   it("saves the case's notes", async () => {
@@ -506,10 +609,72 @@ describe("orchestratorToolService", () => {
       resumeTaskId: null,
       fork: false,
       files: [],
+      pageInputs: [],
+      replyTo: null,
     });
     expect(result.ok && result.value).toMatchObject({
       ok: true,
       output: { taskId: TASK_ID, status: "running" },
+    });
+  });
+
+  it("task_run stores the message it answers", async () => {
+    mocks.latestMessage = { externalRef: "10500", payload: null };
+    mocks.startTask.mockResolvedValue({
+      ok: true,
+      value: {
+        taskId: TASK_ID,
+        status: "running",
+        runner: "runner-1",
+        error: null,
+        waiting: null,
+      },
+    });
+
+    await orchestratorToolService.call(TOKEN, OrchestratorToolName.TaskRun, {
+      runner: "runner-1",
+      command: "/ba-requirement",
+      replyTo: "10500",
+    });
+
+    expect(mocks.startTask).toHaveBeenCalledWith(
+      expect.objectContaining({ replyTo: "10500" })
+    );
+  });
+
+  it("task_run refuses an unknown replyTo", async () => {
+    mocks.latestMessage = null;
+
+    const result = await orchestratorToolService.call(
+      TOKEN,
+      OrchestratorToolName.TaskRun,
+      { runner: "runner-1", command: "/ba-requirement", replyTo: "999" }
+    );
+
+    expect(result.ok && result.value).toMatchObject({ ok: false });
+    expect(mocks.startTask).not.toHaveBeenCalled();
+  });
+
+  it("task_get shows replyTo", async () => {
+    mocks.taskRow = {
+      id: TASK_ID,
+      command: "/ba-requirement",
+      args: "",
+      mode: RunnerCommandMode.Write,
+      status: OrchestratorTaskStatus.Succeeded,
+      computeTarget: { machineName: "runner-1" },
+      result: { reply: "ok", error: null, replyTo: "10500" },
+    };
+
+    const result = await orchestratorToolService.call(
+      TOKEN,
+      OrchestratorToolName.TaskGet,
+      { taskId: TASK_ID }
+    );
+
+    expect(result.ok && result.value).toMatchObject({
+      ok: true,
+      output: { replyTo: "10500" },
     });
   });
 
@@ -601,6 +766,7 @@ describe("orchestratorToolService", () => {
     expect(mocks.turnUpdates).toEqual([
       { ended: OrchestratorTurnEnd.WaitTasks },
     ]);
+    expect(mocks.conversationUpdates).toEqual([{ askedHuman: null }]);
     expect(mocks.evaluateWaits).toHaveBeenCalledWith(
       "conversation-1",
       expect.any(Date)
@@ -701,9 +867,10 @@ describe("orchestratorToolService", () => {
 
     // The thread is found over the whole conversation, not the turn's own
     // messages: a turn woken by task results took no message from people.
-    expect(mocks.messageQueries).toEqual([
-      { conversationId: "conversation-1", origin: "external" },
-    ]);
+    expect(mocks.messageQueries).toContainEqual({
+      conversationId: "conversation-1",
+      origin: "external",
+    });
     expect(mocks.replyOnItem.mock.calls[0]?.[1].parentId).toBe("500");
   });
 

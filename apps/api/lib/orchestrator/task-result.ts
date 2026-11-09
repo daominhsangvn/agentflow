@@ -7,7 +7,7 @@ import { z } from "zod";
 
 export type TaskResult = {
   reply: string | null;
-  questions: Array<{ id: string; question: string; options?: string[] }>;
+  questions: TaskQuestion[];
   error: string | null;
   /** Why a queued task has not started (a busy runner). */
   waiting?: string | null;
@@ -21,6 +21,10 @@ export type TaskResult = {
   filesOmitted?: number;
   /** Text files of earlier tasks, handed to this task until it launches. */
   inputs?: TaskInputFile[];
+  /** The ref of the message (comment) this task's answer replies to (task_run replyTo). */
+  replyTo?: string | null;
+  /** Confluence pages read when task_run ran, written to `inputs/` at launch. */
+  pageInputs?: TaskPageInput[];
 };
 
 /**
@@ -43,6 +47,17 @@ export type TaskInputFile = {
   size: number;
 };
 
+/** A Confluence page's Markdown, read when task_run ran and handed to the task as an input file. */
+export type TaskPageInput = {
+  pageId: string;
+  title: string;
+  url: string;
+  version: number;
+  name: string;
+  content: string;
+  size: number;
+};
+
 const taskFileSchema = z.object({
   name: z.string(),
   size: z.number(),
@@ -57,6 +72,16 @@ const taskInputFileSchema = z.object({
   size: z.number(),
 });
 
+const taskPageInputSchema = z.object({
+  pageId: z.string(),
+  title: z.string(),
+  url: z.string(),
+  version: z.number(),
+  name: z.string(),
+  content: z.string(),
+  size: z.number(),
+});
+
 const taskResultSchema = z.object({
   reply: z.string().nullable(),
   questions: z
@@ -65,6 +90,7 @@ const taskResultSchema = z.object({
         id: z.string(),
         question: z.string(),
         options: z.array(z.string()).optional(),
+        commentId: z.string().optional(),
       })
     )
     .default([]),
@@ -75,9 +101,52 @@ const taskResultSchema = z.object({
   files: z.array(taskFileSchema).optional(),
   filesOmitted: z.number().optional(),
   inputs: z.array(taskInputFileSchema).optional(),
+  replyTo: z.string().nullish(),
+  pageInputs: z.array(taskPageInputSchema).optional(),
 });
 
 export function readTaskResult(value: unknown): TaskResult | null {
   const parsed = taskResultSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
+
+const KEPT_FIELDS = [
+  "inputs",
+  "waiting",
+  "cancelled",
+  "cancelledFrom",
+  "replyTo",
+  "pageInputs",
+] as const;
+
+/**
+ * The result to store: `next` over the fields an earlier write left (inputs,
+ * waiting, cancel notes), so a later write does not erase them.
+ */
+export function mergeTaskResult(
+  previous: unknown,
+  next: TaskResult
+): TaskResult {
+  const stored = readTaskResult(previous);
+  if (!stored) {
+    return next;
+  }
+  const kept: Partial<TaskResult> = {};
+  for (const field of KEPT_FIELDS) {
+    if (stored[field] !== undefined) {
+      Object.assign(kept, { [field]: stored[field] });
+    }
+  }
+  return { ...kept, ...next };
+}
+
+/**
+ * A question a task's agent asked. `commentId` is set when the agent already
+ * asked it on the source item itself (questions.json commentId).
+ */
+export type TaskQuestion = {
+  id: string;
+  question: string;
+  options?: string[];
+  commentId?: string;
+};

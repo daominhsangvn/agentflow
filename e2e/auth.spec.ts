@@ -3,7 +3,7 @@ import { performSignIn } from "./helpers/sign-in";
 import { E2ETag } from "./helpers/tags";
 import { expect, test } from "./test";
 
-const POST_LOGIN_URL = /\/(my-tasks|onboarding)/;
+const POST_LOGIN_URL = /\/(dashboard|my-tasks|onboarding)/;
 const SIGN_UP_URL = /\/sign-up/;
 const RE_INVALID_CREDENTIALS = /invalid email or password/i;
 const WRONG_PASSWORD_SUFFIX = "-definitely-wrong";

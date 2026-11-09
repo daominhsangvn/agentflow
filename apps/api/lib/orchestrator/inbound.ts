@@ -4,7 +4,7 @@ import {
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
 } from "@repo/api/src/types/orchestrator";
-import { type Prisma, withDb } from "@repo/database";
+import { type Prisma, type TransactionClient, withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import type { LoadedConnection } from "@/lib/integrations/connection-service";
@@ -34,6 +34,9 @@ import {
  * the thread to be quiet (debounce), then a turn takes it (advance.ts). A change of the
  * ticket itself (event.itemChange: status, labels) is recorded as a status_changed /
  * label_added / label_removed message on the item conversation (ticket-change.ts).
+ * A workflow with mentionOnly drops thread replies that only continue a channel conversation.
+ * An anchor an agent's own comment made (questions.json commentId) routes a reply the same
+ * way, and the message carries the task and question it answers.
  */
 
 const PRISMA_UNIQUE_VIOLATION = "P2002";
@@ -52,6 +55,8 @@ export type OrchestratorRouteInput = {
 
 export type OrchestratorRouteResult = {
   conversationId: string;
+  /** The case the conversation belongs to. */
+  caseId: string;
   workflowId: string;
   /** False when the message was already recorded (a retried delivery). */
   created: boolean;
@@ -62,12 +67,17 @@ type RouteTarget = {
   workflowId: string;
   projectId: string;
   conversationId: string | null;
+  caseId: string | null;
+  /** It only continues a channel conversation: no trigger, no anchor. */
+  continued: boolean;
+  /** The task question the anchor was made for: a reply answers it. */
+  answers: { taskId: string; questionId: string | null } | null;
 };
 
 type KnownConversation = {
   id: string;
   projectId: string;
-  case: { workflowId: string };
+  case: { id: string; workflowId: string };
 };
 
 export async function routeToOrchestrator(
@@ -97,6 +107,13 @@ export async function routeToOrchestrator(
       });
       continue;
     }
+    if (target.continued && workflow.mentionOnly) {
+      log.info(
+        `${LOG_PREFIX} mention-only workflow: a thread reply does not wake it`,
+        { workflowId: target.workflowId, dedupKey: event.dedupKey }
+      );
+      continue;
+    }
     results.push(
       await deliver({ input, organizationId, parentId, target, workflow })
     );
@@ -119,18 +136,20 @@ async function resolveTargets(
     ? await withDb((db) =>
         db.orchestratorAnchor.findUnique({
           where: {
-            organizationId_provider_externalRef: {
+            organizationId_connectionId_externalRef: {
               organizationId,
-              provider: event.item.provider,
+              connectionId: input.connection.record.id,
               externalRef: parentId,
             },
           },
           select: {
+            taskId: true,
+            questionId: true,
             conversation: {
               select: {
                 id: true,
                 projectId: true,
-                case: { select: { workflowId: true } },
+                case: { select: { id: true, workflowId: true } },
               },
             },
           },
@@ -139,7 +158,7 @@ async function resolveTargets(
     : null;
   const targets: RouteTarget[] = [];
   if (anchored) {
-    targets.push(toKnownTarget(anchored.conversation));
+    targets.push(anchoredTarget(anchored));
   }
   const seen = new Set(targets.map((target) => target.workflowId));
   for (const workflow of input.workflows) {
@@ -149,6 +168,9 @@ async function resolveTargets(
         workflowId: workflow.workflowId,
         projectId: workflow.projectId,
         conversationId: null,
+        caseId: null,
+        continued: false,
+        answers: null,
       });
     }
   }
@@ -167,19 +189,25 @@ async function resolveTargets(
       select: {
         id: true,
         projectId: true,
-        case: { select: { workflowId: true } },
+        case: { select: { id: true, workflowId: true } },
       },
       take: CONTINUED_MAX,
     })
   );
-  return continued.map(toKnownTarget);
+  return continued.map((conversation) => toKnownTarget(conversation, true));
 }
 
-function toKnownTarget(conversation: KnownConversation): RouteTarget {
+function toKnownTarget(
+  conversation: KnownConversation,
+  continued: boolean
+): RouteTarget {
   return {
     workflowId: conversation.case.workflowId,
     projectId: conversation.projectId,
     conversationId: conversation.id,
+    caseId: conversation.case.id,
+    continued,
+    answers: null,
   };
 }
 
@@ -192,27 +220,29 @@ async function deliver(args: {
   workflow: OrchestratorWorkflow;
 }): Promise<OrchestratorRouteResult> {
   const { input, organizationId, target, workflow } = args;
-  const conversationId =
-    target.conversationId ??
-    (await openConversation({
-      organizationId,
-      projectId: target.projectId,
-      workflowId: target.workflowId,
-      projectConnectionId: input.projectConnectionId,
-      event: input.event,
-      parentId: args.parentId,
-    }));
+  const { conversationId, caseId } =
+    target.conversationId && target.caseId
+      ? { conversationId: target.conversationId, caseId: target.caseId }
+      : await openConversation({
+          organizationId,
+          projectId: target.projectId,
+          workflowId: target.workflowId,
+          projectConnectionId: input.projectConnectionId,
+          event: input.event,
+          parentId: args.parentId,
+        });
   const created = await recordMessage({
     organizationId,
     conversationId,
     event: input.event,
     workflowNames: [workflow.name],
     debounceSeconds: workflow.debounceSeconds,
+    answers: target.answers,
   });
   if (created && workflow.debounceSeconds === 0) {
     waitUntil(advanceConversation(conversationId));
   }
-  return { conversationId, workflowId: target.workflowId, created };
+  return { conversationId, caseId, workflowId: target.workflowId, created };
 }
 
 async function openConversation(input: {
@@ -222,7 +252,7 @@ async function openConversation(input: {
   projectConnectionId: string;
   event: InboundEvent;
   parentId: string | null;
-}): Promise<string> {
+}): Promise<{ conversationId: string; caseId: string }> {
   const { organizationId, projectId, workflowId, event } = input;
   const sourceKey = caseSourceKey(event.item);
   const channelKey = channelKeyFor(event.item, input.parentId);
@@ -236,7 +266,7 @@ async function openConversation(input: {
         sourceKey,
         title: caseTitle(event),
       },
-      update: { status: OrchestratorCaseStatus.Open },
+      update: { status: OrchestratorCaseStatus.Open, closedAt: null },
       select: { id: true },
     });
     const existing = await tx.orchestratorConversation.findUnique({
@@ -256,7 +286,7 @@ async function openConversation(input: {
             }
           : {},
       });
-      return existing.id;
+      return { conversationId: existing.id, caseId: found.id };
     }
     const conversation = await tx.orchestratorConversation.create({
       data: {
@@ -272,7 +302,7 @@ async function openConversation(input: {
       },
       select: { id: true },
     });
-    return conversation.id;
+    return { conversationId: conversation.id, caseId: found.id };
   });
 }
 
@@ -283,6 +313,7 @@ async function recordMessage(input: {
   event: InboundEvent;
   workflowNames: string[];
   debounceSeconds: number;
+  answers: RouteTarget["answers"];
 }): Promise<boolean> {
   const { event } = input;
   // One comment can raise several events (a reply that mentions the bot): it
@@ -294,7 +325,7 @@ async function recordMessage(input: {
   const content = messageContent(event);
   try {
     await withDb.tx(async (tx) => {
-      await tx.orchestratorMessage.create({
+      const created = await tx.orchestratorMessage.create({
         data: {
           organizationId: input.organizationId,
           conversationId: input.conversationId,
@@ -312,8 +343,21 @@ async function recordMessage(input: {
             workflows: input.workflowNames,
             // The comment it replies to: an answer goes in that thread.
             parentId: event.message?.parentId ?? null,
+            ...(input.answers
+              ? {
+                  taskId: input.answers.taskId,
+                  questionId: input.answers.questionId,
+                }
+              : {}),
           },
         },
+        select: { id: true },
+      });
+      await coverAskedQuestion(tx, {
+        organizationId: input.organizationId,
+        conversationId: input.conversationId,
+        messageId: created.id,
+        answers: input.answers,
       });
       await tx.orchestratorConversation.updateMany({
         where: { id: input.conversationId },
@@ -331,6 +375,48 @@ async function recordMessage(input: {
     }
     throw error;
   }
+}
+
+/**
+ * The first reply to an agent's question covers it: one less open question
+ * on its task. Later replies to the same question and replies to anchors
+ * that are not a question change nothing.
+ */
+async function coverAskedQuestion(
+  tx: TransactionClient,
+  input: {
+    organizationId: string;
+    conversationId: string;
+    messageId: string;
+    answers: RouteTarget["answers"];
+  }
+): Promise<void> {
+  const { answers } = input;
+  if (!answers?.questionId) {
+    return;
+  }
+  const earlier = await tx.orchestratorMessage.findFirst({
+    where: {
+      conversationId: input.conversationId,
+      id: { not: input.messageId },
+      AND: [
+        { payload: { path: ["taskId"], equals: answers.taskId } },
+        { payload: { path: ["questionId"], equals: answers.questionId } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (earlier) {
+    return;
+  }
+  await tx.orchestratorTask.updateMany({
+    where: {
+      id: answers.taskId,
+      organizationId: input.organizationId,
+      openQuestionCount: { gt: 0 },
+    },
+    data: { openQuestionCount: { decrement: 1 } },
+  });
 }
 
 /** Kind, text and extra payload of the message an event records. */
@@ -356,4 +442,19 @@ function messageContent(event: InboundEvent): {
 function caseTitle(event: InboundEvent): string {
   const title = event.item.title?.trim();
   return (title ? `${event.item.key}: ${title}` : event.item.key).slice(0, 255);
+}
+
+function anchoredTarget(anchored: {
+  taskId: string | null;
+  questionId: string | null;
+  conversation: KnownConversation;
+}): RouteTarget {
+  const target = toKnownTarget(anchored.conversation, false);
+  if (anchored.taskId) {
+    return {
+      ...target,
+      answers: { taskId: anchored.taskId, questionId: anchored.questionId },
+    };
+  }
+  return target;
 }

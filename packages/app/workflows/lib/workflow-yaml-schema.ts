@@ -101,7 +101,12 @@ export const WORKFLOW_YAML_KEYS = {
     "concurrency",
     "debounceSeconds",
     "turnTimeoutMinutes",
+    "connections",
     "cancelOn",
+    "mentionOnly",
+    "caseLookup",
+    "caseHandoff",
+    "approvals",
   ],
   /** An item of `agent.runners`. */
   runnerRule: ["runner", "condition"],
@@ -294,51 +299,66 @@ const prdYamlSchema = z
     (prd): WorkflowPrdRule => ({ instruction: prd?.instruction || null })
   );
 
-const agentYamlSchema = z.object(
-  {
-    /** The older place of the workflow's `project`; still read. */
-    project: z.string().trim().min(1).max(200).nullish(),
-    runAs: z.string().trim().min(1).nullish(),
-    runner: requiredText("Name the runner the loops run on", 200),
-    runners: z
-      .array(
-        z.object({
-          runner: requiredText("Name the runner of the rule", 200),
-          condition: requiredText(
-            'Write when the rule applies, e.g. source.assignee_email == "an@acme.dev"',
-            WORKFLOW_RUNNER_CONDITION_MAX
-          ),
-        }),
-        { error: "Write runners: as a list of runner and condition" }
-      )
-      .max(WORKFLOW_RUNNER_RULES_MAX)
-      .nullish()
-      .transform((rules) => rules ?? []),
-    mode: workflowAgentModeSchema.default(WorkflowAgentMode.PlanAndExecute),
-    stopOnOpenQuestions: z.boolean().default(true),
-    repository: z
-      .object({
-        fullName: requiredText("Write the repository, e.g. acme/web", 200).min(
-          3,
-          "Write the repository, e.g. acme/web"
-        ),
-        branch: requiredText("Write the base branch, e.g. main", 200),
-      })
-      .nullish(),
-    prd: prdYamlSchema,
-    titleTemplate: z
-      .string()
-      .trim()
-      .min(1, "Write the title template")
-      .max(300)
-      .default(WORKFLOW_DEFAULT_TITLE_TEMPLATE),
-    instructions: z.string().max(WORKFLOW_INSTRUCTIONS_MAX).nullish(),
-    orchestrator: workflowOrchestratorConfigSchema.nullish(),
-    // Checked by the project process schema (`checkProcess`).
-    process: z.unknown().optional(),
-  },
-  { error: "Add the agent: mapping (runner, mode, …)" }
-);
+const agentYamlSchema = z
+  .object(
+    {
+      /** The older place of the workflow's `project`; still read. */
+      project: z.string().trim().min(1).max(200).nullish(),
+      runAs: z.string().trim().min(1).nullish(),
+      runner: requiredText("Name the runner the loops run on", 200),
+      runners: z
+        .array(
+          z.object({
+            runner: requiredText("Name the runner of the rule", 200),
+            condition: requiredText(
+              'Write when the rule applies, e.g. source.assignee_email == "an@acme.dev"',
+              WORKFLOW_RUNNER_CONDITION_MAX
+            ),
+          }),
+          { error: "Write runners: as a list of runner and condition" }
+        )
+        .max(WORKFLOW_RUNNER_RULES_MAX)
+        .nullish()
+        .transform((rules) => rules ?? []),
+      mode: workflowAgentModeSchema.default(WorkflowAgentMode.PlanAndExecute),
+      stopOnOpenQuestions: z.boolean().default(true),
+      repository: z
+        .object({
+          fullName: requiredText(
+            "Write the repository, e.g. acme/web",
+            200
+          ).min(3, "Write the repository, e.g. acme/web"),
+          branch: requiredText("Write the base branch, e.g. main", 200),
+        })
+        .nullish(),
+      prd: prdYamlSchema,
+      titleTemplate: z
+        .string()
+        .trim()
+        .min(1, "Write the title template")
+        .max(300)
+        .default(WORKFLOW_DEFAULT_TITLE_TEMPLATE),
+      instructions: z.string().max(WORKFLOW_INSTRUCTIONS_MAX).nullish(),
+      orchestrator: workflowOrchestratorConfigSchema.nullish(),
+      // Checked by the project process schema (`checkProcess`).
+      process: z.unknown().optional(),
+    },
+    { error: "Add the agent: mapping (runner, mode, …)" }
+  )
+  .superRefine((agent, context) => {
+    const grants = agent.orchestrator?.connections ?? {};
+    if (
+      agent.mode !== WorkflowAgentMode.Orchestrated &&
+      Object.keys(grants).length > 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["orchestrator", "connections"],
+        message:
+          "connections: only an orchestrated workflow (mode: orchestrated) has orchestrator grants",
+      });
+    }
+  });
 
 export const workflowYamlSchema = z
   .object({
@@ -399,3 +419,6 @@ export type PostActionYaml = z.infer<typeof postActionYamlSchema>;
 function isPostActionEvent(event: WorkflowRunEvent): boolean {
   return WORKFLOW_POST_ACTION_EVENTS.includes(event);
 }
+
+/** Rules longer than this still save, with a warning: they are sent with every orchestrator turn. */
+export const WORKFLOW_INSTRUCTIONS_WARN_LENGTH = 8000;

@@ -1,3 +1,7 @@
+import {
+  OrchestratorCaseStatus,
+  OrchestratorCaseWaitingFor,
+} from "@repo/api/src/types/orchestrator";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -5,7 +9,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isCaseActive,
   useOrchestratorCase,
+  useOrchestratorCaseLoops,
+  useOrgOrchestratorCases,
+  useWorkflowAgentCases,
   useWorkflowOrchestratorCases,
+  workflowCasesPollInterval,
 } from "../use-orchestrator-cases";
 
 const CASE_ID = "case-1";
@@ -79,5 +87,156 @@ describe("useWorkflowOrchestratorCases", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockApiClient.get).toHaveBeenCalledWith("/workflows/w%201/cases");
+  });
+});
+
+describe("useOrchestratorCaseLoops", () => {
+  beforeEach(() => {
+    mockApiClient.get.mockReset();
+    mockApiClient.get.mockResolvedValue({
+      loops: [],
+      sessions: [],
+      pullRequests: [],
+    });
+  });
+
+  it("reads the loops from the encoded case path", async () => {
+    const { result } = renderHook(() => useOrchestratorCaseLoops("c 1"), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      "/orchestrator/cases/c%201/loops"
+    );
+  });
+
+  it("polls only while polling is requested or work is live", async () => {
+    const poll = (opts?: { poll?: boolean }) => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      const { result } = renderHook(
+        () => useOrchestratorCaseLoops("c1", opts),
+        {
+          wrapper: ({ children }: { children: ReactNode }) => (
+            <QueryClientProvider client={client}>
+              {children}
+            </QueryClientProvider>
+          ),
+        }
+      );
+      return { client, result };
+    };
+    const interval = (c: QueryClient) =>
+      c.getQueryCache().getAll()[0]?.observers[0]?.options.refetchInterval as (
+        q: unknown
+      ) => unknown;
+    const run = async (opts: { poll?: boolean } | undefined, data: unknown) => {
+      mockApiClient.get.mockResolvedValue(data);
+      const { client, result } = poll(opts);
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      const query = client.getQueryCache().getAll()[0];
+      return interval(client)(query);
+    };
+    const idle = { loops: [], sessions: [], pullRequests: [] };
+    const liveLoop = {
+      ...idle,
+      loops: [{ loopId: "l", status: "RUNNING" }],
+    };
+    const liveSession = {
+      ...idle,
+      sessions: [{ status: "active" }],
+    };
+
+    expect(await run(undefined, idle)).toBe(false);
+    expect(await run({ poll: true }, idle)).toBe(5000);
+    expect(await run(undefined, liveLoop)).toBe(5000);
+    expect(await run(undefined, liveSession)).toBe(5000);
+  });
+});
+
+describe("useOrgOrchestratorCases", () => {
+  beforeEach(() => {
+    mockApiClient.get.mockReset();
+    mockApiClient.get.mockResolvedValue([]);
+  });
+
+  it("builds the query string from the set filters only", async () => {
+    const { result } = renderHook(
+      () =>
+        useOrgOrchestratorCases({
+          projectId: "p1",
+          status: OrchestratorCaseStatus.Open,
+        }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      `/orchestrator/cases?projectId=p1&status=${OrchestratorCaseStatus.Open}`
+    );
+  });
+
+  it("calls the bare path without filters", async () => {
+    const { result } = renderHook(() => useOrgOrchestratorCases({}), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenCalledWith("/orchestrator/cases");
+  });
+});
+
+describe("useWorkflowAgentCases", () => {
+  beforeEach(() => {
+    mockApiClient.get.mockReset();
+    mockApiClient.get.mockResolvedValue([]);
+  });
+
+  it("reads the workflow's cases from the org list", async () => {
+    const { result } = renderHook(() => useWorkflowAgentCases("w1"), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiClient.get).toHaveBeenCalledWith(
+      "/orchestrator/cases?workflowId=w1"
+    );
+  });
+
+  it("sends no request while disabled", () => {
+    renderHook(() => useWorkflowAgentCases("w1", { enabled: false }), {
+      wrapper,
+    });
+
+    expect(mockApiClient.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("workflowCasesPollInterval", () => {
+  const idle = {
+    turnRunning: false,
+    activeTaskCount: 0,
+    waitingFor: OrchestratorCaseWaitingFor.Nothing,
+  };
+
+  it("polls in the background when nothing is live", () => {
+    expect(workflowCasesPollInterval([])).toBe(30_000);
+    expect(workflowCasesPollInterval([idle])).toBe(30_000);
+  });
+
+  it("polls fast when a case is active", () => {
+    expect(
+      workflowCasesPollInterval([idle, { ...idle, activeTaskCount: 1 }])
+    ).toBe(5000);
+  });
+
+  it("polls fast when a turn is awaited", () => {
+    expect(
+      workflowCasesPollInterval([
+        { ...idle, waitingFor: OrchestratorCaseWaitingFor.Turn },
+      ])
+    ).toBe(5000);
   });
 });

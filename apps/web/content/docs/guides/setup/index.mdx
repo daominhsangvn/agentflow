@@ -1,0 +1,47 @@
+---
+title: "Setup overview"
+description: "What you set up for a project, in which order, and where each part lives, using the LeaveDesk LD-6 setup as the example."
+---
+
+A project that delivers tickets with AgentFlow needs seven things. Set them up in this order: each one names things the earlier ones created.
+
+| # | Part | Where | Guide |
+|---|---|---|---|
+| 1 | **Connections**: the Jira bot, the Confluence user, the Git server token | **Connections** (sidebar) | [Connections](/docs/guides/setup/connections) |
+| 2 | **Project connections and repositories**: the project's keys for those connections, its Jira projects, Confluence spaces and repositories | Project → **Connections & Repos** | [Connections](/docs/guides/setup/connections) |
+| 3 | **Agents**: automatic and personal, with their model provider | The Agent's machine; **Agents** (sidebar) → Your agents | [Agents](/docs/guides/setup/agents), [Personal Agent](/docs/guides/setup/personal-agent) |
+| 4 | **Agent capabilities**: the commands each Agent offers (`AGENTFLOW.md`) | A toolkit repository (automatic) or the project folder (personal) | [Agent capabilities](/docs/guides/setup/agent-capabilities), [Integrate an existing agent](/docs/guides/setup/integrate-existing-agent) |
+| 5 | **Workflow**: triggers, the agent team, actions | Workflows → New workflow (YAML) | [Workflow YAML](/docs/guides/setup/workflow-yaml), [Triggers and actions](/docs/guides/setup/triggers-and-actions) |
+| 6 | **Process** (run-based workflows) or **rules** (orchestrated workflows) | `agent.process` or Project → Process; `agent.instructions` | [Process YAML](/docs/guides/setup/process-yaml), [Orchestrator](/docs/guides/setup/orchestrator) |
+| 7 | **What Agents may write through connections** | `connections:` of an instruction or a process step | [Connection grants](/docs/guides/setup/connection-grants) |
+
+## Two ways to run a workflow
+
+| | Run-based workflow (`plan`, `plan_and_execute`, or a process) | Orchestrated workflow (`orchestrated`) |
+|---|---|---|
+| What a trigger does | Starts a **run** for the ticket | Sends a **message** to the workflow's Orchestrator Agent |
+| Who decides the next step | The process: steps run in the order you wrote them | The Orchestrator Agent, following your rules in plain language |
+| What it is good for | One fixed pipeline per trigger: "label `ready-for-dev` → plan → implement → pull request" | A ticket that moves through statuses, with questions in comments, several Agents in parallel, going back a status |
+| Writes outside AgentFlow | `actions:` and the `connections:` grants of instructions and steps | The orchestrator's tools: replies in the thread, Confluence pages, pull requests |
+
+LeaveDesk started with four run-based workflows (BA, Dev, QC design, QC run, each started by a label) and moved to one orchestrated workflow that follows the Jira status. Both are described in these guides.
+
+## The LD-6 setup at a glance
+
+| Part | LeaveDesk |
+|---|---|
+| Project | **LeaveDesk**, key `PRO-1` |
+| Connections | Jira (one bot, webhook, project `LD`), Confluence (space `LD`), Local Git (Gitea, provided by the server) |
+| Project connection keys | `jira`, `confluence` (repositories are added from the Local Git connection directly) |
+| Repositories | `leavedesk-app` (the code), `leavedesk-knowledge` (BA toolkit and knowledge base), `leavedesk-qa` (QC toolkit and Playwright tests), `leavedesk-superpowers` (Dev toolkit) |
+| Agents | Orchestrator Agent (automatic, no repository work), BA Agent (automatic, toolkit `leavedesk-knowledge`), QC Agent (automatic, toolkit `leavedesk-qa`, Playwright image), Dev Agent (personal, the developer's machine) |
+| Jira statuses | To Do → PRD → Planning → Implement → Testing → Review → Done |
+| Workflow | "LeaveDesk · Questions", `agent.mode: orchestrated`, triggers: status changed and bot mentioned |
+
+The [LeaveDesk example](/docs/guides/setup/leavedesk-example) has every file: the connections, each Agent's `AGENTFLOW.md`, the workflow YAML and the full rules.
+
+## Before you start
+
+- AgentFlow runs (app, API and MCP server; for a team, see [Deploy the server for production](/docs/guides/setup/production-server)) and you are an **organization admin**: connections, project connections and workflows are admin-only.
+- The API is reachable from your Agents over HTTPS, and from Jira when Jira must send webhooks to it (Jira Cloud only calls public HTTPS URLs on an allowed port such as 443).
+- You have an account per bot in each outside system. The bot is the account AgentFlow writes as, and changes it makes are ignored as triggers.

@@ -26,7 +26,7 @@ test("connection settings: write them as YAML with suggestions and see their pro
   const { orgRole, orgSlug } = requireOrgClaims(token);
   expect(isOrgAdminRole(orgRole), ADMIN_REQUIRED_MESSAGE).toBe(true);
 
-  await page.goto(`/${orgSlug}/settings?tab=integrations`);
+  await page.goto(`/${orgSlug}/connections`);
   await page.getByRole("button", { name: "Add connection" }).first().click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: JIRA_RE }).click();

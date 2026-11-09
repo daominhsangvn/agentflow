@@ -2,6 +2,7 @@ import {
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
   OrchestratorTaskStatus,
+  OrchestratorToolName,
   OrchestratorWaitKind,
 } from "@repo/api/src/types/orchestrator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -317,6 +318,40 @@ describe("evaluateWaits", () => {
     expect(text).not.toContain("resumeTaskId");
   });
 
+  it("marks a question the agent already asked on the item", async () => {
+    mocks.tasks = [
+      task("task-1", OrchestratorTaskStatus.Succeeded, {
+        reply: null,
+        questions: [
+          { id: "q1", question: "Part-timers too?", commentId: "10234" },
+        ],
+        error: null,
+      }),
+    ];
+    await waitFor(["task-1"], { wakeOnFailure: false });
+
+    expect(await evaluateWaits("conversation-1", NOW)).toBe(true);
+    const text = mocks.messages[0]?.text as string;
+    expect(text).toContain("comment 10234");
+    expect(text).toContain("do not post it again");
+    expect(text).toContain(OrchestratorToolName.WaitHuman);
+  });
+
+  it("names the message a task answers", async () => {
+    mocks.tasks = [
+      task("task-1", OrchestratorTaskStatus.Succeeded, {
+        reply: "ok",
+        questions: [],
+        error: null,
+        replyTo: "10500",
+      }),
+    ];
+    await waitFor(["task-1"]);
+
+    expect(await evaluateWaits("conversation-1", NOW)).toBe(true);
+    expect(mocks.messages[0]?.text as string).toContain('ref="10500"');
+  });
+
   it("shows why a queued task waits when the deadline passes", async () => {
     mocks.tasks = [
       task("task-1", OrchestratorTaskStatus.Queued, {
@@ -340,6 +375,45 @@ describe("evaluateWaits", () => {
     await waitFor(["task-1"], { timeoutMinutes: 30 });
 
     expect(await fireDueDeadlines(NOW)).toBe(1);
+    expect(mocks.messages[0]).toMatchObject({
+      kind: OrchestratorMessageKind.Deadline,
+    });
+  });
+
+  it("two waits on one cancelled task post one message", async () => {
+    mocks.tasks = [
+      task("task-1", OrchestratorTaskStatus.Cancelled, {
+        reply: null,
+        questions: [],
+        error: null,
+        cancelled: "ticket changed",
+      }),
+      task("task-2", OrchestratorTaskStatus.Running),
+    ];
+    await waitFor(["task-1"], { wakeOnFailure: false });
+    await waitFor(["task-1", "task-2"], { wakeOnFailure: false });
+
+    expect(await evaluateWaits("conversation-1", NOW)).toBe(true);
+
+    expect(mocks.messages).toHaveLength(1);
+    const text = mocks.messages[0]?.text as string;
+    expect(text.split("- Task task-1:")).toHaveLength(2);
+    expect(
+      (mocks.messages[0]?.payload as { waitIds: string[] }).waitIds
+    ).toEqual(["wait-1", "wait-2"]);
+    expect(mocks.waits.every((wait) => wait.firedAt !== null)).toBe(true);
+  });
+
+  it("deadlines of one conversation fire as one message", async () => {
+    mocks.tasks = [
+      task("task-1", OrchestratorTaskStatus.Running),
+      task("task-2", OrchestratorTaskStatus.Running),
+    ];
+    await waitFor(["task-1"], { timeoutMinutes: 30 });
+    await waitFor(["task-2"], { timeoutMinutes: 30 });
+
+    expect(await fireDueDeadlines(NOW)).toBe(2);
+    expect(mocks.messages).toHaveLength(1);
     expect(mocks.messages[0]).toMatchObject({
       kind: OrchestratorMessageKind.Deadline,
     });

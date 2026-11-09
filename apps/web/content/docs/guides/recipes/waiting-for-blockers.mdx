@@ -1,0 +1,39 @@
+---
+title: "Waiting for blockers"
+description: "Hold a ticket's work until the tickets that block it are done, and wake the waiting case when a blocker moves."
+---
+
+A ticket can be blocked by others: a Jira "Blocks" link, or an Azure DevOps Dependency relation. Starting a task on an unfinished dependency produces work that is thrown away, so the rules tell the orchestrator to check first and to wake the cases that wait for it.
+
+## What the platform gives
+
+- `source_item_get` returns `blockedBy` (items this one waits for) and `blocks` (items waiting for this one), each with key, title and status when the provider has them ([Jira](/docs/integrations/jira), [Azure DevOps](/docs/integrations/azure-devops)).
+- `case_notify { itemKey, message }` leaves a **Case notice** message on the case of another item of the same workflow and wakes it. A closed case reopens. The message is queued behind a running turn: it never stops that turn.
+- `case_notify` is refused when that item has no case in the workflow, when the key is the case's own item, from a conversation with no source item, when that case has no conversation on this connection, and from a superseded turn. A refusal shows as a **Refused** message on the case ([Cases](/docs/guides/operate/cases)).
+
+Which statuses count as "done enough" is not configuration. The rules say it.
+
+## What the rules should say
+
+```text
+## Blockers
+- Before starting tasks for a status, read the item (source_item_get). If any item in blockedBy is not yet in Review or Done, start nothing and comment which items it waits for.
+- When this item moves to Review or Done, call case_notify for each item in blocks with what changed.
+- On a case_notify message, read the item again; if no blocker remains, act on its current status as if it had just moved there.
+- A comment on the ticket also re-checks blockers.
+```
+
+Four parts: check before starting, say what is awaited, notify the dependants, and re-check on a notice.
+
+## Limits
+
+- The blocker's workflow needs a trigger that runs a turn when the ticket moves (a status-changed trigger); otherwise nobody calls `case_notify`.
+- The waiting item needs a case in the same workflow.
+- Notifying is the model's choice, not a guarantee. A comment on the waiting ticket wakes it for a manual re-check.
+
+## See also
+
+- [Orchestrator](/docs/guides/setup/orchestrator)
+- [Orchestrator tools](/docs/reference/orchestrator-tools)
+- [Blocked tasks](/docs/guides/recipes/blocked-tasks)
+- [Writing orchestrator rules](/docs/guides/recipes/orchestrator-rules)

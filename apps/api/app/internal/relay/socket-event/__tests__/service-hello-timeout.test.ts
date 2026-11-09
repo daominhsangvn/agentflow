@@ -1,4 +1,5 @@
 import { DesktopHelloNackReason } from "@repo/api/src/types/compute-target";
+import { log } from "@repo/observability/log";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -19,6 +20,14 @@ const {
   mockSetOnlineState: vi.fn(),
   mockClearOperationBacklog: vi.fn(),
   mockIsComputeTargetSigningEligible: vi.fn(),
+}));
+
+const { mockCheckPersonalAgentProject } = vi.hoisted(() => ({
+  mockCheckPersonalAgentProject: vi.fn(),
+}));
+
+vi.mock("@/app/compute-targets/personal-agent-project", () => ({
+  checkPersonalAgentProject: mockCheckPersonalAgentProject,
 }));
 
 vi.mock("@/lib/desktop-command-store", () => ({
@@ -230,6 +239,7 @@ describe("relay dispatchSocketEvent desktop.hello — timeout handling", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
 
+    mockCheckPersonalAgentProject.mockResolvedValue({ ok: true, value: null });
     mockRegister.mockResolvedValue({
       ok: true,
       value: { id: "target-relay-test" },
@@ -470,3 +480,69 @@ const SESSION_SYNC_CAPABILITIES = {
   agentSessionSyncActivityChunking: true,
   agentSessionSyncMonitoredActivity: true,
 };
+
+describe("relay dispatchSocketEvent desktop.hello — personal Agent project check", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("nacks a personal Agent whose project is unknown and registers nothing", async () => {
+    mockCheckPersonalAgentProject.mockResolvedValue({
+      ok: false,
+      error: "Project PRO-9 is not in this organization.",
+    });
+    const result = await dispatchSocketEvent({
+      event: "desktop.hello",
+      payload: {
+        ...HELLO_PAYLOAD,
+        capabilities: { personalRunner: { projectKey: "PRO-9" } },
+      },
+      auth: AUTH,
+      targetId: undefined,
+      correlation: {},
+      pluginVersion: undefined,
+      relaySocketId: undefined,
+      requestArrivedAt: Date.now(),
+    });
+    if (!result.ok) {
+      throw new Error("relay hello dispatch failed");
+    }
+    expect(result.response.disconnect).toBe(true);
+    expect(result.response.emit[0]?.event).toBe("desktop.hello.nack");
+    expect(result.response.emit[0]?.payload).toEqual(
+      expect.objectContaining({
+        reason: DesktopHelloNackReason.PersonalAgentProjectNotFound,
+      })
+    );
+    expect(mockRegister).not.toHaveBeenCalled();
+  });
+
+  it("logs a failed project lookup as a failure, not as an unknown project", async () => {
+    const failure = new Error("db down");
+    mockCheckPersonalAgentProject.mockRejectedValue(failure);
+    const result = await dispatchSocketEvent({
+      event: "desktop.hello",
+      payload: {
+        ...HELLO_PAYLOAD,
+        capabilities: { personalRunner: { projectKey: "PRO-9" } },
+      },
+      auth: AUTH,
+      targetId: undefined,
+      correlation: {},
+      pluginVersion: undefined,
+      relaySocketId: undefined,
+      requestArrivedAt: Date.now(),
+    });
+    if (!result.ok) {
+      throw new Error("relay hello dispatch failed");
+    }
+    expect(result.response.emit[0]?.payload).toEqual(
+      expect.objectContaining({ reason: DesktopHelloNackReason.InternalError })
+    );
+    expect(log.warn).toHaveBeenCalledWith(
+      "relay.hello.personal_project_check_failed",
+      expect.objectContaining({ error: failure })
+    );
+    expect(mockRegister).not.toHaveBeenCalled();
+  });
+});

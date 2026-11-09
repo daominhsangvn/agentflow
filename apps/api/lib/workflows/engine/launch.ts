@@ -48,7 +48,6 @@ import {
 } from "@/lib/loops/loop-dispatch-utils";
 import { buildLoopPrompt } from "@/lib/loops/prompts";
 import { runError } from "./errors";
-import { isPersonalRunnerTarget } from "./personal-runner-queue";
 import { type EngineLoopCommand, recordRunLoop } from "./run-loops";
 import { recordRunRepositories } from "./run-repository";
 
@@ -197,11 +196,11 @@ type LoopContextForCreate = {
 };
 
 /**
- * PLAN: one of the project's runners when it has some (the workflow's target
- * when it is one), else the workflow's target. EXECUTE: the target that ran
- * the PLAN while it is an online project runner, else another online project
- * runner (the runner restores the plan's saved state, docs/runner.md "Plan
- * state"), else the PLAN's target as before.
+ * PLAN: see resolveProjectComputeTarget. EXECUTE: continues on the Agent
+ * holding the PLAN state while it is an online project Agent, else another
+ * online project Agent (the runner restores the plan's saved state,
+ * docs/runner.md "Plan state"), else the PLAN's target as before; it is not
+ * refused even when that Agent has left the project's Agents.
  */
 async function resolveTarget(
   input: LaunchWorkflowLoopInput
@@ -241,10 +240,11 @@ async function resolveTarget(
 }
 
 /**
- * The computer a run's first loop starts on: one of the project's runners
- * when it has some (the workflow's computer when it is one of them), else the
- * workflow's computer. The project is the document's, or the given one
- * before the run has documents.
+ * The workflow's Agent when the project has no Agents. A project with Agents:
+ * the workflow's Agent must be one of them (else AgentNotInProject); it is
+ * used when online, a personal one must be online, an automatic one offline
+ * gives way to the least-busy online project Agent. The project is the
+ * document's, or the given one before the run has documents.
  */
 export async function resolveProjectComputeTarget(
   input: {
@@ -253,17 +253,18 @@ export async function resolveProjectComputeTarget(
     computeTargetId: string;
   } & ProjectRunnerScope
 ): Promise<Result<string, WorkflowRunError>> {
-  // A project with runners runs on them; the workflow's computer is kept
-  // when it is one of them, or when it is a personal runner.
-  const personal = await isPersonalRunnerTarget(input);
-  const runner = personal
-    ? ({ kind: ProjectRunnerChoiceKind.None } as const)
-    : await chooseProjectRunner({
-        organizationId: input.organizationId,
-        userId: input.userId,
-        preferredComputeTargetId: input.computeTargetId,
-        ...projectRunnerScope(input),
-      });
+  const runner = await chooseProjectRunner({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    preferredComputeTargetId: input.computeTargetId,
+    requirePreferred: true,
+    ...projectRunnerScope(input),
+  });
+  if (runner.kind === ProjectRunnerChoiceKind.NotProjectAgent) {
+    return Result.err(
+      runError(WorkflowRunErrorCode.AgentNotInProject, runner.message)
+    );
+  }
   if (runner.kind === ProjectRunnerChoiceKind.Resolved) {
     return Result.ok(runner.computeTargetId);
   }

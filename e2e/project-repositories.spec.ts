@@ -11,7 +11,7 @@ const MISSING_CONNECTION_ID = "0199a5f0-0000-7000-8000-00000000ffff";
 const NO_REPOSITORIES_RE = /No repositories yet/;
 const ADD_FORM_RE = /No connection offers repositories yet|Choose a connection/;
 const REPOSITORIES_TAB_RE = /tab=repositories/;
-const NO_RUNNERS_RE = /No runners yet/;
+const NO_RUNNERS_RE = /No agents yet/;
 
 test("project repositories: empty state, add form and the admin API", {
   tag: E2ETag.Smoke,
@@ -46,32 +46,37 @@ test("project repositories: empty state, add form and the admin API", {
     expect(add.status()).toBe(404);
 
     await page.goto(`/${orgSlug}/projects/${project.id}`);
-    await page.getByRole("radio", { name: "Integrations" }).click();
+    await page.getByRole("radio", { name: "Connections & Repos" }).click();
     await expect(page).toHaveURL(REPOSITORIES_TAB_RE);
     await expect(page.getByText(NO_REPOSITORIES_RE)).toBeVisible({
       timeout: 15_000,
     });
-
-    // Runners: none yet, and a computer that does not exist is refused.
-    await expect(page.getByText(NO_RUNNERS_RE)).toBeVisible();
-    const runners = await request.get(`${api}/projects/${project.id}/runners`, {
-      headers,
-    });
-    expect((await runners.json()).data).toEqual({ runners: [] });
-    const unknownRunner = await request.put(
-      `${api}/projects/${project.id}/runners`,
-      { data: { runnerIds: [MISSING_CONNECTION_ID] }, headers }
-    );
-    expect(unknownRunner.status()).toBe(400);
 
     await page.getByRole("button", { name: "Add repository" }).click();
     await expect(page.getByText(ADD_FORM_RE).first()).toBeVisible({
       timeout: 15_000,
     });
 
-    // Agent instructions live on the overview: saved, and still there after
-    // a reload. The overview no longer carries project-management fields.
-    await page.getByRole("radio", { name: "Overview" }).click();
+    await page.getByRole("radio", { name: "Agents" }).click();
+    // Agents: none yet, and a computer that does not exist is refused.
+    await expect(page.getByText(NO_RUNNERS_RE)).toBeVisible();
+    const runners = await request.get(`${api}/projects/${project.id}/runners`, {
+      headers,
+    });
+    expect((await runners.json()).data).toEqual({
+      runners: [],
+      waiting: [],
+      projectKey: expect.any(String),
+    });
+    const unknownRunner = await request.put(
+      `${api}/projects/${project.id}/runners`,
+      { data: { runnerIds: [MISSING_CONNECTION_ID] }, headers }
+    );
+    expect(unknownRunner.status()).toBe(400);
+
+    // Agent instructions live on the Instructions tab: saved, and still there
+    // after a reload. The overview no longer carries project-management fields.
+    await page.getByRole("radio", { name: "Instructions" }).click();
     await expect(page.getByText("Due Date")).toHaveCount(0);
     const instructions = page.getByRole("textbox", {
       name: "Agent instructions",
@@ -92,7 +97,7 @@ test("project repositories: empty state, add form and the admin API", {
     expect((await stored.json()).data).toEqual({
       instructions: "- shop: storefront\n- api: backend",
     });
-    await page.getByRole("radio", { name: "Integrations" }).click();
+    await page.getByRole("radio", { name: "Connections & Repos" }).click();
     await expect(
       page.getByRole("textbox", { name: "Agent instructions" })
     ).toHaveCount(0);

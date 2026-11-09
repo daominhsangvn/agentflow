@@ -1,0 +1,323 @@
+# AgentFlow production stack (self-hosted): postgres, RustFS (S3), api, app, mcp,
+# plus one-shot jobs: `migrate` (database), `storage-init` (buckets) and
+# `bootstrap-admin` (first AgentFlow owner from AGENTFLOW_ADMIN_*). Images are
+# built on this server from source. Every published port is bound to 127.0.0.1;
+# put your HTTPS reverse proxy in front of it.
+#
+# Optional profiles:
+#   local-git  Gitea plus the `local-git-init` job (admin user + API token,
+#              written to a shared volume the api reads via LOCAL_GIT_TOKEN_FILE)
+#   mailpit    Mailpit mail catcher (UI behind MAILPIT_UI_USER/PASSWORD)
+# Select them with --profile or COMPOSE_PROFILES=local-git,mailpit in .env.
+#
+#   cp deploy/compose/.env.prod.example deploy/compose/.env   # then edit it
+#   docker compose -f deploy/compose/docker-compose.prod.yml up -d --build
+#   docker compose -f deploy/compose/docker-compose.prod.yml --profile local-git --profile mailpit up -d
+#
+# Compose reads deploy/compose/.env (next to this file) for ${...} substitution,
+# so no --env-file is needed. Run the commands from the repository root. NEXT_PUBLIC_* values are baked into
+# the app and api images: rebuild (`up -d --build`) after changing them.
+
+name: agentflow-prod
+
+x-api-image: &api-image ${AGENTFLOW_IMAGE_NAMESPACE:-agentflow-prod}/api:local
+x-database-url: &database-url postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}@postgres:5432/${POSTGRES_DB:-agentflow_ai}?sslmode=disable
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-agentflow_ai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-agentflow_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # S3-compatible object storage. Console on 127.0.0.1:9001 only (use an SSH tunnel).
+  rustfs:
+    image: rustfs/rustfs:1.0.1
+    restart: unless-stopped
+    command: ["/data"]
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID in deploy/compose/.env}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in deploy/compose/.env}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_OBS_LOGGER_LEVEL: ${RUSTFS_LOG_LEVEL:-warn}
+    ports:
+      - "127.0.0.1:${S3_PORT:-9000}:9000"
+      - "127.0.0.1:${S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional git hosting (Gitea). Start with `--profile local-git`.
+  local-git:
+    image: gitea/gitea:1.24.7
+    profiles: ["local-git"]
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__ROOT_URL: ${LOCAL_GIT_URL:-http://localhost:3300}/
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__server__OFFLINE_MODE: "true"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "true"
+      GITEA__repository__DEFAULT_BRANCH: main
+      GITEA__repository__DEFAULT_PRIVATE: private
+      GITEA__log__LEVEL: warn
+    ports:
+      - "127.0.0.1:${LOCAL_GIT_PORT:-3300}:3000"
+    volumes:
+      - local_git_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set NEXT_PUBLIC_APP_URL in deploy/compose/.env}
+        NEXT_PUBLIC_WEB_URL: ${NEXT_PUBLIC_WEB_URL:?set NEXT_PUBLIC_WEB_URL in deploy/compose/.env}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL in deploy/compose/.env}
+    image: *api-image
+    restart: unless-stopped
+    env_file:
+      - path: ${AGENTFLOW_ENV_FILE:-.env}
+        required: true
+    environment:
+      DATABASE_URL: *database-url
+      S3_ENDPOINT: http://rustfs:9000
+      S3_FORCE_PATH_STYLE: "true"
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:?set S3_PUBLIC_ENDPOINT in deploy/compose/.env}
+      AGENTFLOW_RUNNER_JWT_SECRET: ${AGENTFLOW_RUNNER_JWT_SECRET:?set AGENTFLOW_RUNNER_JWT_SECRET in deploy/compose/.env}
+      BETTER_AUTH_URL: ${NEXT_PUBLIC_APP_URL:?set NEXT_PUBLIC_APP_URL in deploy/compose/.env}
+      API_BASE_URL: ${API_BASE_URL:-${NEXT_PUBLIC_API_URL}}
+      AGENTFLOW_MCP_URL: ${MCP_SERVER_URL:?set MCP_SERVER_URL in deploy/compose/.env}/mcp
+      HOST: 0.0.0.0
+      PORT: "3002"
+      # JWKS for verifying session tokens: reach this container, not the public URL.
+      AUTH_API_URL: http://127.0.0.1:3002
+      LOCAL_GIT_SERVER_URL: ${LOCAL_GIT_SERVER_URL:-http://local-git:3000}
+      LOCAL_GIT_RUNNER_URL: ${LOCAL_GIT_RUNNER_URL:-${LOCAL_GIT_URL:-}}
+      LOCAL_GIT_TOKEN_FILE: /run/local-git/token
+      # Never install dependencies at boot.
+      PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
+    ports:
+      - "127.0.0.1:${API_PORT:-3002}:3002"
+    volumes:
+      - local_git_token:/run/local-git:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+      local-git-init:
+        condition: service_completed_successfully
+        required: false
+      mailpit:
+        condition: service_healthy
+        required: false
+
+  # One-shot: create the first AgentFlow owner through the api (skipped when a
+  # user already exists). `app` waits for it, so only the app's sign-up page is
+  # held back. The api accepts sign-up once healthy; set AUTH_ALLOW_SIGN_UP=false
+  # for the first `up` (the bootstrap call bypasses it for the first owner).
+  bootstrap-admin:
+    image: *api-image
+    pull_policy: never
+    restart: "no"
+    working_dir: /app
+    command: ["node", "scripts/bootstrap-first-admin.mjs"]
+    environment:
+      AGENTFLOW_API_INTERNAL_URL: http://api:3002
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?set INTERNAL_API_SECRET in deploy/compose/.env}
+      AGENTFLOW_ADMIN_EMAIL: ${AGENTFLOW_ADMIN_EMAIL:?set AGENTFLOW_ADMIN_EMAIL in deploy/compose/.env}
+      AGENTFLOW_ADMIN_PASSWORD: ${AGENTFLOW_ADMIN_PASSWORD:?set AGENTFLOW_ADMIN_PASSWORD in deploy/compose/.env}
+      AGENTFLOW_ADMIN_NAME: ${AGENTFLOW_ADMIN_NAME:-Administrator}
+      PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # One-shot (profile local-git): ensure the Gitea admin user and API token.
+  local-git-init:
+    image: gitea/gitea:1.24.7
+    profiles: ["local-git"]
+    restart: "no"
+    entrypoint: ["/bin/sh", "/local-git-init.sh"]
+    environment:
+      LOCAL_GIT_ADMIN_USER: ${LOCAL_GIT_ADMIN_USER:-agentflow}
+      LOCAL_GIT_ADMIN_PASSWORD: ${LOCAL_GIT_ADMIN_PASSWORD:-}
+      LOCAL_GIT_ADMIN_EMAIL: ${LOCAL_GIT_ADMIN_EMAIL:-}
+      LOCAL_GIT_OWNER: ${LOCAL_GIT_OWNER:-}
+      GITEA_INTERNAL_URL: http://local-git:3000
+    volumes:
+      - ./local-git-init.sh:/local-git-init.sh:ro
+      - local_git_data:/data
+      - local_git_token:/run/local-git
+    depends_on:
+      local-git:
+        condition: service_healthy
+
+  # Optional mail catcher. Start with `--profile mailpit`; set SMTP_URL=smtp://mailpit:1025.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    profiles: ["mailpit"]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$${MAILPIT_UI_PASSWORD}" ]; then
+          echo "set MAILPIT_UI_PASSWORD in deploy/compose/.env" >&2
+          exit 1
+        fi
+        export MP_UI_AUTH="$${MAILPIT_UI_USER}:$${MAILPIT_UI_PASSWORD}"
+        exec /mailpit
+    environment:
+      MAILPIT_UI_USER: ${MAILPIT_UI_USER:-admin}
+      MAILPIT_UI_PASSWORD: ${MAILPIT_UI_PASSWORD:-}
+      MP_DATABASE: /data/mailpit.db
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+    volumes:
+      - mailpit_data:/data
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # One-shot: apply database migrations with the api image.
+  migrate:
+    image: *api-image
+    pull_policy: never
+    restart: "no"
+    working_dir: /app/packages/database
+    command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: *database-url
+      PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # One-shot: create the buckets and CORS rules (idempotent).
+  storage-init:
+    image: *api-image
+    pull_policy: never
+    restart: "no"
+    working_dir: /app
+    command: ["node", "scripts/storage-init.mjs"]
+    environment:
+      S3_ENDPOINT: http://rustfs:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_FORCE_PATH_STYLE: "true"
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID in deploy/compose/.env}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in deploy/compose/.env}
+      FILE_ATTACHMENTS_BUCKET: ${FILE_ATTACHMENTS_BUCKET:-agentflow-attachments}
+      TRANSCRIPTS_BUCKET: ${TRANSCRIPTS_BUCKET:-agentflow-transcripts}
+      PLUGIN_STORE_BUCKET: ${PLUGIN_STORE_BUCKET:-agentflow-plugin-store}
+      LOOP_STATE_BUCKET: ${LOOP_STATE_BUCKET:-agentflow-loop-state}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set NEXT_PUBLIC_APP_URL in deploy/compose/.env}
+      S3_CORS_ALLOWED_ORIGINS: ${S3_CORS_ALLOWED_ORIGINS:-${NEXT_PUBLIC_APP_URL}}
+    depends_on:
+      rustfs:
+        condition: service_healthy
+
+  app:
+    build:
+      context: ../..
+      dockerfile: apps/app/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL in deploy/compose/.env}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set NEXT_PUBLIC_APP_URL in deploy/compose/.env}
+        NEXT_PUBLIC_WEB_URL: ${NEXT_PUBLIC_WEB_URL:?set NEXT_PUBLIC_WEB_URL in deploy/compose/.env}
+        AUTH_API_URL: http://api:3002
+        NEXT_PUBLIC_DOCS_URL: ${NEXT_PUBLIC_DOCS_URL:-}
+        NEXT_PUBLIC_MCP_SERVER_URL: ${MCP_SERVER_URL:?set MCP_SERVER_URL in deploy/compose/.env}/mcp
+        NEXT_PUBLIC_AGENTFLOW_FEATURE_FLAGS: ${NEXT_PUBLIC_AGENTFLOW_FEATURE_FLAGS:-}
+        NEXT_PUBLIC_APP_ENVIRONMENT: production
+        NEXT_PUBLIC_LOGO_URL: ${NEXT_PUBLIC_LOGO_URL:-}
+        NEXT_PUBLIC_GITHUB_APP_SLUG: ${NEXT_PUBLIC_GITHUB_APP_SLUG:-}
+        NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
+        NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-}
+    image: ${AGENTFLOW_IMAGE_NAMESPACE:-agentflow-prod}/app:local
+    restart: unless-stopped
+    environment:
+      AUTH_API_URL: http://api:3002
+      SERVER_API_URL: http://api:3002
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?set INTERNAL_API_SECRET in deploy/compose/.env}
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+      bootstrap-admin:
+        condition: service_completed_successfully
+
+  mcp:
+    build:
+      context: ../..
+      dockerfile: apps/mcp/Dockerfile
+    image: ${AGENTFLOW_IMAGE_NAMESPACE:-agentflow-prod}/mcp:local
+    restart: unless-stopped
+    environment:
+      AGENTFLOW_API_URL: http://api:3002
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?set INTERNAL_API_SECRET in deploy/compose/.env}
+      DATABASE_URL: *database-url
+      MCP_SERVER_URL: ${MCP_SERVER_URL:?set MCP_SERVER_URL in deploy/compose/.env}
+      WEBAPP_URL: ${NEXT_PUBLIC_APP_URL:?set NEXT_PUBLIC_APP_URL in deploy/compose/.env}
+      WEBAPP_ENV: prod
+      MCP_TRUST_PROXY: "true"
+    ports:
+      - "127.0.0.1:${MCP_PORT:-3010}:3010"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  rustfs_data:
+  local_git_data:
+  local_git_token:
+  mailpit_data:

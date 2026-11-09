@@ -10,7 +10,7 @@ import { E2ETag } from "./helpers/tags";
 import { createUniqueName } from "./helpers/utils";
 import { expect, test } from "./test";
 
-// Project → Integrations → Commands: what each runner declares in its
+// Project → Agents → Commands: what each runner declares in its
 // AGENTFLOW.md. A file only exists once a runner uploaded it, so the list is
 // served by a route; the project and the page are real.
 
@@ -41,7 +41,7 @@ test("project runner capabilities: the runners' declared commands", {
     );
 
     await page.goto(`/${orgSlug}/projects/${project.id}`);
-    await page.getByRole("radio", { name: "Integrations" }).click();
+    await page.getByRole("radio", { name: "Agents" }).click();
     const section = page.getByTestId("project-runner-capabilities");
     await expect(section).toBeVisible({ timeout: 15_000 });
     // Loaded only once opened.

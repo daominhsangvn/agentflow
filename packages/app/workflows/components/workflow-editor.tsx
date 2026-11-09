@@ -14,6 +14,8 @@ import {
 // Cross-slice: the YAML names the org's projects, members and repositories.
 import { useOrgProjectConnections } from "@repo/app/projects/hooks/use-project-connections";
 import { useProjectRepositories } from "@repo/app/projects/hooks/use-project-repositories";
+// Cross-slice: the editor suggests only the project's Agents.
+import { useProjectRunners } from "@repo/app/projects/hooks/use-project-runners";
 import { useProjects } from "@repo/app/projects/hooks/use-projects";
 import { getUserDisplayName } from "@repo/app/shared/lib/user-utils";
 import {
@@ -33,7 +35,10 @@ import { useOrgPath } from "@repo/navigation/use-org-path";
 import { AlertTriangleIcon, InfoIcon, Loader2Icon } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
 import { useCreateWorkflow, useUpdateWorkflow } from "../hooks/use-workflows";
-import type { WorkflowComputeTargetChoices } from "../lib/workflow-editor-options";
+import {
+  projectAgentOptions,
+  type WorkflowComputeTargetChoices,
+} from "../lib/workflow-editor-options";
 import {
   WORKFLOW_SOURCE_SYSTEMS_NOTICE,
   WorkflowMutationErrorTitle,
@@ -199,14 +204,21 @@ function WorkflowYamlForm({
   const repositories = useProjectRepositories(projectId, {
     enabled: REPOSITORY_KEY_RE.test(text),
   });
+  const projectRunners = useProjectRunners(projectId, { enabled: isAdmin });
+  const projectRunnerList = projectRunners.data?.runners;
   const completionData = useMemo(
     () => ({
       ...catalog,
+      // Suggestions only; catalog.runners keeps resolving stored names.
+      runners: projectAgentOptions(
+        catalog.runners,
+        (projectRunnerList ?? []).map((r) => r.id)
+      ),
       repositories: (repositories.data ?? []).map(
         (repository) => repository.fullName
       ),
     }),
-    [catalog, repositories.data]
+    [catalog, repositories.data, projectRunnerList]
   );
   const isPending = createWorkflow.isPending || updateWorkflow.isPending;
   const readOnly = !isAdmin;
@@ -262,7 +274,9 @@ function WorkflowYamlForm({
         </Alert>
       ) : null}
       <WorkflowYamlIntro />
-      <WorkflowConfigurationGuide catalog={catalog} defaultOpen={!workflow} />
+      {workflow ? null : (
+        <WorkflowConfigurationGuide catalog={catalog} defaultOpen />
+      )}
       {unavailable.length > 0 ? (
         <Alert variant="warning">
           <AlertTriangleIcon />

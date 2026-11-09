@@ -14,6 +14,7 @@ import {
   loadConnectionRuntime,
   recordConnectionPollResult,
 } from "@/lib/integrations/connection-service";
+import { loadConnectionPollScopes } from "@/lib/integrations/project-connections";
 import type { InboundEvent } from "@/lib/integrations/types";
 import { jsonValueSchema } from "@/lib/json-schema";
 import { scrubProviderError } from "./errors";
@@ -119,7 +120,16 @@ async function pollConnection(
   try {
     const result = await poll(
       createProviderContext(loaded.runtime, LOG_PREFIX),
-      readCursor(connection.pollCursor)
+      readCursor(connection.pollCursor),
+      {
+        intervalSeconds: connection.pollIntervalSeconds,
+        loadScopes: () =>
+          loadConnectionPollScopes(
+            connection.organizationId,
+            connection.id,
+            loaded.provider
+          ),
+      }
     );
     const runs = await ingestPolledEvents(loaded, result.events);
     await recordConnectionPollResult(connection.id, {

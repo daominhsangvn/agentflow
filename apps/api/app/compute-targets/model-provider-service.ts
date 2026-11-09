@@ -232,3 +232,11 @@ function buildClaudeEnv(
   }
   return env;
 }
+
+/** The pinned Claude Code version of a stored `model_provider` value ("latest" when unset). */
+export function readPinnedClaudeCodeVersion(modelProvider: unknown): string {
+  const parsed = storedSettingsSchema.safeParse(modelProvider);
+  return parsed.success
+    ? parsed.data.claudeCodeVersion
+    : ClaudeCodeVersionChannel.Latest;
+}

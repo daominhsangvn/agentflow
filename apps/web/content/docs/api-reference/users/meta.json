@@ -1,4 +1,0 @@
-{
-  "title": "Users",
-  "pages": ["listUsers", "getCurrentUser"]
-}

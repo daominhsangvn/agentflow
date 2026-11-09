@@ -18,3 +18,17 @@ export type WorkflowComputeTargetChoices = {
   isLoading: boolean;
   error: Error | null;
 };
+
+/**
+ * The Agents to suggest: only the project's Agents when it has some, else all
+ * of them.
+ */
+export function projectAgentOptions(
+  options: readonly WorkflowComputeTargetOption[],
+  runnerIds: readonly string[]
+): readonly WorkflowComputeTargetOption[] {
+  if (runnerIds.length === 0) {
+    return options;
+  }
+  return options.filter((option) => runnerIds.includes(option.id));
+}

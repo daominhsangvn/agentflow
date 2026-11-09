@@ -3,7 +3,7 @@ import { z } from "zod";
 import { jsonObjectSchema, stringRecordSchema } from "@/lib/json-schema";
 import { isRecord } from "@/lib/type-guards";
 import { ATLASSIAN_CLOUD_ID_RE } from "../atlassian/auth";
-import { JiraDeployment } from "./constants";
+import { JiraDeployment, JiraPollScope } from "./constants";
 import { epochMillisToIso } from "./dates";
 
 /**
@@ -38,6 +38,8 @@ const connectionInputSchema = z.object({
    * through the Atlassian API gateway (an API token with scopes).
    */
   cloudId: z.string().trim().regex(ATLASSIAN_CLOUD_ID_RE).nullish(),
+  /** Poll delivery only. Absent means assigned_to_bot. */
+  pollScope: z.enum(JiraPollScope).nullish(),
 });
 type ConnectionInput = z.infer<typeof connectionInputSchema>;
 
@@ -110,6 +112,48 @@ export const jiraAttachmentSchema = z.looseObject({
 });
 export type JiraAttachment = z.infer<typeof jiraAttachmentSchema>;
 
+const jiraLinkedIssueSchema = z.looseObject({
+  key: z.string(),
+  fields: z
+    .looseObject({
+      summary: optionalTextSchema,
+      status: optionalNamedValueSchema,
+    })
+    .nullish()
+    .catch(null),
+});
+
+export const jiraIssueLinkSchema = z.looseObject({
+  type: z.looseObject({ name: optionalTextSchema }).nullish().catch(null),
+  inwardIssue: jiraLinkedIssueSchema.nullish().catch(null),
+  outwardIssue: jiraLinkedIssueSchema.nullish().catch(null),
+});
+export type JiraIssueLink = z.infer<typeof jiraIssueLinkSchema>;
+
+export const jiraCommentSchema = z.looseObject({
+  id: idSchema,
+  /** Set on a reply in a comment thread: the comment it replies to. */
+  parentId: idSchema.nullish(),
+  author: optionalUserSchema,
+  created: jiraDateSchema,
+  /** ADF on Cloud v3, wiki markup on v2. */
+  body: z.unknown().optional(),
+  updated: jiraDateSchema,
+  updateAuthor: optionalUserSchema,
+  /** `expand=renderedBody`: HTML. */
+  renderedBody: z.string().nullish(),
+});
+export type JiraComment = z.infer<typeof jiraCommentSchema>;
+
+/** Comments without an id are dropped one by one; a value that is not a list degrades to null. */
+export const jiraCommentsSchema = z
+  .array(jiraCommentSchema.nullable().catch(null))
+  .transform((comments) => comments.filter((comment) => comment !== null))
+  .nullish()
+  .catch(null);
+
+const optionalCountSchema = z.number().nullish().catch(null);
+
 export const jiraIssueFieldsSchema = z.looseObject({
   summary: optionalTextSchema,
   /** ADF on Cloud REST v3, wiki markup (string) in webhooks and on REST v2. */
@@ -126,6 +170,12 @@ export const jiraIssueFieldsSchema = z.looseObject({
     .nullish()
     .catch(null),
   attachment: z.array(jiraAttachmentSchema).nullish().catch(null),
+  issuelinks: z.array(jiraIssueLinkSchema).nullish().catch(null),
+  /** Search results and issue reads carry the newest page of comments. */
+  comment: z
+    .looseObject({ comments: jiraCommentsSchema, total: optionalCountSchema })
+    .nullish()
+    .catch(null),
   /** ISO string (epoch milliseconds in Automation bodies are converted). */
   created: jiraDateSchema,
   updated: jiraDateSchema,
@@ -179,8 +229,6 @@ const jiraHistoriesSchema = z
   .transform((histories) => histories.filter((history) => history !== null))
   .nullish()
   .catch(null);
-
-const optionalCountSchema = z.number().nullish().catch(null);
 
 /** Cloud `GET /rest/api/3/issue/{id}/changelog` (oldest first, paginated). */
 export const jiraChangelogPageSchema = z.looseObject({
@@ -252,21 +300,10 @@ export const jiraSearchResultSchema = z.looseObject({
 });
 export type JiraSearchResult = z.infer<typeof jiraSearchResultSchema>;
 
-export const jiraCommentSchema = z.looseObject({
-  id: idSchema,
-  /** Set on a reply in a comment thread: the comment it replies to. */
-  parentId: idSchema.nullish(),
-  author: optionalUserSchema,
-  created: jiraDateSchema,
-  /** ADF on Cloud v3, wiki markup on v2. */
-  body: z.unknown().optional(),
-  /** `expand=renderedBody`: HTML. */
-  renderedBody: z.string().nullish(),
-});
-export type JiraComment = z.infer<typeof jiraCommentSchema>;
-
 export const jiraCommentPageSchema = z.looseObject({
-  comments: z.array(jiraCommentSchema).nullish(),
+  comments: jiraCommentsSchema,
+  total: optionalCountSchema,
+  startAt: optionalCountSchema,
 });
 
 export const jiraCreatedCommentSchema = z.looseObject({
@@ -356,6 +393,7 @@ function normalizeConnectionInput(input: ConnectionInput): {
   siteUrl: string;
   email: string | null;
   cloudId?: string;
+  pollScope?: JiraPollScope;
 } {
   const site = normalizeSiteUrl(input.siteUrl, input.deployment);
   const isCloud = input.deployment === JiraDeployment.Cloud;
@@ -365,6 +403,9 @@ function normalizeConnectionInput(input: ConnectionInput): {
     email: isCloud ? (input.email ?? null) : null,
     ...(isCloud && input.cloudId
       ? { cloudId: input.cloudId.toLowerCase() }
+      : {}),
+    ...(input.pollScope === JiraPollScope.ProjectChanges
+      ? { pollScope: JiraPollScope.ProjectChanges }
       : {}),
   };
 }
@@ -446,6 +487,23 @@ export const jiraFoundIssuesSchema = z.looseObject({
           .looseObject({ summary: z.string().nullish() })
           .nullish()
           .catch(null),
+      })
+    )
+    .nullish(),
+});
+
+export function jiraPollScopeOf(
+  config: Pick<JiraConnectionConfig, "pollScope">
+): JiraPollScope {
+  return config.pollScope ?? JiraPollScope.AssignedToBot;
+}
+
+export const jiraJqlParseResultSchema = z.looseObject({
+  queries: z
+    .array(
+      z.looseObject({
+        query: z.string().nullish(),
+        errors: z.array(z.string()).nullish().catch(null),
       })
     )
     .nullish(),

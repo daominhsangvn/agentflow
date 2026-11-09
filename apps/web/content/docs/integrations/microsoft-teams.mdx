@@ -1,0 +1,46 @@
+---
+title: "Microsoft Teams"
+description: "Start work by mentioning the bot in a Teams channel, and post or reply in Teams from workflows."
+---
+
+## What it does
+
+One connection has two independent parts, and at least one must be set:
+
+- **Workflows webhook** to post cards to a channel.
+- **Bot** (an Azure Bot) to be mentioned in channels and to answer in the thread.
+
+## Connection settings
+
+| Key | Notes |
+|---|---|
+| secret `webhookUrl` | A Teams Workflows webhook ("Send webhook alerts to a channel"). Old Office 365 connector webhooks are rejected |
+| `config.appId`, `config.tenantId` | The Azure Bot (single tenant) |
+| secret `clientSecret` | The bot's app registration secret |
+| `inbound.mode` | `webhook`: the inbound URL is the Azure Bot's messaging endpoint, so it must be public HTTPS (behind NAT, use a tunnel and `PUBLIC_WEBHOOK_BASE_URL`) |
+
+Project setting: `channels` (links or ids) lists where mentioning the bot starts this project's workflows. Empty means the project only posts.
+
+## Triggers
+
+| Type | Starts when |
+|---|---|
+| `microsoft_teams.bot_mentioned` | A channel message in the bot's tenant mentions the bot, as a new post or a thread reply. The item is the **thread**: one run per thread, and another mention resumes a run that waits for input. Filter: `channels`. Group chats, personal chats and other tenants are ignored |
+
+A reply in a thread that does not mention the bot (`microsoft_teams.thread_reply`) is not a trigger. Only an Orchestrator Agent that already talks in that thread receives it.
+
+## Actions
+
+| Operation | What it does |
+|---|---|
+| `microsoft_teams.post_message` | Posts an Adaptive Card (title, text, facts, buttons) through the webhook |
+| `microsoft_teams.reply` | Answers in the thread the run came from, optionally starting with an @mention of the requester. Skipped for runs that did not come from Teams |
+
+## Setup
+
+The connection page shows the setup steps and a Teams app manifest template; the app needs the RSC permission `ChannelMessage.Read.Group`. See [Connections and repositories](/docs/guides/setup/connections).
+
+## Limits
+
+- Anyone in the channel can ask. Thread text is untrusted input, like ticket text.
+- Up to 500 replies of a thread are read; the oldest are dropped above 60 000 characters.

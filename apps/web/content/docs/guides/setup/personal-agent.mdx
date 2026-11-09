@@ -1,0 +1,139 @@
+---
+title: "Personal Agent"
+description: "Run a personal Agent on a person's own computer, in the project folder they already use: install, set up, keep it running, upgrade."
+---
+
+A **personal Agent** runs AgentFlow's tasks on a person's own computer, in the project folder they already work in, with their own Git, `gh` and `~/.claude`. The commands they type by hand today run unchanged when a workflow starts them. It works for one AgentFlow project; run one per project. How it differs from an automatic Agent: [Agents](/docs/guides/setup/agents).
+
+## What the computer needs
+
+- Node.js 22 or newer, `bash`, `git`, `jq` and `python3` with PyYAML. The Agent checks them when it starts and exits with code `3` naming the missing one. On Windows: Git for Windows (its `bash.exe` runs the scripts), `jq` and Python 3. Install Claude Code with the native installer (`irm https://claude.ai/install.ps1 | iex`), not npm. Before the setup, run `doctor.bat --project PRO-1` from the unzipped folder: it checks these tools, that the first `claude` on PATH is the native one, how Git Bash passes the loops' prompts, and, once set up, the Agent's `runner.env` and API URL. Fix every `FAIL` line first.
+- Claude Code on `PATH`, with the version the Agent is pinned to in AgentFlow if one is pinned (see [After it starts](#after-it-starts)). A personal Agent never installs Claude Code.
+- The person's own tools the project's commands use, signed in: `gh` (or `tea` for Gitea, with a token that has `write:repository` and `write:issue`), SSH keys or a credential helper for `git push`, and any MCP servers in `~/.claude`.
+- The project folder, already cloned, with an `AGENTFLOW.md` that declares its commands ([Agent capabilities](/docs/guides/setup/agent-capabilities)).
+- The API URL over HTTPS and an API key with the `write` scope ([First admin and organization](/docs/getting-started/first-admin#create-an-api-key-for-agents)).
+
+## Install
+
+Download the Agent bundle from the repository's GitHub releases (tags `runner-v*`):
+
+| Computer | File | Start command |
+|---|---|---|
+| macOS or Linux | `agentflow-runner-<version>-linux.tar.gz` | `node runner.mjs` |
+| Windows | `agentflow-runner-<version>-windows.zip` | `start-runner.cmd` |
+
+The bundle is plain Node.js, so the Linux archive also runs on macOS. Do not run its `install.sh`: that installs an automatic Agent as a system service on a server.
+
+```bash
+mkdir -p ~/agentflow-runner && cd ~/agentflow-runner
+tar -xzf ~/Downloads/agentflow-runner-*-linux.tar.gz
+cd agentflow-runner
+```
+
+From a clone of the repository you can build the same bundle with `pnpm -C apps/desktop package:headless` (`--windows` for the zip).
+
+## Set up
+
+```bash
+node runner.mjs setup                    # Windows: setup-runner.cmd
+```
+
+Answer `personal` to the first question, then:
+
+| Question | Notes |
+|---|---|
+| API URL and API key | The key's owner becomes the owner of this Agent |
+| Project key | The AgentFlow project's key, for example `PRO-1` |
+| Project folder | Must exist; tasks run in it |
+| Several tasks at once | Default no. Yes only when the project's commands keep their own work apart (a worktree or branch per ticket) |
+| Any tool without a permission prompt | Default no. Nobody is at the terminal to approve a prompt, so tools the commands need must be allowed in their `allowed-tools` or the person's `permissions.allow`. Yes lets the agent do anything the account can |
+| Name | Default `<user name>-<project key>` |
+| Local gateway port | Enter picks a free port |
+
+The answers are saved in `~/.agentflow-runner/personal/<project key>/runner.env` (Windows: `%USERPROFILE%\.agentflow-runner\personal\<project key>\runner.env`). `node runner.mjs setup --project PRO-1` asks that Agent's questions again. All settings: [Agent CLI and environment](/docs/reference/agent-cli).
+
+## Start
+
+```bash
+node runner.mjs --project PRO-1          # Windows: start-runner.cmd --project PRO-1
+```
+
+It uploads the folder's `AGENTFLOW.md` and waits for tasks. The data directory keeps the Agent's identity, so the next start is the same Agent in AgentFlow. A second process for the same project refuses to start (`runner.lock`).
+
+## After it starts
+
+1. The Agent appears online under **Agents** (sidebar) → **Your agents**.
+2. Set its **Model provider** there, or leave Claude Code to use the person's own login.
+3. Set its **Claude Code version** to `latest`, or to the exact version `claude --version` prints. A pinned version that differs fails each task with the `claude install <version>` command to run.
+4. Add it in Project → **Agents**: until then it shows under **Waiting to be added**, and only an admin of the project can add it. It can only be added to its own project. A project key that is not a project of the API key's organization is refused at start (`personal_agent_project_not_found`). Then name it in the workflow (`runner:` or a step's runner) where its commands should run.
+5. Check Project → **Agents** → **Commands**: the commands from `AGENTFLOW.md` and any problems found in it.
+
+Try it on one ticket through every step of the workflow before using it on real work.
+
+## Keep it running
+
+A personal Agent runs only while its process runs. Start it at login so it survives closing the terminal and restarts.
+
+**macOS (launchd).** Save as `~/Library/LaunchAgents/com.agentflow.runner.pro-1.plist`, with your paths (`which node`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.agentflow.runner.pro-1</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string><string>-lc</string>
+    <string>exec node ~/agentflow-runner/agentflow-runner/runner.mjs --project PRO-1</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/agentflow-runner-pro-1.log</string>
+  <key>StandardErrorPath</key><string>/tmp/agentflow-runner-pro-1.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.agentflow.runner.pro-1.plist
+```
+
+The login shell (`zsh -lc`) gives the Agent the same `PATH` as the terminal, so it finds `node`, `claude`, `gh` and the project's toolchains.
+
+**Linux (systemd user service).** `~/.config/systemd/user/agentflow-runner-pro-1.service`:
+
+```ini
+[Service]
+ExecStart=/bin/bash -lc 'exec node %h/agentflow-runner/agentflow-runner/runner.mjs --project PRO-1'
+Restart=always
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user enable --now agentflow-runner-pro-1
+journalctl --user -u agentflow-runner-pro-1 -f
+```
+
+**Windows.** The last question of `setup-runner.cmd --project PRO-1` offers to start the Agent with Windows as a Windows service (WinSW), named `agentflow-agent-pro-1`, that starts before anyone signs in. It runs under your Windows account: WinSW asks for that account's password (not a Windows Hello PIN; Microsoft accounts use the online password) and the "log on as a service" right. Mapped network drives are not visible to services, so use UNC paths. Logs are in `%USERPROFILE%\.agentflow-runner\personal\PRO-1\service\logs`. Keep the unzipped folder in a permanent place, not Downloads or temp.
+
+## Stop and upgrade
+
+- Stop it with Ctrl+C, `launchctl unload <plist>`, `systemctl --user stop <unit>` or by ending the task. Stopping abandons the task it runs; the server times it out. Stop it when it is idle.
+- To upgrade, stop it, replace the bundle folder with the new release and start it again. The data directory in `~/.agentflow-runner` is not in the bundle folder, so the Agent keeps its identity and settings.
+- On Windows, stop the service in `services.msc`, or remove it with `uninstall-runner.cmd --project PRO-1`. That command also asks whether to delete the Agent's local data (default no); the Agent stays in AgentFlow as offline. A service left behind by a deleted folder is removed with `sc.exe delete agentflow-agent-pro-1`.
+- On Windows, to upgrade, unzip the new release, run `setup-runner.cmd --project PRO-1` from it and press Enter to every question: the service is re-pointed and restarted. Answering no to the service question removes it.
+- Upgrading Claude Code is the person's job: run `claude install <version>` when AgentFlow pins a new version.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Exits with code `3` | A required tool is missing or not on the login shell's `PATH`. The message names it |
+| Tasks wait with `runner_busy` | One task at a time is the default; the next one starts when the current one ends (tried every minute) |
+| Every task fails with `claude install <version>` | The pinned Claude Code version differs from `claude --version`. Install it, or set the Agent to `latest` |
+| A command stops at a permission prompt | The tool is not in the command's `allowed-tools` or the person's `permissions.allow` |
+| `finish: push` step refused | A personal Agent never commits for AgentFlow; the command must commit, push and open the pull request itself |
+| The Agent shows offline | The process is not running, or it cannot reach the API URL over HTTPS |

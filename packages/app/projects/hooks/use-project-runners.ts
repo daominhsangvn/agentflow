@@ -2,7 +2,6 @@
 
 import type { ComputeTarget } from "@repo/api/src/types/compute-target";
 import type {
-  ProjectRunner,
   ProjectRunners,
   UpdateProjectRunnersInput,
 } from "@repo/api/src/types/project-runners";
@@ -26,18 +25,16 @@ export const projectRunnersKeys = {
   computers: ["compute-targets", "available-for-project-runners"] as const,
 };
 
-export function useProjectRunners(projectId: string) {
+export function useProjectRunners(
+  projectId: string,
+  options?: { enabled?: boolean }
+) {
   const apiClient = useApiClient();
 
   return useQuery({
     queryKey: projectRunnersKeys.detail(projectId),
-    queryFn: async (): Promise<ProjectRunner[]> => {
-      const response = await apiClient.get<ProjectRunners>(
-        runnersPath(projectId)
-      );
-      return response.runners;
-    },
-    enabled: !!projectId,
+    queryFn: () => apiClient.get<ProjectRunners>(runnersPath(projectId)),
+    enabled: !!projectId && (options?.enabled ?? true),
   });
 }
 
@@ -49,10 +46,7 @@ export function useSaveProjectRunners(projectId: string) {
     mutationFn: (input: UpdateProjectRunnersInput) =>
       apiClient.put<ProjectRunners>(runnersPath(projectId), input),
     onSuccess: (saved) => {
-      queryClient.setQueryData(
-        projectRunnersKeys.detail(projectId),
-        saved.runners
-      );
+      queryClient.setQueryData(projectRunnersKeys.detail(projectId), saved);
     },
     ...mutationErrorOptions(SAVE_PROJECT_RUNNERS_ERROR_TITLE),
   });

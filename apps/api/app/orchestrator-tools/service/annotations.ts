@@ -8,6 +8,14 @@ export const TASK_FILE_REF = {
   additionalProperties: false,
 };
 
+/** A Confluence page, handed to a task as a file with its current content. */
+export const PAGE_FILE_REF = {
+  type: "object",
+  properties: { page: { type: "string" }, name: { type: "string" } },
+  required: ["page", "name"],
+  additionalProperties: false,
+};
+
 /** Reads AgentFlow or the item. */
 export const READS = {
   readOnlyHint: true,

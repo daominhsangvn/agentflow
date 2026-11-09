@@ -1,0 +1,63 @@
+---
+title: "Approval before posting"
+description: "Have an admin approve every write on the ticket first: draft, ask in AgentFlow with request_decision, wait, then AgentFlow posts exactly what was approved."
+---
+
+When the orchestrator posts as a bot, a wrong comment or status change lands under the bot's name. This recipe keeps every write on the ticket behind an admin's approval, and keeps the request itself off the ticket.
+
+## The pattern
+
+1. The orchestrator drafts the comment, files or status change.
+2. It calls `request_decision` with a one-line `question`, the whole draft in `draft` (`draft.comment.text`, never a summary: the admin approves what they read; files in `draft.comment.attachments`; a status change in `draft.transitionName`) and `where: case_page`, then `wait_human`.
+3. An admin presses **Approve** or **Reject** in AgentFlow. The Decisions card shows the draft in full. The decision wakes the conversation.
+4. Approved: AgentFlow posts the draft itself, once, and the wake message says so; the orchestrator does not post it again. Rejected: nothing is posted; it revises with the admin's comment and asks again.
+
+## Rule text
+
+```text
+## Approval before posting
+- Nothing goes on the Jira ticket without an admin's approval (comments, files, status changes): request_decision where: case_page with a one-line question and draft (the whole comment in draft.comment.text, never a summary; files in draft.comment.attachments; a status change in draft.transitionName), then wait_human. Approved: AgentFlow posts the draft itself; never post it again. Rejected: revise with the admin's comment, ask again. A posted comment is not edited; a correction is a new draft.
+- Not gated: Confluence pages, tasks, pull requests, case-page replies, questions an agent posted on the ticket itself.
+```
+
+## Where admins approve
+
+- The case page: the **Decisions** card at the top of the case.
+- The workflow's **Agents** tab: pick the orchestrator node, then the case. Its number counts the cases that need a person.
+- **Home**: "Pending decision".
+
+**Approve** and **Reject** are for organization admins. A message on the case page such as "ok, post it" is read by the orchestrator, which records it with `record_decision`. Under `approvals: required` that does not approve a decision with a draft: an admin presses **Approve**.
+
+## What the platform does
+
+- `request_decision` takes `where`: `thread` or `case_page`. Without it, the request goes where the latest message came from.
+- Only `thread` needs the `comment` grant on the ticket. With `case_page` nothing is posted on the ticket; the case-page text ends with "Approve or reject it under Decisions, or answer here."
+- A decision wakes the conversation with an internal message such as `Decision <id> was approved by <who> (<via>)` followed by `It asked: <question>`, so the next turn knows exactly what was approved.
+- A pending decision makes the case need a person (a **Decision pending** badge in the Agents tab case list, the orchestrator node's number, Home).
+- Without `approvals: required`, the platform does not refuse an unapproved reply: the rules do the gating, and the grants are the hard limit (leave out `transition` if the orchestrator must never move the ticket). See "Make it a guard".
+
+## Make it a guard
+
+Set `approvals: required` under `agent.orchestrator` in the workflow YAML. `reply` and `edit_reply` on the thread and the `source_item_*` writes are then refused; a comment or a move reaches the ticket only as the `draft` of an approved `request_decision`. `request_decision` with `where: thread` is refused, so the request and its draft stay on the case page and nothing reaches the ticket before approval. `record_decision` with `approved: true` is refused for a decision with a draft: only an admin's **Approve** button approves it (a rejection through `record_decision` still works). Replies with `where: case_page` stay allowed.
+
+## Variant: agents' questions answered only in AgentFlow
+
+Some teams do not want an Agent's questions on the ticket at all. Add this rule:
+
+```text
+- An agent's questions are answered in AgentFlow: never post them on the ticket. End the turn with wait_human asked "<N> questions from <agent> on the case page".
+- If someone asks on the case page to post an agent's questions on the ticket, draft that comment and ask for approval like any other post.
+```
+
+Admins answer with **Send answers** in the Agent's "asks (N)" list or on the case page. To put the questions on the ticket after all, message the orchestrator on the case page ("post the BA's questions on the ticket"): it drafts the comment and asks for approval; nothing is posted until an admin approves. A message to that Agent while its questions are open counts as the answers. Questions an Agent posted on the ticket itself (`commentId`) are answered there. No email is sent: people see the case in the **Agents** tab and on Home.
+
+## Case study
+
+[LeaveDesk, end to end](/docs/guides/case-studies/leavedesk#approval-before-posting) shows these rules in a full orchestrator workflow.
+
+## See also
+
+- [Questions and answers](/docs/guides/recipes/questions-and-answers)
+- [Asking an Agent](/docs/guides/recipes/asking-an-agent)
+- [Approvals](/docs/guides/setup/orchestrator#approvals)
+- [Cases](/docs/guides/operate/cases)

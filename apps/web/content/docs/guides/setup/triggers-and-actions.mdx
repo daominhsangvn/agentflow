@@ -1,0 +1,432 @@
+---
+title: "Triggers and actions"
+description: "Every trigger and action type each provider offers, with all of its options and defaults, plus AgentFlow's own actions (instructions and email)."
+---
+
+A workflow names a trigger or action type of the connection it uses (`connection: jira`, `type: jira.issue_status_changed`). This page lists every type, read from the providers AgentFlow ships. The editor suggests the same types and options (Ctrl+Space), and the workflow's **Configuration guide** shows the ones your organization's connections offer.
+
+How to read the action entries:
+
+- **Works on: the run's source item**: the item that started the run, through the connection it came from. Such an action takes no item key, so text in a ticket can never redirect it. It is skipped for runs from another provider.
+- **Works on: every repository the run pushed**: one pull request per pushed repository, through that repository's connection.
+- **Works on: a project connection**: name it with `connection:` when the project has several connections of that provider.
+- The same writes are available to Agents (instruction actions and process steps) as integration tools, when their `connections:` grant names them: see [Connection grants](/docs/guides/setup/connection-grants).
+
+## Which triggers fit which workflow
+
+| You want | Trigger | Notes |
+|---|---|---|
+| Start work when a ticket is assigned to the bot | `jira.issue_assigned`, `azure_devops.work_item_assigned` | Works with webhook and poll |
+| Start work when a label is added (`ready-for-dev`) | `jira.issue_labeled`, `jira.issue_conditions` with `labels` | Webhook only |
+| Combine conditions (assigned **and** labeled, in any order) | `jira.issue_conditions` with `match: all` | Webhook for labels and mentions |
+| Answer people who mention the bot | `jira.issue_mentioned`, `microsoft_teams.bot_mentioned` | Webhook with the Comment events (Jira) |
+| Follow the ticket's status (orchestrated workflows) | `jira.issue_status_changed` | Webhook with Issue updated; the bot's own transitions are ignored. In an orchestrated workflow each change is a `status_changed` message for the orchestrator |
+| Let another system start work | `webhook.request`, or `connection: http` (the workflow's own URL) | Signed or token-authenticated JSON |
+
+A reply to a comment the bot posted, and a reply in a comment thread or Teams thread an orchestrator already talks in, reaches the orchestrator without a mention.
+
+## AgentFlow actions
+
+These need no connection.
+
+### Instruction
+
+```yaml
+- on: execute.completed
+  instruction: |
+    Summarize what was implemented for {{source.key}} and post it as one comment on the issue.
+  connections:
+    source: [comment]
+```
+
+An Agent carries out the instruction on the run's Agent ([Workflow YAML](/docs/guides/setup/workflow-yaml#actions-items)). It has no `config`; what it may write is its `connections:` grant.
+
+### `agentflow.email`
+
+Sends the run event through the server's mail relay (`SMTP_URL`, from `EMAIL_FROM`). Without `SMTP_URL` the action is skipped with the reason.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `to` (required) | list of emails, up to 20 | | Recipients. |
+| `cc` | list of emails | | Copy recipients. |
+| `subject` | text with variables | says what the event asks for, e.g. `[AgentFlow] Approval needed: LD-6: Team calendar` | The subject. |
+| `body` | text with variables, plain text | `{{summary}}` and the workflow, item and run links | The body. |
+
+```yaml
+- on: input.needed
+  type: agentflow.email
+  config:
+    to: [admin@example.com]
+    subject: "[AgentFlow] {{source.key}} needs you"
+```
+
+## Jira (`jira`)
+
+### Triggers
+
+#### `jira.issue_assigned`
+
+Starts a run when a Jira issue is created with, or changed to, the connection's bot account as assignee.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `projectKeys` | list |  | Project keys, e.g. PROJ. Leave empty for any project. |
+| `issueTypes` | list |  | e.g. Story, Bug, Task. Leave empty for any issue type. |
+| `labels` | list |  | Only issues that have at least one of these labels. Leave empty for no label filter. |
+
+#### `jira.issue_labeled`
+
+Starts a run when the label is added to a Jira issue (or an issue is created with it), removed from it, or either, per the change option. Needs webhook delivery (polling only detects assignments); a removal is only seen through webhooks.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `label` (required) | text |  | Jira label that starts a run, e.g. ai-ready. |
+| `change` | `added` or `removed` or `both` | `added` | Start when the label is added (default), removed or either. |
+| `projectKeys` | list |  | Project keys, e.g. PROJ. Leave empty for any project. |
+| `issueTypes` | list |  | e.g. Story, Bug, Task. Leave empty for any issue type. |
+
+#### `jira.issue_mentioned`
+
+Starts a run when a comment, or the description of an issue, mentions the bot account with @. Needs webhook delivery with the Comment created / updated events.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `projectKeys` | list |  | Project keys, e.g. PROJ. Leave empty for any project. |
+| `issueTypes` | list |  | e.g. Story, Bug, Task. Leave empty for any issue type. |
+| `labels` | list |  | Only issues that have at least one of these labels. Leave empty for no label filter. |
+
+#### `jira.issue_conditions`
+
+Starts a run when an issue is assigned to the bot, gets one of the labels and/or mentions the bot, combined with AND (all) or OR (any): e.g. assigned to the bot AND labeled ai-ready, in either order. Labels and mentions need webhook delivery; polling only sees issues assigned to the bot.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `match` | `all` or `any` | `all` | all: a run starts when the last of the chosen conditions becomes true while the others already hold, in any order. any: a run starts when any of them becomes true. |
+| `assigned` | true or false | `false` | The issue is assigned to the connection's bot account. Assigning it is the moment this condition becomes true. |
+| `labels` | list |  | The issue has at least one of these labels. Adding one is the moment this condition becomes true. Leave empty to not use labels. |
+| `mentioned` | true or false | `false` | A comment, or the description, mentions the bot with @. A mention is a moment: with all, the run starts on the mention while the other conditions hold. |
+| `projectKeys` | list |  | Project keys, e.g. PROJ. Leave empty for any project. |
+| `issueTypes` | list |  | e.g. Story, Bug, Task. Leave empty for any issue type. |
+| `statuses` | list |  | e.g. To Do, Backlog. Leave empty for any status. |
+
+#### `jira.issue_status_changed`
+
+Starts when a person moves a Jira issue to another status (from / to filters, case-insensitive names). Needs webhook delivery with the Issue updated event; the bot's own transitions are ignored.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `from` | list |  | Status names. Leave empty for any. |
+| `to` | list |  | Status names. Leave empty for any. |
+| `projectKeys` | list |  | Project keys, e.g. PROJ. Leave empty for any project. |
+| `issueTypes` | list |  | e.g. Story, Bug, Task. Leave empty for any issue type. |
+
+### Actions
+
+#### `jira.add_comment`
+
+Adds a comment to the Jira issue the run was started from, e.g. the plan link or the pull request. Works on: the run's source item. An instruction or step agent gets the same write with `source: [comment]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `message` | text with variables | `{{summary}}` | Markdown. Jira Cloud shows it as rich text (headings, lists, links, code); Data Center shows the text as written. |
+| `target` | `source` | `source` | The comment goes on the run's source issue. |
+
+#### `jira.transition_issue`
+
+Moves the Jira issue the run was started from through a workflow transition, e.g. to "In Review" when the pull request is open. Works on: the run's source item. An instruction or step agent gets the same write with `source: [transition]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `transitionName` (required) | text |  | Name of the workflow transition, or of the status it leads to (case-insensitive). Skipped when the issue cannot make that transition from its current status. |
+
+#### `jira.update_labels`
+
+Adds and removes labels on the Jira issue the run was started from, e.g. removes the label that started the run. Works on: the run's source item. An instruction or step agent gets the same write with `source: [label]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `add` | list |  | Labels to add to the issue (single words). |
+| `remove` | list |  | Labels to remove from the issue; a label it does not have is ignored. |
+
+#### `jira.add_link`
+
+Adds a web link to the Jira issue the run was started from, e.g. the page its plan is reviewed on. Works on: the run's source item. An instruction or step agent gets the same write with `source: [link]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `url` (required) | URL |  | Address of the web link; adding a link the issue already has updates its title. |
+| `title` (required) | text |  | The link's title on the item. |
+
+#### `jira.create_issue`
+
+Creates an issue in one of the project connection's Jira projects, e.g. the user story with the approved PRD as its description, and can link it to the run's source issue. Works on: a project connection (by key). An agent gets it as the tool `jira_create_issue` with `&lt;key&gt;: [jira.create_issue]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `projectKey` | text |  | Key of one of the project connection's Jira projects; defaults to the run's source issue's project, or the first project. |
+| `issueType` | text | `Story` | Name of the issue type, e.g. Story, Task or Bug. |
+| `summary` (required) | text with variables |  | The new issue's summary. |
+| `description` | text with variables |  | Markdown, e.g. the whole PRD. Jira Cloud shows it as rich text; Data Center shows the text as written. |
+| `labels` | list |  | Labels of the new issue (single words). |
+| `attachmentName` | text |  | File name of a text file to attach to the new issue, e.g. the full PRD; needs the attachment content. |
+| `attachmentContent` | text |  | The text of the file to attach (Markdown or plain text), as it should be in the file. |
+| `linkType` | text |  | Issue link phrase as read from the new issue ("implements", "is implemented by", "relates to", "blocks"), or a link type name. Leave it out for no link. |
+| `linkIssue` | text |  | Key of the issue to link to, in one of the project connection's Jira projects; defaults to the run's source issue. |
+
+## Confluence (`confluence`)
+
+### Actions
+
+#### `confluence.create_page`
+
+Creates a page in one of the project connection's spaces, e.g. the implementation plan for review. Works on: a project connection (by key). An agent gets it as the tool `confluence_create_page` with `&lt;key&gt;: [confluence.create_page]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `space` (required) | text |  | Key of one of the project connection's spaces. |
+| `title` (required) | text with variables |  | Unique within the space. |
+| `body` (required) | text with variables |  | The page's content (Markdown unless the format says storage). |
+| `parentId` | text |  | Link or id of the page to put it under, in the same space; defaults to the project connection's parent page. |
+| `format` | `markdown` or `storage` | `markdown` | markdown (default), or storage for a body read with format storage (keeps macros and inline comment markers). |
+
+#### `confluence.update_page`
+
+Replaces the body (and optionally the title) of a page of the project connection's spaces, unless it changed since the version read. Works on: a project connection (by key). An agent gets it as the tool `confluence_update_page` with `&lt;key&gt;: [confluence.update_page]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `page` (required) | text |  | The page's link or id. |
+| `baseVersion` (required) | number |  | The page version your change is based on (from confluence_get_page). Refused when the page changed since, so nobody's edit is overwritten: read it again. |
+| `title` | text with variables |  | A new title; leave it out to keep the title. |
+| `body` (required) | text with variables |  | The page's whole new content. |
+| `format` | `markdown` or `storage` | `markdown` | markdown (default), or storage for a body read with format storage (keeps macros and inline comment markers). |
+| `message` | text |  | Shown in the page history. |
+
+#### `confluence.comment`
+
+Adds a comment below a page of the project connection's spaces, or replies to one of its comments. Works on: a project connection (by key). An agent gets it as the tool `confluence_comment` with `&lt;key&gt;: [confluence.comment]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `page` (required) | text |  | The page's link or id. |
+| `body` (required) | text with variables |  | Markdown. |
+| `replyTo` | text |  | Id of a comment of the page (from confluence_list_comments) to reply to; leave it out for a new comment below the page. |
+
+#### `confluence.resolve_comment`
+
+Marks an inline comment of a page of the project connection's spaces resolved. Resolving a resolved one is not an error. Works on: a project connection (by key). An agent gets it as the tool `confluence_resolve_comment` with `&lt;key&gt;: [confluence.resolve_comment]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `page` (required) | text |  | The page's link or id. |
+| `comment` (required) | text |  | Id of the inline comment (the first comment of its thread) to resolve. |
+
+## Local Git (`local_git`)
+
+### Actions
+
+#### `local_git.create_pull_request`
+
+Opens a Local Git pull request in each project repository the agent team pushed a branch to. Later actions can link them with `{{pr.url}}` (the first) or `{{pr.urls}}`. Works on: every repository the run pushed.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `title` (required) | text with variables | `{{source.key}}: {{source.title}}` | The pull request title. |
+| `description` | text with variables | `Resolves {{source.key}}: {{source.url}}` `Implementation plan: {{plan.url}}` `AgentFlow run: {{run.url}}` | Markdown. |
+| `targetBranch` | text |  | Leave empty to merge into the branch the run started from (the repository's default branch). |
+| `draft` | true or false | `false` | Open it as a draft. |
+
+## GitHub (`github`)
+
+### Actions
+
+#### `github.create_pull_request`
+
+Opens a GitHub pull request in each project repository the agent team pushed a branch to. Later actions can link them with `{{pr.url}}` (the first) or `{{pr.urls}}`. Works on: every repository the run pushed.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `title` (required) | text with variables | `{{source.key}}: {{source.title}}` | The pull request title. |
+| `description` | text with variables | `Resolves {{source.key}}: {{source.url}}` `Implementation plan: {{plan.url}}` `AgentFlow run: {{run.url}}` | Markdown. |
+| `targetBranch` | text |  | Leave empty to merge into the branch the run started from (the repository's default branch). |
+| `draft` | true or false | `false` | Open it as a draft. |
+
+## Bitbucket (`bitbucket`)
+
+### Actions
+
+#### `bitbucket.create_pull_request`
+
+Opens a Bitbucket pull request in each project repository the agent team pushed a branch to. Later actions can link them with `{{pr.url}}` (the first) or `{{pr.urls}}`. Works on: every repository the run pushed.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `title` (required) | text with variables | `{{source.key}}: {{source.title}}` | The pull request title. |
+| `description` | text with variables | `Resolves {{source.key}}: {{source.url}}` `Implementation plan: {{plan.url}}` `AgentFlow run: {{run.url}}` | Markdown. |
+| `targetBranch` | text |  | Leave empty to merge into the branch the run started from (the repository's default branch). |
+| `draft` | true or false | `false` | Open it as a draft. |
+
+## Azure DevOps (`azure_devops`)
+
+### Triggers
+
+#### `azure_devops.work_item_assigned`
+
+Starts a run when a work item is created with, or changed to, the bot account as Assigned To.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `projects` | list |  | Project names. Leave empty to match every project. |
+| `workItemTypes` | list |  | For example User Story, Bug or Product Backlog Item. Leave empty to match every type. |
+| `areaPathPrefix` | text |  | Only work items in this area path or below it. Leave empty to match every area. |
+| `tags` | list |  | Only work items that have at least one of these tags. Leave empty to ignore tags. |
+
+#### `azure_devops.work_item_tagged`
+
+Starts a run when the tag is added to a work item (or a work item is created with it). In poll mode only work items assigned to the bot are seen.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `tag` (required) | text |  | Tag that starts a run when it is added (case-insensitive). |
+| `projects` | list |  | Project names. Leave empty to match every project. |
+| `workItemTypes` | list |  | For example User Story, Bug or Product Backlog Item. Leave empty to match every type. |
+
+#### `azure_devops.work_item_mentioned`
+
+Starts a run when a comment (or the description of a new work item) mentions the bot account with @. Webhook mode needs the "Work item commented on" service hook; poll mode uses @RecentMentions.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `projects` | list |  | Project names. Leave empty to match every project. |
+| `workItemTypes` | list |  | For example User Story, Bug or Product Backlog Item. Leave empty to match every type. |
+| `areaPathPrefix` | text |  | Only work items in this area path or below it. Leave empty to match every area. |
+| `tags` | list |  | Only work items that have at least one of these tags. Leave empty to ignore tags. |
+
+#### `azure_devops.work_item_conditions`
+
+Starts a run when a work item is assigned to the bot, gets one of the tags and/or mentions the bot, combined with AND (all) or OR (any): e.g. assigned to the bot AND tagged agentflow, in either order. In poll mode only work items assigned to the bot (and recent mentions) are seen.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `match` | `all` or `any` | `all` | all: a run starts when the last of the chosen conditions becomes true while the others already hold, in any order. any: a run starts when any of them becomes true. |
+| `assigned` | true or false | `false` | Assigned To is the connection's bot account. Assigning it is the moment this condition becomes true. |
+| `tags` | list |  | The work item has at least one of these tags (case-insensitive). Adding one is the moment this condition becomes true. Leave empty to not use tags. |
+| `mentioned` | true or false | `false` | A comment (or the description of a new work item) mentions the bot with @. A mention is a moment: with all, the run starts on the mention while the other conditions hold. |
+| `projects` | list |  | Project names. Leave empty to match every project. |
+| `workItemTypes` | list |  | For example User Story, Bug or Product Backlog Item. Leave empty to match every type. |
+| `areaPathPrefix` | text |  | Only work items in this area path or below it. Leave empty to match every area. |
+| `states` | list |  | e.g. New, Active. Leave empty to match every state (Boards column states are the work item's State). |
+
+### Actions
+
+#### `azure_devops.add_comment`
+
+Adds a markdown comment, written by the bot account, to the Azure DevOps work item that started the run. Works on: the run's source item. An instruction or step agent gets the same write with `source: [comment]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `message` (required) | text with variables | `{{summary}}` | Markdown. `{{summary}}` is a ready-made message for each run event (pull request link, open questions, failure reason). |
+
+#### `azure_devops.update_state`
+
+Moves the Azure DevOps work item that started the run to a state, e.g. Resolved or In Review. Works on: the run's source item. An instruction or step agent gets the same write with `source: [transition]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `state` (required) | text |  | Name of a state of the work item's type in its process (for example Active, Resolved, Done). |
+
+#### `azure_devops.update_tags`
+
+Adds and removes tags on the Azure DevOps work item that started the run, e.g. removes the tag that started it. Works on: the run's source item. An instruction or step agent gets the same write with `source: [label]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `add` | list |  | Tags to add to the work item. |
+| `remove` | list |  | Tags to remove from the work item (case-insensitive); a tag it does not have is ignored. |
+
+#### `azure_devops.add_link`
+
+Adds a web link to the Azure DevOps work item that started the run, e.g. the page its plan is reviewed on. Works on: the run's source item. An instruction or step agent gets the same write with `source: [link]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `url` (required) | URL |  | Address of the web link; a link the work item has is kept. |
+| `title` (required) | text |  | The link's title on the item. |
+
+#### `azure_devops.create_pull_request`
+
+Opens a Azure DevOps pull request in each project repository the agent team pushed a branch to. Later actions can link them with `{{pr.url}}` (the first) or `{{pr.urls}}`. Works on: every repository the run pushed.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `title` (required) | text with variables | `{{source.key}}: {{source.title}}` | The pull request title. |
+| `description` | text with variables | `Resolves {{source.key}}: {{source.url}}` `Implementation plan: {{plan.url}}` `AgentFlow run: {{run.url}}` | Markdown. |
+| `targetBranch` | text |  | Leave empty to merge into the branch the run started from (the repository's default branch). |
+| `draft` | true or false | `false` | Open it as a draft. |
+
+#### `azure_devops.run_pipeline`
+
+Queues an Azure Pipelines run, by default on the branch the agent team pushed. Works on: a project connection (by key). An agent gets it as the tool `azure_devops_run_pipeline` with `&lt;key&gt;: [azure_devops.run_pipeline]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `pipelineId` (required) | number |  | The number in the pipeline's URL (…/_build?definitionId=12 → 12). |
+| `project` | text |  | Leave empty to use the project of the run's repository, or of the work item that started the run. |
+| `branch` | text with variables |  | Leave empty to use the branch the agent team pushed (or the pipeline's default branch when there is none). |
+
+## Microsoft Teams (`microsoft_teams`)
+
+### Triggers
+
+#### `microsoft_teams.bot_mentioned`
+
+Starts a run when someone mentions the bot with @ in a channel post or a thread reply. The run reads the whole thread and carries out the message that mentioned the bot. Needs the bot fields of the connection and webhook delivery (the inbound URL is the Azure Bot's messaging endpoint).
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `channels` | list |  | Only mentions in these channels (links or channel ids). Leave empty for every channel of the project connection. |
+
+### Actions
+
+#### `microsoft_teams.post_message`
+
+Posts an Adaptive Card with the run status, the source item and links to the run and pull request (when there is one) to the channel of the Workflows webhook. Works on: a project connection (by key). An agent gets it as the tool `microsoft_teams_post_message` with `&lt;key&gt;: [microsoft_teams.post_message]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `title` | text with variables | `{{workflow.name}}: {{source.key}}` | Bold first line of the card. |
+| `message` | text with variables | `{{summary}}` | Markdown. Teams shows bold, italic, links and lists; headings become bold lines. Long messages are truncated to fit the Teams size limit. |
+| `includeFacts` | true or false | `true` | Add the run's facts (status, item, links) to the card. |
+
+#### `microsoft_teams.reply`
+
+The bot answers in the channel thread whose mention started the run, e.g. that it is on it, the questions of the plan or the pull request. Works on: the run's source item. An instruction or step agent gets the same write with `source: [comment]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `message` | text with variables | `{{summary}}` | Markdown. Teams shows bold, italic, links, lists and code. Long messages are truncated to fit the Teams size limit. |
+| `mentionRequester` | true or false | `true` | Start the reply with an @mention of the person who mentioned the bot. |
+
+## Webhook (HTTPS) (`webhook`)
+
+### Triggers
+
+#### `webhook.request`
+
+Starts a run when an authenticated JSON request (Standard Webhooks signature or token header) reaches the connection's inbound URL.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `types` | list |  | Start a run only when the request's "type" is one of these (case-insensitive). Leave empty to accept every request. |
+
+### Actions
+
+#### `webhook.post`
+
+POSTs \{type, timestamp, run\} as JSON to an HTTPS endpoint, signed with Standard Webhooks headers when the connection has a signing secret. Retries of an event keep the same webhook-id. Works on: a project connection (by key). An agent gets it as the tool `webhook_post` with `&lt;key&gt;: [webhook.post]`.
+
+| Option | Type | Default | What it does |
+|---|---|---|---|
+| `url` | URL |  | Defaults to the connection's callback URL. |
+| `useSourceCallback` | true or false | `true` | When the run was started by an HTTPS request that included "callbackUrl", post there instead. The callback must use one of the connection's allowed callback hosts or, when the connection lists none, a public host; otherwise the URL above is used. |
+

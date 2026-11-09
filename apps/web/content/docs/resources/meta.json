@@ -1,14 +1,4 @@
 {
   "title": "Resources",
-  "pages": [
-    "troubleshooting",
-    "faq",
-    "release-notes",
-    "commands-reference",
-    "gateway-endpoints-reference",
-    "env-vars-reference",
-    "agentflow-vs-chat-based-workflows",
-    "prd-template",
-    "implementation-plan-template"
-  ]
+  "pages": ["faq", "troubleshooting", "release-notes"]
 }

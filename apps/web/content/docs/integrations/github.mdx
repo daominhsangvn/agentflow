@@ -1,38 +1,30 @@
 ---
-title: GitHub
-description: 'Connect GitHub to link repositories, branches, and pull requests'
+title: "GitHub"
+description: "Add GitHub repositories to a project and open pull requests in them, with a fine-grained token of a bot account."
 ---
 
-The GitHub integration links your repositories to AgentFlow so features can be
-associated with branches and pull requests.
+## What it does
 
-## Connect
+GitHub provides **repositories** and the `github.create_pull_request` action. It has no triggers and no inbound side yet.
 
-Connection uses GitHub's OAuth + App installation flow:
+## Connection settings
 
-1. In the web app, open **Settings → Integrations → GitHub** and start the
-   connect flow.
-2. Authorize the AgentFlow GitHub App and choose which repositories to grant
-   access to. GitHub redirects back with an authorization code.
-3. The app completes the connection server-side — exchanging the code for a
-   token, verifying your access to the installation, claiming it, and syncing
-   repositories. The `client_secret` never leaves the API server.
+| Key | Notes |
+|---|---|
+| `config.apiUrl` | Leave the default (`https://api.github.com`) for github.com; `https://<host>/api/v3` for GitHub Enterprise Server |
+| secret `token` | A fine-grained personal access token of the bot account, with access to the repositories projects will use and Contents and Pull requests set to Read and write |
 
-## Status
+Saving the connection checks the token; its owner is the bot.
 
-```bash
-curl https://api.agentflow.ai/integrations/github \
-  -H "Authorization: Bearer sk_live_YOUR_KEY"
-```
+## Repositories
 
-Once connected you can list the accessible repositories and their branches and
-pull requests. The MCP server exposes `get-github-status`.
+Project → **Connections & Repos** → add a repository → choose the GitHub connection, search, add. Archived repositories are left out. A project has at most 20 repositories. Agents clone and push with credentials AgentFlow gives each run; the repository stores no token.
 
-## Disconnect
+## Pull requests
 
-Disconnect from **Settings → Integrations → GitHub**, or over the API:
+`github.create_pull_request` opens one pull request in each repository of the run that the Agents pushed a branch to, from that branch into the configured target branch (else the branch the run started from, else the default branch). It reuses the open pull request of the same head and base. An orchestrated workflow uses the `pull_request_open` tool instead. A project with repositories on two providers needs the action of each connection. See [Triggers and actions](/docs/guides/setup/triggers-and-actions).
 
-```bash
-curl -X DELETE https://api.agentflow.ai/integrations/github \
-  -H "Authorization: Bearer sk_live_YOUR_KEY"
-```
+## Limits
+
+- Merging a pull request on GitHub is not reported back to AgentFlow.
+- At most 1000 repositories are listed.

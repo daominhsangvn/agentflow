@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "../orchestrator.ts";
 import {
   resolveWorkflowOrchestratorConfig,
+  WORKFLOW_INSTRUCTIONS_MAX,
   workflowAgentConfigSchema,
   workflowOrchestratorConfigSchema,
 } from "../workflow.ts";
@@ -25,6 +27,11 @@ describe("workflow orchestrator config", () => {
         OrchestratorTicketChange.StatusChanged,
         OrchestratorTicketChange.LabelRemoved,
       ],
+      mentionOnly: false,
+      caseLookup: false,
+      caseHandoff: false,
+      approvals: OrchestratorApprovals.Optional,
+      connections: {},
     });
   });
 
@@ -52,6 +59,45 @@ describe("workflow orchestrator config", () => {
         OrchestratorTicketChange.StatusChanged,
         OrchestratorTicketChange.LabelRemoved,
       ],
+      mentionOnly: false,
+      caseLookup: false,
+      caseHandoff: false,
+      approvals: OrchestratorApprovals.Optional,
+      connections: {},
     });
+  });
+
+  it("parses the side-conversation switches", () => {
+    const parsed = workflowOrchestratorConfigSchema.parse({
+      mentionOnly: true,
+      caseHandoff: true,
+    });
+    expect(parsed.mentionOnly).toBe(true);
+    expect(parsed.caseHandoff).toBe(true);
+    expect(parsed.caseLookup).toBe(false);
+  });
+
+  it("parses approvals required", () => {
+    expect(
+      workflowOrchestratorConfigSchema.parse({
+        approvals: OrchestratorApprovals.Required,
+      }).approvals
+    ).toBe(OrchestratorApprovals.Required);
+  });
+
+  it("accepts rules up to the limit and rejects longer ones", () => {
+    const rules = (length: number) => ({
+      ...BASE,
+      instructions: "x".repeat(length),
+    });
+    expect(WORKFLOW_INSTRUCTIONS_MAX).toBe(16_000);
+    expect(
+      workflowAgentConfigSchema.safeParse(rules(WORKFLOW_INSTRUCTIONS_MAX))
+        .success
+    ).toBe(true);
+    expect(
+      workflowAgentConfigSchema.safeParse(rules(WORKFLOW_INSTRUCTIONS_MAX + 1))
+        .success
+    ).toBe(false);
   });
 });

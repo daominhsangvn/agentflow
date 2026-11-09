@@ -1,0 +1,49 @@
+---
+title: "Webhook"
+description: "Start a workflow from any system with a signed HTTPS request, and post run events to any HTTPS endpoint."
+---
+
+## What it does
+
+The webhook is HTTPS in both directions. It is built in and needs no entry in **Connections**: every workflow can use it as a trigger and as an action by writing `connection: http`. Saving a workflow that uses it creates a webhook connection owned by that workflow, shown in the editor as "Show URL and secret". Another workflow cannot reference it, and it is deleted with the workflow.
+
+## Connection settings
+
+| Key | Notes |
+|---|---|
+| secret `callbackUrl` | Default target of outbound calls. Stored as a secret because receivers such as Zapier or n8n embed their credential in the URL |
+| secret `signingSecret` | Standard Webhooks `whsec_...`, used to sign outbound requests |
+| `config.allowedCallbackHosts` | Hosts a request's own `callbackUrl` may point to |
+
+## Trigger: `webhook.request`
+
+The external system sends `POST` to the workflow's inbound URL (shown with its secret in the editor). The request is authenticated with a Standard Webhooks signature (`webhook-id`, `webhook-timestamp`, `webhook-signature` headers, secret `whsec_...`) or the `X-AgentFlow-Token` header. Bodies over 1 MB are refused.
+
+```json
+{ "id": "evt-1", "title": "Add CSV export", "description": "markdown", "key": "REQ-7",
+  "url": "https://example.com/req-7", "type": "feature", "labels": ["x"],
+  "callbackUrl": "https://example.com/hooks/agentflow" }
+```
+
+- `id` (or the `webhook-id` header) deduplicates deliveries.
+- The item is carried in the request; nothing is fetched.
+- `callbackUrl` and `metadata` stay with the run and are available to actions.
+- Filter: `types` (start only when the request's `type` is one of them; empty accepts all).
+
+The inbound URL is `<PUBLIC_WEBHOOK_BASE_URL>/webhooks/integrations/<inboundKey>`. Without `PUBLIC_WEBHOOK_BASE_URL` it falls back to `NEXT_PUBLIC_API_URL`, then `http://localhost:3002`, which outside systems cannot call; the setup dialog warns about it. An unknown key answers 404, and a verified request answers 200 quickly while processing continues.
+
+## Action: `webhook.post`
+
+POSTs `{type, run}` as JSON to an HTTPS endpoint, signed when a `signingSecret` is set. The target is the first of:
+
+1. the request's `callbackUrl`, when the action's `useSourceCallback` option is on (default) and the host is in `allowedCallbackHosts` or, with no list, is not a local or private address;
+2. the action's `url`;
+3. the connection's `callbackUrl`.
+
+A refused request callback falls back to the others and is noted on the action. Calls never follow redirects: a 3xx counts as a failed delivery. Retries of an event keep the same `webhook-id`.
+
+Full option list: [Triggers and actions](/docs/guides/setup/triggers-and-actions).
+
+## Limits
+
+- The inbound side needs a reachable URL; outside systems cannot call plain HTTP on localhost.

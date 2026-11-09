@@ -4,14 +4,12 @@ import { verifyHubSignature, verifyStaticToken } from "../../inbound-auth";
 import {
   HttpMethod,
   type InboundEvent,
-  type InboundMessage,
   type InboundParseResult,
   type InboundRequest,
   type InboundSecretContext,
   type InboundVerification,
   type IntegrationAccount,
 } from "../../types";
-import { adfToPlainText } from "../atlassian/adf";
 import { type JiraContext, jiraIssuePath, jiraRequest } from "./client";
 import {
   JIRA_AUTOMATION_EVENT_TYPE,
@@ -29,6 +27,7 @@ import {
   jiraAssignedEvent,
   jiraChangeEvents,
   jiraCommentMentionEvents,
+  jiraCommentMessage,
   jiraCommentReplyEvent,
   jiraConditionsEvent,
   jiraCreatedEvents,
@@ -324,15 +323,6 @@ async function commentEvents(
       )
     );
   }
-  const message: InboundMessage = {
-    id: comment.id,
-    parentId: comment.parentId ?? null,
-    text: commentText(comment.body),
-  };
+  const message = jiraCommentMessage(comment);
   return events.map((event) => ({ ...event, message }));
-}
-
-/** A webhook comment's text: wiki markup as written, ADF as plain text. */
-function commentText(body: unknown): string {
-  return typeof body === "string" ? body : adfToPlainText(body);
 }

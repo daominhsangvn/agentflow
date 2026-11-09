@@ -6,6 +6,7 @@ import {
   type IntegrationProviderSummary,
 } from "@repo/api/src/types/integration";
 import {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "@repo/api/src/types/orchestrator";
@@ -44,6 +45,11 @@ import {
 } from "@repo/app/shared/lib/yaml-cursor";
 import { parseDocument, stringify } from "yaml";
 import { z } from "zod";
+import {
+  ORCHESTRATOR_GRANTS_PATH,
+  orchestratorGrantKeys,
+  orchestratorGrantValues,
+} from "./orchestrator-grant-completions";
 import {
   WORKFLOW_AGENT_MODE_DESCRIPTIONS,
   WORKFLOW_AGENT_MODE_LABELS,
@@ -115,6 +121,9 @@ const BOOLEAN_KEYS: readonly string[] = [
   "enabled",
   "continueOnError",
   "stopOnOpenQuestions",
+  "mentionOnly",
+  "caseLookup",
+  "caseHandoff",
 ];
 
 const BlockKind = { Map: "map", List: "list", Text: "text" } as const;
@@ -187,6 +196,9 @@ function keyCandidates(
   }
   if (where === "agent/orchestrator") {
     return keyed(WORKFLOW_YAML_KEYS.orchestrator);
+  }
+  if (where === ORCHESTRATOR_GRANTS_PATH) {
+    return orchestratorGrantKeys(data.projectConnections, cursor.existingKeys);
   }
   if (where === RUNNER_RULE_PATH) {
     return keyed(WORKFLOW_YAML_KEYS.runnerRule);
@@ -306,12 +318,20 @@ function agentValueCandidates(
         return [];
     }
   }
+  if (where === ORCHESTRATOR_GRANTS_PATH) {
+    return orchestratorGrantValues(key);
+  }
   if (where === "agent/orchestrator" && key === "cancelOn") {
     return ticketChangeValues();
   }
   if (where === "agent/orchestrator" && key === "concurrency") {
     return Object.values(OrchestratorConcurrency).map((concurrency) =>
       value(concurrency, ORCHESTRATOR_CONCURRENCY_DESCRIPTIONS[concurrency])
+    );
+  }
+  if (where === "agent/orchestrator" && key === "approvals") {
+    return Object.values(OrchestratorApprovals).map((approvals) =>
+      value(approvals, ORCHESTRATOR_APPROVALS_DESCRIPTIONS[approvals])
     );
   }
   if (where === "agent/repository" && key === "fullName") {
@@ -827,6 +847,15 @@ const ORCHESTRATOR_CONCURRENCY_DESCRIPTIONS: Record<
     "A new message stops the running turn and starts one with all messages",
   [OrchestratorConcurrency.Queue]:
     "A new message waits until the running turn ends",
+};
+
+const ORCHESTRATOR_APPROVALS_DESCRIPTIONS: Record<
+  OrchestratorApprovals,
+  string
+> = {
+  [OrchestratorApprovals.Optional]: "Rules decide; writes are not checked.",
+  [OrchestratorApprovals.Required]:
+    "Thread comments, edits and ticket changes only through an approved request_decision draft.",
 };
 
 const TICKET_CHANGE_DESCRIPTIONS: Record<OrchestratorTicketChange, string> = {

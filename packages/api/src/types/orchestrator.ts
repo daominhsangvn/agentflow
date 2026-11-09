@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+import type { AgentKind } from "./agent-fleet.ts";
+import type {
+  WorkflowRunLoopRef,
+  WorkflowRunPullRequest,
+  WorkflowRunSession,
+} from "./workflow.ts";
+
 /**
  * The project orchestrator's runtime (docs/orchestrator.md): cases (a ticket
  * or a thread of work), conversations (where messages come from and answers
@@ -55,6 +62,18 @@ export const OrchestratorMessageKind = {
   LabelAdded: "label_added",
   /** A label was removed from the ticket. */
   LabelRemoved: "label_removed",
+  /** A tool call of the orchestrator that was refused (audit; never wakes a turn). */
+  ToolRefused: "tool_refused",
+  /** A page the orchestrator published (page_publish). */
+  Document: "document",
+  /** Another case of this workflow notified this one (case_notify); wakes a turn. */
+  CaseNotify: "case_notify",
+  /** A change request people confirmed in a side conversation about this item (case_handoff); wakes a turn. */
+  Handoff: "handoff",
+  /** The side conversation's record that it sent a confirmed summary (case_handoff; audit, never wakes a turn). */
+  HandoffSent: "handoff_sent",
+  /** A task's agent asked questions on the item itself (questions.json commentId); the Case's record. Internal, never wakes a turn on its own. */
+  TaskAsked: "task_asked",
 } as const;
 export type OrchestratorMessageKind =
   (typeof OrchestratorMessageKind)[keyof typeof OrchestratorMessageKind];
@@ -119,6 +138,24 @@ export const OrchestratorDecisionVia = {
 } as const;
 export type OrchestratorDecisionVia =
   (typeof OrchestratorDecisionVia)[keyof typeof OrchestratorDecisionVia];
+
+/** How far the server got with an approved decision's draft. */
+export const OrchestratorDraftOutcome = {
+  /** Claimed; posting now (or the process stopped while posting). */
+  Running: "running",
+  Done: "done",
+  Failed: "failed",
+} as const;
+export type OrchestratorDraftOutcome =
+  (typeof OrchestratorDraftOutcome)[keyof typeof OrchestratorDraftOutcome];
+
+/** agent.orchestrator.approvals: required = thread writes only from an approved draft. */
+export const OrchestratorApprovals = {
+  Optional: "optional",
+  Required: "required",
+} as const;
+export type OrchestratorApprovals =
+  (typeof OrchestratorApprovals)[keyof typeof OrchestratorApprovals];
 
 // ---------------------------------------------------------------------------
 // A turn on the orchestrator's runner (desktop command)
@@ -213,6 +250,15 @@ export const OrchestratorToolName = {
   RequestDecision: "request_decision",
   RecordDecision: "record_decision",
   EditReply: "edit_reply",
+  PagePublish: "page_publish",
+  PageGet: "page_get",
+  PullRequestOpen: "pull_request_open",
+  SourceItemTransition: "source_item_transition",
+  SourceItemLabel: "source_item_label",
+  SourceItemLink: "source_item_link",
+  CaseNotify: "case_notify",
+  CaseLookup: "case_lookup",
+  CaseHandoff: "case_handoff",
 } as const;
 export type OrchestratorToolName =
   (typeof OrchestratorToolName)[keyof typeof OrchestratorToolName];
@@ -224,6 +270,40 @@ export type OrchestratorToolName =
 export const ORCHESTRATOR_TASK_REPLY_FILE =
   ".agentflow-ai/work/orchestrator-reply.md";
 export const ORCHESTRATOR_TASK_REPLY_MAX = 30_000;
+
+/** What an approved decision does on the conversation's item (request_decision draft). */
+export const orchestratorDecisionDraftSchema = z.object({
+  /** The item it acts on, e.g. LD-9. */
+  itemKey: z.string().min(1).max(255),
+  comment: z
+    .object({
+      text: z.string().min(1),
+      replyTo: z.string().nullable(),
+      attachments: z.array(z.object({ taskId: z.string(), name: z.string() })),
+    })
+    .nullable(),
+  /** Jira transition / Azure DevOps state; null: no move. */
+  transitionName: z.string().nullable(),
+});
+export type OrchestratorDecisionDraft = z.infer<
+  typeof orchestratorDecisionDraftSchema
+>;
+
+export const orchestratorDecisionDraftResultSchema = z.object({
+  outcome: z.enum(OrchestratorDraftOutcome),
+  /** The posted comment's provider reference; null: not posted. */
+  commentRef: z.string().nullable(),
+  /** The move done; null: none or not done. */
+  transition: z
+    .object({ from: z.string().nullable(), to: z.string().nullable() })
+    .nullable(),
+  error: z.string().nullable(),
+  /** ISO; when the server claimed the draft. */
+  carriedOutAt: z.string(),
+});
+export type OrchestratorDecisionDraftResult = z.infer<
+  typeof orchestratorDecisionDraftResultSchema
+>;
 
 /** An admin's decision in AgentFlow (POST /orchestrator/decisions/{id}). */
 export const decideOrchestratorDecisionInputSchema = z.object({
@@ -251,8 +331,19 @@ export type OrchestratorCaseSummary = {
   /** Queued + running tasks. */
   activeTaskCount: number;
   turnRunning: boolean;
+  taskCount: number;
+  turnCount: number;
+  /** Known cost of the case's task sessions (loop cost when a loop has no session) and turns; null when none is known. */
+  costUsd: number | null;
+  /** Known input/output tokens of the case's task sessions (loop numbers when a loop has no session) and turns. */
+  inputTokens: number;
+  outputTokens: number;
+  /** Active agent time: summed session (or loop) durations of the case's tasks plus its turns. */
+  activeMs: number;
   createdAt: string;
   updatedAt: string;
+  /** When the case was closed; null while open. */
+  closedAt: string | null;
 };
 
 export type OrchestratorTurnUsage = {
@@ -270,6 +361,11 @@ export type OrchestratorCaseMessage = {
   text: string;
   turnId: string | null;
   createdAt: string;
+  via?: OrchestratorMessageVia | null;
+  /** Tasks whose questions this case-page message answered. */
+  answeredTaskIds?: string[];
+  /** The agent (compute target) a case-page message is addressed to. */
+  toAgentId?: string | null;
 };
 
 export type OrchestratorCaseTurn = {
@@ -283,6 +379,14 @@ export type OrchestratorCaseTurn = {
   runnerName: string | null;
   startedAt: string;
   finishedAt: string | null;
+};
+
+export type OrchestratorCaseTaskFile = {
+  name: string;
+  size: number;
+  /** False when the runner did not store it (see skipped). */
+  stored: boolean;
+  skipped: string | null;
 };
 
 export type OrchestratorCaseTask = {
@@ -300,10 +404,19 @@ export type OrchestratorCaseTask = {
   resumeTaskId: string | null;
   loopId: string | null;
   reply: string | null;
-  questions: Array<{ id: string; question: string; options?: string[] }>;
+  files: OrchestratorCaseTaskFile[];
+  filesOmitted: number;
+  questions: Array<{
+    id: string;
+    question: string;
+    options?: string[];
+    commentId?: string;
+  }>;
   error: string | null;
   /** Why a queued task has not started (a busy runner). */
   waiting: string | null;
+  /** Questions no answer covers yet (server-owned). */
+  openQuestionCount: number;
   createdAt: string;
   finishedAt: string | null;
 };
@@ -328,6 +441,8 @@ export type OrchestratorCaseDecision = {
   decidedBy: string | null;
   comment: string | null;
   decidedAt: string | null;
+  draft: OrchestratorDecisionDraft | null;
+  draftResult: OrchestratorDecisionDraftResult | null;
   createdAt: string;
 };
 
@@ -348,6 +463,7 @@ export type OrchestratorCaseDetail = OrchestratorCaseSummary & {
   tasks: OrchestratorCaseTask[];
   waits: OrchestratorCaseWait[];
   decisions: OrchestratorCaseDecision[];
+  documents: OrchestratorCaseDocument[];
 };
 
 export const updateOrchestratorCaseInputSchema = z.object({
@@ -391,3 +507,193 @@ export const ORCHESTRATOR_CANCEL_ON_DEFAULT: readonly OrchestratorTicketChange[]
     OrchestratorTicketChange.StatusChanged,
     OrchestratorTicketChange.LabelRemoved,
   ];
+
+/** GET /orchestrator/cases/{id}/loops: the loops the case's tasks ran (Date fields, revived). */
+export type OrchestratorCaseLoops = {
+  loops: WorkflowRunLoopRef[];
+  sessions: WorkflowRunSession[];
+  pullRequests: WorkflowRunPullRequest[];
+};
+
+/** What a page published by the orchestrator is (shown in CASE.md and on the case page). */
+export const OrchestratorDocumentKind = {
+  Ticket: "ticket",
+  Prd: "prd",
+  Plan: "plan",
+  TestPlan: "test_plan",
+  TestRun: "test_run",
+  Other: "other",
+} as const;
+export type OrchestratorDocumentKind =
+  (typeof OrchestratorDocumentKind)[keyof typeof OrchestratorDocumentKind];
+
+/** Display label of each document kind (CASE.md and the case page). */
+export const DOCUMENT_KIND_LABELS: Record<OrchestratorDocumentKind, string> = {
+  [OrchestratorDocumentKind.Ticket]: "Ticket page",
+  [OrchestratorDocumentKind.Prd]: "PRD",
+  [OrchestratorDocumentKind.Plan]: "Implementation plan",
+  [OrchestratorDocumentKind.TestPlan]: "Test plan",
+  [OrchestratorDocumentKind.TestRun]: "Test run",
+  [OrchestratorDocumentKind.Other]: "Document",
+};
+
+/** A page the orchestrator published for the case (newest version of each page). */
+export type OrchestratorCaseDocument = {
+  pageId: string;
+  title: string;
+  url: string;
+  kind: OrchestratorDocumentKind;
+  version: number;
+  attachments: string[];
+  publishedAt: string;
+};
+
+export const ORCHESTRATOR_TASK_BLOCKED_PREFIX = "BLOCKED:";
+
+export const OrchestratorCaseWaitingFor = {
+  /** The case is closed. */
+  Nothing: "nothing",
+  /** A turn runs. */
+  Turn: "turn",
+  /** A decision is pending. */
+  Decision: "decision",
+  /** An unfired wait or active tasks. */
+  Tasks: "tasks",
+  /** A conversation is waiting for people. */
+  Human: "human",
+  /** Idle. */
+  NextMessage: "next_message",
+} as const;
+export type OrchestratorCaseWaitingFor =
+  (typeof OrchestratorCaseWaitingFor)[keyof typeof OrchestratorCaseWaitingFor];
+
+export type OrchestratorCaseListItem = OrchestratorCaseSummary & {
+  project: { id: string; name: string };
+  workflow: { id: string; name: string };
+  waitingFor: OrchestratorCaseWaitingFor;
+  /** Machine names of the agents running or queued for the case's active tasks. */
+  runningAgents: string[];
+  /** The case needs a person (caseNeedsPersonWhere). */
+  needsPerson: boolean;
+  /** The newest wait_human asked of the case's conversations. */
+  askedHuman: string | null;
+  /** Every agent with a task in the case. */
+  agents: OrchestratorCaseAgent[];
+};
+
+export type OrchestratorCaseAgent = {
+  computeTargetId: string;
+  /** Queued + running tasks of this agent in the case. */
+  activeTaskCount: number;
+  runningTaskCount: number;
+  queuedTaskCount: number;
+  openQuestionCount: number;
+  /** Status of the agent's newest task in the case. */
+  latestTaskStatus: OrchestratorTaskStatus | null;
+  /** The newest task's error when it failed. */
+  latestTaskError: string | null;
+  /** Why the newest task is still queued (e.g. a busy personal runner). */
+  latestTaskWaiting: string | null;
+};
+
+export const orchestratorCaseListQuerySchema = z
+  .object({
+    projectId: z.uuid().optional(),
+    workflowId: z.uuid().optional(),
+    status: z.enum(OrchestratorCaseStatus).optional(),
+  })
+  .strict();
+export type OrchestratorCaseListQuery = z.infer<
+  typeof orchestratorCaseListQuerySchema
+>;
+
+/** A message written on the case page in AgentFlow, or a reply shown there. */
+export const OrchestratorMessageVia = {
+  AgentFlow: "agentflow",
+} as const;
+export type OrchestratorMessageVia =
+  (typeof OrchestratorMessageVia)[keyof typeof OrchestratorMessageVia];
+
+/** Where a reply goes: the ticket's thread or the case page. */
+export const OrchestratorReplyTarget = {
+  Thread: "thread",
+  CasePage: "case_page",
+} as const;
+export type OrchestratorReplyTarget =
+  (typeof OrchestratorReplyTarget)[keyof typeof OrchestratorReplyTarget];
+
+export const ORCHESTRATOR_CASE_MESSAGE_MAX = 4000;
+export const ORCHESTRATOR_CASE_ANSWERS_MAX = 20;
+export const ORCHESTRATOR_ASKED_HUMAN_MAX = 500;
+
+export const postOrchestratorCaseMessageInputSchema = z
+  .object({
+    conversationId: z.uuid(),
+    text: z.string().trim().max(ORCHESTRATOR_CASE_MESSAGE_MAX).default(""),
+    answers: z
+      .array(
+        z.object({
+          taskId: z.uuid(),
+          questionId: z.string().trim().min(1).max(100),
+          answer: z.string().trim().min(1).max(ORCHESTRATOR_CASE_MESSAGE_MAX),
+        })
+      )
+      .max(ORCHESTRATOR_CASE_ANSWERS_MAX)
+      .default([]),
+    toAgentId: z.uuid().optional(),
+  })
+  .refine((input) => input.text.length > 0 || input.answers.length > 0, {
+    message: "Write a message or answer a question",
+  });
+export type PostOrchestratorCaseMessageInput = z.input<
+  typeof postOrchestratorCaseMessageInputSchema
+>;
+
+export type OrchestratorCaseMessagePosted = {
+  messageId: string;
+  conversationId: string;
+};
+
+export const orchestratorMessageViaPayloadSchema = z.looseObject({
+  via: z.enum(OrchestratorMessageVia),
+});
+
+const orchestratorMessageAnswersPayloadSchema = z.looseObject({
+  answers: z.array(z.looseObject({ taskId: z.string() })),
+});
+
+/** The tasks a case-page message answered (empty when it answered none). */
+export function readOrchestratorMessageAnsweredTaskIds(
+  payload: unknown
+): string[] {
+  const parsed = orchestratorMessageAnswersPayloadSchema.safeParse(payload);
+  if (!parsed.success) {
+    return [];
+  }
+  return [...new Set(parsed.data.answers.map((answer) => answer.taskId))];
+}
+
+export function readOrchestratorMessageVia(
+  payload: unknown
+): OrchestratorMessageVia | null {
+  const parsed = orchestratorMessageViaPayloadSchema.safeParse(payload);
+  return parsed.success ? parsed.data.via : null;
+}
+
+/** GET /workflows/{id}/agents: a node of the Agents tab diagram. */
+export type WorkflowAgentMapNode = {
+  computeTargetId: string;
+  name: string;
+  isOnline: boolean;
+};
+
+export type WorkflowAgentMapAgent = WorkflowAgentMapNode & {
+  role: string | null;
+  kind: AgentKind;
+  declared: boolean;
+};
+
+export type WorkflowAgentMap = {
+  orchestrator: WorkflowAgentMapNode | null;
+  agents: WorkflowAgentMapAgent[];
+};

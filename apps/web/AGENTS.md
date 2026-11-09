@@ -17,12 +17,7 @@ Before writing or editing any claim about privacy, egress, identity, lifecycle, 
 
 A PR changing egress, identity, lifecycle, or a public API shape updates the describing `content/docs/**` page in the same PR.
 
-## `api-reference/openapi.json`
-
-Generated-client contract — shape errors compile into other people's code.
-
-- Model request bodies as discriminated branches when the runtime validates field *pairs*. A flat field-level union lets clients compile combinations the endpoint always rejects.
-- Public input aliases the runtime accepts must appear in the schema even when they normalize to another value internally.
+- The docs describe the self-hosted edition only; links between pages use absolute `/docs/...` paths.
 
 ## Related
 

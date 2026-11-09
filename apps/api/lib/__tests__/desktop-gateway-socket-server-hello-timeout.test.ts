@@ -1,4 +1,5 @@
 import { DesktopHelloNackReason } from "@repo/api/src/types/compute-target";
+import { log } from "@repo/observability/log";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -17,6 +18,14 @@ const {
   mockClearOperationBacklog: vi.fn(),
   mockHeartbeat: vi.fn(),
   mockIsDirectDesktopAuthSigningEligible: vi.fn(),
+}));
+
+const { mockCheckPersonalAgentProject } = vi.hoisted(() => ({
+  mockCheckPersonalAgentProject: vi.fn(),
+}));
+
+vi.mock("../../app/compute-targets/personal-agent-project", () => ({
+  checkPersonalAgentProject: mockCheckPersonalAgentProject,
 }));
 
 vi.mock("../desktop-command-store", () => ({
@@ -142,6 +151,7 @@ vi.mock("@repo/observability/telemetry/context", () => ({
 import { handleSocketHello } from "../desktop-gateway-socket-server";
 
 function installSuccessfulHelloDefaults() {
+  mockCheckPersonalAgentProject.mockResolvedValue({ ok: true, value: null });
   mockRegister.mockResolvedValue({
     ok: true,
     value: { id: "target-behavioral-1" },
@@ -465,3 +475,61 @@ const SESSION_SYNC_CAPABILITIES = {
   agentSessionSyncActivityChunking: true,
   agentSessionSyncMonitoredActivity: true,
 };
+
+describe("handleSocketHello — personal Agent project check", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installSuccessfulHelloDefaults();
+  });
+
+  it("nacks a personal Agent whose project is unknown and registers nothing", async () => {
+    mockCheckPersonalAgentProject.mockResolvedValue({
+      ok: false,
+      error: "Project PRO-9 is not in this organization.",
+    });
+    const socket = makeSocket();
+    await handleSocketHello(
+      socket as never,
+      makeAuthContext() as never,
+      makeHelloPayload({
+        capabilities: { personalRunner: { projectKey: "PRO-9" } },
+      }) as never,
+      { helloStartedAt: Date.now() }
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      "desktop.hello.nack",
+      expect.objectContaining({
+        reason: DesktopHelloNackReason.PersonalAgentProjectNotFound,
+      })
+    );
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(mockRegister).not.toHaveBeenCalled();
+  });
+
+  it("logs a failed project lookup as a failure, not as an unknown project", async () => {
+    const failure = new Error("db down");
+    mockCheckPersonalAgentProject.mockRejectedValue(failure);
+    const socket = makeSocket();
+    await handleSocketHello(
+      socket as never,
+      makeAuthContext() as never,
+      makeHelloPayload({
+        capabilities: { personalRunner: { projectKey: "PRO-9" } },
+      }) as never,
+      { helloStartedAt: Date.now() }
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      "desktop.hello.nack",
+      expect.objectContaining({ reason: DesktopHelloNackReason.InternalError })
+    );
+    expect(log.warn).toHaveBeenCalledWith(
+      "desktop.gateway.hello.personal_project_check_failed",
+      expect.objectContaining({ error: failure })
+    );
+    expect(log.warn).not.toHaveBeenCalledWith(
+      "desktop.gateway.hello.personal_project_not_found",
+      expect.anything()
+    );
+    expect(mockRegister).not.toHaveBeenCalled();
+  });
+});

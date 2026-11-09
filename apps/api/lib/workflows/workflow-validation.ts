@@ -3,8 +3,13 @@ import {
   IntegrationOperationTarget,
   IntegrationProviderKey,
 } from "@repo/api/src/types/integration";
+import {
+  OrchestratorSourceOperation,
+  resolveOrchestratorGrants,
+} from "@repo/api/src/types/orchestrator-grants";
 import type { ProjectProcess } from "@repo/api/src/types/project-process";
 import { ProcessStepType } from "@repo/api/src/types/project-process";
+import { readProjectRunnerIds } from "@repo/api/src/types/project-runners";
 import { Result } from "@repo/api/src/types/result";
 import {
   type SaveWorkflowInput,
@@ -35,6 +40,7 @@ import {
   type ProjectConnectionCatalog,
   type ProjectConnectionEntry,
   resolveKey,
+  sourceGrantDefinitions,
 } from "@/lib/integrations/connection-grants";
 import { triggerContainersOutside } from "@/lib/integrations/project-connections";
 import { WebhookTriggerType } from "@/lib/integrations/providers/webhook/inbound-event";
@@ -46,6 +52,10 @@ import {
 } from "@/lib/integrations/registry";
 import { actionTarget } from "@/lib/integrations/types";
 import { toJsonObject } from "./engine/run-data";
+import {
+  projectAgentsError,
+  workflowAgentRefs,
+} from "./workflow-project-agents";
 
 /**
  * Validation of a saved workflow (docs/workflows.md "API"): projects and
@@ -155,9 +165,9 @@ export async function validateWorkflowInput(
   const { organizationId, existing } = context;
   const runAsUserId = input.runAsUserId ?? context.defaultRunAsUserId;
   const projectIds = triggerProjectIds(input);
-  const scopeError = await checkScope(organizationId, projectIds, runAsUserId);
-  if (scopeError) {
-    return Result.err(scopeError);
+  const scope = await checkScope(organizationId, projectIds, runAsUserId);
+  if (scope.error) {
+    return Result.err(scope.error);
   }
   const targetError = await checkComputeTarget({
     organizationId,
@@ -179,6 +189,14 @@ export async function validateWorkflowInput(
     if (ruleError) {
       return Result.err(`Runner rule ${index + 1}: ${ruleError}`);
     }
+  }
+  const agentsError = await checkProjectAgents(
+    organizationId,
+    input,
+    scope.projects
+  );
+  if (agentsError) {
+    return Result.err(agentsError);
   }
   const orchestratedError = checkOrchestrated(input);
   if (orchestratedError) {
@@ -214,6 +232,10 @@ export async function validateWorkflowInput(
   const processError = checkProcessGrants(input.agent.process, checks);
   if (processError) {
     return Result.err(processError);
+  }
+  const orchestratorGrantError = checkOrchestratorGrants(input, checks);
+  if (orchestratorGrantError) {
+    return Result.err(orchestratorGrantError);
   }
   return Result.ok({
     name: input.name,
@@ -291,12 +313,12 @@ async function checkScope(
   organizationId: string,
   projectIds: readonly string[],
   runAsUserId: string
-): Promise<string | null> {
+): Promise<{ error: string | null; projects: ScopeProject[] }> {
   const [projects, runAsUser] = await Promise.all([
     withDb((db) =>
       db.project.findMany({
         where: { id: { in: [...projectIds] }, organizationId },
-        select: { id: true },
+        select: { id: true, name: true, settings: true },
       })
     ),
     withDb((db) =>
@@ -307,12 +329,44 @@ async function checkScope(
     ),
   ]);
   if (projects.length !== projectIds.length) {
-    return "Project not found in this organization.";
+    return { error: "Project not found in this organization.", projects };
   }
   if (!runAsUser) {
-    return "The run-as user must be an active member of the organization.";
+    return {
+      error: "The run-as user must be an active member of the organization.",
+      projects,
+    };
   }
-  return null;
+  return { error: null, projects };
+}
+
+type ScopeProject = { id: string; name: string; settings: unknown };
+
+/**
+ * The default Agent and every rule's Agent must be Agents of each project
+ * that lists Agents. Names are loaded only when some project lists any.
+ */
+async function checkProjectAgents(
+  organizationId: string,
+  input: SaveWorkflowInput,
+  projects: ScopeProject[]
+): Promise<string | null> {
+  if (!projects.some((p) => readProjectRunnerIds(p.settings).length > 0)) {
+    return null;
+  }
+  const agents = workflowAgentRefs(input);
+  const agentIds = [...new Set(agents.map((a) => a.computeTargetId))];
+  const targets = await withDb((db) =>
+    db.computeTarget.findMany({
+      where: { id: { in: agentIds }, organizationId },
+      select: { id: true, machineName: true },
+    })
+  );
+  return projectAgentsError({
+    projects,
+    agents,
+    agentNames: new Map(targets.map((t) => [t.id, t.machineName])),
+  });
 }
 
 /**
@@ -862,6 +916,9 @@ function providerName(provider: string): string {
  */
 function checkOrchestrated(input: SaveWorkflowInput): string | null {
   if (input.agent.mode !== WorkflowAgentMode.Orchestrated) {
+    if (Object.keys(input.agent.orchestrator?.connections ?? {}).length > 0) {
+      return "agent.orchestrator.connections: only an orchestrated workflow (agent.mode: orchestrated) has orchestrator grants.";
+    }
     return null;
   }
   if (input.agent.process) {
@@ -869,6 +926,68 @@ function checkOrchestrated(input: SaveWorkflowInput): string | null {
   }
   if (input.agent.runners.length > 0) {
     return "A workflow handled by the orchestrator runs on one runner (agent.runner): remove agent.runners.";
+  }
+  return null;
+}
+
+const ORCHESTRATOR_GRANT_PREFIX = "agent.orchestrator.";
+
+/**
+ * The orchestrator's grants name things that exist: a source operation some
+ * trigger's provider offers, and Confluence connections of the project.
+ */
+function checkOrchestratorGrants(
+  input: SaveWorkflowInput,
+  checks: ActionChecks
+): string | null {
+  if (input.agent.mode !== WorkflowAgentMode.Orchestrated) {
+    return null;
+  }
+  const grants = input.agent.orchestrator?.connections ?? {};
+  const set = resolveOrchestratorGrants(grants);
+  const sourceError = checkOrchestratorSourceGrant(set.source, checks);
+  if (sourceError) {
+    return `${ORCHESTRATOR_GRANT_PREFIX}${sourceError}`;
+  }
+  for (const key of set.pages.keys()) {
+    const pageError = checkOrchestratorPageKey(key, checks);
+    if (pageError) {
+      return `${ORCHESTRATOR_GRANT_PREFIX}${pageError}`;
+    }
+  }
+  return null;
+}
+
+function checkOrchestratorSourceGrant(
+  source: ReadonlySet<OrchestratorSourceOperation>,
+  checks: ActionChecks
+): string | null {
+  for (const op of source) {
+    if (op === OrchestratorSourceOperation.Comment) {
+      continue;
+    }
+    const offered = checks.sourceProviders.some((provider) =>
+      op === OrchestratorSourceOperation.Attach
+        ? provider !== IntegrationProviderKey.MicrosoftTeams
+        : sourceGrantDefinitions(provider, [op]).length > 0
+    );
+    if (!offered) {
+      return `connections.source: no trigger's connection can ${op} its items (a Teams thread takes only comment).`;
+    }
+  }
+  return null;
+}
+
+function checkOrchestratorPageKey(
+  key: string,
+  checks: ActionChecks
+): string | null {
+  const resolved = resolveKey(checks.catalog, checks.projectIds, key);
+  if (!resolved.ok) {
+    return `connections.${key}: ${resolved.error}`;
+  }
+  if (resolved.value.provider !== IntegrationProviderKey.Confluence) {
+    return `connections.${key}: the orchestrator writes only Confluence pages; ${key} is ${providerName(resolved.value.provider)}.`;
   }
   return null;
 }

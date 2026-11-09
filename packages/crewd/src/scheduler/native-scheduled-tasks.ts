@@ -32,7 +32,7 @@
  * Its reader returns `[]` when `file.tasks` is not an array. The crewd task's
  * runtime-only `durable` flag is projected onto Claude Code's own `permanent`
  * field (the native flag that governs whether an entry survives across restarts,
- * per `apps/web/content/docs/mechanisms/scheduled-tasks.mdx`) — NOT dropped: a
+ * per Claude Code's native scheduled-tasks file format) — NOT dropped: a
  * default `durable:true` task must emit `permanent:true` so the native scheduler
  * keeps it, since native ownership suppresses the local daemon. An earlier
  * revision of this writer emitted a bare top-level array with a `durable` field

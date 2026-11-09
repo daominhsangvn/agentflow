@@ -74,6 +74,7 @@ import { readActionStage } from "./workflow-validation";
 export type RunServiceError = { status: StatusCode; message: string };
 
 export type RunListOptions = {
+  projectId?: string;
   workflowId?: string;
   status?: WorkflowRunStatus;
   cursor?: string | null;
@@ -104,6 +105,7 @@ export const workflowRunService = {
       db.workflowRun.findMany({
         where: {
           organizationId,
+          ...(options.projectId ? { projectId: options.projectId } : {}),
           ...(options.workflowId ? { workflowId: options.workflowId } : {}),
           ...(options.status ? { status: options.status } : {}),
           ...(cursor ? cursorFilter(cursor) : {}),

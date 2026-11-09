@@ -1,127 +1,46 @@
 ---
-title: Troubleshooting
-description: Common failure modes, diagnostic steps, and fixes for the desktop client, the gateway, and the plugins.
+title: "Troubleshooting"
+description: "Symptoms, causes and fixes for the server, Agents, integrations and cases."
 ---
 
-Most AgentFlow failures fall into one of a few categories. This page is the first place to look when something goes wrong.
+## Server
 
-## Tray says `error` or `degraded`
+| Symptom | Cause | Fix |
+|---|---|---|
+| `P1001: Can't reach database server at undefined:5432` | `DATABASE_URL` is not set or Docker is not running. | Run `docker compose ps`. Check `packages/database/.env` and the `.env.local` of each app. |
+| `Cannot find module '@repo/database'` | The Prisma client is not generated. | Run `pnpm --filter @repo/database db:generate`. |
+| Environment variable validation failed | A variable is missing or invalid. | Add it to `.env.local`. An empty `""` fails validation: comment out unused variables instead. See [Server environment variables](/docs/reference/server-env). |
+| Attachments fail to upload or transcripts do not load | Buckets or CORS rules are missing on RustFS. | Run `pnpm storage:init`, and again after changing the app's origin. |
 
-**Tray `error`**
+## Agents
 
-- startup failed
-- open the main window; the Dashboard shows the technical detail
-- check the in-app logs under `desktop:get-logs` (exposed in the UI)
-- common causes: port conflict outside the fallback range, missing API key, malformed settings
+| Symptom | Cause | Fix |
+|---|---|---|
+| Agent exits with code 2 and `Invalid configuration: ...` | A variable is missing or invalid; the message names it. | Fix the variable. See [Agent CLI](/docs/reference/agent-cli). |
+| `AGENTFLOW_API_URL: Origin must use https ...` | The Agent reaches the API over plain http on a non-local host. | Use https, or list the host in `AGENTFLOW_ALLOW_HTTP_HOSTS`. |
+| Agent exits with code 3 and `Cannot start: missing required tools ...` | `bash`, `git`, `claude`, `jq` or `python3` is not on the PATH, the plugins are not found, or the workspace is not writable. | Install the missing tool or fix the workspace path. |
+| `Connection degraded: ...` | The API is unreachable or rejects the key (revoked, or missing `write` scope). The Agent keeps retrying. | Check the API URL and issue a new key. |
+| Agent shows offline | The Agent stopped or lost its connection. | Look at Needs attention on Home and at the [Agents page](/docs/guides/operate/agents), then restart the Agent. |
+| Saving a workflow says an Agent "is not one of the Agents of project ..." | The default, rule or orchestrator Agent is not added to a trigger project that has Agents. | Add it in Project → Agents, or name one of the project's Agents. |
+| Run failed: "Agent ... is not one of project ...'s Agents" (`agent_not_in_project`) | The workflow or rule names an Agent outside the project's Agents. The run is not moved to another Agent. | Add the Agent to the project, or name a project Agent. |
+| Run failed: "Personal Agent ... is offline" | The personal Agent the run needs is offline; the run does not move to another Agent. | Start the personal Agent and run again. |
+| Personal Agent refused at start with `personal_agent_project_not_found` | Its project key is not a project of the API key's organization. | Correct the project key (`node runner.mjs setup --project <key>`). |
+| Task fails with a `claude install <version>` message | A personal Agent's Claude Code version differs from the pinned version. | Run the command shown on the machine. |
+| `No Claude credentials on this runner` warning | Expected when a Model provider is set in AgentFlow. Otherwise tasks fail at the first `claude` call. | Set the Model provider on the Agent, or sign in to Claude Code on the machine. |
 
-**Tray `degraded`**
+## Integrations
 
-- the cloud socket is disconnected or awaiting hello-ack
-- local operations still work
-- the recovery timer forces a full reconnect after 2 minutes; wait or force one with Pause/Resume
+| Symptom | Cause | Fix |
+|---|---|---|
+| Webhooks do not arrive | The server is not reachable over public HTTPS from the integration. | Expose the API on a public HTTPS URL, or use polling where the trigger supports it. See [Triggers and actions](/docs/guides/setup/triggers-and-actions). |
+| A connection test fails | The token expired or lacks scopes. | Update the token in [Connections](/docs/guides/setup/connections) and test again. |
+| A task cannot use a connection | The project has no grant for it. | See [Connection grants](/docs/guides/setup/connection-grants). |
 
-## `401` on `/api/gateway/*`
+## Workflows & cases
 
-- the session token is missing or expired, or the API key is invalid
-- check **Settings → API key** for a valid key
-- if the problem is an expired session, it will renew on next challenge-exchange
-- confirm `Origin` matches a registered origin (the web app origin)
-
-## `403 directory not allowed`
-
-- the operation tried to touch a path outside the sandbox or inside a hard-denied path
-- confirm `sandboxBaseDirectory` includes the target path
-- check for symlinks that escape the sandbox; paths are canonicalized via `fs.realpathSync.native`
-- remember hard-denies apply even inside the sandbox: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/Library/Keychains`, `/etc`, `/bin`, `/sbin`
-
-## Port conflict
-
-- probe order: `19432 → 19433 → 19434 → 19435`
-- confirm the active port at `~/.agentflow-ai/electron-port`
-- if all four ports are busy, the tray goes `error`; free a port or quit the conflicting process
-
-## Cloud socket `auth error`
-
-- API key is invalid or revoked
-- the tray shows `Authentication failed — verify your API key in Settings`
-- re-paste the key; confirm it matches an active key in the AgentFlow web app
-
-## `claude`, `codex`, `gh`, `git`, or `python3` not found
-
-- the desktop spawns `$SHELL -ilc` to extract the real PATH; if your shell init does not export the binary, spawn will fail
-- telemetry emits `preflight.binary_not_found` or `preflight.spawn_failed`
-- override the binary path at **Settings → Binary paths** or via `PATCH /api/gateway/settings/binary-paths`
-
-## Loop hangs or never completes
-
-- check `state.json` for the current phase and status
-- if status is `AWAITING_USER`, you have an open checkpoint (answer questions or confirm changes with `/code:amend-plan`)
-- if an agent is looping on a promise, check the hook logs and the validation script output
-- cap runtime with `AGENTFLOW_MAX_ITERATIONS` (default 10)
-
-## Plan fails `PLAN_VALIDATED`
-
-- the plan structure violates `plan-schema.json`
-- read the validator output
-- common issues: missing acceptance criteria, mismatched array lengths, invalid task types
-- fix the plan and relaunch; the validation script will revalidate
-
-## Subagent missing `LEARNINGS_ACKNOWLEDGED`
-
-- a `learning_agent` did not acknowledge and capture learnings
-- `subagent-stop-hook.sh` will re-run the agent up to 2 times
-- if it still fails, check the agent prompt and `self-learning:learning-quality` skill availability
-
-## Judges produce low scores
-
-- the input context is thin or not grounded
-- ensure `@code:pre-explorer` ran and produced `code-map.json`
-- check judge metric justifications for the specific axes that failed
-- adjust the plan or implementation to address the gaps, then rerun judges
-
-## Log locations
-
-| Log | Location |
-|---|---|
-| In-app ring buffer (500 entries) | `desktop:get-logs` IPC, shown in Logs tab |
-| Electron stdout/stderr | console, tagged `[tag][HH:MM:SS.fff]` |
-| Symphony loop subprocess | `logPath` and `jsonlPath` per job |
-| Activity Log | `desktop-activity-log.json` |
-| Port discovery | `~/.agentflow-ai/electron-port` |
-| Gateway identity UUID | `<userData>/gateway-identity.json` |
-
-## Persistent stores to inspect
-
-All under `app.getPath("userData")`:
-
-- `desktop-settings.json`
-- `desktop-secrets.json`
-- `desktop-approvals.json`
-- `desktop-activity-log.json`
-- `desktop-job-store.json`
-- `desktop-loop-tokens.json`
-
-## Debug modes (dev only)
-
-- `AF_LOCAL_GATEWAY_DEBUG_AUTH=1` — enable debug token minting
-- `AF_LOCAL_GATEWAY_NO_AUTH=1` — disable gateway auth (dangerous)
-- `AF_LOCAL_GATEWAY_PROD_ORIGINS_ONLY=1` — stricter origin whitelist
-- enable `verboseLogging: true` in settings for extra log detail
-
-## When all else fails
-
-- quit and relaunch the desktop client; the `BootRecoveryService` reattaches live jobs and finalizes dead ones
-- check `./plugins/code/scripts/preflight-check.sh` under `plugins/self-learning/scripts/` (bundled with the plugin) for Python, jq, awk, git, and PyYAML presence
-- rerun the plugin install script to restore any missing plugin files
-- repair AgentFlow plugins into user scope if System Check reports project-scoped or disabled plugins:
-
-```bash
-for plugin in bootstrap code code-review judges platform self-learning; do
-  claude plugin uninstall "$plugin@agentflow-ai" --scope project
-  claude plugin install "$plugin@agentflow-ai" --scope user
-  claude plugin enable "$plugin@agentflow-ai" --scope user
-done
-claude plugin list --json
-```
-
-See also the [FAQ](./faq) for common questions.
+| Symptom | Cause | Fix |
+|---|---|---|
+| A case waits and nothing happens | The case is waiting for a person to answer or approve. | Open the case and read the last message. See [Cases](/docs/guides/operate/cases). |
+| A task is blocked | The task finished with an answer starting `BLOCKED:` because a file or page its command needs is missing. | Pass the file or page in `files`, or produce it first. See [Blocked tasks](/docs/guides/recipes/blocked-tasks). |
+| A tool call shows as "Refused" | A guard refused it (undeclared command, missing `needs`, superseded turn). | Fix the rules or the capabilities. See [Orchestrator rules](/docs/guides/recipes/orchestrator-rules). |
+| No workflow starts on a ticket change | The trigger does not match or the workflow is disabled. | Check the workflow YAML. See [Workflow YAML](/docs/guides/setup/workflow-yaml). |

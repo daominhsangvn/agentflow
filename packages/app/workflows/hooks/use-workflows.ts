@@ -25,6 +25,12 @@ import {
   type WorkflowRunsResponse,
   type WorkflowsResponse,
 } from "@repo/api/src/types/workflow";
+import type {
+  WorkflowEventPayload,
+  WorkflowEventsResponse,
+} from "@repo/api/src/types/workflow-event";
+// Cross-slice: a save creates or removes the workflow's managed HTTP connection.
+import { integrationKeys } from "@repo/app/integrations/hooks/integration-keys";
 // Cross-slice: the integrations slice owns the server-message error handling
 // shared by both slices' mutations.
 import { mutationErrorOptions } from "@repo/app/integrations/lib/mutation-error";
@@ -155,6 +161,9 @@ export function useCreateWorkflow() {
     onSuccess: (workflow) => {
       queryClient.setQueryData(workflowKeys.detail(workflow.id), workflow);
       queryClient.invalidateQueries({ queryKey: workflowKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.connectionList(),
+      });
     },
     ...mutationErrorOptions(WorkflowMutationErrorTitle.Create),
   });
@@ -175,6 +184,9 @@ export function useUpdateWorkflow() {
     onSuccess: (workflow) => {
       queryClient.setQueryData(workflowKeys.detail(workflow.id), workflow);
       queryClient.invalidateQueries({ queryKey: workflowKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: integrationKeys.connectionList(),
+      });
     },
     ...mutationErrorOptions(WorkflowMutationErrorTitle.Update),
   });
@@ -474,6 +486,12 @@ function normalizeRunFilters(
   if (filters.status) {
     normalized.status = filters.status;
   }
+  if (filters.projectId) {
+    normalized.projectId = filters.projectId;
+  }
+  if (filters.workflowId) {
+    normalized.workflowId = filters.workflowId;
+  }
   return normalized;
 }
 
@@ -490,6 +508,12 @@ function buildRunListQuery(
   }
   if (filters.status) {
     params.set("status", filters.status);
+  }
+  if (filters.projectId) {
+    params.set("projectId", filters.projectId);
+  }
+  if (filters.workflowId) {
+    params.set("workflowId", filters.workflowId);
   }
   const query = params.toString();
   return query ? `?${query}` : "";
@@ -528,5 +552,45 @@ export function useDecideWorkflowRunReview() {
       refreshRunCaches(queryClient, run);
     },
     ...mutationErrorOptions(WorkflowMutationErrorTitle.DecideReview),
+  });
+}
+
+/** Page size of the workflow event history. */
+export const WORKFLOW_EVENTS_PAGE_SIZE = 25;
+
+/** Inbound event history of one workflow, newest first, paged by cursor. */
+export function useWorkflowEvents(workflowId: string) {
+  const apiClient = useApiClient();
+
+  return useInfiniteQuery({
+    queryKey: workflowKeys.events(workflowId),
+    queryFn: ({ pageParam }) => {
+      const cursor = pageParam
+        ? `&cursor=${encodeURIComponent(pageParam)}`
+        : "";
+      return apiClient.get<WorkflowEventsResponse>(
+        `${workflowPath(workflowId)}/events?limit=${WORKFLOW_EVENTS_PAGE_SIZE}${cursor}`
+      );
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    enabled: !!workflowId,
+  });
+}
+
+/** Stored payload of one event (org admins); fetches only once an event is selected. */
+export function useWorkflowEventPayload(
+  workflowId: string,
+  eventId: string | null
+) {
+  const apiClient = useApiClient();
+
+  return useQuery({
+    queryKey: workflowKeys.eventPayload(workflowId, eventId ?? ""),
+    queryFn: () =>
+      apiClient.get<WorkflowEventPayload>(
+        `${workflowPath(workflowId)}/events/${eventId}`
+      ),
+    enabled: !!workflowId && !!eventId,
   });
 }

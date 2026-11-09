@@ -1,0 +1,105 @@
+---
+title: "Connection grants"
+description: "What an Agent may read and write through the project's connections, written as connections: on an instruction action or a process step; the integration tools each grant gives, fixed options, approvals and limits."
+---
+
+Agents never hold integration credentials. An instruction action's Agent, and a process step's Agent, reads the run's source item and **nothing else** unless its `connections:` map grants more. Every write is listed there, by the admin who writes the workflow or the process, and AgentFlow carries it out with the connection's credentials. Any other call is refused and recorded.
+
+```yaml
+connections:
+  source: [comment, transition, label, link]  # writes on the run's source item
+  confluence: read                            # read pages of the project's spaces
+  jira-ops:                                   # another project connection, by key
+    allow: [jira.create_issue]
+    with: { projectKey: OPS }                 # fixed: the Agent cannot change it
+    approval: required                        # a person approves each write
+  pull_requests: [reply, resolve]             # review threads of the run's pull requests
+```
+
+Grants apply to **automatic** Agents. A personal Agent gets no integration tools: it uses the person's own (a Jira MCP server, `gh`).
+
+## Grant keys
+
+| Key | What it is |
+|---|---|
+| `source` | The run's source item (the ticket that started the run), whatever its provider. It is pinned: its tools take no item and no connection, so a key written in the ticket cannot redirect them. |
+| `pull_requests` | The review threads of the pull requests this run opened, through each repository's connection. |
+| a project connection key | Another connection of the project, e.g. `confluence`, `teams-release`, `jira-ops`. |
+
+Up to 10 keys per map.
+
+## Grant values
+
+| Value | Meaning |
+|---|---|
+| `read` | Read only. |
+| `[operation, ...]` | These writes (any write implies read). Up to 20. |
+| `{ allow: [...], with: {...}, approval: required }` | `allow`: the writes. `with`: options fixed for every call; the Agent's values for them are ignored. `approval: required`: each write waits on the run page until an org admin approves or rejects it. |
+
+### Operations by key
+
+| Key | Operations |
+|---|---|
+| `source` | `comment`, `transition`, `label` (labels on Jira, tags on Azure DevOps), `link` (a web link on the item) |
+| `pull_requests` | `reply`, `resolve` (no `with`) |
+| Jira key | `jira.create_issue` |
+| Confluence key | `confluence.create_page`, `confluence.update_page`, `confluence.comment`, `confluence.resolve_comment` |
+| Microsoft Teams key | `microsoft_teams.post_message` |
+| Webhook key | `webhook.post` |
+| Azure DevOps key | `azure_devops.run_pipeline` |
+
+The options of each operation are the action's options: [Triggers and actions](/docs/guides/setup/triggers-and-actions).
+
+## The tools an Agent gets
+
+The Agent gets an MCP server, `agentflow_integrations`, whose tools follow from the grant:
+
+| Tool | Given when | What it does |
+|---|---|---|
+| `integrations_overview` | always | What this session may do. |
+| `source_item_get` | the run has a source | Reads the source item: title, status, description, labels, assignee, latest comments, web links, attachment names, URL. |
+| `source_item_attachment_read` | the source is Jira | Reads the text of one file attached to the source item, by name (text up to 1 MB; images and other binary files are refused). A read: needs no grant. |
+| `source_item_comment` | `source: [comment]` | Comments on the source item. With `attachments`, shows files the Agent uploaded first (Jira). |
+| `source_item_transition` | `source: [transition]` | Moves the source item (Jira transition, Azure DevOps state). |
+| `source_item_label` | `source: [label]` | Adds or removes labels (tags). |
+| `source_item_link` | `source: [link]` | Adds a web link, e.g. the page a plan is reviewed on. |
+| `connection_get_item` | any grant on a Jira or Azure DevOps key | Reads one item by key, id or link, only within that project connection's projects. |
+| `confluence_get_page`, `confluence_find_pages`, `confluence_list_comments` | any grant on a Confluence key | Reads pages and comments, only within the project connection's spaces. |
+| `<provider>_<operation>`, e.g. `confluence_update_page`, `jira_create_issue`, `microsoft_teams_post_message` | the operation is granted on a key | Carries it out on one of the keys granting it. |
+| `pull_requests_list` | a `pull_requests` grant | The run's pull requests with repository, number, state and title. |
+| `pull_request_threads` | a `pull_requests` grant, and the run has a pull request | Review threads (open by default, or all), each comment marked `mine` when the Agent wrote it. Bitbucket and Azure DevOps; GitHub and Local Git answer "not supported" for now. |
+| `pull_request_reply`, `pull_request_resolve` | `pull_requests: [reply]`, `[resolve]` | Replies in a thread; marks it resolved. |
+
+## Attaching files to a comment
+
+With `source: [comment]` on a Jira source (and no approval on it), the Agent can attach files to its comment: test evidence, screenshots, the full PRD.
+
+1. Upload each file with the helper the Agent finds in `$AGENTFLOW_ATTACH`: `"$AGENTFLOW_ATTACH" results/LD-6/login.png image/png` (at most 8 MB). It prints the file's id. The upload attaches the file to the item at once and counts as a write.
+2. Call `source_item_comment` with the text and `attachments`: the ids (up to 10). Jira Cloud shows images inline.
+
+Typed `jira.add_comment` actions take no files.
+
+## Limits and records
+
+- At most **5 writes per instruction attempt** and **100 per step**.
+- Every call is recorded on the run page under "Integration tool calls", with its status (succeeded, failed, refused, pending approval, rejected). An identical repeated write answers with the first result instead of writing twice.
+- `approval: required`: the write is recorded as pending with its arguments; an org admin approves it (it is carried out then) or rejects it. A pending write does not fail its instruction.
+- A process step's grant is checked when the process is saved, against the connections of every project that uses it.
+
+## Prompts that use grants
+
+Write in the instruction what to read and what to write; the grant only makes it possible.
+
+| Goal | Grant | Instruction text |
+|---|---|---|
+| Comment a summary on the ticket | `source: [comment]` | `Summarize what was implemented (files, tests, the pull request {{pr.url}}) as one comment on the issue.` |
+| Move the ticket | `source: [transition]` | `Move the issue to "In Review".` |
+| Label by result | `source: [label, transition]` | `Read .agentflow-ai/work/qa/verdict.txt. PASS: add the label qc-passed and move the issue to Done. FAIL: add qc-failed and move it to To Do.` |
+| Link the plan page | `source: [link]` | `Add a web link to the issue to {{plan.url}} titled "Implementation plan".` |
+| Read the PRD attached to the ticket | none (read) | `If the issue has an attachment PRD-{{issue.key}}.md, read it with source_item_attachment_read: it is the PRD. Otherwise the description is the PRD.` |
+| Post test evidence | `source: [comment]` | `Upload every file of results/{{issue.key}}/*.png with "$AGENTFLOW_ATTACH", then post results/{{issue.key}}/jira-comment.md as one comment with those attachments.` |
+| Publish the plan on Confluence | `confluence: [confluence.create_page, confluence.update_page]` | `Publish .agentflow-ai/work/plan.md as the page "{{issue.key}} · Implementation plan" in space LD. If the page exists, read it first and update it from its current version.` |
+| Answer comments on a Confluence page | `confluence: [confluence.comment, confluence.resolve_comment]` | `Read the open comments of the plan page with confluence_list_comments, answer each one in its thread, and resolve those you fixed.` |
+| Create a follow-up story | `jira-ops: { allow: [jira.create_issue], with: { projectKey: OPS } }` | `Create one story for the follow-up work listed in plan.md, linked to {{source.key}} as "relates to".` |
+| Address a code review | `pull_requests: [reply, resolve]` | `Read the open review threads of the pull request, fix each point, answer each thread with what changed and resolve it.` |
+| Tell a channel | `teams-release: [microsoft_teams.post_message]` | `Post a one-paragraph release note for {{source.key}} to the Teams channel.` |

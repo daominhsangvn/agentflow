@@ -1,0 +1,60 @@
+---
+title: "Files and Confluence pages"
+description: "Hand files and pages to tasks, publish and update Confluence pages while keeping people's edits, and attach files to a reply."
+---
+
+Tasks work on files. A task leaves files, the orchestrator hands them to the next task, publishes them as Confluence pages or attaches them to the ticket.
+
+## Files a task leaves
+
+A command declares `attach` globs in its `AGENTFLOW.md` (for example `PRD-*.md`). When the task ends the Agent collects the matches (at most 20 files, 4 MB each, 5 MB together) and they come back with the result. `produces` and `needs` tags tell the orchestrator which command makes what another command needs ([Agent capabilities](/docs/guides/setup/agent-capabilities)).
+
+The task's answer is a file, `.agentflow-ai/work/orchestrator-reply.md` (up to 30,000 characters). It says what was done, in a few lines.
+
+## Hand files to a task
+
+`task_run` takes `files`:
+
+| Form | Passes |
+|---|---|
+| `{taskId, name}` | A text file of an earlier task of the case |
+| `{page, name}` | The **current** Markdown of a Confluence page (an id or a link, inside the project connection's spaces), read when `task_run` runs |
+
+Up to 5 files, 200 KB each and 400 KB together. They are written to `inputs/` in the task's work directory. A page input counts for the `needs` check. Name the files in the prompt.
+
+Rule text from LD-6:
+
+```text
+- Before a task works from a document, hand it the page's CURRENT content with task_run files [{page, name}] (people may have edited it on Confluence): PRD-<KEY>.md, PLAN-<KEY>.md, TESTCASES-<KEY>.md.
+```
+
+## Publish a Confluence page
+
+`page_publish` turns a Markdown file of a task of the case into a page.
+
+- With `page` (id or link) it updates that page. Without it, it finds the page by `title` under the parent (the project's parent page, or `root`) or creates it.
+- `kind` is one of `ticket`, `prd`, `plan`, `test_plan`, `test_run`, `other`.
+- `attachments` (at most 10 files, for example screenshots) are uploaded to the page and images are shown below the body.
+- Later versions update the **same** page: pass `page` from the case's Documents card. LD-6 kept the PRD on one page from v1 to v4.
+- Each publish is recorded on the case under Documents with page, title, kind, version and link.
+- Writes stay in the connection's spaces. The provider refuses any page or parent outside them.
+
+## Keep people's edits
+
+`page_publish` refuses to update a page someone else edited since AgentFlow last published it. Run the task again with that page in its `files`, so their edits are kept, then publish. `overwrite: true` replaces the page, which the rules should allow only when a person asked for it.
+
+```text
+- If page_publish refuses because people edited the page: run the task again with that page in its files so their edits are kept, then publish. Use overwrite only when a person asked to replace the page.
+```
+
+`page_get` reads a page's Markdown, version and last editor, for answering a question about a document.
+
+## Attach files to the ticket
+
+`reply` takes `attachments: [{taskId, name}]`: the files are uploaded to the ticket first and shown with the comment (Jira; Teams refuses). A failure posts nothing and names what was already attached. LD-6 prefers short Jira comments with page links and no attachments. For run-based workflows, files travel as Jira attachments (`PRD-<KEY>.md`, `PLAN-<KEY>.md`, `TESTCASES-<KEY>.md`).
+
+## See also
+
+- [Orchestrator](/docs/guides/setup/orchestrator)
+- [Blocked tasks](/docs/guides/recipes/blocked-tasks)
+- [Connections](/docs/guides/setup/connections)

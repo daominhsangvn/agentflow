@@ -1,0 +1,113 @@
+// Components of AgentFlow around the workflow orchestrator, and how they talk.
+// Provider-agnostic on purpose: a "channel" is any integration connection.
+// Details: docs/orchestrator.md, docs/workflows.md, docs/runner.md.
+
+model {
+  person = actor "Team member" {
+    description "Asks for work and answers questions in a channel thread"
+  }
+
+  admin = actor "Admin" {
+    description "Follows cases and gives decisions in AgentFlow"
+  }
+
+  channel = external "Channel" {
+    description "Any integration connection: sends events in, receives replies"
+  }
+
+  documentStore = external "Document store" {
+    description "Where task documents are published and read"
+  }
+
+  codeHost = external "Code host" {
+    description "Project repositories: branches and pull requests"
+  }
+
+  llm = external "LLM provider" {
+    description "Anthropic or an Anthropic-compatible API"
+  }
+
+  agentflow = system "AgentFlow" {
+    app = container "App" {
+      description "Web UI: workflow cases, decision buttons"
+    }
+
+    integration = container "Integration layer" {
+      #deterministic
+      description "Part of the API. Connections and providers: the only way AgentFlow reaches external systems"
+    }
+
+    orchestrator = container "Orchestrator" {
+      description "One per orchestrated workflow: takes every request of the workflow"
+
+      core = component "Orchestrator Core" {
+        #deterministic
+        description "Part of the API. Cases, conversations, turn scheduling, guards, tasks, waits, decisions. Never calls a model"
+      }
+
+      agent = agent "Orchestrator Agent" {
+        #llm
+        description "Claude Code on its own runner, no repository, MCP tools only. Reads the rules and the case, decides what to do"
+      }
+    }
+
+    mcp = container "MCP server" {
+      description "Serves the orchestrator tools for the turn's token and forwards each call to the Core"
+    }
+
+    workers = container "Worker runners" {
+      #llm
+      description "Runners that do the work: commands declared in their AGENTFLOW.md, run as STEP loops"
+    }
+
+    database = datastore "PostgreSQL" {
+      description "Cases, conversations, messages, tasks, decisions"
+    }
+
+    objectStorage = datastore "Object storage (RustFS)" {
+      description "Files tasks produce, loop state"
+    }
+  }
+
+  // People
+  person -> channel "asks, answers in the thread"
+  admin -> agentflow.app "follows cases, decides"
+  agentflow.app -> agentflow.orchestrator.core "decisions" {
+    technology "REST"
+  }
+
+  // In and out of AgentFlow
+  channel -> agentflow.integration "events" {
+    technology "webhook / poll"
+  }
+  agentflow.integration -> channel "replies, edits, attachments"
+  agentflow.integration -> documentStore "publishes and reads pages"
+  agentflow.integration -> codeHost "opens pull requests"
+  agentflow.integration -> agentflow.orchestrator.core "messages"
+  agentflow.orchestrator.core -> agentflow.integration "reply, publish, open pull request"
+
+  // Orchestrator
+  agentflow.orchestrator.core -> agentflow.database "state"
+  agentflow.orchestrator.core -> agentflow.orchestrator.agent "turn: rules, CASE.md, new messages" {
+    technology "WebSocket"
+  }
+  agentflow.orchestrator.agent -> agentflow.orchestrator.core "turn result: session, usage"
+  agentflow.orchestrator.agent -> agentflow.mcp "tool calls" {
+    technology "MCP"
+  }
+  agentflow.mcp -> agentflow.orchestrator.core "forwards tool calls" {
+    technology "REST, turn token"
+  }
+  agentflow.orchestrator.agent -> llm "model calls"
+
+  // Work
+  agentflow.orchestrator.core -> agentflow.workers "tasks as STEP loops" {
+    technology "WebSocket"
+  }
+  agentflow.workers -> agentflow.orchestrator.core "loop status, answer"
+  agentflow.workers -> agentflow.objectStorage "result files"
+  agentflow.workers -> codeHost "clone, push branches" {
+    technology "git"
+  }
+  agentflow.workers -> llm "model calls"
+}

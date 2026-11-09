@@ -52,14 +52,23 @@ import {
 import { personalRunnerBusy } from "@/lib/workflows/engine/personal-runner-queue";
 import { isLoopSettled } from "@/lib/workflows/engine/run-loops";
 import { renderCase } from "./case-render";
+import { recordAskedQuestions } from "./task-asked";
 import { taskCancelledMessage } from "./task-cancel";
 import {
+  checkInputsFit,
   loadTaskInputs,
   resolveTaskInputs,
   type TaskFileRef,
   taskFilesFromStep,
 } from "./task-files";
-import { readTaskResult, type TaskResult } from "./task-result";
+import { checkTaskCommand, checkTaskNeeds } from "./task-guards";
+import {
+  mergeTaskResult,
+  readTaskResult,
+  type TaskInputFile,
+  type TaskPageInput,
+  type TaskResult,
+} from "./task-result";
 
 /**
  * The orchestrator's tasks (docs/orchestrator.md): one command of one runner,
@@ -89,12 +98,16 @@ export type StartTaskInput = {
   command: string;
   args: string;
   prompt: string;
-  /** Null: the mode its AGENTFLOW.md declares (write when undeclared). */
+  /** Null: the mode its AGENTFLOW.md declares; write on a read command is refused. */
   mode: RunnerCommandMode | null;
   resumeTaskId: string | null;
   fork: boolean;
   /** Files of earlier tasks of the case, written to the task's `inputs/`. */
   files: TaskFileRef[];
+  /** Confluence pages read by task_run, written to the task's `inputs/` as files. */
+  pageInputs: TaskPageInput[];
+  /** The message ref the task answers (reply's replyTo); null when none. */
+  replyTo: string | null;
 };
 
 export async function startTask(input: StartTaskInput): Promise<
@@ -105,6 +118,7 @@ export async function startTask(input: StartTaskInput): Promise<
       runner: string;
       error: string | null;
       waiting: string | null;
+      replyTo: string | null;
     },
     string
   >
@@ -116,12 +130,13 @@ export async function startTask(input: StartTaskInput): Promise<
   const runner = findRunner(files, input.runner);
   if (!runner) {
     return Result.err(
-      `No runner "${input.runner}" declared commands for this project: ${files.map((file) => file.runnerName).join(", ") || "none did"}.`
+      `No Agent "${input.runner}" of this project declared commands: ${files.map((file) => file.runnerName).join(", ") || "none did"}.`
     );
   }
-  const declared = runner.capabilities?.commands.find(
-    (command) => command.name === input.command
-  );
+  const checked = checkTaskCommand(runner, input.command, input.mode);
+  if (!checked.ok) {
+    return Result.err(checked.error);
+  }
   if (input.resumeTaskId) {
     const resumed = await withDb((db) =>
       db.orchestratorTask.findFirst({
@@ -151,12 +166,24 @@ export async function startTask(input: StartTaskInput): Promise<
       );
     }
   }
-  const inputs =
-    input.files.length > 0
-      ? await resolveTaskInputs(input.caseId, input.files)
-      : null;
-  if (inputs && !inputs.ok) {
-    return Result.err(inputs.error);
+  if (!input.resumeTaskId) {
+    const needs = await checkTaskNeeds({
+      organizationId: input.organizationId,
+      conversationId: input.conversationId,
+      files,
+      declared: checked.value.declared,
+      inputNames: [
+        ...input.files.map((file) => file.name),
+        ...input.pageInputs.map((page) => page.name),
+      ],
+    });
+    if (!needs.ok) {
+      return Result.err(needs.error);
+    }
+  }
+  const initial = await initialResultFor(input);
+  if (!initial.ok) {
+    return Result.err(initial.error);
   }
   const task = await withDb((db) =>
     db.orchestratorTask.create({
@@ -169,24 +196,20 @@ export async function startTask(input: StartTaskInput): Promise<
         command: input.command,
         args: input.args,
         prompt: input.prompt,
-        mode: input.mode ?? declared?.mode ?? RunnerCommandMode.Write,
+        mode: checked.value.mode,
         resumeTaskId: input.resumeTaskId,
         fork: input.fork,
         status: OrchestratorTaskStatus.Queued,
-        ...(inputs?.ok
-          ? {
-              result: {
-                reply: null,
-                questions: [],
-                error: null,
-                inputs: inputs.value,
-              } as Prisma.InputJsonValue,
-            }
+        ...(initial.value
+          ? { result: initial.value as Prisma.InputJsonValue }
           : {}),
       },
       select: { id: true },
     })
   );
+  if (input.resumeTaskId && !input.fork) {
+    await clearOpenQuestions(input);
+  }
   const status = await launchTask(task.id);
   const stored = await withDb((db) =>
     db.orchestratorTask.findUnique({
@@ -201,6 +224,7 @@ export async function startTask(input: StartTaskInput): Promise<
     runner: runner.runnerName,
     error: result?.error ?? null,
     waiting: result?.waiting ?? null,
+    replyTo: input.replyTo,
   });
 }
 
@@ -234,11 +258,11 @@ export async function advanceTasks(now: Date): Promise<{
     db.orchestratorTask.findMany({
       where: { status: OrchestratorTaskStatus.Running },
       take: TICK_LIMIT,
-      select: { id: true, conversationId: true, loopId: true },
+      select: { id: true, conversationId: true, loopId: true, result: true },
     })
   );
   for (const task of running) {
-    if (task.loopId && (await settleTask(task.id, task.loopId, now))) {
+    if (task.loopId && (await settleTask(task, task.loopId, now))) {
       settled.add(task.conversationId);
     }
   }
@@ -421,13 +445,19 @@ async function prepareStep(
     string
   >
 > {
+  const stored = readTaskResult(task.result);
   const inputs = await loadTaskInputs(
-    readTaskResult(task.result)?.inputs ?? []
+    stored?.inputs ?? [],
+    stored?.pageInputs ?? []
   );
   if (!inputs.ok) {
     return Result.err(inputs.error);
   }
-  const { step, attach } = await buildStep(task, inputs.value);
+  const built = await buildStep(task, inputs.value);
+  if (!built.ok) {
+    return built;
+  }
+  const { step, attach } = built.value;
   if (
     step.toolkit &&
     !findRepositoryCheckout(checkouts, step.toolkit.repository)
@@ -445,14 +475,12 @@ async function markStarted(
   loopId: string
 ): Promise<boolean> {
   const taskId = task.id;
-  const inputs = readTaskResult(task.result)?.inputs;
-  const started: TaskResult = {
+  const started = mergeTaskResult(task.result, {
     reply: null,
     questions: [],
     error: null,
     waiting: null,
-    ...(inputs ? { inputs } : {}),
-  };
+  });
   const updated = await withDb((db) =>
     db.orchestratorTask.updateMany({
       where: { id: taskId, status: OrchestratorTaskStatus.Queued },
@@ -470,7 +498,7 @@ async function markStarted(
 async function buildStep(
   task: TaskRow,
   inputs: LoopStepInputFile[]
-): Promise<{ step: LoopStepConfig; attach: string[] }> {
+): Promise<Result<{ step: LoopStepConfig; attach: string[] }, string>> {
   const earlier = await withDb((db) =>
     db.orchestratorTask.count({
       where: {
@@ -488,9 +516,16 @@ async function buildStep(
   const file = capabilities.find(
     (candidate) => candidate.computeTargetId === task.computeTargetId
   );
-  const declared = file?.capabilities?.commands.find(
-    (command) => command.name === task.command
-  );
+  if (!file) {
+    return Result.err(
+      "The task's Agent is no longer one of the project's Agents, or has no AGENTFLOW.md for this project: the task was not started."
+    );
+  }
+  const checked = checkTaskCommand(file, task.command, null);
+  if (!checked.ok) {
+    return Result.err(`${checked.error} The task was not started.`);
+  }
+  const { declared } = checked.value;
   // A personal runner's own commands commit and push; AgentFlow pushes for
   // an auto runner's command that declares it.
   const personal = file?.source === RunnerCapabilitiesSource.Personal;
@@ -525,7 +560,7 @@ async function buildStep(
       : {}),
     ...(inputs.length > 0 ? { inputs } : {}),
   };
-  return { step, attach };
+  return Result.ok({ step, attach });
 }
 
 /** The command and its arguments first (a slash command is expanded), then the request. */
@@ -614,14 +649,29 @@ async function ensureTaskDocument(
   return documentId;
 }
 
+/** A resume that is not a fork continues the task: its questions are covered. */
+async function clearOpenQuestions(input: StartTaskInput): Promise<void> {
+  await withDb((db) =>
+    db.orchestratorTask.updateMany({
+      where: {
+        id: input.resumeTaskId ?? "",
+        caseId: input.caseId,
+        organizationId: input.organizationId,
+      },
+      data: { openQuestionCount: 0 },
+    })
+  );
+}
+
 const DOCUMENT_TITLE_MAX = 255;
 
 /** Settles a running task whose loop ended; true when it did. */
 async function settleTask(
-  taskId: string,
+  task: { id: string; result: unknown },
   loopId: string,
   now: Date
 ): Promise<boolean> {
+  const taskId = task.id;
   const loop = await withDb((db) =>
     db.loop.findUnique({
       where: { id: loopId },
@@ -657,13 +707,13 @@ async function settleTask(
       ?.content.slice(0, ORCHESTRATOR_TASK_REPLY_MAX) ?? null;
   const succeeded = loop.status === LoopStatus.Completed;
   const { files, filesOmitted } = taskFilesFromStep(outputs);
-  const result: TaskResult = {
+  const result = mergeTaskResult(task.result, {
     reply,
     questions: outputs?.questions ?? [],
     error: succeeded ? null : loopErrorText(loop.status, loop.error),
     ...(files.length > 0 ? { files } : {}),
     ...(filesOmitted > 0 ? { filesOmitted } : {}),
-  };
+  });
   const updated = await withDb((db) =>
     db.orchestratorTask.updateMany({
       where: { id: taskId, status: OrchestratorTaskStatus.Running },
@@ -673,19 +723,29 @@ async function settleTask(
           : OrchestratorTaskStatus.Failed,
         result: result as Prisma.InputJsonValue,
         finishedAt: now,
+        openQuestionCount: result.questions.length,
       },
     })
   );
+  if (updated.count === 1) {
+    await recordAskedQuestions(taskId, result.questions);
+  }
   return updated.count === 1;
 }
 
 async function failTask(taskId: string, error: string): Promise<void> {
   log.warn(`${LOG_PREFIX} task failed`, { taskId, error });
-  const result: TaskResult = {
+  const stored = await withDb((db) =>
+    db.orchestratorTask.findUnique({
+      where: { id: taskId },
+      select: { result: true },
+    })
+  );
+  const result = mergeTaskResult(stored?.result, {
     reply: null,
     questions: [],
     error: error.slice(0, ERROR_MAX),
-  };
+  });
   await withDb((db) =>
     db.orchestratorTask.updateMany({
       where: {
@@ -746,14 +806,12 @@ async function queueWaiting(
   waiting: string
 ): Promise<Result<string, string>> {
   const taskId = task.id;
-  const inputs = readTaskResult(task.result)?.inputs;
-  const result: TaskResult = {
+  const result = mergeTaskResult(task.result, {
     reply: null,
     questions: [],
     error: null,
     waiting: waiting.slice(0, ERROR_MAX),
-    ...(inputs ? { inputs } : {}),
-  };
+  });
   await withDb((db) =>
     db.orchestratorTask.updateMany({
       where: { id: taskId, status: OrchestratorTaskStatus.Queued },
@@ -805,4 +863,43 @@ async function loopCreateFailure(
     return Result.err(mapped.message);
   }
   throw error;
+}
+
+function initialTaskResult(
+  inputs: TaskInputFile[] | null,
+  pageInputs: TaskPageInput[],
+  replyTo: string | null
+): TaskResult | null {
+  if (!(inputs || replyTo || pageInputs.length > 0)) {
+    return null;
+  }
+  return {
+    reply: null,
+    questions: [],
+    error: null,
+    ...(inputs ? { inputs } : {}),
+    ...(pageInputs.length > 0 ? { pageInputs } : {}),
+    ...(replyTo ? { replyTo } : {}),
+  };
+}
+
+/** Checks the task's input files and pages and builds the result it starts with. */
+async function initialResultFor(
+  input: StartTaskInput
+): Promise<Result<TaskResult | null, string>> {
+  const inputs =
+    input.files.length > 0
+      ? await resolveTaskInputs(input.caseId, input.files)
+      : null;
+  if (inputs && !inputs.ok) {
+    return Result.err(inputs.error);
+  }
+  const resolved = inputs?.ok ? inputs.value : null;
+  const fits = checkInputsFit(resolved ?? [], input.pageInputs);
+  if (!fits.ok) {
+    return Result.err(fits.error);
+  }
+  return Result.ok(
+    initialTaskResult(resolved, input.pageInputs, input.replyTo)
+  );
 }

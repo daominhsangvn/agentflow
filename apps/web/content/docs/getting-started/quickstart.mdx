@@ -1,0 +1,87 @@
+---
+title: "Quickstart"
+description: "Connect Jira, assign an Agent and write a small orchestrated workflow; then mention the bot on a ticket and watch the case."
+---
+
+This takes one Jira ticket through an orchestrated workflow. It assumes the server and an Agent are running ([Install an Agent](/docs/getting-started/install-agent)).
+
+## 1. Add the Jira connection
+
+**Connections** (sidebar) → Add → Jira. Fill in the YAML (`deployment`, `siteUrl`, `email` of the bot) and type the bot's API token in the password field. Choose `webhook` or `poll` for inbound events; labels, status changes and mentions need a webhook. Then create the webhook in Jira as described in [Connections](/docs/guides/setup/connections#jira-webhook).
+
+## 2. Add it to the project
+
+Project → **Connections & Repos** → Add connection. Use the key `jira` and settings:
+
+```yaml
+projectKeys: [LD]
+```
+
+Add at least one repository from the same page when the Agents will work on code.
+
+## 3. Have an Agent online
+
+Make sure an Agent is online and assigned in Project → **Agents**. Give it a minimal `AGENTFLOW.md` declaring one read command, so the Orchestrator Agent can use it:
+
+```markdown
+---
+runner: BA
+commands:
+  - name: /research
+    args: <KEY>
+    description: Answer a question about the ticket from the knowledge base
+    mode: read
+    produces: answer
+---
+```
+
+Put the file in the root of the project's toolkit repository for an automatic Agent, or in the project folder for a personal Agent. The Agent must also have a `/research` Claude Code command, since `AGENTFLOW.md` only declares it. See [Agent capabilities](/docs/guides/setup/agent-capabilities) for every field.
+
+## 4. Create the workflow
+
+**Workflows** → New workflow → YAML:
+
+```yaml
+name: Quickstart · Questions
+project: LeaveDesk
+triggers:
+  - connection: jira
+    type: jira.issue_mentioned
+    config:
+      projectKeys: [LD]
+  - connection: jira
+    type: jira.issue_status_changed
+    config:
+      projectKeys: [LD]
+agent:
+  runAs: admin@agentflow.local
+  runner: runner-orch
+  mode: orchestrated
+  orchestrator:
+    debounceSeconds: 20
+    connections:
+      source: [comment]
+  instructions: |
+    ## Roles
+    - BA: answers questions about the ticket.
+
+    ## Questions and answers
+    - Answer each comment in its own thread (replyTo).
+    - To answer a question about the ticket, start the BA command that reads and answers.
+```
+
+Replace `project`, `runAs`, `runner` (the Orchestrator Agent's name) and `LD` with your own. Every key is explained in [Workflow YAML](/docs/guides/setup/workflow-yaml).
+
+## 5. Mention the bot
+
+On a ticket in the Jira project, write a comment such as "@bot what does this ticket ask for?". After the debounce time the Orchestrator Agent starts a turn, may run the BA command, and replies in the thread.
+
+## 6. Watch the case
+
+Open **Cases** (sidebar). The ticket has a case with its conversation, the turn and any task the Orchestrator Agent started. See [Cases](/docs/guides/operate/cases).
+
+## Next steps
+
+- [How AgentFlow works](/docs/concepts/how-agentflow-works)
+- [Set up a project end to end](/docs/guides/setup)
+- [Writing orchestrator rules](/docs/guides/recipes/orchestrator-rules)

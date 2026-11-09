@@ -95,11 +95,13 @@ jobs:
         run: |
           $zip = Get-ChildItem agentflow-runner-*-windows.zip | Select-Object -First 1
           Expand-Archive $zip.FullName -DestinationPath out
-          foreach ($file in "runner.mjs", "healthcheck.mjs", "start-runner.cmd", "setup-runner.cmd", "README.txt", "agent-plugins") {
+          foreach ($file in "runner.mjs", "healthcheck.mjs", "start-runner.cmd", "setup-runner.cmd", "uninstall-runner.cmd", "winsw/WinSW.exe", "winsw/LICENSE.txt", "README.txt", "agent-plugins") {
             if (-not (Test-Path "out/agentflow-runner/$file")) { throw "missing $file" }
           }
           node --check out/agentflow-runner/runner.mjs
           if ($LASTEXITCODE -ne 0) { throw "runner.mjs does not parse" }
+          & out/agentflow-runner/winsw/WinSW.exe version
+          if ($LASTEXITCODE -ne 0) { throw "WinSW.exe does not run" }
 
   release:
     if: github.ref_type == 'tag'

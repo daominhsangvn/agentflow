@@ -1,0 +1,26 @@
+---
+title: "Guides"
+description: "Task-oriented guides for the self-hosted AgentFlow edition, from the first connection to a ticket that goes from To Do to Done."
+---
+
+These guides explain how to use AgentFlow's features, step by step, with every option you can set. The running example is **LeaveDesk**: one Jira ticket (LD-6, "a calendar of who in my team is off") that a BA, a Dev and a QC Agent take from To Do to Done, under an Orchestrator Agent, while people review on Confluence and merge the pull requests.
+
+## Sections
+
+| Section | What it covers |
+|---|---|
+| [Setup](/docs/guides/setup) | Everything you configure once per project: connections, Agents, what each Agent can do (`AGENTFLOW.md`), workflows, processes, what Agents may do through connections, and the orchestrator with its rules |
+| [Operate](/docs/guides/operate) | Day-to-day use: Home, Cases, Runs, Agents, Sessions and email notifications |
+| [Recipes](/docs/guides/recipes) | Rule-writing patterns from LD-6: orchestrator rules, files and pages, status flows, questions and answers, approval before posting, asking an Agent, blocked tasks, personal Agents, side conversations, cancelling |
+| [Case studies](/docs/guides/case-studies) | Real test runs written up: the LeaveDesk rules explained, and a personal Agent on Windows |
+
+## Words used in these guides
+
+| Word | Meaning |
+|---|---|
+| **Agent** | A computer that runs Claude Code for AgentFlow. **Automatic**: a headless Agent (Docker, a server) that clones the project's repositories and works with AgentFlow's credentials. **Personal**: an Agent on a person's own machine, in the project folder they already use, with their own credentials. In YAML an Agent is still named with the key `runner`. |
+| **Connection** | An account in an outside system (a Jira bot, a Confluence user, a Git server token). It is the only place credentials live. |
+| **Project connection** | A project's use of a connection, under a short **key** (`jira`, `confluence`, `git`) that workflow YAML names. |
+| **Workflow** | Triggers (what starts work), the agent team (how it works) and actions (what is written back). |
+| **Process** | The steps of a workflow's run, in order: AgentFlow plan or implement steps, your own Agent steps, approvals. |
+| **Orchestrated workflow** | A workflow with `agent.mode: orchestrated`. It starts no run: every request goes to an **Orchestrator Agent**, which follows your rules in plain language and sends commands to the other Agents. |

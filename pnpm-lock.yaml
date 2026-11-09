@@ -233,6 +233,9 @@ importers:
       '@repo/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@repo/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/typescript-config
       '@t3-oss/env-nextjs':
         specifier: ^0.13.11
         version: 0.13.11(@typescript/typescript6@6.0.2)(arktype@2.1.27)(valibot@1.2.0(@typescript/typescript6@6.0.2))(zod@4.3.6)
@@ -303,9 +306,6 @@ importers:
       '@octokit/webhooks-types':
         specifier: ^7.6.1
         version: 7.6.1
-      '@repo/typescript-config':
-        specifier: workspace:*
-        version: link:../../packages/typescript-config
       '@types/adm-zip':
         specifier: ^0.5.7
         version: 0.5.7
@@ -1710,9 +1710,15 @@ importers:
       '@t3-oss/env-nextjs':
         specifier: ^0.13.11
         version: 0.13.11(arktype@2.1.27)(typescript@7.0.2)(valibot@1.2.0(typescript@7.0.2))(zod@4.3.6)
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       pg:
         specifier: ^8.20.0
         version: 8.20.0
+      prisma:
+        specifier: ~7.8.0
+        version: 7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
       server-only:
         specifier: ^0.0.1
         version: 0.0.1
@@ -1732,12 +1738,6 @@ importers:
       bufferutil:
         specifier: ^4.1.0
         version: 4.1.0
-      dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
-      prisma:
-        specifier: ~7.8.0
-        version: 7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -7387,14 +7387,17 @@ packages:
   '@smithy/smithy-client@4.11.3':
     resolution: {integrity: sha512-Q7kY5sDau8OoE6Y9zJoRGgje8P4/UY0WzH8R2ok0PDh+iJ+ZnEKowhjEqYafVcubkbYxQVaqwm3iufktzhprGg==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/smithy-client@4.12.0':
     resolution: {integrity: sha512-R8bQ9K3lCcXyZmBnQqUZJF4ChZmtWT5NLi6x5kgWx5D+/j0KorXcA0YcFg/X5TOgnTCy1tbKc6z2g2y4amFupQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/smithy-client@4.12.3':
     resolution: {integrity: sha512-7k4UxjSpHmPN2AxVhvIazRSzFQjWnud3sOsXcFStzagww17j1cFQYqTSiQ8xuYK3vKLR1Ni8FzuT3VlKr3xCNw==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/types@4.12.0':
     resolution: {integrity: sha512-9YcuJVTOBDjg9LWo23Qp0lTQ3D7fQsQtwle0jVfpbUHy9qBwCEgKuVH4FqFB3VYu0nwdHKiEMA+oXz7oV8X1kw==}

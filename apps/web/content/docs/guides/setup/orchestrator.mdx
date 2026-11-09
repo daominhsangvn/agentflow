@@ -1,0 +1,412 @@
+---
+title: "Orchestrator"
+description: "Set up an orchestrated workflow, what the Orchestrator Agent can do with each of its tools and connections, and the rule text to copy into agent.instructions for every capability."
+---
+
+An **orchestrated workflow** (`agent.mode: orchestrated`) starts no run. Every event its triggers match, and every reply to a comment it posted, goes to the workflow's **Orchestrator Agent**: Claude Code on an Agent of its own (a project Agent), choosing only among the project's Agents when it has any, with only the orchestrator's tools. On each turn it reads your **rules** (`agent.instructions`), what happened on the ticket so far (the **case**) and what each Agent declares it can do (`AGENTFLOW.md`), then chooses which command of which Agent does the work, and answers in the thread.
+
+```
+Jira status change / mention / reply ──▶ case LD-6 ──▶ turn of the Orchestrator Agent
+                                                         reads: rules, CASE.md, the Agents' commands, new messages
+                                                         ├─ task_run ▶ BA Agent  /ba-requirement analyze LD-6
+                                                         ├─ task_run ▶ QC Agent  /qa-test LD-6 design
+                                                         └─ wait_for  (the turn ends; AgentFlow waits in code)
+                         task results ──▶ next turn ──▶ page_publish, reply (in the comment's thread), wait_human
+```
+
+## Concepts
+
+| Term | What it is |
+|---|---|
+| **Case** | One per workflow and ticket. Holds the notes, conversations, tasks, decisions and the Confluence documents of that ticket. Closed by the orchestrator; a new message reopens it. |
+| **Conversation** | One per thread: the ticket's top level (status and label changes, root comments, mentions) and each comment thread. Each has its own turns; different threads run in parallel. |
+| **Turn** | One run of the Orchestrator Agent on all new messages of a conversation. It acts only through its tools and ends with `wait_for`, `wait_human` or `close_case`. |
+| **Task** | One declared command of one Agent, started with `task_run` and run as a loop on that Agent. Its answer, questions and files come back to the case. |
+| **Wait** | `wait_for` (tasks) is evaluated in code: no model runs until the tasks finish, one fails, or the deadline passes. `wait_human` waits for the next message. |
+| **Ticket change** | A status move or a label change, stored as a message (`Status changed: PRD → Planning (by Admin)`). |
+
+## Set it up
+
+1. **Agents and their `AGENTFLOW.md`**: one Agent per role (BA, Dev, QC), each declaring its commands ([Agent capabilities](/docs/guides/setup/agent-capabilities)). Check Project → Agents → Commands: no problems, the commands you expect.
+2. **An Agent for the Orchestrator Agent**: an automatic Agent; when the project has Agents, it must be one of them (saving refuses another); its turns run in an empty folder, with no files, shell or web. Give it a model provider ([Agents](/docs/guides/setup/agents)).
+3. **Connections**: the ticket system (Jira, or Teams threads), Confluence when documents live there (`spaceKeys`, `parentPageId`), and the repositories ([Connections](/docs/guides/setup/connections)). The Jira webhook needs Issue updated and Comment created and updated.
+4. **The workflow** (below), with the rules.
+5. **Try it** on one ticket through every status, with a question in a comment at each review step.
+
+```yaml
+name: LeaveDesk · Questions
+description: People move LD tickets through the flow and ask questions in comments; the orchestrator runs the BA, Dev and QC Agents.
+project: LeaveDesk
+triggers:
+  - connection: jira
+    type: jira.issue_status_changed      # every status move is a message for the case
+    config:
+      projectKeys: [LD]
+  - connection: jira
+    type: jira.issue_mentioned           # someone mentions the bot
+    config:
+      projectKeys: [LD]
+  # - connection: jira
+  #   type: jira.issue_labeled           # when the flow uses labels
+  #   config: { label: ready-for-dev, change: both, projectKeys: [LD] }
+agent:
+  runAs: admin@agentflow.local
+  runner: runner-orch
+  mode: orchestrated
+  orchestrator:
+    concurrency: supersede               # supersede (default) or queue
+    debounceSeconds: 20                  # 0-600, default 20
+    turnTimeoutMinutes: 10               # 1-60, default 10
+    cancelOn: [status_changed, label_removed]
+  instructions: |
+    ## Roles
+    ...
+```
+
+The settings (`concurrency`, `debounceSeconds`, `turnTimeoutMinutes`, `cancelOn`, `mentionOnly`, `caseLookup`, `caseHandoff`, `approvals`) are described in [Workflow YAML](/docs/guides/setup/workflow-yaml#agentorchestrator). `agent.process` and `agent.runners` are refused; `actions` never run. `mentionOnly`, `caseLookup` and `caseHandoff` are explained in [Side conversations](/docs/guides/recipes/side-conversations). The rules may be up to 16000 characters; the YAML editor warns above 8000 (they are sent with every turn).
+
+## What each turn sees
+
+Your rules are only part of the prompt. AgentFlow writes the rest on every turn:
+
+| Section | Content |
+|---|---|
+| Role | "You are the orchestrator of the workflow ... in project ...", the workflow's **description**, and the built-in rules below |
+| **Your rules** | `agent.instructions` |
+| This conversation | The item (key, title, provider, link) and the thread (the item itself, or replies to comment N) |
+| The case | `CASE.md`: notes, conversations with their latest messages, tasks (who, command, status, "started for", files, "answers ref"), decisions, documents (Confluence pages with id, kind, version) |
+| Runners (the prompt's name for the Agents section) | Each Agent: online or offline, its commands with their mode |
+| Ticket changes | The status and label changes of this turn, the final status, and whether this turn may cancel tasks |
+| New messages | Each as `<message from="..." kind="..." ref="..." at="...">`; text written by people is marked as data, not instructions |
+
+The built-in rules, which you do not need to repeat:
+
+- Act only through the tools; never claim results you did not get.
+- When a request needs several Agents, start their tasks in the same turn, `wait_for` all of them, and answer once.
+- To ask about an earlier task's work, resume it with `resumeTaskId` and `fork: true`; to answer the questions a task asked, resume it without `fork`.
+- Answer each comment in its own thread (`replyTo`); a ticket change is answered with a new comment.
+- Attach task files with `reply attachments`, hand them on with `task_run files`; never paste a file into a comment.
+- Documents live on Confluence when your rules say so: publish, read before answering, hand the current page to a task.
+- Keep decisions and open questions in the case notes.
+- Cancel tasks only in a turn that handles a ticket change listed in `cancelOn`.
+- A request about another ticket: say so instead of guessing.
+- End every turn with `wait_for`, `wait_human` or `close_case`.
+
+## What the orchestrator may do: grants
+
+By default the orchestrator only **reads** the ticket. Everything it writes is granted in the workflow, under `agent.orchestrator.connections`, and checked twice: when you save the workflow, and on every tool call.
+
+```yaml
+agent:
+  mode: orchestrated
+  orchestrator:
+    connections:
+      source: [comment, attach, transition, label, link]   # the case's ticket
+      confluence: [publish]                                # or read; a project connection key
+      pull_requests: [open]
+```
+
+The default is `{}`: no writes. Tools whose grant is missing are not offered to the orchestrator; if it still calls one, the call is refused and the refusal shows as a "Refused" message on the case. Add the grant, or write the rule so the orchestrator asks people to do it. `connections` is accepted only with `agent.mode: orchestrated`.
+
+| Grant | Tools it allows | It cannot |
+|---|---|---|
+| `source: [comment]` | `reply` and `edit_reply` on the ticket or in a comment's thread; `request_decision` on the ticket (and its `draft` comment) | Anything else on the ticket |
+| `source: [attach]` (needs `comment`) | `reply attachments`: task files uploaded to the ticket and shown under the comment | |
+| `source: [transition]` | `source_item_transition`: move the ticket (also a `draft` move) to another status | Move to a status the ticket's workflow does not allow from where it is |
+| `source: [label]` | `source_item_label`: add or remove labels | Assign the ticket |
+| `source: [link]` | `source_item_link`: add a link to the ticket | |
+| `<confluence key>: read` | `page_get`, and page files for `task_run files [{page, name}]` | Publish |
+| `<confluence key>: [publish]` | `page_publish`, plus everything `read` allows | Write outside the connection's `spaceKeys`; overwrite people's edits without `overwrite: true` |
+| `pull_requests: [open]` | `pull_request_open` for the branches an automatic Agent's task pushed | Merge. A personal Agent's command opens its own pull request |
+
+`source` is always the ticket the conversation is about: the orchestrator cannot read or write another ticket. `source` lists `comment`, `attach`, `transition`, `label`, `link`; `pull_requests` lists only `open`; a Confluence key is `read` or `[publish]`. A Microsoft Teams thread accepts `comment` only: transition, label and link are refused, and so are attachments.
+
+When more than one granted Confluence connection can serve a call, `page_publish`, `page_get` and page files need `connection` set to one of the granted keys; the refusal lists them. A key that is not granted is never used.
+
+A message from AgentFlow itself (the case page, see "The case page") is answered without any grant: the reply shows on the case page. Posting it on the ticket too (`reply where: thread`) needs `comment`.
+
+At save, AgentFlow also checks that a trigger's connection can do each `source` operation (a Teams thread takes only `comment`) and that each other key is a Confluence connection of the project; otherwise the workflow is refused.
+
+The turn prompt has a "Your writes" section that states the grants: what the orchestrator may write, and what is not granted. You do not need to repeat them in the rules, but the rules say **when** to use a write.
+
+**Agents in tasks do not see the ticket.** A task's Agent sees only its prompt, the case and its input files. Automatic Agents' tasks have no integration tools: they reach Jira, Confluence and repositories only through the orchestrator, which runs in the control plane under the grants above. Personal Agents use their own credentials on their machine. The orchestrator must put the ticket and every decision in the task's prompt, and hand documents as files. Write a rule for it (see "Context for tasks" below).
+
+| Where | What the orchestrator can do |
+|---|---|
+| **Agents** | Run declared commands in read or write mode, pass files and pages, resume or fork earlier tasks, wait, cancel on a ticket change. It cannot run undeclared commands, write with a read command, or start a command whose needed file is missing |
+
+## Capabilities and the rule text to copy
+
+Each capability below lists the tool and its arguments, what AgentFlow guarantees, and the rule text to put in `agent.instructions`. Copy the rules you need, then adapt the names (roles, statuses, page titles, file names) to your project. Write roles, never command names: "BA writes the PRD", not `/ba-requirement`; the orchestrator finds the command in the Agents' `AGENTFLOW.md`, so a renamed command keeps working.
+
+### Choose the Agent and the command
+
+**Tools.** `runners_list` (each Agent's `AGENTFLOW.md`: role, commands, mode, produces, needs, skills, online). `task_run { runner, command, args?, prompt?, mode?, files?, resumeTaskId?, fork?, replyTo? }`: `runner` is the Agent's name, its role (`runner:` in its `AGENTFLOW.md`) or id; `prompt` up to 20,000 characters; `mode` is the command's declared one unless given.
+
+**Guarantees.** Undeclared commands, `mode: write` on a read command, and a missing needed file are refused before the task starts. An offline Agent fails the task with that reason; a busy personal Agent keeps it `queued`.
+
+```markdown
+## Roles
+- BA: writes the PRD of a ticket, archives the approved PRD and answers questions about requirements.
+- Dev: writes the implementation plan, implements it and opens its own pull request (never merges); answers questions about the plan and the code.
+- QC: designs the test plan; separately, automates and runs the approved test plan and reports each round with evidence; answers questions about tests.
+- People review the documents and the pull requests, ask questions as comments and merge the pull requests; they move the ticket unless your grant and rules let the orchestrator do it.
+- The agents list says which agent does what; follow what each command declares (needs, produces, files). Do not guess commands an agent does not declare.
+```
+
+### Context for tasks: the ticket and the decisions
+
+**Tools.** `source_item_get` (title, status, description, latest comments, attachment names). `task_run prompt`.
+
+```markdown
+## The ticket
+- Agents do not see the ticket: their files only hold the case. Before the first task of a ticket (and whenever the ticket's description changed), read the ticket with source_item_get and put it in the task prompt as people wrote it: key, title, description, acceptance criteria, and the names of its attachments. Later tasks of the same ticket get it again in their prompt.
+- A confirmed answer is a decision: pass it in the prompt of later tasks that use the same document.
+```
+
+### Follow the ticket's status
+
+**Messages.** Each status move is a `status_changed` message on the ticket's conversation; debounce merges a burst of moves into one turn that sees the sequence and the final status. Label changes arrive as `label_added` and `label_removed` when a `jira.issue_labeled` trigger matches them.
+
+```markdown
+## Flow (Jira status order)
+To Do → PRD → Planning → Implement → Testing → Review → Done
+- To Do: nothing.
+- PRD: BA writes the PRD from the ticket. Post its questions as one numbered comment. When the PRD is ready, comment the link and ask people to review it; they move the ticket to Planning when it is approved (or, with the `transition` grant, the orchestrator moves it when they approve in a comment).
+- Planning: at the same time BA archives the approved PRD, Dev writes the implementation plan and QC designs the test plan, all with the PRD. When each is done, comment its link; ask people to review both. People move the ticket to Implement when both are approved, unless your grant and rules let the orchestrator do it.
+- Implement: Dev implements from the plan and opens its pull request itself. When done, comment the pull request link and say the ticket can move to Testing. Nobody merges yet.
+- Testing: QC automates and runs the approved tests against the Dev branch. Comment the verdict, passed/failed counts and each failure with its reason. If tests failed, ask people what to do.
+- Review: start nothing new. Answer questions about the pull requests. People merge them and move the ticket to Done, unless your grant and rules let the orchestrator move it.
+- Done: close the case.
+
+## Work belongs to its status
+- Start a writing task only for the work of the ticket's CURRENT status. If someone asks in a comment for work of another status (e.g. "fix the code" while in Testing), do not start it: answer that the ticket must move to that status first. Reading tasks (questions, research, reviews) are allowed in every status.
+
+## Coming back to a status
+- When the ticket moves back to a status whose work was already done in this case (e.g. Testing → Implement after a failed round), start NOTHING on your own. Comment what that status already produced (pages, pull request, last results) and ask what to change. Start the work only when a person says what to do in a comment, then resume the task that did that work with their instruction.
+- The first time the ticket enters a status, follow the Flow as written.
+```
+
+For a flow driven by labels instead of statuses, write one line per label ("label `ready-for-dev` added: Dev writes the plan") and add `label_added` to `cancelOn` only if adding a label should cancel work.
+
+### Move, label and link the ticket
+
+**Tools.** Each needs its grant (`source: [transition]`, `[label]`, `[link]`).
+
+- `source_item_transition { transitionName }`: moves the ticket to the status or transition named (Jira transition name; Azure DevOps state).
+- `source_item_label { add, remove }`: adds and removes labels (up to 20 each; at least one in total).
+- `source_item_link { url, title }`: adds a link to the ticket (`url` is `http` or `https`).
+
+**Guarantees.** Only the conversation's own ticket changes. The orchestrator's own status or label change is recorded on the case as a ticket change by AgentFlow, so people see it and the next turn knows it; it never cancels tasks (see "Cancelling"). A write from a turn that was superseded by a newer message is refused.
+
+```markdown
+## Moving the ticket
+- When people approve the PRD in a comment (record_decision), move the ticket to Planning with source_item_transition and say so in the thread.
+- When the pull request is open, move the ticket to Testing and comment the link.
+- Add the label `needs-review` with source_item_label when a document waits for people; remove it when they approve.
+- Add the pull request and the Confluence page as links on the ticket with source_item_link.
+- Never move the ticket back; if the work must go back, ask people to do it.
+```
+
+### Run several Agents at once and wait
+
+**Tools.** `wait_for { taskIds, kind?, timeoutMinutes?, wakeOnFailure? }`: `kind` `all` (default) or `any`; `timeoutMinutes` 1 to 1440 wakes the turn with where the tasks are; `wakeOnFailure` (default `true`) wakes at once when a task fails. Up to 20 tasks.
+
+**Guarantees.** Waits fire once, in code; several waits of one conversation that fire together post one combined message.
+
+```markdown
+- When a status needs several agents, start all their tasks in the same turn and wait for all of them; post each one's result as it is ready only if the rules say so, otherwise answer once.
+- A task that runs longer than 60 minutes: say on the ticket that it is still running (wait_for with timeoutMinutes 60, then wait again).
+```
+
+### Questions from Agents and answers from people
+
+**How it works.** A command with `asks: true` may end with questions; the task comes back with them. Resume the task (`resumeTaskId`, no `fork`) with the answers: the same session continues.
+
+For agents' questions that only people in AgentFlow should answer, see [the variant of approval before posting](/docs/guides/recipes/approval-before-posting#variant-agents-questions-answered-only-in-agentflow) and [Asking an Agent](/docs/guides/recipes/asking-an-agent).
+
+**Tools.** `reply { text, replyTo?, attachments? }` (text up to 20,000); `task_run replyTo` (the comment a task answers; it comes back with the result).
+
+```markdown
+## Questions and answers (every status)
+- Post an agent's questions as one numbered comment, each with the assumption it uses meanwhile.
+- Answer each comment in its own thread (replyTo). When a comment's answer needs a task, pass the comment's ref as the task's replyTo and answer in that thread when the result comes.
+- A reply that answers some questions and asks new ones: answer the new ones first (ask the agent that knows), then resume the task only when every question has an answer; list the ones still open.
+- A question never stops or restarts a running task.
+- To answer a question about earlier work (a plan, findings), resume that task with fork, or use the agent's read command.
+```
+
+### Files on the ticket
+
+**How it works.** A command's `attach` globs are collected when its task ends (at most 20 files, 4 MB each, 5 MB together) and listed with the result. `reply attachments: [{taskId, name}]` (up to 10) uploads them to the Jira issue and shows them under the comment. `task_run files: [{taskId, name}]` (up to 5 text files, 200 KB each, 400 KB together) writes them to the next task's `inputs/`.
+
+**Guarantees.** Files come only from tasks of the same case. A failed upload posts nothing and says what was already attached.
+
+```markdown
+## Files on the ticket
+- Attach a task's files with reply attachments [{taskId, name}], in the comment that announces them. Never paste a file's content into a comment.
+- Always use the latest succeeded task that produced the file (a resumed task produces a new version).
+- If a file you need is missing or "not collected", say so in the comment and do not claim it is attached.
+- Hand files to the next tasks with task_run files [{taskId, name}] and name them in the prompt. Before task_run, check the command's needs against what the case has.
+```
+
+### Documents on Confluence
+
+**Tools.**
+
+- `page_publish { file: {taskId, name}, title, kind?, page?, parent?, space?, attachments?, overwrite?, connection? }`: turns a task's Markdown file into a page. `page` (id or link) updates that page; without it the page is found by `title` or created under `parent` (a page, or `root` for the top of the space), else the project connection's `parentPageId`. `kind`: `ticket`, `prd`, `plan`, `test_plan`, `test_run`, `other`. `attachments`: up to 10 task files (screenshots), images shown in the page. `connection`: the Confluence key when the project has several. Returns the page id, link and version; the case lists it under Documents.
+- `page_get { page, connection? }`: the page's current Markdown (up to 60,000 characters), version, parent and last editor.
+- `task_run files: [{page, name}]`: the page's current content as an input file (people may have edited it); counts for `needs`.
+
+**Guarantees.** Pages stay in the connection's `spaceKeys`. Updating a page someone else edited since AgentFlow last published it is refused unless `overwrite: true`. A title already used elsewhere in the space is refused.
+
+```markdown
+## Documents on Confluence
+- Every ticket has one page "<KEY> · <summary>" under the project's parent page (kind ticket): the ticket link, a one-line summary and the links to its child pages. Create it the first time a document of the ticket is published, and update it when a child page is added.
+- Child pages of the ticket page: "<KEY> · PRD" (kind prd), "<KEY> · Implementation plan" (kind plan), "<KEY> · Test plan" (kind test_plan). Each test round is a child page of the test plan: "<KEY> · Test run <N> · <YYYY-MM-DD>" (kind test_run), with the results file as the body and the evidence screenshots as attachments.
+- Publish with page_publish from the newest succeeded task that produced the file. Later versions update the SAME page: pass page (the page id from the case's Documents).
+- Before a task works from a document, hand it the page's CURRENT content with task_run files [{page, name}]: PRD-<KEY>.md, PLAN-<KEY>.md, TESTCASES-<KEY>.md.
+- If page_publish refuses because people edited the page: run the task again with that page in its files so their edits are kept, then publish. Use overwrite only when a person asked to replace the page.
+- On the ticket, write short comments with the page title, its link, its version and one or two lines on what changed. Do not attach files to the comments.
+- To answer a question about a document, read the page first (page_get).
+```
+
+Without Confluence, keep documents on the ticket instead: "When the PRD is ready, comment a short summary with PRD-`<KEY>`.md attached."
+
+### Pull requests
+
+**Tools.** `pull_request_open { taskId, title, description?, draft? }`: opens one pull request per repository the task pushed, through each repository's connection; reuses an open one. Refused for a task that did not succeed or pushed nothing. Only for automatic Agents' commands with `push: true` run in write mode; a personal Agent's command opens its own.
+
+```markdown
+- When the archive (or the QC test code) task is done, open its pull request (pull_request_open with that task) and comment the link.
+- Dev opens its own pull request: comment its link with the summary from the pull request body file.
+- Never merge: people merge the pull requests. People move the ticket unless the rules above say the orchestrator does.
+```
+
+### Blocked tasks
+
+A command that misses an input answers with a first line `BLOCKED: missing ...`.
+
+```markdown
+## Blocked tasks
+- A task answer that starts with "BLOCKED:" did nothing. Comment what is missing and who produces it (from that line). If the missing document exists on Confluence or from an earlier task, pass it in the task's files and run the task again (once); otherwise wait for it.
+```
+
+### Blockers
+
+**Tools.** `source_item_get` returns `blockedBy` and `blocks` (Jira "Blocks" links, Azure DevOps predecessor and successor). `case_notify { itemKey, message }` leaves a "Case notice" message on the case of another item of the same workflow and wakes it (a closed case reopens). It is queued, so it never stops a running turn; it is refused when that item has no case, for the case's own item, from a conversation with no source item, when that case has no conversation on this connection, and from a superseded turn.
+
+```markdown
+## Blockers
+- Before starting tasks for a status, read the item (source_item_get). If any item in blockedBy is not yet in Review or Done, start nothing and comment which items it waits for.
+- When this item moves to Review or Done, call case_notify for each item in blocks with what changed.
+- On a case_notify message, read the item again; if no blocker remains, act on its current status as if it had just moved there.
+- A comment on the ticket also re-checks blockers.
+```
+
+Limits: the blocker's workflow needs a status-changed trigger, or no turn runs when it moves; notifying is the model's choice, so the comment is the fallback; which statuses count as resolved is the rules' choice. See [Waiting for blockers](/docs/guides/recipes/waiting-for-blockers).
+
+### Cancelling
+
+**Tools.** `task_cancel { taskId, reason }`: stops a running task, keeps a queued one from starting, closes a finished one so it cannot be resumed. Accepted only in a turn that handles a ticket change listed in `cancelOn`; comments never allow it.
+
+```markdown
+## Cancelling
+- Only a status change cancels tasks. Moving forward in the flow keeps running tasks (say they are still running).
+- Moving backward or to a status outside the flow: cancel the tasks started for the statuses being left and say so on the ticket.
+- Several changes in one turn: act on the final status only.
+```
+
+### Approvals
+
+**Tools.** `request_decision { question, where?, draft? }` creates a pending decision and posts the question. `where: thread` posts on the ticket with the case's link and needs `comment`; `where: case_page` stays in AgentFlow and needs no grant. Default: where the answered message came from. `record_decision { decisionId, approved, decidedBy, comment? }` records a decision someone gave in the thread. End the turn with `wait_human`.
+
+**Draft.** Put the whole comment in `draft.comment.text` (files in `draft.comment.attachments`, a status change in `draft.transitionName`). The Decisions card shows it in full. When an admin approves, AgentFlow posts it itself, once, and wakes the orchestrator with a note that it was posted; the orchestrator must not post it again. A rejection posts nothing. With `approvals: required` in the workflow, the orchestrator cannot write to the ticket any other way: `request_decision` must use `where: case_page`, and only an admin's Approve button approves a draft (`record_decision` with `approved: true` is refused for it; rejecting works).
+
+There are three ways to approve. Write the rule for the one your team uses.
+
+1. **The AgentFlow button.** The orchestrator calls `request_decision`; an org admin approves or rejects in AgentFlow (the case page), which wakes the conversation. Use it for decisions that matter.
+2. **A comment.** Someone writes "approved" in the thread. The orchestrator reads it and calls `record_decision` with who wrote it. Who may approve in the thread is not checked: the orchestrator trusts its reading of who wrote it. Under `approvals: required` this does not approve a decision that has a draft; an admin presses Approve.
+3. **A status change people make.** The move itself is the approval (for example PRD → Planning). It arrives as a `status_changed` message; the rules say what each status means.
+
+```markdown
+## Approvals
+- Before Dev implements, ask for a decision ("Implement LD-6 from plan v2?") with request_decision and wait. Start the implementation only when it is approved in AgentFlow.
+```
+
+```markdown
+- Before anything goes on the ticket, ask for approval with request_decision where: case_page and wait. Post only what was approved.
+```
+
+The full pattern is in [Approval before posting](/docs/guides/recipes/approval-before-posting).
+
+```markdown
+- When someone answers a request_decision in a comment ("approved", "go ahead", "no"), record it with record_decision (decidedBy: the author) and continue as if it was approved or rejected in AgentFlow.
+- When people approve the PRD in a comment (record_decision), move the ticket to Planning with source_item_transition and say so.
+```
+
+```markdown
+- The ticket moving to Planning means the PRD is approved. Do not ask again: start the planning work.
+```
+
+### Edit a posted message
+
+**Tools.** `edit_reply { reference, text, version? }`: replaces the text of a message this conversation posted (no files).
+
+```markdown
+- Keep one status comment per ticket: edit it (edit_reply) with each new version's summary instead of posting a new one; post a new comment when a new file is attached.
+```
+
+### Notes and closing
+
+**Tools.** `case_get` (CASE.md), `case_update_notes { notes }` (replaces the notes, up to 20,000; read them first and keep what still holds), `close_case { summary? }`, `wait_human`.
+
+```markdown
+- Keep in the case notes: decisions, open questions, who was asked what, the pages and pull requests of the ticket.
+- Done: close the case with a summary and the links.
+```
+
+### Language
+
+```markdown
+## Language
+- Default language: Vietnamese. A comment written in another language is answered in that language. Page titles, file names, ticket keys and code stay as they are.
+```
+
+### Teams threads
+
+With a `microsoft_teams.bot_mentioned` trigger, each Teams thread is a conversation: the bot answers in the thread, mentioning who asked last; replies in a thread it already talks in reach it without a mention.
+
+```markdown
+- In Teams, answer in the thread. Do not attach files: post the link of the page or the pull request.
+```
+
+## Guards
+
+| Guard | What it does |
+|---|---|
+| Declared commands | An Agent only runs commands its `AGENTFLOW.md` declares; a read command never runs in write mode |
+| Needs | A command whose needed file is neither passed, nor a page input, nor attached to the ticket is refused |
+| Grants | A write that `agent.orchestrator.connections` does not grant is refused and recorded; a workflow that grants something its connections cannot do is refused at save |
+| Cancel on a ticket change only | Only a change listed in `cancelOn` may cancel tasks; a comment never does, and neither does the orchestrator's own transition or label |
+| One turn per conversation | With `supersede`, a newer message stops the running turn and its writes (`reply`, `edit_reply`, `task_run`, `task_cancel`, `request_decision`, `record_decision`, `case_notify`, `source_item_transition`, `source_item_label`, `source_item_link`, `close_case`) are refused; the next turn answers all messages |
+| Same-case files | Files and pages handed to a task, and files attached to a reply, come from this case |
+| Confluence | Writes stay in the project's spaces; publishing never drops a person's edit unless `overwrite` |
+| Refusals recorded | Every refused call is a "Refused" message on the case |
+
+Not guarded yet: who may approve in the thread (`record_decision`), approval before posting (a guard only with `approvals: required`; otherwise rules), budgets per case or project (turns, tasks, cost) and cancelling only on backward moves (your rules decide). Ticket text is marked untrusted in the prompt but not otherwise filtered.
+
+## The case page
+
+Cases are listed under **Cases** (sidebar) and on the workflow's **Cases** tab. Reading a case, answering task questions, messaging the orchestrator, stopping a turn and closing a case are in [Cases](/docs/guides/operate/cases).
+
+A message from the case page is answered by `reply` with `where: case_page`: the reply shows in the conversation and nothing is posted on the ticket. Posting it on the ticket too is up to your rules: `reply` with `where: thread` needs the `comment` grant.
+
+```markdown
+## Messages from AgentFlow
+- A message from the case page is answered on the case page. Post the answer on the ticket (reply where: thread) only when it changes what people there must know, for example a decision.
+```
+
+## Recipes and case studies
+
+Patterns with rule text are in [Recipes](/docs/guides/recipes); real runs written up are in [Case studies](/docs/guides/case-studies).

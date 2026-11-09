@@ -19,9 +19,9 @@
     "typecheck": "next typegen && tsc --noEmit --emitDeclarationOnly false --incremental --tsBuildInfoFile ./tsconfig.tsbuildinfo"
   },
   "dependencies": {
+    "@agentflow-ai/loops-api": "workspace:*",
     "@aws-sdk/client-s3": "^3.985.0",
     "@aws-sdk/s3-request-presigner": "^3.987.0",
-    "@agentflow-ai/loops-api": "workspace:*",
     "@paralleldrive/cuid2": "^2.3.1",
     "@prisma/client": "~7.8.0",
     "@repo/ai": "workspace:*",
@@ -40,6 +40,7 @@
     "@repo/observability": "workspace:*",
     "@repo/pensero": "workspace:*",
     "@repo/storage": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
     "@t3-oss/env-nextjs": "^0.13.11",
     "adm-zip": "^0.5.16",
     "better-auth": "1.7.6",
@@ -65,7 +66,6 @@
   },
   "devDependencies": {
     "@octokit/webhooks-types": "^7.6.1",
-    "@repo/typescript-config": "workspace:*",
     "@types/adm-zip": "^0.5.7",
     "@types/node": "^25.9.1",
     "@types/nodemailer": "^8.0.2",

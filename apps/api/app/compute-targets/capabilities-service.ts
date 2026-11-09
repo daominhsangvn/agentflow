@@ -3,12 +3,15 @@ import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import {
   type ComputeTargetCapabilities,
   parseRunnerCapabilitiesMarkdown,
+  RUNNER_CAPABILITIES_MAX_WARNINGS,
   RunnerCapabilitiesSource,
   runnerCapabilitiesSchema,
   type UploadRunnerCapabilitiesInput,
 } from "@repo/api/src/types/runner-capabilities";
 import { Prisma, withDb } from "@repo/database";
 import { z } from "zod";
+import { serverCapabilityWarnings } from "@/app/compute-targets/capabilities-warnings";
+import { loadProjectRunnerIds } from "@/app/projects/project-runner-selection";
 import { resolveProjectId } from "@/lib/identifier-utils";
 
 /**
@@ -16,7 +19,8 @@ import { resolveProjectId } from "@/lib/identifier-utils";
  * (AGENTFLOW.md)"): what each runner declares it can do for a project. A runner
  * uploads its file with its owner's API key; the API parses the front matter
  * itself (the runner's parse only decides its local warnings) and keeps one
- * file per runner and project.
+ * file per runner and project. The API adds its own warnings (secret-looking
+ * lines, read commands with push).
  */
 
 const WITH_RUNNER = {
@@ -57,7 +61,12 @@ export const computeTargetCapabilitiesService = {
         ? (parsed.value as Prisma.InputJsonValue)
         : Prisma.DbNull,
       problems: parsed.ok ? [] : parsed.problems,
-      warnings: input.warnings,
+      warnings: [
+        ...new Set([
+          ...serverCapabilityWarnings(input.content, parsed),
+          ...input.warnings,
+        ]),
+      ].slice(0, RUNNER_CAPABILITIES_MAX_WARNINGS),
       contentHash: createHash("sha256").update(input.content).digest("hex"),
       uploadedAt: new Date(),
     };
@@ -106,14 +115,24 @@ export const computeTargetCapabilitiesService = {
     return rows ? rows.map(toCapabilities) : null;
   },
 
-  /** Every runner's file for a project (the orchestrator's runner catalog). */
+  /**
+   * The project's Agents' files (the orchestrator's Agent catalog); every
+   * file when the project has no Agents.
+   */
   async listForProject(
     organizationId: string,
     projectId: string
   ): Promise<ComputeTargetCapabilities[]> {
+    const runnerIds = await loadProjectRunnerIds(organizationId, { projectId });
     const rows = await withDb((db) =>
       db.computeTargetCapabilities.findMany({
-        where: { organizationId, projectId },
+        where: {
+          organizationId,
+          projectId,
+          ...(runnerIds.length > 0
+            ? { computeTargetId: { in: runnerIds } }
+            : {}),
+        },
         orderBy: { uploadedAt: "desc" },
         include: WITH_RUNNER,
       })

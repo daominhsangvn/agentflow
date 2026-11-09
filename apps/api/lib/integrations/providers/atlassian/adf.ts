@@ -59,8 +59,13 @@ export type AdfBlockNode =
   | {
       type: "mediaSingle";
       attrs: { layout: "center" };
-      content: [{ type: "media"; attrs: { type: "external"; url: string } }];
+      content: [{ type: "media"; attrs: AdfMediaAttrs }];
     };
+
+/** External media (a URL) or a file uploaded to the page (Confluence). */
+export type AdfMediaAttrs =
+  | { type: "external"; url: string }
+  | { type: "file"; id: string; collection: string };
 
 export type AdfListItem = { type: "listItem"; content: AdfBlockNode[] };
 

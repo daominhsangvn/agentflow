@@ -2,6 +2,7 @@ import type { ApiResult } from "@repo/api/src/types/common";
 import { failure } from "@repo/api/src/types/common";
 import type { StatusCode } from "@repo/api/src/types/result";
 import { workflowRunStatusSchema } from "@repo/api/src/types/workflow";
+import { WORKFLOW_EVENT_LIST_MAX_LIMIT } from "@repo/api/src/types/workflow-event";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { denyUnlessOrgAdmin as denyUnlessOrgAdminFor } from "@/lib/auth/deny-unless-org-admin";
@@ -28,6 +29,14 @@ export const runListQuerySchema = z
   })
   .strict();
 
+/** /workflow-runs adds project and workflow filters to the shared run list query. */
+export const orgRunListQuerySchema = runListQuerySchema
+  .extend({
+    projectId: z.uuid().optional(),
+    workflowId: z.uuid().optional(),
+  })
+  .strict();
+
 /** Returns a 403 response for non-admins, or null when the caller is an org admin/owner. */
 export function denyUnlessOrgAdmin(
   auth: Pick<AuthContext, "clerkOrgId" | "clerkUserId">,
@@ -43,3 +52,16 @@ export function serviceErrorResponse(error: {
 }): NextResponse<ApiResult<never>> {
   return NextResponse.json(failure(error.message), { status: error.status });
 }
+
+/** ?cursor=&limit= of the workflow events endpoint. Unknown keys are rejected. */
+export const eventListQuerySchema = z
+  .object({
+    cursor: z.string().min(1).max(512).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(WORKFLOW_EVENT_LIST_MAX_LIMIT)
+      .optional(),
+  })
+  .strict();

@@ -1,0 +1,66 @@
+---
+title: "Writing orchestrator rules"
+description: "How to structure the rules (agent.instructions) of an orchestrated workflow: what to write in each part and what the platform already does."
+---
+
+The rules are plain text in `agent.instructions`, up to 16000 characters. They are sent with every turn and repeat in a resumed session, so the YAML editor warns above 8000: long rules cost tokens and attention. Keep them to the process: AgentFlow writes the rest of the prompt (the case, the Agents and their commands, the ticket changes, the new messages).
+
+## Structure
+
+Write one section per concern. LD-6 uses these:
+
+| Section | Put in it |
+|---|---|
+| The ticket | How the orchestrator reads the ticket and passes it to tasks |
+| Documents | Where documents go (Confluence pages), their titles and kinds, and when to publish |
+| Flow | One line per status: who starts what, what is posted, what people do next |
+| Questions and answers | Answer in the thread, when to resume a task |
+| Blocked tasks | What to do with a `BLOCKED:` answer |
+| Blockers | What to do while a blocking ticket is open, and whom to notify when this one is done |
+| Work belongs to its status | Which work may start in which status |
+| Coming back to a status | What to do when a status is entered again |
+| Cancelling | What cancels tasks |
+| Language | The default language of comments |
+
+## What to write
+
+**Roles, not command names.** Name Agents by role (BA, Dev, QC) and let the orchestrator choose the command from the Agents' `AGENTFLOW.md`. A command renamed in a toolkit keeps working without touching the workflow. The platform refuses a command the Agent does not declare.
+
+**The flow, by status.** One line per status. A status with no line is ambiguous.
+
+```text
+- PRD: BA writes the PRD from the ticket. Post its questions as one numbered comment. When the PRD is ready, publish the ticket page and the PRD page, comment the link and ask people to review the PRD on Confluence and to ask their questions here; they move the ticket to Planning when it is approved.
+- Review: start nothing new. People (Dev and QC) review the pull requests of the ticket (Dev code, QC tests, BA archive) and ask questions here: answer in the thread from the agent that knows.
+- Done: close the case.
+```
+
+**Files and pages.** Say which task's file to publish, and to hand the current page to later tasks ([Files and pages](/docs/guides/recipes/files-and-pages)).
+
+**Questions, blocked tasks, cancelling.** Each has its own recipe: [questions](/docs/guides/recipes/questions-and-answers), [blocked tasks](/docs/guides/recipes/blocked-tasks), [cancelling](/docs/guides/recipes/cancelling).
+
+**Language.** State the default language and that a comment in another language is answered in that language. Page titles, file names, commands and ticket keys stay as they are.
+
+## Phrasing that works
+
+- Imperative, one rule per line, with the reason when it is not obvious.
+- Say what must **not** happen: "Nobody merges yet", "start nothing new".
+- Refer to tools by their effect and to Agents by role.
+- Do not paste long templates; point to the document's kind and title.
+- Try the rules on one ticket through every status, with a question at each review step, before real work.
+
+## An excerpt
+
+From the LD-6 rules:
+
+```text
+## Work belongs to its status
+- Start a writing task only for the work of the ticket's CURRENT status (PRD: the PRD; Planning: archive, plan, test plan; Implement: code and fixes; Testing: test rounds). If someone asks in a comment for work of another status (e.g. "fix the code" while in Testing), do not start it: answer that the ticket must move to that status first, and do it when it is there. Reading tasks (questions, research, reviews) are allowed in every status.
+```
+
+The capabilities a workflow needs to grant and the rule text to copy are in [Orchestrator](/docs/guides/setup/orchestrator#capabilities-and-the-rule-text-to-copy).
+
+## See also
+
+- [Status flows](/docs/guides/recipes/status-flows)
+- [LeaveDesk example](/docs/guides/setup/leavedesk-example)
+- [Orchestrator](/docs/guides/setup/orchestrator)

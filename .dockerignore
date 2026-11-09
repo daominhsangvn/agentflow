@@ -8,8 +8,10 @@ node_modules
 *.log
 .turbo
 **/.turbo
-.env*
-!.env.example
+**/.env*
+!**/.env.example
 **/dist-headless
 **/test-results
 **/playwright-report
+deploy/compose/.env
+.harness

@@ -21,6 +21,7 @@ import {
 import { JiraTriggerType } from "./constants";
 import { toIsoDate } from "./dates";
 import { jiraItemRef, jiraManualEvent } from "./issue-events";
+import { jiraIssueRelations } from "./issue-links";
 import {
   type JiraAttachment,
   type JiraComment,
@@ -172,6 +173,7 @@ export function toSourceItem(
       .map(toSourceComment)
       .filter((comment) => comment.bodyMarkdown.length > 0),
     attachments: (fields.attachment ?? []).map(toSourceAttachment),
+    ...jiraIssueRelations(siteUrl, fields.issuelinks),
   };
 }
 

@@ -1,9 +1,0 @@
-{
-  "title": "Agent Sessions",
-  "pages": [
-    "listAgentSessions",
-    "getAgentSession",
-    "getAgentSessionUsage",
-    "getAgentSessionAnalytics"
-  ]
-}

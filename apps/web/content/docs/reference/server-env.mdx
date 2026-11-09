@@ -1,0 +1,110 @@
+---
+title: "Server environment variables"
+description: "The variables the AgentFlow server reads, grouped by area, with defaults. Agent variables are on the Agent CLI page."
+---
+
+Server variables live in `apps/api/.env.local` and `apps/app/.env.local`; `apps/api/.env.example` lists every one. An empty value (`""`) fails validation for optional fields: comment out what you do not use. Backing-service ports and credentials for `docker compose` come from `.env` (copy `.env.docker.example`). The variables an Agent reads are in [Agent CLI and environment](/docs/reference/agent-cli).
+
+## URLs
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_APP_URL` | required | Origin of the web app (`http://localhost:3000`) |
+| `NEXT_PUBLIC_API_URL` | required | Origin of the API (`http://localhost:3002`) |
+| `NEXT_PUBLIC_WEB_URL` | required | Origin of the marketing and docs site (`http://localhost:3001`) |
+| `NEXT_PUBLIC_DOCS_URL` | unset | Optional docs origin |
+| `API_BASE_URL` | unset | The address the API gives Agents for callbacks. An Agent can override it with `AGENTFLOW_API_URL` |
+| `PUBLIC_WEBHOOK_BASE_URL` | `NEXT_PUBLIC_API_URL` | Public origin used in inbound webhook URLs (`<base>/webhooks/integrations/<key>`). Jira Cloud and Azure DevOps must reach it over public HTTPS; otherwise use poll mode |
+| `AGENTFLOW_MCP_URL` | `http://localhost:3010/mcp` | The MCP endpoint the API gives Agents for [Agent tools](/docs/reference/agent-tools) and Orchestrator tools |
+| `AUTH_API_URL` | `NEXT_PUBLIC_API_URL` | Where the web app's server code reaches the API for sessions; set it when the internal address differs (Docker) |
+
+## Database
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | none | PostgreSQL URL, for example `postgresql://postgres:password@localhost:5432/agentflow_ai`. Add `?sslmode=disable` when the host is not `localhost` and has no TLS |
+
+`PGHOST`, `PGPORT` (default `5432`), `PGUSER`, `PGDATABASE` and `PGSCHEMA` are also read.
+
+## Storage (RustFS, S3 protocol)
+
+Nothing assumes AWS: any S3-compatible server works.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `S3_ENDPOINT` | none | Endpoint the API calls (inside Docker, the service name, such as `http://rustfs:9000`) |
+| `S3_PUBLIC_ENDPOINT` | `S3_ENDPOINT` | Endpoint baked into presigned URLs. Browsers and Agents must reach it. An Agent container next to a local RustFS uses `http://host.docker.internal:9000` |
+| `S3_REGION` | `us-east-1` | Region name |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | none | The pair of the RustFS root credentials in `.env` |
+| `S3_FORCE_PATH_STYLE` | `true` | Path-style addressing, which self-hosted S3 servers expect |
+| `S3_MULTIPART_CHECKSUM` | `computed` | `computed` works on any server; `native` only for AWS S3 |
+| `S3_COLD_STORAGE_CLASS` | unset | Leave unset unless the backend supports the class |
+| `S3_CORS_ALLOWED_ORIGINS` | the origin of `NEXT_PUBLIC_APP_URL` | Web app origins `pnpm storage:init` allows on the browser-facing buckets. Without them the browser cannot upload attachments or show a transcript. Re-run `pnpm storage:init` after changing the app origin |
+| `FILE_ATTACHMENTS_BUCKET`, `TRANSCRIPTS_BUCKET`, `PLUGIN_STORE_BUCKET`, `LOOP_STATE_BUCKET` | none | Bucket names; `pnpm storage:init` creates them |
+
+## Secrets and tokens
+
+| Variable | Purpose |
+|---|---|
+| `ENCRYPTION_KEY` | 32-byte base64 master key (AES-256-GCM) for secrets at rest: connection tokens and Claude API keys. Rotating it makes stored secrets unreadable |
+| `BETTER_AUTH_SECRET` | Signing secret of the sign-in sessions |
+| `INTERNAL_API_SECRET` | Shared secret the MCP server sends in `X-Internal-Secret` on its calls to the API. Set the same value on the API and the MCP server; the MCP server does not start without it |
+| `AGENTFLOW_RUNNER_JWT_SECRET` | Shared secret for Agent tokens. Required: the api fails to start without it, or with a value shorter than 32 characters or with fewer than 8 different characters |
+
+Generate a key with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+
+## Auth
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BETTER_AUTH_URL` | `http://localhost:3000` | Public web app origin: cookies, links, token issuer |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | none | Extra origins, comma-separated |
+| `AUTH_ALLOW_SIGN_UP` | allowed | `false`: invite-only; only emails with a pending invitation can sign up |
+| `AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION` | joins | `false`: later accounts do not join the default organization |
+| `AUTH_ALLOW_CREATE_ORGANIZATION` | single organization | `true`: more than one organization |
+| `AUTH_DEFAULT_ORGANIZATION_NAME`, `AUTH_DEFAULT_ORGANIZATION_SLUG` | `AgentFlow`, `agentflow` | The organization the first account creates |
+| `AGENTFLOW_ADMIN_EMAIL`, `AGENTFLOW_ADMIN_PASSWORD` | none | Production Compose only (read by the `bootstrap-admin` job, required there): the first owner, created when no user exists. Password: at least 8 characters |
+| `AGENTFLOW_ADMIN_NAME` | `Administrator` | Production Compose only: display name of that owner |
+
+See [First admin and organization](/docs/getting-started/first-admin).
+
+## Email
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SMTP_URL` | none | SMTP relay, such as `smtp://localhost:1025` (Mailpit). Without it no mail is sent |
+| `EMAIL_FROM` | `AgentFlow <no-reply@localhost>` | The sender |
+
+See [Email](/docs/integrations/email).
+
+## Workflows and scheduler
+
+The API process runs a small scheduler: workflows every `WORKFLOW_TICK_SECONDS`, a cleanup every 5 minutes, and a stale-session cleanup hourly.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WORKFLOW_TICK_SECONDS` | `10` | Workflow scheduler tick (minimum 5) |
+| `WORKFLOW_RUN_PHASE_TIMEOUT_HOURS` | `24` | Fail runs stuck in one phase |
+| `STALE_SESSION_AGE_HOURS` | `24` | Ends sessions still marked active after their machine stopped reporting |
+| `SELF_HOSTED_CRON_DISABLED` | off | `true` turns the in-process scheduler off, for an external scheduler that calls the `/cron/*` routes. `CRON_SECRET` must then be set |
+| `CRON_SECRET` | generated per process | Authenticates the `/cron/*` routes |
+
+## Local Git
+
+`pnpm local-git:init` writes these to `apps/api/.env.local`. Under production Compose the `local-git-init` job does it instead ([Accounts](/docs/guides/setup/production-server#accounts)). See [Local Git](/docs/integrations/local-git).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LOCAL_GIT_SERVER_URL` | `http://localhost:3300` | Where the API reaches Local Git |
+| `LOCAL_GIT_RUNNER_URL` | the server URL | Where Agents reach it |
+| `LOCAL_GIT_TOKEN` | none | Access token; with it every organization gets the Local Git connection. Wins over `LOCAL_GIT_TOKEN_FILE` |
+| `LOCAL_GIT_TOKEN_FILE` | none | Path of a file holding the access token. Set by the production Compose file to `/run/local-git/token`, written by `local-git-init`; do not set it in `.env` |
+| `LOCAL_GIT_ADMIN_USER`, `LOCAL_GIT_ADMIN_PASSWORD`, `LOCAL_GIT_ADMIN_EMAIL` | `agentflow`, none, `<user>@local-git.invalid` | Production Compose, profile `local-git` (read by `local-git-init`): the Gitea admin. The password is required with the profile |
+| `LOCAL_GIT_OWNER` | the token's account | Organization or user of new repositories |
+| `LOCAL_GIT_PORT`, `LOCAL_GIT_URL` | `3300`, `http://localhost:3300` | In the Docker `.env`: the host port, and the address browsers use |
+
+## Docker services (`.env`)
+
+`POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `S3_PORT`, `S3_CONSOLE_PORT`, `MAILPIT_SMTP_PORT`, `MAILPIT_UI_PORT` and `LOCAL_GIT_PORT` change the host ports and credentials of the services started by `docker compose up -d`. Change the RustFS credentials for anything beyond local development.
+
+In the production Compose `.env` (profile `mailpit`), `MAILPIT_UI_USER` (default `admin`) and `MAILPIT_UI_PASSWORD` (required, no spaces) protect the Mailpit UI.

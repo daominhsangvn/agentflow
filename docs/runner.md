@@ -156,7 +156,7 @@ reports the tool as missing and agents cannot run it. Add the directory in
 `su runner -s /bin/bash -lc '<tool> --version'` in the Dockerfile.
 
 Run one image per set of toolchains and assign its runners to the projects
-that need them (Project → Integrations → Runners). Build all of a project's
+that need them (Project → Agents → Agents). Build all of a project's
 runners from the same image: a new loop goes to whichever is least busy. A
 runner with every toolchain (e.g. .NET, Rust and Node.js) can serve every
 project. The runner reports the toolchains it finds on its `PATH` (node, npm,
@@ -279,7 +279,23 @@ pnpm -C apps/desktop package:headless --windows
 # dist-headless/agentflow-runner-<version>-windows.zip
 ```
 
-Unzip it on the Windows machine and run `start-runner.cmd`. The first start
+Unzip it on the Windows machine. The folder holds `runner.mjs`,
+`agent-plugins/`, `doctor.bat` (with `doctor.ps1`), `start-runner.cmd`,
+`setup-runner.cmd`, `uninstall-runner.cmd`, `README.txt` and `winsw/`
+(`WinSW.exe` and its `LICENSE.txt`).
+
+Run `doctor.bat` first (`doctor.bat --project PRO-1` for a personal Agent). It
+checks Node.js 22+, Git for Windows and its `bin\bash.exe`, that the first
+`claude` on PATH is the native Claude Code (an npm install is a `.cmd`/`.ps1`
+or shell wrapper, which breaks the loops' multi-line prompts), that Git Bash
+keeps a `/command` argument as typed when it is excluded with
+`MSYS2_ARG_CONV_EXCL` (the runner does this for a prompt's slash command), jq,
+Python 3 with PyYAML, gh, the Claude login, long paths and, once `runner.env`
+exists, the API URL (plain http needs `AGENTFLOW_ALLOW_HTTP_HOSTS` in that
+file, which is all the Windows service reads) and that the API answers. It
+exits with code 1 while a required check fails.
+
+Run `start-runner.cmd`. The first start
 asks four questions, then connects:
 
 | Question | Default |
@@ -311,12 +327,39 @@ ConnectionStrings__DefaultConnection=Server=localhost;Database=App_Agent;Trusted
   on the loops' PATH: `python3` (the first of `python3`, `python`, `py -3`
   that runs Python 3), `jq` (with `--binary`), and a `sitecustomize.py` on
   `PYTHONPATH` that makes Python print `\n`. Loops also get `PYTHONUTF8=1`.
+- Git Bash rewrites arguments that look like POSIX paths for the native
+  programs it starts (`/writing-plans LD-7` would reach `claude.exe` as
+  `C:/Program Files/Git/writing-plans LD-7`). A step whose prompt starts with
+  a slash command lists that command in `MSYS2_ARG_CONV_EXCL` for its `claude`
+  invocation only, so the command is expanded and other paths still convert.
 - Stopping a loop ends its whole process tree with `taskkill /T /F`; Windows
   has no graceful equivalent, so the scripts get no chance to clean up.
 - The Claude Code version set in AgentFlow is not installed: loops run the
   `claude` on PATH. Keep it current with `claude update`.
-- To start the runner with Windows, add `start-runner.cmd` to a Task
-  Scheduler task that runs at logon of the runner's account.
+
+**Start with Windows.** The last setup question offers to install the Agent
+as a Windows service ([WinSW](https://github.com/winsw/winsw), shipped in
+`winsw/`) that starts before anyone signs in. There is one service per Agent:
+`agentflow-agent`, or `agentflow-agent-pro-1` for the personal Agent of PRO-1.
+It runs under your Windows account: WinSW asks for that account's password
+(not a Windows Hello PIN; Microsoft accounts use the online password) and
+offers the "log on as a service" right. Windows asks for administrator
+approval once per action. Mapped network drives are not visible to services;
+use UNC paths. Logs are in `<data dir>\service\logs`
+(`%USERPROFILE%\.agentflow-runner\service\logs`, or
+`...\personal\PRO-1\service\logs`). Keep the unzipped folder in a permanent
+place, not Downloads or temp: the service runs `runner.mjs` from it.
+Answering no to the question removes an installed service.
+
+**Upgrade.** Unzip the new release, run `setup-runner.cmd [--project KEY]`
+from it and press Enter to every question; the service is re-pointed to the
+new folder and restarted.
+
+**Uninstall.** `uninstall-runner.cmd [--project KEY]` (`node runner.mjs
+uninstall`) removes the service and asks whether to delete the Agent's local
+data (default no). The Agent stays in AgentFlow as an offline computer;
+remove it there if you no longer need it. A service left behind by a deleted
+folder is removed with `sc.exe delete <id>`.
 
 ## After installing
 
@@ -353,6 +396,10 @@ version. It is sent with every loop, like the model provider
   itself away from the version set. Set it in `runner.env` on a systemd
   runner.
 - The desktop app ignores the setting and keeps its own `claude`.
+- A personal runner never installs. When the provider pins an exact release
+  that differs from `claude --version`, each loop fails with ``This computer
+  runs Claude Code X, the provider needs Y: run `claude install Y` ``.
+  `latest` is not checked.
 
 ## Configuration
 
@@ -459,7 +506,7 @@ pages, the way the desktop app reports its local sessions
 - **The agent components** the runner offers — the bundled plugins and their
   subagents, commands and skills, and the `.claude` definitions of a loop
   workspace (a process toolkit) — make up the runner's inventory on the
-  Agents page; the subagents, skills and commands a loop invokes count as
+  Skills catalog (Labs); the subagents, skills and commands a loop invokes count as
   their usage.
 
 AgentFlow always ingests them: no organization setting or feature flag
@@ -584,7 +631,7 @@ migration aid, not a replacement for the auto runner.
 | At once | `AGENTFLOW_RUNNER_MAX_CONCURRENT` | one, the other runs waiting their turn, or several when the project's commands make their own worktrees (`AGENTFLOW_RUNNER_PARALLEL=true`) |
 | Permission prompts | the loop's allowed tools | the loop's allowed tools and the person's `permissions.allow`, or none at all (`AGENTFLOW_RUNNER_SKIP_PERMISSIONS=true`) |
 | Per computer | any number, each with its own `AGENTFLOW_RUNNER_DATA_DIR` | any number, one per project key |
-| Claude Code | the version set in AgentFlow | the `claude` on PATH (no pinning: `~/.local/bin/claude` is shared by the account) |
+| Claude Code | the version set in AgentFlow | the `claude` on PATH (no pinning; a loop fails when the provider pins another version) |
 
 **Set up.** `node runner.mjs setup` (Windows: `setup-runner.cmd`) asks for the
 mode first; Enter keeps `auto`. Personal asks for the API URL and key, the
@@ -599,6 +646,9 @@ runner name (default `<user name>-<project key>`) and the local gateway port
 node runner.mjs --project PRO-1          # Windows: start-runner.cmd --project PRO-1
 node runner.mjs setup --project PRO-1    # asks that runner's questions again
 ```
+
+On Windows each personal Agent can be its own service, and
+`uninstall-runner.cmd --project PRO-1` removes it.
 
 Each personal runner has its own data directory (identity, job store, loop
 tokens, status, Windows shims), so any number of them, for different
@@ -640,12 +690,21 @@ already in use, since both would be the same computer in AgentFlow.
   nobody is at the terminal to approve a prompt.
 - Questions work like any step with `questions: ask`: the command writes
   `$AGENTFLOW_WORKDIR/questions.json` and stops; the run shows them in
-  AgentFlow, and the answers resume the same session.
+  AgentFlow, and the answers resume the same session. A question may carry
+  `commentId` when the command already commented it on the ticket (see
+  "Writing commands for a personal runner").
 - The folder is never removed or reset; worktree clean-up skips it.
 - A workflow chooses a person's runner per item with runner rules
-  (docs/workflows.md "Runner rules"), e.g. the assignee's. A personal runner
-  a workflow or a rule names is used even when the project lists other
-  runners.
+  (docs/workflows.md "Runner rules"), e.g. the assignee's.
+- A personal Agent registers with the organization only. Its project key must
+  be a project of the API key's organization, or registration is refused
+  (`personal_agent_project_not_found`). It is not added to the project
+  automatically: it shows on Project -> Agents as "waiting to be added" and an
+  admin adds it. It can only be added to its own project.
+- When the project has Agents, a workflow only uses a personal Agent when it
+  is one of them. Otherwise the run fails with `agent_not_in_project` ("Agent ... is
+  not one of project ...'s Agents"). An offline personal Agent fails the
+  launch; the run is not moved to another Agent.
 
 ### Writing commands for a personal runner
 
@@ -662,13 +721,18 @@ runs it by hand.
    When you need a decision you cannot make from the ticket or the code:
    - If `$AGENTFLOW_WORKDIR` is set (an AgentFlow run), write the questions to
      `$AGENTFLOW_WORKDIR/questions.json` as a JSON array, e.g.
-     `[{"id": "q1", "question": "Export CSV or XLSX?", "options": ["CSV", "XLSX"]}]`,
+     `[{"id": "q1", "question": "Export CSV or XLSX?", "options": ["CSV", "XLSX"]}]`
+     (with `"commentId": "10234"` when you already commented it, see below),
      then stop. Do not ask in the terminal.
    - Otherwise ask the user as usual.
    ```
 
    At most 30 questions, 2,000 characters each, 10 options of 500
-   characters. The answers come back as the next prompt of the same session:
+   characters. When the command itself comments the question on the ticket
+   with the person's Jira tools, it writes that comment's id as `commentId`
+   (`[{"id": "q1", "question": "...", "commentId": "10234"}]`, at most 255
+   characters); AgentFlow does not post it again and takes the reply to that
+   comment as the answer. Without `commentId` nothing changes. The answers come back as the next prompt of the same session:
    pick up where the command stopped (write the answers where the command
    keeps them, e.g. `clarifications.md`, then go on).
 2. **Never wait for a confirmation.** Decide with a stated default, or ask
@@ -691,7 +755,10 @@ runs it by hand.
 
 ## Capabilities (AGENTFLOW.md)
 
-A runner tells AgentFlow what it can do in an `AGENTFLOW.md`, so the project's
+An Agent (automatic or personal) tells AgentFlow what it can do in an
+`AGENTFLOW.md`. The project's Agents are the ones on Project -> Agents; when
+the project has some, the orchestrator only sees the files of those Agents.
+So the project's
 orchestrator knows which command of which runner to send a request to. A
 personal runner reads it from its project folder; an auto runner reads it from
 the root of the default branch of the project's toolkit repository (see
@@ -742,6 +809,9 @@ an approved PRD; to answer questions about a plan, resume its session.
   total), and the orchestrator can attach them to the ticket. Only
   orchestrator tasks use it (process steps use `artifacts` and
   `$AGENTFLOW_ATTACH`). Name the files in the command's body text.
+- On upload the API adds warnings (stored with the file, never blocking): a
+  line that looks like a secret (line number and kind, never the value) and a
+  `mode: read` command that declares `push`.
 - The API parses the front matter itself (`parseRunnerCapabilitiesMarkdown`,
   `packages/api/src/types/runner-capabilities.ts`) and keeps one file per
   runner and project (`compute_target_capabilities`); a file whose front matter
@@ -755,7 +825,7 @@ branch>`, and upload it with `source: toolkit` through the same `PUT
 so `uploadedAt` shows the last check.
 
 - **Triggers.** (1) **Refresh** on a toolkit row, or **Read from a runner's
-  toolkit** in Project → Runners → Commands (org admins). (2) A daily cron,
+  toolkit** in Project → Agents → Commands (org admins). (2) A daily cron,
   `/cron/refresh-runner-capabilities`, which refreshes toolkit files older than
   20 h (at most 100 per run, online runners only). (3) Saving the project
   process with a changed `toolkit` (repository or mounts) refreshes the
@@ -780,7 +850,7 @@ so `uploadedAt` shows the last check.
   repository's `.claude/` tree; the runner also warns when the front matter
   names no toolkit or a different repository than the one it was read from.
 
-- Project → Integrations → **Commands** shows
+- Project → Agents → **Commands** shows
   each runner's commands, problems, warnings and the file;
   `GET /projects/{id}/runner-capabilities` returns them.
 - The file is sent to AgentFlow: never put a secret in it.

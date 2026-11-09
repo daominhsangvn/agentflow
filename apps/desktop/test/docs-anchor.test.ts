@@ -51,8 +51,7 @@ function pageExists(page: string): boolean {
 
 test("declares docs anchors for the screens with on-topic docs pages", () => {
   // Only screens whose docs page genuinely documents them get an anchor. Sessions
-  // now has a dedicated `mechanisms/sessions` page (ISS-4587), so it deep-links
-  // there; Branches has no dedicated page yet and stays omitted (see
+  // deep-links to `guides/operate/sessions`; Branches has no dedicated page yet and stays omitted (see
   // NAV_DOCS_ANCHORS).
   for (const navId of [NavId.Settings, NavId.Diagnostics, NavId.Sessions]) {
     const anchor = staticDocsAnchorFor(navId);
@@ -107,7 +106,7 @@ test("Fumadocs fixture directory is present", () => {
   const dirNames = new Set(
     entries.filter((e) => e.isDirectory()).map((e) => e.name)
   );
-  for (const section of ["mechanisms", "resources"]) {
+  for (const section of ["guides", "resources"]) {
     assert.ok(
       dirNames.has(section),
       `expected apps/web/content/docs/${section} to exist`

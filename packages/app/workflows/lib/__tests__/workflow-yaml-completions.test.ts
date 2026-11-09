@@ -1,3 +1,4 @@
+import { IntegrationProviderKey } from "@repo/api/src/types/integration";
 import { OrchestratorTicketChange } from "@repo/api/src/types/orchestrator";
 import { WorkflowRunEvent } from "@repo/api/src/types/workflow";
 import { YamlCompletionKind } from "@repo/app/shared/lib/yaml-completion";
@@ -8,6 +9,7 @@ import {
   JIRA_ISSUE_LABELED,
   JIRA_ISSUE_STATUS_CHANGED,
   JIRA_TRANSITION_ISSUE,
+  makeProjectConnection,
   makeProjectConnections,
   PROVIDERS,
   TEAMS_POST_MESSAGE,
@@ -36,10 +38,10 @@ const DATA: WorkflowCompletionData = {
 };
 
 /** The suggestions at the "§" of the text (YAML uses "|" itself). */
-function at(textWithCursor: string) {
+function at(textWithCursor: string, data = DATA) {
   const pos = textWithCursor.indexOf("§");
   const text = textWithCursor.replace("§", "");
-  const result = workflowYamlCompletions(text, pos, DATA);
+  const result = workflowYamlCompletions(text, pos, data);
   return {
     result,
     labels: result?.options.map((option) => option.label) ?? [],
@@ -235,11 +237,27 @@ describe("workflowYamlCompletions", () => {
       "concurrency",
       "debounceSeconds",
       "turnTimeoutMinutes",
+      "connections",
       "cancelOn",
+      "mentionOnly",
+      "caseLookup",
+      "caseHandoff",
+      "approvals",
+    ]);
+    expect(at("agent:\n  orchestrator:\n    approvals: §").labels).toEqual([
+      "optional",
+      "required",
     ]);
     expect(at("agent:\n  orchestrator:\n    concurrency: §").labels).toEqual([
       "supersede",
       "queue",
+    ]);
+  });
+
+  it("offers true or false for mentionOnly", () => {
+    expect(at("agent:\n  orchestrator:\n    mentionOnly: §").labels).toEqual([
+      "true",
+      "false",
     ]);
   });
 
@@ -313,5 +331,36 @@ describe("workflowYamlCompletions — project connections", () => {
       "[link]",
     ]);
     expect(delivery.labels).toEqual(["read", `[${TEAMS_POST_MESSAGE}]`]);
+  });
+});
+
+describe("workflowYamlCompletions — orchestrator grants", () => {
+  const WITH_WIKI: WorkflowCompletionData = {
+    ...DATA,
+    projectConnections: [
+      ...DATA.projectConnections,
+      makeProjectConnection(PROJECT_ID, {
+        provider: IntegrationProviderKey.Confluence,
+        key: "wiki",
+        name: "Wiki",
+      }),
+    ],
+  };
+  const atWiki = (text: string) => at(text, WITH_WIKI);
+  const PREFIX = "agent:\n  orchestrator:\n    connections:\n      ";
+
+  it("suggests source, pull_requests and the Confluence keys", () => {
+    const { labels } = atWiki(`${PREFIX}§`);
+
+    expect(labels).toEqual(["source", "pull_requests", "wiki"]);
+    expect(labels).not.toContain("acme-jira");
+  });
+
+  it("suggests the writes of each key", () => {
+    expect(atWiki(`${PREFIX}source: §`).labels).toContain(
+      "[comment, attach, transition, label, link]"
+    );
+    expect(atWiki(`${PREFIX}wiki: §`).labels).toEqual(["read", "[publish]"]);
+    expect(atWiki(`${PREFIX}pull_requests: §`).labels).toEqual(["[open]"]);
   });
 });

@@ -141,7 +141,7 @@ describe("CommandPalette", () => {
     pressCommandK();
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Home")).toBeInTheDocument();
     expect(screen.getByText("Sessions")).toBeInTheDocument();
   });
 
@@ -164,7 +164,7 @@ describe("CommandPalette", () => {
     pressCommandK();
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Home")).toBeInTheDocument();
     expect(screen.queryByText("Insights")).not.toBeInTheDocument();
   });
 
@@ -184,7 +184,7 @@ describe("CommandPalette", () => {
     expect(screen.queryByText("Judges")).not.toBeInTheDocument();
     // Non-Labs destinations are untouched — the gate removed a section, not
     // the palette.
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Home")).toBeInTheDocument();
     expect(screen.getByText("Sessions")).toBeInTheDocument();
   });
 
@@ -197,6 +197,19 @@ describe("CommandPalette", () => {
 
     expect(screen.getByText("Insights")).toBeInTheDocument();
     expect(screen.getByText("Judges")).toBeInTheDocument();
+    expect(screen.getByText("Skills catalog")).toBeInTheDocument();
+  });
+
+  test("hides Routines and Skills catalog without the Labs container flag", () => {
+    mockUseFeatureFlag.mockImplementation((flag: string) =>
+      flagResult(flag, flag !== LABS_NAV_SECTION_FEATURE_FLAG_KEY)
+    );
+    render(<CommandPalette />);
+    pressCommandK();
+
+    expect(screen.queryByText("Routines")).not.toBeInTheDocument();
+    expect(screen.queryByText("Skills catalog")).not.toBeInTheDocument();
+    expect(screen.getByText("My Tasks")).toBeInTheDocument();
   });
 
   test("lists Routines when the routines flag is ON (FEA-4348)", () => {
@@ -294,7 +307,7 @@ describe("CommandPalette", () => {
     render(<CommandPalette />);
     pressCommandK();
 
-    fireEvent.click(screen.getByText("Dashboard"));
+    fireEvent.click(screen.getByText("Home"));
 
     expect(mockPush).toHaveBeenCalledWith("/acme/dashboard");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

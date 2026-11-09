@@ -9,9 +9,11 @@ import {
   ORCHESTRATOR_DEBOUNCE_SECONDS_MAX,
   ORCHESTRATOR_TURN_TIMEOUT_MINUTES_DEFAULT,
   ORCHESTRATOR_TURN_TIMEOUT_MINUTES_MAX,
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "./orchestrator.ts";
+import { orchestratorConnectionGrantsSchema } from "./orchestrator-grants.ts";
 import { projectConnectionKeySchema } from "./project-connection.ts";
 import {
   type ProcessDocumentType,
@@ -173,6 +175,8 @@ export const WorkflowRunErrorCode = {
   SourceFetchFailed: "source_fetch_failed",
   DocumentCreateFailed: "document_create_failed",
   ComputeTargetUnavailable: "compute_target_unavailable",
+  /** The workflow names an Agent that is not one of the run's project's Agents; the run never moves to another Agent. */
+  AgentNotInProject: "agent_not_in_project",
   /**
    * A personal runner that runs one loop at a time is busy: the step waits
    * for it (retried, never fails the run by itself).
@@ -394,7 +398,7 @@ export const WORKFLOW_TEMPLATE_VARIABLES = [
 
 export const WORKFLOW_NAME_MAX = 120;
 export const WORKFLOW_DESCRIPTION_MAX = 2000;
-export const WORKFLOW_INSTRUCTIONS_MAX = 8000;
+export const WORKFLOW_INSTRUCTIONS_MAX = 16_000;
 export const WORKFLOW_TRIGGERS_MAX = 10;
 export const WORKFLOW_ACTIONS_MAX = 20;
 export const WORKFLOW_DEFAULT_TITLE_TEMPLATE =
@@ -452,6 +456,21 @@ export const workflowOrchestratorConfigSchema = z.object({
     .max(3)
     .default([...ORCHESTRATOR_CANCEL_ON_DEFAULT])
     .transform((values) => [...new Set(values)]),
+  /** A thread reply that no trigger matched (no mention) does not wake a turn. */
+  mentionOnly: z.boolean().default(false),
+  /** The case_lookup tool, which reads another item's case in the project. */
+  caseLookup: z.boolean().default(false),
+  /** The case_handoff tool, which sends an approved summary to another item's case. */
+  caseHandoff: z.boolean().default(false),
+  /** required: reply/edit_reply on the thread and source_item_* only through an approved request_decision draft. */
+  approvals: z
+    .enum(OrchestratorApprovals)
+    .default(OrchestratorApprovals.Optional),
+  /**
+   * What the orchestrator may write; default {}: it only reads the ticket
+   * (docs/orchestrator.md).
+   */
+  connections: orchestratorConnectionGrantsSchema.default({}),
 });
 export type WorkflowOrchestratorConfig = z.infer<
   typeof workflowOrchestratorConfigSchema
@@ -722,6 +741,8 @@ export type Workflow = {
   httpEndpointConnectionId: string | null;
   runCounts: WorkflowRunCounts;
   lastRunAt: Date | null;
+  /** Orchestrated workflows: their cases (they have no workflow runs); null for process workflows. */
+  caseCounts: WorkflowCaseCounts | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -1010,3 +1031,13 @@ export function resolveWorkflowOrchestratorConfig(
 ): WorkflowOrchestratorConfig {
   return agent.orchestrator ?? workflowOrchestratorConfigSchema.parse({});
 }
+
+export type WorkflowCaseCounts = {
+  total: number;
+  open: number;
+  closed: number;
+  /** Max case updatedAt; null without cases. */
+  lastActivityAt: Date | null;
+  /** Open cases that need a person (caseNeedsPersonWhere). */
+  needsPerson: number;
+};

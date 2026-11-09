@@ -65,6 +65,7 @@ test("a computer's model provider: import a Claude settings.json, save, reopen",
       baseUrl: "https://api.deepseek.com/anthropic",
       model: "deepseek-chat",
       env: { CLAUDE_CODE_EFFORT_LEVEL: "max" },
+      claudeCodeVersion: "latest",
       token: { isSet: true, lastFour: "0000" },
     });
 

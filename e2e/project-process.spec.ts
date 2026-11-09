@@ -42,8 +42,8 @@ test("project process: default, customize, save a version, reset", {
       invalidVersion: null,
     });
 
-    await page.goto(`/${orgSlug}/projects/${project.id}`);
-    await page.getByRole("radio", { name: "Process" }).click();
+    // The Process tab has no toggle on the project page; open it by URL.
+    await page.goto(`/${orgSlug}/projects/${project.id}?tab=process`);
     await expect(page).toHaveURL(PROCESS_TAB_RE);
     const panel = page.getByTestId("project-process-panel");
     await expect(panel.getByText(DEFAULT_PROCESS_RE)).toBeVisible({
@@ -163,8 +163,8 @@ test("project process: write it as YAML with the suggestion popup, comments kept
     });
     projectId = project.id;
 
-    await page.goto(`/${orgSlug}/projects/${project.id}`);
-    await page.getByRole("radio", { name: "Process" }).click();
+    // The Process tab has no toggle on the project page; open it by URL.
+    await page.goto(`/${orgSlug}/projects/${project.id}?tab=process`);
     const panel = page.getByTestId("project-process-panel");
     await panel.getByRole("button", { name: "Customize" }).click({
       timeout: 15_000,

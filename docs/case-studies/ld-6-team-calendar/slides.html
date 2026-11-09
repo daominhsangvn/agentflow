@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LD-6 Case Study</title>
+<style>
+  :root {
+    --bg: #eef1f5;
+    --slide: #ffffff;
+    --ink: #172033;
+    --muted: #5b6577;
+    --line: #d9dee7;
+    --accent: #2563eb;
+    --agent: #6366f1;
+    --rule: #b45309;
+    --rule-bg: #fef3e2;
+    --ok: #15803d;
+    --warn: #b91c1c;
+    --chip: #f1f4f9;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
+  .viewport { position: fixed; inset: 0; display: grid; place-items: center; overflow: hidden; }
+  .stage { width: 1280px; height: 720px; position: relative; transform-origin: center; }
+  .slide { position: absolute; inset: 0; background: var(--slide); border-radius: 14px;
+    box-shadow: 0 10px 40px rgba(23, 32, 51, .12); padding: 56px 72px; display: none;
+    flex-direction: column; }
+  .slide.active { display: flex; }
+  .kicker { font-size: 15px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent);
+    font-weight: 700; margin: 0 0 10px; }
+  h1 { font-size: 54px; line-height: 1.08; margin: 0 0 18px; letter-spacing: -.02em; }
+  h2 { font-size: 38px; line-height: 1.15; margin: 0 0 26px; letter-spacing: -.01em; }
+  p { font-size: 21px; line-height: 1.5; margin: 0 0 14px; color: var(--muted); }
+  .lead { font-size: 25px; color: var(--ink); }
+  .foot { position: absolute; left: 72px; right: 72px; bottom: 26px; display: flex;
+    justify-content: space-between; font-size: 13px; color: var(--muted); }
+  .grid { display: grid; gap: 18px; }
+  .g2 { grid-template-columns: 1fr 1fr; }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+  .g4 { grid-template-columns: repeat(4, 1fr); }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; background: #fff; }
+  .card h3 { margin: 0 0 8px; font-size: 20px; }
+  .card p { font-size: 16px; margin: 0; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 6px; background: var(--chip);
+    color: var(--muted); margin-bottom: 8px; }
+  .agent { border-color: #c7c9f9; background: #f5f5ff; }
+  .agent .tag { background: #e3e4fd; color: var(--agent); }
+  .orch { border-color: #bcd0fb; background: #f2f6ff; }
+  .orch .tag { background: #dce7fe; color: var(--accent); }
+  .rule { border-color: #f3d3a6; background: var(--rule-bg); }
+  .rule .tag { background: #fbe3bf; color: var(--rule); }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+  ul.clean { list-style: none; padding: 0; margin: 0; }
+  ul.clean li { font-size: 19px; line-height: 1.45; padding: 7px 0 7px 26px; position: relative; color: var(--ink); }
+  ul.clean li::before { content: ""; position: absolute; left: 4px; top: 17px; width: 9px; height: 9px;
+    border-radius: 50%; background: var(--accent); }
+  table { border-collapse: collapse; width: 100%; font-size: 17px; }
+  th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  td code { background: var(--chip); padding: 1px 6px; border-radius: 5px; }
+
+  /* setup diagram */
+  .setup { display: grid; grid-template-columns: 210px 1fr 230px; gap: 26px; align-items: stretch; flex: 1; }
+  .col { display: flex; flex-direction: column; gap: 14px; justify-content: center; }
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: #fff; }
+  .box b { display: block; font-size: 18px; margin-bottom: 4px; }
+  .box span { font-size: 14px; color: var(--muted); line-height: 1.4; display: block; }
+  .people { background: #effaf2; border-color: #bfe5c9; }
+  .tool { background: #f7f9fc; }
+  .af { border: 2px dashed #9db7f5; border-radius: 16px; padding: 18px; display: grid; gap: 14px;
+    grid-template-rows: auto auto auto; background: #fafcff; position: relative; }
+  .af::before { content: "AgentFlow"; position: absolute; top: -12px; left: 18px; background: #fff;
+    padding: 0 8px; font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: .08em;
+    text-transform: uppercase; }
+  .row { display: grid; gap: 12px; }
+  .arrow { text-align: center; color: var(--muted); font-size: 14px; }
+
+  /* flow */
+  .flow { display: flex; gap: 8px; align-items: stretch; margin: 6px 0 22px; }
+  .step { flex: 1; border-radius: 10px; padding: 12px 10px; text-align: center; background: var(--chip);
+    border: 1px solid var(--line); position: relative; }
+  .step b { display: block; font-size: 17px; }
+  .step span { display: block; font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.35; }
+  .step.people-step { background: #effaf2; border-color: #bfe5c9; }
+  .layers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+  /* cases */
+  .cases { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .case { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: #fff; }
+  .case .n { font-size: 13px; font-weight: 800; color: var(--accent); letter-spacing: .06em; }
+  .case h3 { font-size: 18px; margin: 4px 0 6px; }
+  .case p { font-size: 14.5px; margin: 0; line-height: 1.4; }
+  .case.people-case { background: #fffaf3; border-color: #f3dfbf; }
+  .case.people-case .n { color: var(--rule); }
+
+  /* stats */
+  .stat { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .stat .v { font-size: 40px; font-weight: 800; letter-spacing: -.02em; }
+  .stat .l { font-size: 15px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .ok { color: var(--ok); }
+  .bad { color: var(--warn); }
+
+  .views { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .view { border-radius: 12px; padding: 18px; border: 1px solid var(--line); }
+  .view .num { font-size: 34px; font-weight: 800; color: var(--accent); }
+  .view code { font-size: 17px; font-weight: 700; color: var(--ink); }
+  .view p { font-size: 15px; margin-top: 8px; }
+  .url { font-family: ui-monospace, Menlo, monospace; font-size: 26px; color: var(--accent); font-weight: 700; }
+
+  .nav { position: fixed; bottom: 14px; right: 18px; font-size: 13px; color: var(--muted); }
+  .title-slide { justify-content: center; background:
+    radial-gradient(1200px 500px at 85% 110%, #e6edff 0%, transparent 60%), #fff; }
+  .badges { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; }
+  .badges span { font-size: 15px; padding: 7px 12px; border-radius: 8px; background: var(--chip); color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="viewport"><div class="stage" id="stage">
+
+  <!-- 1 · Title -->
+  <section class="slide active title-slide">
+    <p class="kicker">Case study · LeaveDesk</p>
+    <h1>LD-6 · Team calendar<br>from To Do to Done with AgentFlow</h1>
+    <p class="lead">One Jira ticket, three AI agents and the people who own the work.</p>
+    <div class="badges">
+      <span>PRD → Planning → Implement → Testing → Review → Done</span>
+      <span>8 cases</span>
+      <span>Jira · Confluence · Git</span>
+    </div>
+    <div class="foot"><span>AgentFlow</span><span>1</span></div>
+  </section>
+
+  <!-- 2 · What AgentFlow does -->
+  <section class="slide">
+    <p class="kicker">The idea</p>
+    <h2>AI agents do the work. People govern it.</h2>
+    <div class="grid g3" style="margin-bottom:26px">
+      <div class="card"><span class="tag">People</span><h3>Keep working in Jira</h3>
+        <p>Move the ticket, answer questions in comments, review on Confluence, merge pull requests.</p></div>
+      <div class="card orch"><span class="tag">Orchestrator Agent</span><h3>Decides the next step</h3>
+        <p>Reads the workflow’s rules and the ticket’s case, starts the right agent, answers in the right thread.</p></div>
+      <div class="card agent"><span class="tag">Agents</span><h3>Do the work</h3>
+        <p>BA writes the PRD, Dev plans and implements, QC designs and runs the tests.</p></div>
+    </div>
+    <ul class="clean">
+      <li>Agents ask, people answer. Agents open pull requests, people merge.</li>
+      <li>Documents live on Confluence; people may edit them, and the next version keeps their edits.</li>
+      <li>The process is written in plain language by the admin, not in code.</li>
+    </ul>
+    <div class="foot"><span>LD-6 case study</span><span>2</span></div>
+  </section>
+
+  <!-- 3 · Setup -->
+  <section class="slide">
+    <p class="kicker">High-level setup</p>
+    <h2>What the team set up once</h2>
+    <div class="setup">
+      <div class="col">
+        <div class="box people"><b>Team</b><span>Admin, BA, Dev, QC: move the ticket, answer, review, merge</span></div>
+        <div class="arrow">works in ↓</div>
+        <div class="box tool"><b>Jira · project LD</b><span>Statuses: To Do → PRD → Planning → Implement → Testing → Review → Done</span></div>
+      </div>
+      <div class="af">
+        <div class="box rule"><b>LeaveDesk workflow</b><span>Orchestrated. Triggers: status changed, mention. The rules in plain language: roles and process, never command names. Settings: debounce 20 s, cancel on status change.</span></div>
+        <div class="box orch"><b>Orchestrator Agent</b><span>Its own agent, no repository: only AgentFlow tools (task_run, wait_for, reply, page_publish, pull_request_open…). Every turn reads the rules, the case and each agent’s AGENTFLOW.md.</span></div>
+        <div class="row g3" style="grid-template-columns:repeat(3,1fr)">
+          <div class="box agent"><b>BA Agent</b><span>Automatic · toolkit leavedesk-knowledge</span></div>
+          <div class="box agent"><b>Dev Agent</b><span>Personal · the developer’s own machine</span></div>
+          <div class="box agent"><b>QC Agent</b><span>Automatic · toolkit leavedesk-qa · Playwright</span></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="box tool"><b>Jira connection</b><span>Webhooks in, comments out, each in its thread</span></div>
+        <div class="box tool"><b>Confluence · space LD</b><span>Ticket page, PRD, plan, test plan, test runs</span></div>
+        <div class="box tool"><b>Git (Gitea)</b><span>leavedesk-app · leavedesk-qa · leavedesk-knowledge</span></div>
+      </div>
+    </div>
+    <div class="foot"><span>LikeC4 view: setup</span><span>3</span></div>
+  </section>
+
+  <!-- 4 · Agents -->
+  <section class="slide">
+    <p class="kicker">The agents</p>
+    <h2>Each agent declares what it can do in AGENTFLOW.md</h2>
+    <table>
+      <thead><tr><th style="width:150px">Agent</th><th style="width:240px">Runs</th><th>Declared commands</th></tr></thead>
+      <tbody>
+        <tr><td><b>BA Agent</b></td><td>Automatic, toolkit <code>leavedesk-knowledge</code></td>
+          <td><code>/ba-requirement</code> produces the PRD, asks questions · <code>/ba-archive</code> needs the PRD, pushes · <code>/leavedesk-research</code> read</td></tr>
+        <tr><td><b>Dev Agent</b></td><td>Personal: the developer’s machine and credentials</td>
+          <td><code>/writing-plans</code> needs the PRD, leaves the plan · <code>/executing-plans</code> needs the approved plan, opens its own PR · <code>/systematic-debugging</code> read</td></tr>
+        <tr><td><b>QC Agent</b></td><td>Automatic, toolkit <code>leavedesk-qa</code>, Playwright</td>
+          <td><code>/qa-test</code> needs the PRD, leaves the test plan · <code>/qa-run</code> needs the test plan, tests the Dev branch · <code>/qa-review</code> read</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:26px">Each command declares its <b>mode</b> (read or write), what it <b>needs</b> and <b>produces</b>, the files it leaves and whether it pushes. AgentFlow refuses a command that is not declared, a write from a read command, or a missing input.</p>
+    <div class="foot"><span>LikeC4 views: baAgentL4 · devAgentL4 · qcAgentL4</span><span>4</span></div>
+  </section>
+
+  <!-- 5 · Workflow and rules -->
+  <section class="slide">
+    <p class="kicker">The workflow</p>
+    <h2>The rules follow the Jira statuses</h2>
+    <div class="flow">
+      <div class="step"><b>PRD</b><span>BA writes the PRD, asks questions</span></div>
+      <div class="step"><b>Planning</b><span>BA archives · Dev plans · QC designs tests, in parallel</span></div>
+      <div class="step"><b>Implement</b><span>Dev implements with TDD, opens the PR</span></div>
+      <div class="step"><b>Testing</b><span>QC runs the tests on the Dev branch</span></div>
+      <div class="step people-step"><b>Review</b><span>People review and merge</span></div>
+      <div class="step people-step"><b>Done</b><span>Case closed</span></div>
+    </div>
+    <div class="layers">
+      <div class="card rule"><span class="tag">Rules · the admin</span><h3>What to do</h3>
+        <p>Roles and process by status. Work belongs to its status. Coming back to a status starts nothing. Answer each comment in its own thread.</p></div>
+      <div class="card agent"><span class="tag">AGENTFLOW.md · each agent</span><h3>Who can do it</h3>
+        <p>The role in the rules maps to the agent that declares it; its commands, needs and outputs pick the command.</p></div>
+      <div class="card orch"><span class="tag">Platform · AgentFlow</span><h3>What is guaranteed</h3>
+        <p>Debounce and supersede, guards on every task, waits, same-page versions on Confluence, only a status change cancels.</p></div>
+    </div>
+    <div class="foot"><span>LikeC4 view: heart</span><span>5</span></div>
+  </section>
+
+  <!-- 6 · Brief -->
+  <section class="slide">
+    <p class="kicker">The case study</p>
+    <h2>LD-6 · “As a manager I want a calendar of who in my team is off”</h2>
+    <div class="grid g2" style="gap:28px">
+      <div>
+        <ul class="clean">
+          <li><b>PRD:</b> 8 questions, answered in parts; a person’s edit on Confluence kept: PRD v1 → v4 on the same page.</li>
+          <li><b>Planning:</b> three agents in parallel from the PRD page: archive PR, implementation plan, test plan (v2 after a QC question).</li>
+          <li><b>Implement:</b> the Dev Agent on the developer’s machine, TDD, opens PR #6.</li>
+          <li><b>Testing:</b> round 1 fails 32/33 (defect D-1), back to Implement, fix, round 2 passes 33/33.</li>
+          <li><b>Review → Done:</b> people review three pull requests, ask in Jira, merge.</li>
+        </ul>
+      </div>
+      <div>
+        <div class="card" style="margin-bottom:14px"><span class="tag">Along the way</span>
+          <p style="font-size:17px;color:var(--ink)">Four comments within seconds, a status changed by mistake, a ticket sent back to a status whose work was done: what people really do.</p></div>
+        <div class="card orch"><span class="tag">Throughout</span>
+          <p style="font-size:17px;color:var(--ink)">People moved the ticket, answered, edited pages and merged. Every task, page version, reply and pull request came from the Orchestrator Agent’s decisions.</p></div>
+      </div>
+    </div>
+    <div class="foot"><span>LikeC4 view: cases</span><span>6</span></div>
+  </section>
+
+  <!-- 7 · Cases -->
+  <section class="slide">
+    <p class="kicker">The cases</p>
+    <h2>Eight cases, each replayed step by step</h2>
+    <div class="cases">
+      <div class="case"><div class="n">CASE 1</div><h3>PRD</h3><p>Questions, partial answers, a person’s edit: v1 → v4 on the same page.</p></div>
+      <div class="case"><div class="n">CASE 2</div><h3>Planning</h3><p>Three agents in parallel; one wait; three pages and a PR.</p></div>
+      <div class="case"><div class="n">CASE 3</div><h3>Implement</h3><p>The Dev Agent implements the plan page and opens its own PR.</p></div>
+      <div class="case"><div class="n">CASE 4</div><h3>Testing: fail → fix → pass</h3><p>32/33, back to Implement, fix D-1, 33/33.</p></div>
+      <div class="case"><div class="n">CASE 5</div><h3>Review → Done</h3><p>Questions answered by reading tasks; people merge; case closed.</p></div>
+      <div class="case people-case"><div class="n">CASE 6</div><h3>Comments in one window</h3><p>Four comments, one turn, each answer in its own thread.</p></div>
+      <div class="case people-case"><div class="n">CASE 7</div><h3>Accidental status flip</h3><p>Implement → Planning → Testing in seconds: only the final status counts.</p></div>
+      <div class="case people-case"><div class="n">CASE 8</div><h3>Coming back to a status</h3><p>Report what exists, start nothing, wait for an instruction.</p></div>
+    </div>
+    <p style="margin-top:24px">Cases 1–5 are the ticket’s life. Cases 6–8 are what people do. In LikeC4, every decision of the Orchestrator Agent carries a <b>“Why this step”</b> note quoting the rule behind it.</p>
+    <div class="foot"><span>LikeC4 views: case1Prd … case8Reentry</span><span>7</span></div>
+  </section>
+
+  <!-- 8 · Results -->
+  <section class="slide">
+    <p class="kicker">What the ticket produced</p>
+    <h2>Documents, code and tests, reviewed by people</h2>
+    <div class="grid g4" style="margin-bottom:22px">
+      <div class="stat"><div class="v">v4</div><div class="l">PRD on one Confluence page, a person’s edit kept</div></div>
+      <div class="stat"><div class="v">3</div><div class="l">pull requests: feature, QC tests, archived PRD</div></div>
+      <div class="stat"><div class="v">512</div><div class="l">unit tests passing in the feature PR</div></div>
+      <div class="stat"><div class="v"><span class="bad">32</span> → <span class="ok">33</span>/33</div><div class="l">Playwright cases, round 1 → round 2</div></div>
+    </div>
+    <table>
+      <tbody>
+        <tr><td style="width:150px"><b>Confluence</b></td><td>LD-6 · Team calendar (ticket page) with PRD, Implementation plan, Test plan (v1 → v2), Test run 1 and Test run 2</td></tr>
+        <tr><td><b>Git</b></td><td><code>leavedesk-app</code> PR #6 · <code>leavedesk-qa</code> PR #10 · <code>leavedesk-knowledge</code> PR #6</td></tr>
+        <tr><td><b>Jira</b></td><td>Short comments with links, each in the thread it answers; no files attached</td></tr>
+      </tbody>
+    </table>
+    <div class="foot"><span>LD-6 case study</span><span>8</span></div>
+  </section>
+
+  <!-- 9 · LikeC4 -->
+  <section class="slide">
+    <p class="kicker">Now, the diagrams</p>
+    <h2>Let’s open LikeC4</h2>
+    <p class="url" style="margin-bottom:26px">http://localhost:4173</p>
+    <div class="views">
+      <div class="view"><div class="num">1</div><code>setup</code><p>The project as it is configured.</p></div>
+      <div class="view"><div class="num">2</div><code>cases</code><p>Open a case, press Start, follow each step and its “Why this step”.</p></div>
+      <div class="view"><div class="num">3</div><code>heart</code><p>Rules and AGENTFLOW.md drive seven mechanisms; the platform guarantees them. Click one.</p></div>
+      <div class="view"><div class="num">4</div><code>turnAnatomy</code><p>One turn of case 6, from four comments to four answers.</p></div>
+    </div>
+    <div class="foot"><span>docs/case-studies/ld-6-team-calendar</span><span>9</span></div>
+  </section>
+
+</div></div>
+<div class="nav" id="nav"></div>
+<script>
+  const slides = [...document.querySelectorAll(".slide")];
+  const stage = document.getElementById("stage");
+  const nav = document.getElementById("nav");
+  let current = 0;
+  function fromHash() {
+    const n = Number.parseInt(globalThis.location.hash.slice(1), 10);
+    return Number.isNaN(n) ? 0 : Math.min(Math.max(n - 1, 0), slides.length - 1);
+  }
+  function show(i) {
+    current = Math.min(Math.max(i, 0), slides.length - 1);
+    slides.forEach((s, k) => s.classList.toggle("active", k === current));
+    nav.textContent = `${current + 1} / ${slides.length} · ← → or click`;
+    history.replaceState(null, "", `#${current + 1}`);
+  }
+  function fit() {
+    const scale = Math.min(globalThis.innerWidth / 1320, globalThis.innerHeight / 760);
+    stage.style.transform = `scale(${scale})`;
+  }
+  document.addEventListener("keydown", (e) => {
+    if (["ArrowRight", "PageDown", " ", "Enter"].includes(e.key)) { show(current + 1); }
+    if (["ArrowLeft", "PageUp", "Backspace"].includes(e.key)) { show(current - 1); }
+    if (e.key === "Home") { show(0); }
+    if (e.key === "End") { show(slides.length - 1); }
+    if (e.key === "f") { document.documentElement.requestFullscreen?.(); }
+  });
+  document.addEventListener("click", (e) => {
+    show(e.clientX > globalThis.innerWidth / 3 ? current + 1 : current - 1);
+  });
+  globalThis.addEventListener("hashchange", () => show(fromHash()));
+  globalThis.addEventListener("resize", fit);
+  fit();
+  show(fromHash());
+</script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 import {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "@repo/api/src/types/orchestrator";
@@ -546,6 +547,30 @@ postActions:
     expect(result.input).not.toBeNull();
   });
 
+  it("warns when the instructions are over 8000 characters, without blocking the save", () => {
+    const result = parseWorkflowYaml(yamlWithInstructions(8001), CATALOG);
+
+    expect(result.problems).toEqual([
+      expect.objectContaining({
+        severity: YamlProblemSeverity.Warning,
+        message: expect.stringContaining("8001 characters"),
+      }),
+    ]);
+    expect(result.input?.agent.instructions).toHaveLength(8001);
+  });
+
+  it("does not warn at 8000 characters and rejects over 16000", () => {
+    expect(
+      parseWorkflowYaml(yamlWithInstructions(8000), CATALOG).problems
+    ).toEqual([]);
+
+    const tooLong = parseWorkflowYaml(yamlWithInstructions(16_001), CATALOG);
+    expect(tooLong.problems).toEqual([
+      expect.objectContaining({ severity: YamlProblemSeverity.Error }),
+    ]);
+    expect(tooLong.input).toBeNull();
+  });
+
   it("validates the workflow's own process like a project's", () => {
     const valid = `${VALID_YAML.replace(
       "  mode: plan\n",
@@ -586,7 +611,12 @@ describe("workflowToYaml", () => {
       concurrency: OrchestratorConcurrency.Queue,
       debounceSeconds: 5,
       turnTimeoutMinutes: 3,
+      connections: {},
       cancelOn: [OrchestratorTicketChange.StatusChanged],
+      mentionOnly: true,
+      caseLookup: false,
+      caseHandoff: true,
+      approvals: OrchestratorApprovals.Required,
     };
     const custom = makeWorkflow({
       agent: {
@@ -631,6 +661,19 @@ describe("workflowToYaml", () => {
     );
 
     expect(problemsOf(text).length).toBeGreaterThan(0);
+  });
+
+  it("reports connections outside an orchestrated workflow", () => {
+    const text = VALID_YAML.replace(
+      "  mode: plan\n",
+      "  mode: plan_and_execute\n  orchestrator:\n    connections:\n      source: [comment]\n"
+    );
+
+    expect(
+      problemsOf(text).some((problem) =>
+        problem.message.includes("only an orchestrated workflow")
+      )
+    ).toBe(true);
   });
 
   it("reads the status and labeled trigger options", () => {
@@ -875,3 +918,10 @@ function withAgentLines(lines: string): string {
 
 /** The `actions:` list to the end of VALID_YAML. */
 const ACTIONS_LIST_RE = /actions:\n[\s\S]*$/;
+
+function yamlWithInstructions(length: number): string {
+  return VALID_YAML.replace(
+    "  mode: plan\n",
+    `  mode: plan\n  instructions: ${JSON.stringify("x".repeat(length))}\n`
+  );
+}

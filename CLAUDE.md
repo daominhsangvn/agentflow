@@ -48,7 +48,7 @@ Schema: `packages/database/prisma/schema.prisma`. Client: `packages/database/gen
 **Never fire-and-forget promises.** Always wrap background work with `waitUntil()` from `@/lib/wait-until` (apps/api). It keeps the old `@vercel/functions` call shape and guarantees a rejection is logged instead of crashing the long-lived Node process. A `.catch()` without `waitUntil()` is a bug.
 
 ### Self-hosted infrastructure (IMPORTANT)
-No AWS or Vercel services. Object storage goes through `@repo/storage` (S3 protocol against RustFS from `docker-compose.yml`; configure with `S3_*` env vars, never construct an `S3Client` directly). Secrets at rest use `@/lib/secret-encryption` (AES-256-GCM, `ENCRYPTION_KEY`). Loops run only on desktop compute targets; there is no cloud runner. The Claude Code plugins live in `agent-plugins/` and are loaded with `claude --plugin-dir` — never via `/plugin install`.
+No AWS or Vercel services. Object storage goes through `@repo/storage` (S3 protocol against RustFS from `docker-compose.yml`; configure with `S3_*` env vars, never construct an `S3Client` directly). Secrets at rest use `@/lib/secret-encryption` (AES-256-GCM, `ENCRYPTION_KEY`). Loops run only on desktop compute targets; there is no cloud runner. The Claude Code plugins live in `agent-plugins/` and are loaded with `claude --plugin-dir` — never via `/plugin install`. Production runs `deploy/compose/docker-compose.prod.yml` (images built on the server; `NEXT_PUBLIC_*` are build args of the app and api images).
 
 ### Type Definitions (IMPORTANT)
 **Never duplicate types.** One canonical location, imported everywhere:
@@ -72,7 +72,7 @@ Discover undocumented patterns during PRs → add to relevant CLAUDE.md in same 
 No sycophantic language. Brief, factual — state what changed.
 
 ## Key Files
-`turbo.json` (tasks) · `biome.jsonc` (lint config) · `packages/*/keys.ts` (env validation)
+`turbo.json` (tasks) · `biome.jsonc` (lint config) · `packages/*/keys.ts` (env validation) · `docs/architecture/` (LikeC4 model of the orchestrator components and flows; `npx likec4 validate docs/architecture` after changing it)
 
 ## Code Style
 - Use enum/const references, not hardcoded strings — `DocumentType.ImplementationPlan` not `"IMPLEMENTATION_PLAN"`, `EntityType.Document` not `"DOCUMENT"`. This applies everywhere: type annotations, runtime comparisons, test fixtures, and object literals. Import from `packages/api/src/types/` or `@repo/database` for Prisma enums. For type annotations use `import type` with the const object's type alias (e.g., `sourceType?: EntityType`).
@@ -124,6 +124,8 @@ AgentFlow: human-governed, AI-centric software delivery platform. AI produces ar
 ### React Query & Mutations
 - **[convention]**: Do not add `.catch()` error toasts when calling `mutateAsync`. The global `QueryClient` in `apps/app/lib/query-client.tsx` has a default `mutations.onError` handler that toasts the error message. Only catch rejections to suppress unhandled promise warnings or reset local state.
 - **[convention]**: Avoid reflexive on-mount data fetching. Adding a new `useQuery` hook to a component is cheap individually, but editor pages and project pages already mount many components at once and can balloon to 10-20 parallel requests on first paint. Before adding a query that runs on mount, ask: is this data needed for the initial render, or only when the user opens a panel/tab/menu/dialog? If the latter, gate it (`enabled: isOpen`, fetch in an event handler, or lazy-load the component). Prefer deferring fetches until a user action makes the data necessary; reserve on-mount fetches for data the page cannot render without.
+- **[convention]**: New list/stat API contracts use ISO strings with date key names outside the revival allowlist (`packages/app/shared/api/date-revival-keys.ts`), or add an `ENDPOINT_STRING_ONLY_DATE_KEYS` entry.
+- **[pattern]**: Case/agent time and token numbers go through `apps/api/lib/usage/`: a session's numbers win over its loop's, never add both.
 
 ### Code Organization
 - **[pattern]**: Check `@repo/github` (`packages/github/index.ts`) before implementing new GitHub API functions.

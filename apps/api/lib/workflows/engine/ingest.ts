@@ -9,6 +9,7 @@ import {
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
+import { WorkflowEventResult } from "@repo/api/src/types/workflow-event";
 import { Prisma, withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
 import { v7 as uuidv7 } from "uuid";
@@ -19,13 +20,24 @@ import { itemScopeKey } from "@/lib/integrations/project-connections";
 import { findTriggerDefinition } from "@/lib/integrations/registry";
 import type { InboundEvent } from "@/lib/integrations/types";
 import { jsonValueSchema } from "@/lib/json-schema";
-import { routeToOrchestrator } from "@/lib/orchestrator/inbound";
+import {
+  type OrchestratorRouteResult,
+  routeToOrchestrator,
+} from "@/lib/orchestrator/inbound";
 import { waitUntil } from "@/lib/wait-until";
 import { enqueueRunEvents, hasEnabledPreActions } from "./actions";
 import { advanceRun } from "./advance";
 import { findRepliedRuns, type RepliedRun } from "./answer-replies";
 import { routeReviewSignals } from "./review-signals";
 import { buildRunSource, toJsonObject } from "./run-data";
+import {
+  type EventFacts,
+  filteredEventDrafts,
+  orchestratedEventDrafts,
+  recordWorkflowEvents,
+  runEventDraft,
+  type WorkflowEventDraft,
+} from "./workflow-events";
 
 /**
  * Inbound events -> workflow runs (docs/workflows.md "Ingest"). Webhook,
@@ -48,6 +60,8 @@ import { buildRunSource, toJsonObject } from "./run-data";
  *    is created.
  * 4. Created and resumed runs are advanced in the background. Ingest only
  *    reads from the source system: every write there is a pre or post action.
+ * 5. Each workflow's outcome per event is recorded in `workflow_events`
+ *    (workflow-events.ts).
  */
 
 export const DELIVERY_PAYLOAD_MAX_CHARS = 32_768;
@@ -134,6 +148,11 @@ export async function ingestEvents(
   const { decisions } = decided;
   const summary = summarizeDecisions(input, decided);
   await finishDelivery(input, deliveryRowId, summary);
+  await recordWorkflowEvents({
+    organizationId: input.connection.record.organizationId,
+    deliveryRowId,
+    drafts: decided.drafts,
+  });
   for (const decision of decisions) {
     if (startsWork(decision.decision)) {
       waitUntil(advanceRun(decision.runId));
@@ -221,6 +240,7 @@ async function insertDelivery(
 /** The decisions, and how many events no project connection takes. */
 type DecidedRuns = {
   decisions: IngestRunDecision[];
+  drafts: WorkflowEventDraft[];
   unrouted: number;
   /** New messages handed to project orchestrators. */
   orchestrated: number;
@@ -231,97 +251,166 @@ async function decideRuns(
   deliveryRowId: string
 ): Promise<DecidedRuns> {
   if (input.events.length === 0) {
-    return { decisions: [], unrouted: 0, orchestrated: 0 };
+    return { decisions: [], drafts: [], unrouted: 0, orchestrated: 0 };
   }
   const triggers = await loadTriggers(input);
   const routes = await routeEvents(input, triggers);
-  const decisions: IngestRunDecision[] = [];
-  let unrouted = 0;
-  let orchestrated = 0;
+  const decided: DecidedRuns = {
+    decisions: [],
+    drafts: [],
+    unrouted: 0,
+    orchestrated: 0,
+  };
   for (const [index, event] of input.events.entries()) {
     const route = routes[index];
     if (route === undefined) {
-      unrouted += 1;
+      decided.unrouted += 1;
       continue;
     }
-    const replied =
-      route && !input.manualTriggerId
-        ? await findRepliedRuns({
-            connection: input.connection,
-            event,
-            projectConnectionId: route,
-            sourceKey: eventSourceKey(event),
-          })
-        : [];
-    for (const run of replied) {
-      decisions.push(await decideReply(input, event, run));
-    }
-    const signalled =
-      route && !input.manualTriggerId
-        ? await routeReviewSignals({
-            connection: input.connection,
-            event,
-            projectConnectionId: route,
-            sourceKey: eventSourceKey(event),
-          })
-        : [];
-    for (const run of signalled) {
-      decisions.push({
-        triggerId: null,
-        workflowId: run.workflowId,
-        decision: IngestDecision.Signaled,
-        runId: run.runId,
-      });
-    }
-    // A workflow whose run took the signal does not see it as a trigger.
-    const matching = triggers.filter(
-      (trigger) =>
-        trigger.type === event.triggerType &&
-        trigger.projectConnectionId === route &&
-        !signalled.some((run) => run.workflowId === trigger.workflowId) &&
-        !isOrchestratedTrigger(trigger) &&
-        triggerMatches(input, trigger, event)
-    );
-    for (const trigger of matching) {
-      decisions.push(await decideRun(input, event, { trigger, deliveryRowId }));
-    }
-    if (route) {
-      orchestrated += await routeOrchestrated(input, event, route, triggers);
-    }
+    const one = await decideEvent(input, event, route, {
+      triggers,
+      deliveryRowId,
+    });
+    decided.decisions.push(...one.decisions);
+    decided.drafts.push(...one.drafts);
+    decided.orchestrated += one.orchestrated;
   }
-  return { decisions, unrouted, orchestrated };
+  return decided;
+}
+
+/** One routed event: replies, review signals, run triggers, orchestrated workflows. */
+async function decideEvent(
+  input: IngestEventsInput,
+  event: InboundEvent,
+  route: string | null,
+  ctx: { triggers: TriggerRow[]; deliveryRowId: string }
+): Promise<{
+  decisions: IngestRunDecision[];
+  drafts: WorkflowEventDraft[];
+  orchestrated: number;
+}> {
+  const facts: EventFacts = {
+    triggerType: event.triggerType,
+    sourceKey: eventSourceKey(event),
+    occurredAt: event.occurredAt ?? null,
+  };
+  const decisions: IngestRunDecision[] = [];
+  const drafts: WorkflowEventDraft[] = [];
+  const replied =
+    route && !input.manualTriggerId
+      ? await findRepliedRuns({
+          connection: input.connection,
+          event,
+          projectConnectionId: route,
+          sourceKey: facts.sourceKey,
+        })
+      : [];
+  for (const run of replied) {
+    const decision = await decideReply(input, event, run);
+    decisions.push(decision);
+    drafts.push(runEventDraft(facts, decision, replyResult(decision.decision)));
+  }
+  const signalled =
+    route && !input.manualTriggerId
+      ? await routeReviewSignals({
+          connection: input.connection,
+          event,
+          projectConnectionId: route,
+          sourceKey: facts.sourceKey,
+        })
+      : [];
+  for (const run of signalled) {
+    const decision: IngestRunDecision = {
+      triggerId: null,
+      workflowId: run.workflowId,
+      decision: IngestDecision.Signaled,
+      runId: run.runId,
+    };
+    decisions.push(decision);
+    drafts.push(runEventDraft(facts, decision, WorkflowEventResult.Signaled));
+  }
+  const candidates = ctx.triggers.filter(
+    (trigger) =>
+      trigger.type === event.triggerType &&
+      trigger.projectConnectionId === route
+  );
+  const matched = candidates.filter((trigger) =>
+    triggerMatches(input, trigger, event)
+  );
+  // A workflow whose run took the signal does not see it as a trigger.
+  const runTriggers = matched.filter(
+    (trigger) =>
+      !(
+        signalled.some((run) => run.workflowId === trigger.workflowId) ||
+        isOrchestratedTrigger(trigger)
+      )
+  );
+  for (const trigger of runTriggers) {
+    const decision = await decideRun(input, event, {
+      trigger,
+      deliveryRowId: ctx.deliveryRowId,
+    });
+    decisions.push(decision);
+    drafts.push(
+      runEventDraft(facts, decision, DECISION_RESULTS[decision.decision])
+    );
+  }
+  let orchestrated = 0;
+  if (route) {
+    const matchedOrchestrated = matched.filter(isOrchestratedTrigger);
+    const routed = await routeOrchestrated(
+      input,
+      event,
+      route,
+      matchedOrchestrated
+    );
+    orchestrated = routed.created;
+    drafts.push(
+      ...orchestratedEventDrafts(facts, routed.results, matchedOrchestrated)
+    );
+  }
+  drafts.push(
+    ...filteredEventDrafts(facts, {
+      candidates,
+      matchedIds: new Set(matched.map((trigger) => trigger.id)),
+      handledWorkflowIds: new Set(drafts.map((draft) => draft.workflowId)),
+    })
+  );
+  return { decisions, drafts, orchestrated };
+}
+
+/** A reply that resumed its run is `replied`; the other outcomes keep their name. */
+function replyResult(decision: IngestDecision): WorkflowEventResult {
+  if (decision === IngestDecision.Resumed) {
+    return WorkflowEventResult.Replied;
+  }
+  return DECISION_RESULTS[decision];
 }
 
 /**
- * Hands the event to each orchestrated workflow whose trigger matches it, or
- * whose orchestrator posted the message it replies to (docs/orchestrator.md).
- * Returns the number of new messages recorded across those workflows.
+ * Hands the event to each given orchestrated workflow trigger, or to the
+ * orchestrator whose message it replies to (docs/orchestrator.md). Returns the
+ * number of new messages recorded and the per-workflow results.
  */
 async function routeOrchestrated(
   input: IngestEventsInput,
   event: InboundEvent,
   route: string,
-  triggers: TriggerRow[]
-): Promise<number> {
-  const workflows = triggers
-    .filter(
-      (trigger) =>
-        trigger.type === event.triggerType &&
-        trigger.projectConnectionId === route &&
-        isOrchestratedTrigger(trigger) &&
-        triggerMatches(input, trigger, event)
-    )
-    .map((trigger) => ({
-      workflowId: trigger.workflowId,
-      projectId: trigger.projectId,
-    }));
-  const routed = await routeToOrchestrator({
+  matched: TriggerRow[]
+): Promise<{ created: number; results: OrchestratorRouteResult[] }> {
+  const results = await routeToOrchestrator({
     connection: input.connection,
     event,
     projectConnectionId: route,
-    workflows,
+    workflows: matched.map((trigger) => ({
+      workflowId: trigger.workflowId,
+      projectId: trigger.projectId,
+    })),
   });
-  return routed.filter((result) => result.created).length;
+  return {
+    created: results.filter((result) => result.created).length,
+    results,
+  };
 }
 
 async function loadTriggers(input: IngestEventsInput): Promise<TriggerRow[]> {
@@ -843,3 +932,11 @@ function isOrchestratedTrigger(trigger: TriggerRow): boolean {
   return orchestratedAgentSchema.safeParse(trigger.workflow.agentConfig)
     .success;
 }
+
+const DECISION_RESULTS: Record<IngestDecision, WorkflowEventResult> = {
+  [IngestDecision.Created]: WorkflowEventResult.Created,
+  [IngestDecision.Resumed]: WorkflowEventResult.Resumed,
+  [IngestDecision.Duplicate]: WorkflowEventResult.Duplicate,
+  [IngestDecision.Active]: WorkflowEventResult.Active,
+  [IngestDecision.Signaled]: WorkflowEventResult.Signaled,
+};

@@ -159,7 +159,7 @@ for ws in $WORKSPACES; do
     if [ "$ws" = "apps/desktop" ]; then
       run_gate "test desktop (full)" "$RUN_DIR/logs/$LABEL-test-desktop.log" pnpm desktop:test
     else
-      run_gate "test $name (full)" "$RUN_DIR/logs/$LABEL-test-$(basename "$ws").log" \
+      run_gate "test $name (full)" "$RUN_DIR/logs/$LABEL-test-$(echo "$ws" | tr / -).log" \
         pnpm turbo test --output-logs=errors-only "--filter=$name"
     fi
     continue

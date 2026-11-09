@@ -1,0 +1,50 @@
+---
+title: "Confluence"
+description: "Let AgentFlow read, create and review Confluence pages and comments in the spaces a project works in."
+---
+
+## What it does
+
+Confluence holds the documents Agents write and people review: PRDs, plans, test reports. Nothing starts a run from Confluence (it has no triggers or inbound side); it is used by Agents, actions and the Orchestrator Agent.
+
+## Connection settings
+
+| Key | Notes |
+|---|---|
+| `config.siteUrl` | The Cloud site, without `/wiki` |
+| `config.email` | The bot account |
+| secret `apiToken` | API token, with or without scopes (`read:confluence-user`, `read:page:confluence`, `write:page:confluence`, `read:comment:confluence`, `write:comment:confluence`, `read:space:confluence`, `search:confluence`). Attachment upload also needs `read:attachment:confluence` and `write:attachment:confluence` |
+
+A project connection can use another account.
+
+## Project settings
+
+| Key | Notes |
+|---|---|
+| `spaceKeys` | Required. Every operation resolves the page's space and refuses anything outside these spaces |
+| `parentPageId` | Where new pages go when nobody names a parent. Empty: the top of the space |
+
+Without a project connection nothing is allowed.
+
+## Operations
+
+Operations are used as Agent tools, as workflow actions, and by the Orchestrator Agent.
+
+| Operation | Kind | What it does |
+|---|---|---|
+| `confluence.get_page` | read | A page by id or link: title, space, version, parent, URL and body as Markdown |
+| `confluence.find_pages` | read | Pages whose title contains given words, in the allowed spaces |
+| `confluence.list_comments` | read | Footer and inline comments of a page with replies; `open` by default or `all` |
+| `confluence.create_page` | write | A page in an allowed space, under a parent |
+| `confluence.update_page` | write | A new body from the version you read; refused if the page changed since, so a reviewer's edit is never overwritten |
+| `confluence.comment` | write | A comment or a reply on a page |
+| `confluence.resolve_comment` | write | Resolves an inline comment |
+
+Reads are available to any Agent granted `wiki: read`; writes are granted by name, for example `wiki: [confluence.update_page, confluence.comment]`. See [Connection grants](/docs/guides/setup/connection-grants).
+
+The Orchestrator Agent publishes and reads pages with `page_publish` and `page_get` when `agent.orchestrator.connections` grants the Confluence key `read` or `publish`. See [Orchestrator tools](/docs/reference/orchestrator-tools) and [Files and pages](/docs/guides/recipes/files-and-pages).
+
+## Limits
+
+- Bodies over 60 000 characters are cut when read.
+- At most 50 comment threads are listed per page.

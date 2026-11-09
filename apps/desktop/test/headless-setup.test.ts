@@ -9,6 +9,8 @@ import {
   applyRunnerConfig,
   askRunnerMode,
   askRunnerSettings,
+  askStartWithWindows,
+  askYesNo,
   defaultRunnerName,
   defaultWorkspaceDir,
   needsSetup,
@@ -16,6 +18,7 @@ import {
   renderRunnerConfig,
   runnerConfigFile,
   type SetupAnswers,
+  type SetupContext,
   writeRunnerConfigFile,
 } from "../src/headless/headless-setup.js";
 
@@ -290,4 +293,39 @@ test("askRunnerSettings in personal mode asks for the project instead of a works
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }
+});
+
+function yesNoContext(answers: string[]) {
+  const { ask, questions } = scriptedAsk(answers);
+  const context: SetupContext = {
+    ask,
+    say: () => undefined,
+    current: {},
+    username: "dev",
+    homeDir: HOME,
+  };
+  return { context, questions };
+}
+
+test("askStartWithWindows defaults to no when no service is installed", async () => {
+  const { context, questions } = yesNoContext([""]);
+  assert.equal(await askStartWithWindows(context, false), false);
+  assert.equal(questions[0]?.shownDefault, "no");
+});
+
+test("askStartWithWindows defaults to yes when a service is installed", async () => {
+  const { context, questions } = yesNoContext([""]);
+  assert.equal(await askStartWithWindows(context, true), true);
+  assert.equal(questions[0]?.shownDefault, "yes");
+});
+
+test("askStartWithWindows asks again after an invalid answer", async () => {
+  const { context, questions } = yesNoContext(["maybe", "y"]);
+  assert.equal(await askStartWithWindows(context, false), true);
+  assert.equal(questions.length, 2);
+});
+
+test("askYesNo returns false for n", async () => {
+  const { context } = yesNoContext(["n"]);
+  assert.equal(await askYesNo(context, "Sure?", true), false);
 });

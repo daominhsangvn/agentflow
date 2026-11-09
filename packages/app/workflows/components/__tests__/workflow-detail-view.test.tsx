@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   deleteMutateAsync: vi.fn(),
   startMutate: vi.fn(),
   navigate: vi.fn(),
+  search: "",
 }));
 
 vi.mock("../../hooks/use-workflows", () => ({
@@ -51,8 +52,16 @@ vi.mock("@repo/app/orchestrator/components/orchestrator-case-list", () => ({
   OrchestratorCaseList: () => <div data-testid="case-list" />,
 }));
 
+vi.mock("@repo/app/orchestrator/components/workflow-agents-tab", () => ({
+  WorkflowAgentsTab: () => <div data-testid="agents-tab" />,
+}));
+
 vi.mock("../workflow-runs-table", () => ({
   WorkflowRunHistory: () => <div data-testid="run-history" />,
+}));
+
+vi.mock("../workflow-events-table", () => ({
+  WorkflowEventHistory: () => <div data-testid="event-history" />,
 }));
 
 vi.mock("@repo/app/integrations/hooks/use-integrations", () => ({
@@ -68,7 +77,7 @@ vi.mock("@repo/navigation/use-path", () => ({
 }));
 
 vi.mock("@repo/navigation/use-search-params-value", () => ({
-  useSearchParamsValue: () => new URLSearchParams(),
+  useSearchParamsValue: () => new URLSearchParams(mocks.search),
 }));
 
 vi.mock("@repo/navigation/use-navigation", () => ({
@@ -86,14 +95,75 @@ vi.mock("@repo/navigation/link", () => ({
   ),
 }));
 
+const AGENTS_TAB = /Agents/;
+
+const ORCHESTRATED_COUNTS = {
+  total: 3,
+  open: 3,
+  closed: 0,
+  lastActivityAt: null,
+  needsPerson: 0,
+};
+
 const COMPUTE_TARGETS = { options: [], isLoading: false, error: null };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.search = "";
   mocks.workflow = makeWorkflow();
 });
 
 describe("WorkflowDetailView", () => {
+  it("mounts the Agents tab only when it is the active tab", () => {
+    const base = makeWorkflow();
+    mocks.workflow = {
+      ...base,
+      agent: { ...base.agent, mode: WorkflowAgentMode.Orchestrated },
+    };
+    mocks.search = "tab=agents";
+    render(
+      <WorkflowDetailView
+        computeTargets={COMPUTE_TARGETS}
+        isAdmin
+        workflowId={WORKFLOW_ID}
+      />
+    );
+
+    expect(screen.getByTestId("agents-tab")).toBeInTheDocument();
+  });
+
+  it("shows the Agents tab with the needs-person badge for an orchestrated workflow only", () => {
+    const base = makeWorkflow();
+    mocks.workflow = {
+      ...base,
+      agent: { ...base.agent, mode: WorkflowAgentMode.Orchestrated },
+      caseCounts: { ...ORCHESTRATED_COUNTS, needsPerson: 2 },
+    };
+    const { unmount } = render(
+      <WorkflowDetailView
+        computeTargets={COMPUTE_TARGETS}
+        isAdmin
+        workflowId={WORKFLOW_ID}
+      />
+    );
+    expect(screen.getByRole("tab", { name: AGENTS_TAB })).toBeInTheDocument();
+    expect(screen.getByLabelText("2 cases need a person")).toBeInTheDocument();
+    expect(screen.queryByTestId("agents-tab")).not.toBeInTheDocument();
+    unmount();
+
+    mocks.workflow = base;
+    render(
+      <WorkflowDetailView
+        computeTargets={COMPUTE_TARGETS}
+        isAdmin
+        workflowId={WORKFLOW_ID}
+      />
+    );
+    expect(
+      screen.queryByRole("tab", { name: AGENTS_TAB })
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a Cases tab and no Runs tab for an orchestrated workflow", () => {
     const base = makeWorkflow();
     mocks.workflow = {
@@ -110,6 +180,70 @@ describe("WorkflowDetailView", () => {
 
     expect(screen.getByRole("tab", { name: "Cases" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Runs" })).not.toBeInTheDocument();
+  });
+
+  it("offers an Events tab in both modes without mounting it until selected", () => {
+    const base = makeWorkflow();
+    mocks.workflow = {
+      ...base,
+      agent: { ...base.agent, mode: WorkflowAgentMode.Orchestrated },
+    };
+    const { unmount } = render(
+      <WorkflowDetailView
+        computeTargets={COMPUTE_TARGETS}
+        isAdmin
+        workflowId={WORKFLOW_ID}
+      />
+    );
+    expect(screen.getByRole("tab", { name: "Events" })).toBeInTheDocument();
+    unmount();
+
+    mocks.workflow = base;
+    render(
+      <WorkflowDetailView
+        computeTargets={COMPUTE_TARGETS}
+        isAdmin
+        workflowId={WORKFLOW_ID}
+      />
+    );
+    expect(screen.queryByTestId("event-history")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Events" })).toBeInTheDocument();
+  });
+
+  it("shows case counts for an orchestrated workflow and runs otherwise", () => {
+    const base = makeWorkflow();
+    mocks.workflow = {
+      ...base,
+      agent: { ...base.agent, mode: WorkflowAgentMode.Orchestrated },
+      caseCounts: {
+        total: 2,
+        open: 1,
+        closed: 1,
+        lastActivityAt: null,
+        needsPerson: 0,
+      },
+    };
+    const { unmount } = render(
+      <WorkflowDetailView
+        computeTargets={COMPUTE_TARGETS}
+        isAdmin
+        workflowId={WORKFLOW_ID}
+      />
+    );
+    expect(screen.getByText("2 cases (1 open)")).toBeInTheDocument();
+    unmount();
+
+    mocks.workflow = base;
+    render(
+      <WorkflowDetailView
+        computeTargets={COMPUTE_TARGETS}
+        isAdmin
+        workflowId={WORKFLOW_ID}
+      />
+    );
+    expect(
+      screen.getByText("4 runs (1 active)", { exact: false })
+    ).toBeInTheDocument();
   });
 
   it("shows the workflow summary and its configuration", () => {

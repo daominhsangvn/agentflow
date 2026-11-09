@@ -1,0 +1,28 @@
+---
+title: "Bitbucket"
+description: "Add Bitbucket Cloud repositories to a project and open pull requests in them."
+---
+
+## What it does
+
+Bitbucket provides **repositories** and the `bitbucket.create_pull_request` action. It has no triggers and no inbound side. Bitbucket Cloud only; Data Center has another API.
+
+## Connection settings
+
+| Key | Notes |
+|---|---|
+| `config.workspace` | Required for access tokens; optional for an Atlassian API token (then every workspace of the account is searched) |
+| secret `token` | An Atlassian API token of the bot with the Bitbucket scopes `read:user`, `read:workspace`, `read:repository`, `write:repository`, `read:pullrequest`, `write:pullrequest` (each `...:bitbucket`), or a workspace, project or repository access token (Repositories and Pull requests: Write). App passwords no longer exist |
+
+## Repositories
+
+Project → **Connections & Repos** → add a repository → choose the Bitbucket connection, search, add. A project has at most 20 repositories, and Agents clone and push with credentials AgentFlow gives each run; the repository stores no token.
+
+## Pull requests
+
+`bitbucket.create_pull_request` opens one pull request in each repository of the run that the Agents pushed a branch to, from that branch into the configured target branch (else the branch the run started from, else the default branch). Title and description are templates. It reuses the open pull request of the same source and destination branch. An orchestrated workflow uses the `pull_request_open` tool instead. See [Triggers and actions](/docs/guides/setup/triggers-and-actions).
+
+## Limits
+
+- Merging a pull request in Bitbucket is not reported back to AgentFlow.
+- A `*.create_pull_request` action without `connection` works on every connection that holds a pushed repository.

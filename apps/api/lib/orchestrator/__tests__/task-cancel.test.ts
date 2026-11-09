@@ -1,5 +1,6 @@
 import {
   OrchestratorMessageKind,
+  OrchestratorMessageOrigin,
   OrchestratorTaskStatus,
   OrchestratorTicketChange,
 } from "@repo/api/src/types/orchestrator";
@@ -24,6 +25,7 @@ const IDS = {
 const mocks = vi.hoisted(() => ({
   tasks: [] as Row[],
   messageKinds: [] as string[],
+  messageOrigin: null as string | null,
   cancelOn: [] as string[],
   waits: [] as Array<{ conversationId: string }>,
   cancelLoop: vi.fn(),
@@ -36,10 +38,13 @@ vi.mock("@repo/database", () => {
       findFirst: () => Promise.resolve({ workflowId: "wf-1" }),
     },
     orchestratorMessage: {
-      count: (args: { where: { kind: { in: string[] } } }) =>
+      count: (args: { where: { origin: string; kind: { in: string[] } } }) =>
         Promise.resolve(
-          mocks.messageKinds.filter((kind) => args.where.kind.in.includes(kind))
-            .length
+          args.where.origin === mocks.messageOrigin
+            ? mocks.messageKinds.filter((kind) =>
+                args.where.kind.in.includes(kind)
+              ).length
+            : 0
         ),
     },
     orchestratorTask: {
@@ -110,6 +115,7 @@ function seedTask(overrides: Row = {}): Row {
 beforeEach(() => {
   mocks.tasks = [];
   mocks.messageKinds = [OrchestratorMessageKind.StatusChanged];
+  mocks.messageOrigin = OrchestratorMessageOrigin.External;
   mocks.cancelOn = [
     OrchestratorTicketChange.StatusChanged,
     OrchestratorTicketChange.LabelRemoved,
@@ -120,6 +126,17 @@ beforeEach(() => {
 });
 
 describe("cancelTask", () => {
+  it("refuses when the only status change is the orchestrator's own", async () => {
+    const task = seedTask();
+    mocks.messageOrigin = OrchestratorMessageOrigin.Internal;
+    const result = await cancelTask(input);
+    expect(result).toEqual({
+      ok: false,
+      error: cancelOnRefusal(mocks.cancelOn),
+    });
+    expect(task.status).toBe(OrchestratorTaskStatus.Running);
+  });
+
   it("refuses a turn that took only comments", async () => {
     const task = seedTask();
     mocks.messageKinds = [OrchestratorMessageKind.Message];
@@ -147,6 +164,12 @@ describe("cancelTask", () => {
     const result = await cancelTask(input);
     expect(result).toEqual({ ok: false, error: cancelOnRefusal([]) });
     expect(!result.ok && result.error).toContain("allows nothing");
+  });
+
+  it("clears the task's open questions when it cancels", async () => {
+    const task = seedTask({ openQuestionCount: 2 });
+    await cancelTask(input);
+    expect(task.openQuestionCount).toBe(0);
   });
 
   it("stops a running task's loop and closes it", async () => {

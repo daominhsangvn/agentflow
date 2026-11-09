@@ -1,0 +1,31 @@
+---
+title: "Email"
+description: "Outgoing mail from the AgentFlow server over SMTP: invitations, password resets and the agentflow.email action."
+---
+
+## What it does
+
+Email is not a connection. The API sends mail itself over plain SMTP. It is used for:
+
+- invitations and password resets;
+- the `agentflow.email` workflow action, which mails run events such as "input needed".
+
+## Server settings
+
+Set these in `apps/api/.env.local`.
+
+| Variable | What it does |
+|---|---|
+| `SMTP_URL` | The SMTP relay, e.g. `smtp://localhost:1025`. Without it no mail is sent, and the `agentflow.email` action is skipped with the reason |
+| `EMAIL_FROM` | The sender. Default `AgentFlow <no-reply@localhost>` |
+
+In development, `docker compose up -d` starts Mailpit, which captures outgoing mail: SMTP on port 1025, web UI at `http://localhost:8025`. For production, point `SMTP_URL` at your own relay.
+
+## The `agentflow.email` action
+
+The action YAML, options and variables are in [Triggers and actions](/docs/guides/setup/triggers-and-actions); a worked example is in [Notifications](/docs/guides/operate/notifications).
+
+## Limits
+
+- Only SMTP is supported.
+- Mail is sent only when `SMTP_URL` is set.

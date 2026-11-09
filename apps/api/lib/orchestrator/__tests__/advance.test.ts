@@ -19,6 +19,7 @@ import {
   advanceConversation,
   advanceDueConversations,
 } from "@/lib/orchestrator/advance";
+import { turnSuperseded } from "@/lib/orchestrator/supersede";
 
 /**
  * A conversation's turns (docs/orchestrator.md): one at a time, started once
@@ -38,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   events: [] as Array<{ eventType: string; data: unknown }>,
   markExpired: vi.fn(),
   cancel: vi.fn(),
+  runnerIds: [] as string[],
 }));
 
 vi.mock("@repo/database", () => {
@@ -45,6 +47,9 @@ vi.mock("@repo/database", () => {
   withDb.tx = (fn: (db: unknown) => unknown) => fn(mocks.fake?.db);
   return { withDb };
 });
+vi.mock("@/app/projects/project-runner-selection", () => ({
+  loadProjectRunnerIds: () => Promise.resolve(mocks.runnerIds),
+}));
 vi.mock("@/lib/loops/loop-desktop", () => ({
   dispatchOrchestratorTurn: mocks.dispatch,
   dispatchOrchestratorTurnCancel: mocks.cancel,
@@ -89,6 +94,7 @@ beforeEach(async () => {
   fake = createOrchestratorDbFake();
   mocks.fake = fake;
   mocks.command = null;
+  mocks.runnerIds = [];
   mocks.events = [];
   mocks.dispatch.mockResolvedValue("cmd-1");
   fake.addWorkflow(WORKFLOW_ID, "Questions on tickets");
@@ -206,6 +212,14 @@ describe("advanceConversation", () => {
     });
   });
 
+  it("clears what the last turn asked when the next turn starts", async () => {
+    Object.assign(fake.conversations[0] ?? {}, { askedHuman: "Which policy?" });
+
+    await advanceConversation(conversationId, NOW);
+
+    expect(fake.conversations[0]?.askedHuman).toBeNull();
+  });
+
   it("waits while the thread is not quiet yet", async () => {
     await advanceConversation(
       conversationId,
@@ -305,6 +319,71 @@ describe("advanceConversation", () => {
     );
   });
 
+  it("a failed turn's retry keeps a refused-call audit message with that turn", async () => {
+    await advanceConversation(conversationId, NOW);
+    const turnId = fake.turns[0]?.id as string;
+    await fake.db.orchestratorMessage.create({
+      data: {
+        organizationId: ORG_ID,
+        conversationId,
+        origin: OrchestratorMessageOrigin.Internal,
+        kind: OrchestratorMessageKind.ToolRefused,
+        actor: null,
+        text: "task_run refused: x",
+        externalRef: null,
+        dedupKey: "refused:audit-retry",
+        turnId,
+      },
+    });
+    finish({
+      type: "result",
+      ok: false,
+      error: "Claude crashed",
+      retryable: true,
+      sessionId: null,
+    });
+
+    await advanceConversation(conversationId, LATER);
+
+    const audit = fake.messages.find(
+      (message) => message.kind === OrchestratorMessageKind.ToolRefused
+    );
+    expect(audit?.turnId).toBe(turnId);
+    expect(fake.messages[0]?.turnId).toBeNull();
+  });
+
+  it("a failed turn's retry keeps a document message with that turn", async () => {
+    await advanceConversation(conversationId, NOW);
+    const turnId = fake.turns[0]?.id as string;
+    await fake.db.orchestratorMessage.create({
+      data: {
+        organizationId: ORG_ID,
+        conversationId,
+        origin: OrchestratorMessageOrigin.Internal,
+        kind: OrchestratorMessageKind.Document,
+        actor: null,
+        text: "Published",
+        externalRef: null,
+        dedupKey: "document:retry",
+        turnId,
+      },
+    });
+    finish({
+      type: "result",
+      ok: false,
+      error: "Claude crashed",
+      retryable: true,
+      sessionId: null,
+    });
+
+    await advanceConversation(conversationId, LATER);
+
+    const document = fake.messages.find(
+      (message) => message.kind === OrchestratorMessageKind.Document
+    );
+    expect(document?.turnId).toBe(turnId);
+  });
+
   it("stops giving the messages again after three failed turns in a row", async () => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const at = new Date(NOW.getTime() + attempt * 10 * 60_000);
@@ -345,6 +424,27 @@ describe("advanceConversation", () => {
       error: expect.stringContaining("runner offline"),
     });
     expect(fake.messages[0]?.turnId).toBeNull();
+  });
+
+  it("fails the turn, without retry, when the orchestrator's Agent is not a project Agent", async () => {
+    mocks.runnerIds = ["0199a5f0-0000-7000-8000-0000000000c8"];
+
+    await advanceConversation(conversationId, NOW);
+
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(fake.turns[0]).toMatchObject({
+      status: OrchestratorTurnStatus.Failed,
+      error: expect.stringContaining("not one of the project's Agents"),
+    });
+    expect(fake.messages[0]?.turnId).toBe(fake.turns[0]?.id);
+  });
+
+  it("dispatches when the orchestrator's Agent is one of the project's Agents", async () => {
+    mocks.runnerIds = [RUNNER_ID];
+
+    await advanceConversation(conversationId, NOW);
+
+    expect(mocks.dispatch).toHaveBeenCalledTimes(1);
   });
 
   it("does not start turns while the project's orchestrator is disabled", async () => {
@@ -454,6 +554,49 @@ describe("concurrency", () => {
     });
   }
 
+  it("supersede: a message arriving mid-turn makes the turn's writes refused", async () => {
+    await startTurnThenWrite("supersede");
+
+    expect(
+      await turnSuperseded({
+        turnId: fake.turns[0]?.id as string,
+        organizationId: ORG_ID,
+        conversationId,
+      })
+    ).toBe(true);
+  });
+
+  it("queue: a message arriving mid-turn does not refuse the turn's writes", async () => {
+    await startTurnThenWrite("queue");
+
+    expect(
+      await turnSuperseded({
+        turnId: fake.turns[0]?.id as string,
+        organizationId: ORG_ID,
+        conversationId,
+      })
+    ).toBe(false);
+  });
+
+  it("supersede: writes are allowed while nothing newer waits", async () => {
+    await startTurnThenWrite("supersede");
+    const newer = fake.messages.find(
+      (message) => message.externalRef === "501"
+    );
+    await fake.db.orchestratorMessage.updateMany({
+      where: { id: newer?.id as string },
+      data: { turnId: fake.turns[0]?.id as string },
+    });
+
+    expect(
+      await turnSuperseded({
+        turnId: fake.turns[0]?.id as string,
+        organizationId: ORG_ID,
+        conversationId,
+      })
+    ).toBe(false);
+  });
+
   it("supersede: a newer message stops the running turn, once", async () => {
     await startTurnThenWrite("supersede");
 
@@ -494,6 +637,43 @@ describe("concurrency", () => {
     );
   });
 
+  it("supersede: a refused-call audit message stays with the stopped turn", async () => {
+    await startTurnThenWrite("supersede");
+    const turnId = fake.turns[0]?.id as string;
+    await fake.db.orchestratorMessage.create({
+      data: {
+        organizationId: ORG_ID,
+        conversationId,
+        origin: OrchestratorMessageOrigin.Internal,
+        kind: OrchestratorMessageKind.ToolRefused,
+        actor: null,
+        text: "task_run refused: x",
+        externalRef: null,
+        dedupKey: "refused:audit-1",
+        turnId,
+      },
+    });
+    await advanceConversation(conversationId, LATER);
+    finish({
+      type: "result",
+      ok: false,
+      error: "The turn was stopped for a newer message.",
+      retryable: false,
+      sessionId: "session-1",
+    });
+    mocks.dispatch.mockResolvedValue("cmd-2");
+
+    await advanceConversation(conversationId, LATER);
+
+    const audit = fake.messages.find(
+      (message) => message.kind === OrchestratorMessageKind.ToolRefused
+    );
+    expect(audit?.turnId).toBe(turnId);
+    const prompt = mocks.dispatch.mock.calls.at(-1)?.[0].request
+      .prompt as string;
+    expect(prompt).not.toContain("task_run refused");
+  });
+
   it("queue: the running turn finishes; the new message waits for the next", async () => {
     await startTurnThenWrite("queue");
 
@@ -501,6 +681,43 @@ describe("concurrency", () => {
 
     expect(mocks.cancel).not.toHaveBeenCalled();
     expect(fake.messages[1]?.turnId).toBeNull();
+  });
+
+  it("supersede: a document message stays with the stopped turn", async () => {
+    await startTurnThenWrite("supersede");
+    const turnId = fake.turns[0]?.id as string;
+    await fake.db.orchestratorMessage.create({
+      data: {
+        organizationId: ORG_ID,
+        conversationId,
+        origin: OrchestratorMessageOrigin.Internal,
+        kind: OrchestratorMessageKind.Document,
+        actor: null,
+        text: "Published a page",
+        externalRef: null,
+        dedupKey: "document:audit-1",
+        turnId,
+      },
+    });
+    await advanceConversation(conversationId, LATER);
+    finish({
+      type: "result",
+      ok: false,
+      error: "The turn was stopped for a newer message.",
+      retryable: false,
+      sessionId: "session-1",
+    });
+    mocks.dispatch.mockResolvedValue("cmd-2");
+
+    await advanceConversation(conversationId, LATER);
+
+    const document = fake.messages.find(
+      (message) => message.kind === OrchestratorMessageKind.Document
+    );
+    expect(document?.turnId).toBe(turnId);
+    const prompt = mocks.dispatch.mock.calls.at(-1)?.[0].request
+      .prompt as string;
+    expect(prompt).not.toContain("Published a page");
   });
 
   it("an admin's stop fails the turn with their name and does not retry its messages", async () => {

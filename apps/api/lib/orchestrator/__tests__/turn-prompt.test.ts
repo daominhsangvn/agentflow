@@ -1,9 +1,11 @@
 import {
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
+  OrchestratorMessageVia,
   OrchestratorTicketChange,
   OrchestratorToolName,
 } from "@repo/api/src/types/orchestrator";
+import { resolveOrchestratorGrants } from "@repo/api/src/types/orchestrator-grants";
 import {
   RunnerCapabilitiesSource,
   RunnerCommandMode,
@@ -16,6 +18,7 @@ const BASE = {
   workflowName: "Questions on tickets",
   workflowDescription: "",
   rules: "Ask the BA runner first.",
+  grants: resolveOrchestratorGrants({}),
   channel: {
     item: {
       provider: "jira",
@@ -64,9 +67,20 @@ const BASE = {
     OrchestratorTicketChange.StatusChanged,
     OrchestratorTicketChange.LabelRemoved,
   ],
+  sideConversations: {
+    mentionOnly: false,
+    caseLookup: false,
+    caseHandoff: false,
+  },
+  approvalsRequired: false,
 };
 
 describe("buildTurnPrompt", () => {
+  it("keeps rules longer than 8000 characters uncut", () => {
+    const rules = "r".repeat(9000);
+    expect(buildTurnPrompt({ ...BASE, rules })).toContain(rules);
+  });
+
   it("carries the rules, the thread, the case, the runners and the messages", () => {
     const prompt = buildTurnPrompt(BASE);
     expect(prompt).toContain(
@@ -84,6 +98,23 @@ describe("buildTurnPrompt", () => {
     const prompt = buildTurnPrompt(BASE);
     expect(prompt).toContain("attachments [{taskId, name}]");
     expect(prompt).toContain("files [{taskId, name}]");
+  });
+
+  it("tells the turn a decision request on the case page needs no grant", () => {
+    expect(buildTurnPrompt(BASE)).toContain(
+      `${OrchestratorToolName.RequestDecision} where: case_page`
+    );
+  });
+
+  it("tells the turn how to use Confluence pages", () => {
+    const prompt = buildTurnPrompt(BASE);
+    expect(prompt).toContain("page_publish");
+    expect(prompt).toContain("page_get");
+    expect(prompt).toContain("files [{page, name}]");
+  });
+
+  it("tells the turn to pass a comment's ref as task_run replyTo", () => {
+    expect(buildTurnPrompt(BASE)).toContain("task_run replyTo");
   });
 
   it("marks people's text as data and keeps it inside its message", () => {
@@ -195,5 +226,183 @@ describe("buildTurnPrompt", () => {
         "none: you never cancel"
       );
     });
+  });
+});
+
+describe("buildTurnPrompt writes", () => {
+  it("says the orchestrator only reads with no grants", () => {
+    expect(buildTurnPrompt(BASE)).toContain("You only read the ticket.");
+  });
+
+  it("lists the granted tools", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      grants: resolveOrchestratorGrants({
+        source: ["comment", "transition"],
+      }),
+    });
+    expect(prompt).toContain(OrchestratorToolName.SourceItemTransition);
+    expect(prompt).not.toContain("You only read the ticket.");
+  });
+
+  it("tells the draft path when the comment grant is held", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      grants: resolveOrchestratorGrants({ source: ["comment"] }),
+    });
+    expect(prompt).toContain("never a summary");
+    expect(prompt).not.toContain("approvals: required");
+  });
+
+  it("states approvals: required when on", () => {
+    const prompt = buildTurnPrompt({ ...BASE, approvalsRequired: true });
+    expect(prompt).toContain("approvals: required");
+  });
+
+  it("marks a message written in AgentFlow", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          ...BASE.messages[0],
+          payload: { via: OrchestratorMessageVia.AgentFlow },
+        },
+      ],
+    });
+    expect(prompt).toContain('via="agentflow"');
+    expect(prompt).toContain("(AgentFlow)");
+  });
+
+  it("adds no side-conversation section when all switches are off", () => {
+    expect(buildTurnPrompt(BASE)).not.toContain("Other items' cases");
+  });
+
+  it("explains the handoff steps when caseHandoff is on", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      sideConversations: { ...BASE.sideConversations, caseHandoff: true },
+    });
+    expect(prompt).toContain(OrchestratorToolName.CaseHandoff);
+    expect(prompt).toContain(OrchestratorToolName.RequestDecision);
+    expect(prompt).toContain("Never send without an approved decision");
+  });
+
+  it("mentions only case_lookup when only caseLookup is on", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      sideConversations: { ...BASE.sideConversations, caseLookup: true },
+    });
+    expect(prompt).toContain(OrchestratorToolName.CaseLookup);
+    expect(prompt).not.toContain(OrchestratorToolName.CaseHandoff);
+  });
+
+  it("explains a handoff message only when the turn has one", () => {
+    expect(buildTurnPrompt(BASE)).not.toContain("Confirmed change requests");
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          origin: OrchestratorMessageOrigin.Internal,
+          kind: OrchestratorMessageKind.Handoff,
+          actor: "Ana",
+          text: "Change LD-6",
+          createdAt: new Date("2026-10-23T08:00:00.000Z"),
+        },
+      ],
+    });
+    expect(prompt).toContain("Confirmed change requests");
+  });
+
+  it("explains questions asked on the item only when the turn has one", () => {
+    const base = {
+      origin: OrchestratorMessageOrigin.Internal,
+      actor: null,
+      text: "x",
+      createdAt: new Date("2026-10-23T08:00:00.000Z"),
+    };
+    const section = "Questions agents asked on the item";
+    const plain = buildTurnPrompt(BASE);
+    expect(plain).not.toContain(section);
+    expect(plain).not.toContain(' task="');
+
+    const asked = buildTurnPrompt({
+      ...BASE,
+      messages: [{ ...base, kind: OrchestratorMessageKind.TaskAsked }],
+    });
+    expect(asked).toContain(section);
+
+    const reply = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          ...base,
+          origin: OrchestratorMessageOrigin.External,
+          kind: OrchestratorMessageKind.Message,
+          payload: { taskId: "t1", questionId: "q2" },
+        },
+      ],
+    });
+    expect(reply).toContain(section);
+    expect(reply).toContain('task="t1" question="q2"');
+  });
+
+  it("marks a message for an agent and explains the relay only then", () => {
+    const section = "Messages for an agent";
+    const plain = buildTurnPrompt(BASE);
+    expect(plain).not.toContain(section);
+    expect(plain).not.toContain(' to="');
+
+    const relayed = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          origin: OrchestratorMessageOrigin.External,
+          kind: OrchestratorMessageKind.Message,
+          actor: "An",
+          text: "Ask BA about the policy",
+          createdAt: new Date("2026-10-23T08:00:00.000Z"),
+          externalRef: "agentflow-1",
+          payload: {
+            via: OrchestratorMessageVia.AgentFlow,
+            toAgent: { computeTargetId: "ct-1", name: "BA runner" },
+          },
+        },
+      ],
+    });
+    expect(relayed).toContain(section);
+    expect(relayed).toContain(
+      `via="agentflow" to="BA runner" ref="agentflow-1"`
+    );
+    expect(relayed).toContain(OrchestratorToolName.TaskRun);
+    expect(relayed).not.toContain("open-questions-task");
+    expect(relayed).not.toContain("Do not fork");
+
+    const answering = buildTurnPrompt({
+      ...BASE,
+      messages: [
+        {
+          origin: OrchestratorMessageOrigin.External,
+          kind: OrchestratorMessageKind.Message,
+          actor: "An",
+          text: "REST",
+          createdAt: new Date("2026-10-23T08:00:00.000Z"),
+          externalRef: "agentflow-2",
+          payload: {
+            via: OrchestratorMessageVia.AgentFlow,
+            toAgent: {
+              computeTargetId: "ct-1",
+              name: "BA runner",
+              openQuestionTaskId: "t9",
+            },
+          },
+        },
+      ],
+    });
+    expect(answering).toContain(`to="BA runner" open-questions-task="t9"`);
+    expect(answering).toContain("Do not fork");
+  });
+
+  it("tells the orchestrator to set asked when it asked people", () => {
+    expect(buildTurnPrompt(BASE)).toContain("set asked");
   });
 });

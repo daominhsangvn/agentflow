@@ -1,0 +1,57 @@
+---
+title: "Agents"
+description: "See every Agent with its health and Claude Code version, open an Agent's detail, and understand the Claude Code version check."
+---
+
+**Agents** (sidebar, Setup) lists the computers that run your Agents: automatic and personal. To install one, see [Agents](/docs/guides/setup/agents) in Setup.
+
+## The fleet
+
+A row of badges counts Agents online and offline, automatic and personal, and version mismatches. The table has these columns.
+
+| Column | Meaning |
+|---|---|
+| Agent | Its name (click for the detail), the owner of a personal Agent, and a **shared** badge when it is shared with the organization |
+| Type | Automatic or Personal |
+| Status | Online or offline |
+| Health | Passed, Not checked, or the number of required checks failing (the System Check) |
+| Claude Code | The reported version; a **pinned** badge when it differs from the version the model provider pins; **latest** when `latest` is set |
+| Commands | Per project, the commands from the Agent's `AGENTFLOW.md` and a **problems** badge when the file has problems |
+| Projects | The projects whose Agents list (Project → Agents) includes it; nothing else counts |
+| Used by enabled workflows | The number of enabled workflows that name it |
+
+With no Agent yet, the page asks you to start one with an API key and links to Settings → API Keys.
+
+## Your agents
+
+Under **Your agents** are the Agents of your own account: share one with the organization, set its **Model provider** and **Claude Code version**, and run its System Check. The settings are in [Agents](/docs/guides/setup/agents#after-installing).
+
+## An Agent's detail
+
+Click an Agent for `/agents/[id]`. It shows its type, whether it is shared, the reported and pinned Claude Code versions (with a **Version mismatch** badge), and these cards.
+
+| Card | Content |
+|---|---|
+| Capabilities | What it declares in `AGENTFLOW.md`: commands, and the health check's tools |
+| Used by | The workflows that use it |
+| Recent tasks | Work, command, status, active time, tokens, cost, start |
+| Usage | Tasks, success rate, active time and cost for 7 and 30 days |
+
+## Claude Code version check
+
+A model provider can pin a Claude Code version (`latest` or an exact release).
+
+- An **automatic** Agent installs the pinned version before a loop (`claude install <version>`) and fails the loop with the reason if an exact version cannot be installed. If the `latest` lookup fails, it uses the newest version already on the machine.
+- A **personal** Agent never installs. When the pinned release differs from its `claude --version`, each loop fails with the `claude install <version>` command to run. `latest` is not checked.
+
+The fleet shows the mismatch, and Home counts it. A change takes effect with the next loop.
+
+## Assign Agents to a project
+
+Project → **Agents** assigns Agents to the project and lists their commands. The Agents added there are the ones the project's loops use. A personal Agent waits under **Waiting to be added** until an admin adds it, and only to its own project. A workflow that names an Agent outside the list fails with `agent_not_in_project`.
+
+## See also
+
+- [Agent capabilities](/docs/guides/setup/agent-capabilities)
+- [Sessions](/docs/guides/operate/sessions)
+- [Troubleshooting](/docs/resources/troubleshooting)

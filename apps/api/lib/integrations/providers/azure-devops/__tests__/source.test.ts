@@ -14,6 +14,8 @@ import {
 } from "@/lib/integrations/providers/azure-devops/__tests__/azure-devops.test-fixtures";
 import { ADO_TOKEN_REJECTED_MESSAGE } from "@/lib/integrations/providers/azure-devops/client";
 import {
+  ADO_PREDECESSOR_RELATION,
+  ADO_SUCCESSOR_RELATION,
   AdoEventAttribute,
   AdoField,
   AzureDevOpsTriggerType,
@@ -105,6 +107,8 @@ describe("fetchAdoSourceItem", () => {
         },
       ],
       links: [],
+      blockedBy: [],
+      blocks: [],
     });
     expect(item.bodyMarkdown).toContain("CSV with one row per order");
     expect(item.bodyMarkdown).not.toContain("<div>");
@@ -135,6 +139,100 @@ describe("fetchAdoSourceItem", () => {
       },
       { url: "https://example.com/notes", title: null },
     ]);
+  });
+
+  describe("dependency relations", () => {
+    const BATCH_PATH = "/contoso/_apis/wit/workitems";
+    const PREDECESSOR_ID = 7;
+    const SUCCESSOR_ID = 9;
+
+    function withDependencies() {
+      return {
+        ...restWorkItem(),
+        relations: [
+          {
+            rel: ADO_PREDECESSOR_RELATION,
+            url: `https://dev.azure.com/contoso/_apis/wit/workItems/${PREDECESSOR_ID}`,
+          },
+          {
+            rel: ADO_SUCCESSOR_RELATION,
+            url: `https://dev.azure.com/contoso/_apis/wit/workItems/${SUCCESSOR_ID}`,
+          },
+        ],
+      };
+    }
+
+    function batchItem(id: number, title: string, state: string) {
+      return {
+        id,
+        fields: {
+          [AdoField.Title]: title,
+          [AdoField.State]: state,
+          [AdoField.TeamProject]: TEST_PROJECT,
+        },
+      };
+    }
+
+    it("maps predecessor and successor relations to blockedBy and blocks", async () => {
+      const fake = createFakeAdo([
+        ...routes(withDependencies()),
+        {
+          method: HttpMethod.Get,
+          path: BATCH_PATH,
+          json: {
+            value: [
+              batchItem(PREDECESSOR_ID, "Login", "Active"),
+              batchItem(SUCCESSOR_ID, "Checkout", "New"),
+            ],
+          },
+        },
+      ]);
+
+      const item = await fetchAdoSourceItem(createAdoContext(fake), ref);
+
+      expect(item.blockedBy).toEqual([
+        {
+          key: `#${PREDECESSOR_ID}`,
+          title: "Login",
+          status: "Active",
+          url: `${TEST_ORG_URL}/Fabrikam%20Web/_workitems/edit/${PREDECESSOR_ID}`,
+        },
+      ]);
+      expect(item.blocks).toEqual([
+        {
+          key: `#${SUCCESSOR_ID}`,
+          title: "Checkout",
+          status: "New",
+          url: `${TEST_ORG_URL}/Fabrikam%20Web/_workitems/edit/${SUCCESSOR_ID}`,
+        },
+      ]);
+    });
+
+    it("lists the relations without titles when the batch request fails", async () => {
+      const fake = createFakeAdo([
+        ...routes(withDependencies()),
+        { method: HttpMethod.Get, path: BATCH_PATH, status: 500, json: {} },
+      ]);
+
+      const item = await fetchAdoSourceItem(createAdoContext(fake), ref);
+
+      expect(item.blockedBy).toMatchObject([
+        { key: `#${PREDECESSOR_ID}`, title: null, status: null },
+      ]);
+      expect(item.blocks).toMatchObject([
+        { key: `#${SUCCESSOR_ID}`, title: null, status: null },
+      ]);
+    });
+
+    it("returns empty lists and sends no batch request without dependencies", async () => {
+      const fake = createFakeAdo(routes());
+
+      const item = await fetchAdoSourceItem(createAdoContext(fake), ref);
+
+      expect(item.blockedBy).toEqual([]);
+      expect(item.blocks).toEqual([]);
+      expect(fake.requestsTo(HttpMethod.Get, BATCH_PATH)).toHaveLength(0);
+    });
   });
 
   it("expands everything without a fields filter and reads the latest comments", async () => {

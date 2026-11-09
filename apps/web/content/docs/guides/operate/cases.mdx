@@ -1,0 +1,89 @@
+---
+title: "Cases"
+description: "Find a case, read its page, answer questions, message the orchestrator, stop a turn, close or reopen a case, and read its time and cost."
+---
+
+A **case** is one ticket handled by an Orchestrator Agent. It holds the conversation with people, the tasks the Agents ran, the decisions and the documents. Only [orchestrated workflows](/docs/guides/setup/orchestrator) have cases.
+
+## The list
+
+**Cases** (sidebar, Work) lists every case of the organization. Filter by **Projects**, **Workflows** and **Status** (Open or Closed).
+
+| Column | Meaning |
+|---|---|
+| Case | The ticket. A **Running** badge shows while a turn or task is active |
+| Project, Workflow | Where the case belongs |
+| Status | Open or Closed |
+| Waiting for | What the case waits for: Orchestrator working, Decision, Agent tasks, A person's answer, Next message |
+| Agents | The Agents that worked on it |
+| Active time | Summed duration of the sessions of the case's tasks and the orchestrator's turns |
+| Tokens, Cost | Usage of those sessions and turns |
+| Last activity | When the case last changed |
+
+A workflow's page has the same list under its **Cases** tab.
+
+## A case page
+
+The header shows the title, Open or Closed, the workflow, when it was opened, the last activity, the numbers of tasks and turns, active time, tokens, cost and the elapsed time (opened to closed, or to now while open). Below it:
+
+| Card | Content |
+|---|---|
+| Notes | The orchestrator's notes for the case, when it has any |
+| Documents | The Confluence pages of the case |
+| Decisions | Decisions waiting or taken. Org admins see **Approve** and **Reject** on a pending one |
+| Work items | The source ticket and the pull requests |
+| Loops, sessions | The loops and Agent sessions the tasks started |
+| One card per conversation | Messages, turns with their tasks, and refusals |
+| Waits | Timers and waits the orchestrator set, Open or Fired |
+
+In a conversation, each turn shows its status (Running, Succeeded, Failed, Superseded), the Agent it ran on, its duration and usage, and the tasks it started. Messages have a kind, for example Message, Task results, Decision, Reply, Status changed, Label added, **Case notice** (another case of the workflow left a message, see [Blockers](/docs/guides/recipes/waiting-for-blockers)) or **Refused**.
+
+A **Refused** message means a [guard](/docs/guides/setup/orchestrator#guards) refused a call of the orchestrator, for example a task cancel outside a ticket-change turn. Nothing was done; the message says why.
+
+## Answer questions
+
+When a task asked questions, its conversation shows each question with an input. **Send answers** posts them. The page says "Answers sent. The orchestrator picks them up on its next turn." You can also answer in the ticket; both work ([Questions and answers](/docs/guides/recipes/questions-and-answers)).
+
+## Message the orchestrator
+
+Under a conversation, **Message the orchestrator** and **Send** start a turn like any ticket comment, up to 4000 characters. It is stored as a message from you, marked as sent via AgentFlow. The orchestrator answers on the case page and posts on the ticket only when your rules say so ([Orchestrator](/docs/guides/setup/orchestrator#the-case-page)).
+
+## Stop a turn, close a case
+
+Org admins have two buttons.
+
+- **Stop turn**, on a running turn. A confirmation says "The runner is asked to stop this turn. Its messages are not retried." Use it for a turn that loops or waits too long.
+- **Close case** / **Reopen case**, in the header. Closing asks for confirmation: running turns and tasks keep going, and a new message in the thread reopens the case.
+
+## Time and cost
+
+Active time is the summed duration of the sessions of the case's tasks (a loop's start to end when it has no session) plus the orchestrator's turns. Elapsed time is opened to closed. Tokens and cost are summed the same way and include personal Agents' sessions.
+
+## The workflow's Agents tab
+
+The diagram shows the orchestrator and each Agent of the workflow. Edge colours show which Agents have work, and a moving dashed border marks an Agent that is running a task.
+
+- The orchestrator's number is the cases that need a person.
+- An Agent's number is its queued and running tasks across the workflow's cases.
+- A question bubble means the Agent needs a person: it asked questions no answer covers.
+- A red alert means the Agent's latest task in an open case failed. Hover it to see the error.
+
+Picking a node lists its cases, newest first, and clears the open case. Each row can show these badges:
+
+- **Decision pending**: the case waits for an approve/reject.
+- **N questions** (an Agent's inbox) or **Questions from `Agent name`** (the orchestrator's inbox): open questions no answer covers.
+- **Asked**: the orchestrator asked a person. Hover to read the question.
+- **Running** / **Queued**: the Agent's tasks in the case. Hover Queued to see why it waits, for example a busy personal Agent.
+- **Failed**: the Agent's latest task in the case failed. Hover for the error.
+
+The yellow badges show only while the case needs a person (the orchestrator is not working on it). Otherwise the row shows what the case waits for, in grey.
+
+In a case, "`<Agent> asks (N)`" holds the open questions, and **Send answers** resumes the task. "`Ask <Agent> about <key>`" sends a question to a read-only copy (fork) of the Agent's latest task. It stays hidden until the Agent's questions are answered. More in [Asking an Agent](/docs/guides/recipes/asking-an-agent).
+
+A pending decision shows the Decisions card with Approve / Reject at the top of the orchestrator's case thread (admins).
+
+## See also
+
+- [Home](/docs/guides/operate/home)
+- [Sessions](/docs/guides/operate/sessions)
+- [Cancelling](/docs/guides/recipes/cancelling)

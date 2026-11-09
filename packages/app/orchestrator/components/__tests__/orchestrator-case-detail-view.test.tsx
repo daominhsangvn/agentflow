@@ -3,12 +3,13 @@ import {
   OrchestratorCaseStatus,
   OrchestratorConversationStatus,
   OrchestratorDecisionStatus,
+  OrchestratorDocumentKind,
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
   OrchestratorTaskStatus,
   OrchestratorTurnStatus,
 } from "@repo/api/src/types/orchestrator";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../hooks/use-orchestrator-cases", () => ({
+  isCaseActive: () => true,
   useOrchestratorCase: () => mocks.query,
   useSetOrchestratorCaseStatus: () => ({
     mutate: vi.fn(),
@@ -45,6 +47,14 @@ vi.mock("../../hooks/use-orchestrator-cases", () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
+  usePostOrchestratorCaseMessage: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+}));
+
+vi.mock("../orchestrator-case-work-cards", () => ({
+  OrchestratorCaseWorkCards: () => <div data-testid="work-cards" />,
 }));
 
 vi.mock("@repo/navigation/use-org-path", () => ({
@@ -79,6 +89,13 @@ function makeDetail(): OrchestratorCaseDetail {
     pendingDecisionCount: 1,
     activeTaskCount: 1,
     turnRunning: true,
+    taskCount: 1,
+    turnCount: 2,
+    costUsd: null,
+    inputTokens: 1200,
+    outputTokens: 300,
+    activeMs: 5_400_000,
+    closedAt: null,
     createdAt: "2026-10-26T08:00:00.000Z",
     updatedAt: "2026-10-26T08:10:00.000Z",
     notes: "",
@@ -134,6 +151,12 @@ function makeDetail(): OrchestratorCaseDetail {
         resumeTaskId: null,
         loopId: LOOP_ID,
         reply: null,
+        files: [
+          { name: "plan.md", size: 12_595, stored: true, skipped: null },
+          { name: "big.bin", size: 900, stored: false, skipped: "too large" },
+        ],
+        filesOmitted: 0,
+        openQuestionCount: 0,
         questions: [],
         error: null,
         waiting: null,
@@ -152,11 +175,35 @@ function makeDetail(): OrchestratorCaseDetail {
         decidedBy: null,
         comment: null,
         decidedAt: null,
+        draft: null,
+        draftResult: null,
         createdAt: "2026-10-26T08:06:00.000Z",
+      },
+    ],
+    documents: [
+      {
+        pageId: "p1",
+        title: "Plan page",
+        url: "https://wiki.test/p1",
+        kind: OrchestratorDocumentKind.Plan,
+        version: 3,
+        attachments: ["a.png", "b.png"],
+        publishedAt: "2026-10-26T08:05:00.000Z",
+      },
+      {
+        pageId: "p2",
+        title: "Test plan page",
+        url: "https://wiki.test/p2",
+        kind: OrchestratorDocumentKind.TestPlan,
+        version: 1,
+        attachments: [],
+        publishedAt: "2026-10-26T08:06:00.000Z",
       },
     ],
   };
 }
+
+const ELAPSED_OPEN_RE = /^Elapsed .*\(open\)$/;
 
 describe("OrchestratorCaseDetailView", () => {
   beforeEach(() => {
@@ -177,6 +224,26 @@ describe("OrchestratorCaseDetailView", () => {
     });
   });
 
+  it("lists the published documents as external links", () => {
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    const card = screen.getByTestId("orchestrator-case-documents");
+    const link = within(card).getByRole("link", { name: "Plan page" });
+    expect(link.getAttribute("href")).toBe("https://wiki.test/p1");
+    expect(
+      within(card).getByRole("link", { name: "Test plan page" })
+    ).toBeTruthy();
+    expect(within(card).getByText("v3")).toBeTruthy();
+    expect(within(card).getByText("2 attachments")).toBeTruthy();
+  });
+
+  it("shows no documents card for an empty list", () => {
+    mocks.query.data = { ...makeDetail(), documents: [] };
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    expect(screen.queryByTestId("orchestrator-case-documents")).toBeNull();
+  });
+
   it("hides admin actions for members", () => {
     render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin={false} />);
 
@@ -186,6 +253,16 @@ describe("OrchestratorCaseDetailView", () => {
     expect(screen.queryByRole("button", { name: "Close case" })).toBeNull();
   });
 
+  it("lists task files with size and skipped reason", () => {
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    const list = screen.getByTestId("orchestrator-task-files");
+    expect(list).toHaveTextContent("plan.md");
+    expect(list).toHaveTextContent("12.3 KB");
+    expect(list).toHaveTextContent("big.bin");
+    expect(list).toHaveTextContent("too large");
+  });
+
   it("links a task to its loop", () => {
     render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
 
@@ -193,6 +270,44 @@ describe("OrchestratorCaseDetailView", () => {
       "href",
       `/acme/loops/${LOOP_ID}`
     );
+  });
+
+  it("links the header to the workflow's cases tab and shows the cost", () => {
+    mocks.query.data = { ...makeDetail(), costUsd: 1.5 };
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    expect(screen.getByRole("link", { name: "Orchestrated" })).toHaveAttribute(
+      "href",
+      "/acme/workflows/w1?tab=cases"
+    );
+    expect(screen.getByText("$1.50", { exact: false })).toBeInTheDocument();
+  });
+
+  it("shows active time, tokens and elapsed time for an open case", () => {
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    expect(screen.getByText("active 1h 30m", { exact: false })).toBeTruthy();
+    expect(screen.getByText("1.50k tokens", { exact: false })).toBeTruthy();
+    expect(screen.getByText(ELAPSED_OPEN_RE)).toBeTruthy();
+  });
+
+  it("shows the elapsed time up to the close of a closed case", () => {
+    mocks.query.data = {
+      ...makeDetail(),
+      status: OrchestratorCaseStatus.Closed,
+      closedAt: "2026-10-26T10:30:00.000Z",
+    };
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    expect(screen.getByText("Elapsed 2h 30m")).toBeTruthy();
+  });
+
+  it("says the cost is unknown when it is null", () => {
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    expect(
+      screen.getByText("cost unknown", { exact: false })
+    ).toBeInTheDocument();
   });
 
   it("shows a dash, not $0.00, when usage is unknown", () => {

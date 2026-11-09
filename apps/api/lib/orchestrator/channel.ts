@@ -26,7 +26,9 @@ export const conversationChannelSchema = z.object({
 export type ConversationChannel = z.infer<typeof conversationChannelSchema>;
 
 /** The case a source item belongs to: one per item per project. */
-export function caseSourceKey(item: SourceItemRef): string {
+export function caseSourceKey(
+  item: Pick<SourceItemRef, "provider" | "key">
+): string {
   return `${item.provider}:${item.key}`;
 }
 
@@ -36,7 +38,7 @@ export function caseSourceKey(item: SourceItemRef): string {
  * and the issue's top level another. `parentId` is the comment replied to.
  */
 export function channelKeyFor(
-  item: SourceItemRef,
+  item: Pick<SourceItemRef, "provider" | "key">,
   parentId: string | null
 ): string {
   const source = caseSourceKey(item);

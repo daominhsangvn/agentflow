@@ -26,38 +26,50 @@
  * port's `useOrgPath`, the sidebar by prefixing `/${orgSlug}`.
  */
 
-import { ROUTINES_FEATURE_FLAG_KEY } from "@repo/api/src/types/routines";
 import {
   BotIcon,
-  CalendarClockIcon,
-  CopyCheckIcon,
-  FileTextIcon,
   HistoryIcon,
-  LayoutDashboardIcon,
+  HomeIcon,
+  InboxIcon,
   type LucideIcon,
-  SquareCheckIcon,
+  PlugIcon,
   ZapIcon,
 } from "lucide-react";
-import { ArtifactFlag } from "./artifact-flags";
 
 /**
  * Which visual group a destination belongs to in the web app's desktop-width
  * sidebar. The mobile nav ignores grouping and renders a flat, capped row; the
- * sidebar uses it to keep its existing "top level" vs "Artifacts" sections.
+ * sidebar uses it to render Home, then "Work", then "Setup".
  */
 export const PrimaryNavGroup = {
-  TopLevel: "topLevel",
-  Artifact: "artifact",
+  Home: "home",
+  Work: "work",
+  Setup: "setup",
 } as const;
 export type PrimaryNavGroup =
   (typeof PrimaryNavGroup)[keyof typeof PrimaryNavGroup];
 
+/** Org-relative path of Home. Home keeps the old Dashboard URL (user decision). */
+export const HOME_NAV_PATH = "/dashboard";
+
+/** Org-relative path of the org-wide Cases page. */
+export const CASES_NAV_PATH = "/cases";
+
+/** Org-relative path of the org-wide process-mode Runs page. */
+export const RUNS_NAV_PATH = "/runs";
+
+/** Org-relative path of the Sessions destination. */
+export const SESSIONS_NAV_PATH = "/sessions";
+
+/** Org-relative path of the org Connections page. */
+export const CONNECTIONS_NAV_PATH = "/connections";
+
+/** Org-relative path of the Skills catalog (the old agent-components catalog, a Labs item). */
+export const SKILLS_CATALOG_NAV_PATH = "/skills";
+
 /**
- * Org-relative path of the Agents destination. Exported as the stable identity
- * the Agents activity badge keys off, so the badge attaches by destination
- * rather than by the visible "Agents" title (renaming the label must not
- * silently detach the badge). The web app's desktop-width sidebar keys off
- * `NavId.Agents` for the same reason.
+ * Org-relative path of the Agents destination: the org's agents (compute
+ * targets). No badge; the sidebar keys off `NavId.Agents` for stable identity.
  */
 export const AGENTS_NAV_PATH = "/agents";
 
@@ -87,83 +99,44 @@ export type PrimaryNavDestination = {
  */
 export const PRIMARY_NAV_DESTINATIONS: readonly PrimaryNavDestination[] = [
   {
-    title: "Dashboard",
-    path: "/dashboard",
-    icon: LayoutDashboardIcon,
-    group: PrimaryNavGroup.TopLevel,
-  },
-  // Inbox is hidden in the self-hosted edition: its notifications are
-  // Liveblocks inbox notifications, and the deployment runs without Liveblocks
-  // (no LIVEBLOCKS_SECRET), so the page could only say they are unavailable.
-  // Workflows reach people through their actions instead (agentflow.email,
-  // comments, Teams). The /inbox route still exists for direct links.
-  {
-    title: "My Tasks",
-    path: "/my-tasks",
-    icon: CopyCheckIcon,
-    group: PrimaryNavGroup.TopLevel,
+    title: "Home",
+    path: HOME_NAV_PATH,
+    icon: HomeIcon,
+    group: PrimaryNavGroup.Home,
   },
   {
-    // PRD-566 / FEA-4348: Routines (the renamed "Scheduled Tasks" feature) lives
-    // in the Artifacts group alongside the other primary artifact surfaces
-    // (Sessions, Branches, Agents). The interactive list/editor/run-history lives
-    // in the desktop app; the web surface names the feature and points there
-    // (see `routines/components/routines-index-view.tsx`). Gated behind the
-    // PostHog `routines` flag (default off) until GA — belt-and-suspenders with
-    // the desktop `routines` Labs setting — so an unfinished feature never
-    // surfaces in prod. The `/routines` route carries the same gate.
-    title: "Routines",
-    path: "/routines",
-    icon: CalendarClockIcon,
-    group: PrimaryNavGroup.Artifact,
-    featureFlag: ROUTINES_FEATURE_FLAG_KEY,
+    title: "Cases",
+    path: CASES_NAV_PATH,
+    icon: InboxIcon,
+    group: PrimaryNavGroup.Work,
   },
   {
-    // Event-driven Workflows (docs/workflows.md): Jira / Azure DevOps / HTTPS
-    // triggers start an agent-team run, post actions report back. Sits next to
-    // Routines (its scheduled sibling) in the Artifacts group. Always-on (no
-    // featureFlag): the self-hosted edition has no PostHog, so a flag would
-    // hide the feature from every install.
+    title: "Sessions",
+    path: SESSIONS_NAV_PATH,
+    icon: HistoryIcon,
+    group: PrimaryNavGroup.Work,
+  },
+  {
     title: "Workflows",
     path: WORKFLOWS_NAV_PATH,
     icon: ZapIcon,
-    group: PrimaryNavGroup.Artifact,
+    group: PrimaryNavGroup.Setup,
   },
-  {
-    // Org-level Documents index (FEA-4140): the project-less DOC artifacts
-    // (evergreen docs). Ordered FIRST in the Artifacts group; shipped always-on
-    // (no flag), consistent with Agents.
-    title: "Documents",
-    path: "/documents",
-    icon: FileTextIcon,
-    group: PrimaryNavGroup.Artifact,
-  },
-  {
-    title: "Issues",
-    path: "/issues",
-    icon: SquareCheckIcon,
-    group: PrimaryNavGroup.Artifact,
-    featureFlag: ArtifactFlag.Issues,
-  },
-  {
-    // FEA-4155: always-on (no featureFlag). The Sessions page/route is no longer
-    // flag-gated — leaving the nav link gated on the winding-down flag would hide
-    // the only path to a page that now always renders.
-    title: "Sessions",
-    path: "/sessions",
-    icon: HistoryIcon,
-    group: PrimaryNavGroup.Artifact,
-  },
-  // Branches is hidden in the self-hosted edition: branch tracking (PRs,
-  // checks, diffs) comes from the GitHub App only, so it cannot represent the
-  // project repositories added from GitHub (PAT) or Azure DevOps connections.
-  // The /branches route still exists for direct links.
   {
     title: "Agents",
     path: AGENTS_NAV_PATH,
     icon: BotIcon,
-    group: PrimaryNavGroup.Artifact,
+    group: PrimaryNavGroup.Setup,
   },
+  {
+    title: "Connections",
+    path: CONNECTIONS_NAV_PATH,
+    icon: PlugIcon,
+    group: PrimaryNavGroup.Setup,
+  },
+  // My Tasks, Documents, Issues, Routines, Inbox, Branches and Runs (hidden
+  // while the orchestrator is the focus) routes still exist for direct links;
+  // they are not in the menu.
 ] as const;
 
 /**
@@ -175,26 +148,15 @@ export const PRIMARY_NAV_DESTINATIONS: readonly PrimaryNavDestination[] = [
 export const MOBILE_NAV_MAX_DESTINATIONS = 4;
 
 /**
- * The exact org-relative paths the mobile bottom nav renders inline, in order.
- *
- * FEA-4155 (bot review #3789): the bar used to prefix-slice the first
- * {@link MOBILE_NAV_MAX_DESTINATIONS} *enabled* destinations off
- * {@link PRIMARY_NAV_DESTINATIONS}. Because Issues is flag-gated and sits ahead
- * of Sessions in that list, the fourth slot flipped between Issues (flag on) and
- * Sessions (flag off) — the same product showing a different bottom-nav shape
- * per org — and Branches never reached the bar at all, so one of the two
- * surfaces this change unblanks stayed menu-only on mobile.
- *
- * Naming the phone destinations explicitly fixes the bar shape. The
- * self-hosted edition hides Branches (see PRIMARY_NAV_DESTINATIONS), so the set
- * is Dashboard, Sessions and Agents, one below the cap. All are always-on (they
- * carry no `featureFlag`), so the bar shape does not vary by flag state; any
- * still-gated destination here would still resolve through the feature-flag
- * port before rendering.
+ * The exact org-relative paths the mobile bottom nav renders inline, in order:
+ * Home, Cases, Sessions and Agents (4 = {@link MOBILE_NAV_MAX_DESTINATIONS}).
+ * Naming them explicitly keeps the bar shape independent of flag state; the
+ * rest stays reachable from the sidebar Sheet the menu affordance opens.
  */
 export const MOBILE_NAV_PHONE_DESTINATION_PATHS: readonly string[] = [
-  "/dashboard",
-  "/sessions",
+  HOME_NAV_PATH,
+  CASES_NAV_PATH,
+  SESSIONS_NAV_PATH,
   AGENTS_NAV_PATH,
 ] as const;
 

@@ -2,6 +2,7 @@ import type {
   OrchestratorCaseConversation,
   OrchestratorCaseDecision,
   OrchestratorCaseDetail,
+  OrchestratorCaseDocument,
   OrchestratorCaseMessage,
   OrchestratorCaseSummary,
   OrchestratorCaseTask,
@@ -18,8 +19,17 @@ import type {
   OrchestratorTurnUsage,
   OrchestratorWaitKind,
 } from "@repo/api/src/types/orchestrator";
-import { OrchestratorCaseStatus } from "@repo/api/src/types/orchestrator";
+import {
+  OrchestratorCaseStatus,
+  orchestratorDecisionDraftResultSchema,
+  orchestratorDecisionDraftSchema,
+  readOrchestratorMessageAnsweredTaskIds,
+  readOrchestratorMessageVia,
+} from "@repo/api/src/types/orchestrator";
 import { z } from "zod";
+import type { CaseStats } from "@/app/orchestrator/cases/service/case-stats";
+import type { CaseDocument } from "@/lib/orchestrator/case-documents";
+import { readMessageToAgent } from "@/lib/orchestrator/message-to-agent";
 import { readTaskResult } from "@/lib/orchestrator/task-result";
 
 /**
@@ -40,6 +50,7 @@ export type CaseSummaryRow = Row & {
   sourceKey: string | null;
   status: string;
   updatedAt: Date;
+  closedAt: Date | null;
   _count: { conversations: number; decisions: number; tasks: number };
 };
 
@@ -59,6 +70,7 @@ export type CaseDetailRow = CaseSummaryRow & {
           actor: string | null;
           text: string;
           turnId: string | null;
+          payload: unknown;
         }
       >;
       turns: Array<
@@ -101,6 +113,7 @@ export type CaseDetailRow = CaseSummaryRow & {
       resumeTaskId: string | null;
       loopId: string | null;
       result: unknown;
+      openQuestionCount: number;
       finishedAt: Date | null;
     }
   >;
@@ -113,13 +126,16 @@ export type CaseDetailRow = CaseSummaryRow & {
       decidedBy: string | null;
       comment: string | null;
       decidedAt: Date | null;
+      draft: unknown;
+      draftResult: unknown;
     }
   >;
 };
 
 export function toCaseSummary(
   row: CaseSummaryRow,
-  turnRunning: boolean
+  turnRunning: boolean,
+  stats: CaseStats
 ): OrchestratorCaseSummary {
   return {
     id: row.id,
@@ -132,17 +148,26 @@ export function toCaseSummary(
     pendingDecisionCount: row._count.decisions,
     activeTaskCount: row._count.tasks,
     turnRunning,
+    taskCount: stats.taskCount,
+    turnCount: stats.turnCount,
+    costUsd: stats.costUsd,
+    inputTokens: stats.inputTokens,
+    outputTokens: stats.outputTokens,
+    activeMs: stats.activeMs,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    closedAt: row.closedAt?.toISOString() ?? null,
   };
 }
 
 export function toCaseDetail(
   row: CaseDetailRow,
-  turnRunning: boolean
+  turnRunning: boolean,
+  stats: CaseStats,
+  documents: CaseDocument[]
 ): OrchestratorCaseDetail {
   return {
-    ...toCaseSummary(row, turnRunning),
+    ...toCaseSummary(row, turnRunning, stats),
     notes: row.notes,
     project: row.project,
     workflow: row.workflow,
@@ -150,6 +175,7 @@ export function toCaseDetail(
     tasks: oldestFirst(row.tasks).map(toTask),
     waits: oldestFirst(row.conversations.flatMap((c) => c.waits)).map(toWait),
     decisions: oldestFirst(row.decisions).map(toDecision),
+    documents: documents.map(toDocument),
   };
 }
 
@@ -222,6 +248,9 @@ function toMessage(
     text: row.text,
     turnId: row.turnId,
     createdAt: row.createdAt.toISOString(),
+    via: readOrchestratorMessageVia(row.payload),
+    answeredTaskIds: readOrchestratorMessageAnsweredTaskIds(row.payload),
+    toAgentId: readMessageToAgent(row.payload)?.computeTargetId ?? null,
   };
 }
 
@@ -259,9 +288,17 @@ function toTask(row: CaseDetailRow["tasks"][number]): OrchestratorCaseTask {
     resumeTaskId: row.resumeTaskId,
     loopId: row.loopId,
     reply: result?.reply ?? null,
+    files: (result?.files ?? []).map((file) => ({
+      name: file.name,
+      size: file.size,
+      stored: file.storageKey !== null,
+      skipped: file.skipped,
+    })),
+    filesOmitted: result?.filesOmitted ?? 0,
     questions: result?.questions ?? [],
     error: result?.error ?? cancelledError(result),
     waiting: result?.waiting ?? null,
+    openQuestionCount: row.openQuestionCount,
     createdAt: row.createdAt.toISOString(),
     finishedAt: iso(row.finishedAt),
   };
@@ -294,6 +331,11 @@ function toDecision(
     decidedBy: row.decidedBy,
     comment: row.comment,
     decidedAt: iso(row.decidedAt),
+    draft: readJson(orchestratorDecisionDraftSchema, row.draft),
+    draftResult: readJson(
+      orchestratorDecisionDraftResultSchema,
+      row.draftResult
+    ),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -302,4 +344,21 @@ function cancelledError(
   result: ReturnType<typeof readTaskResult>
 ): string | null {
   return result?.cancelled ? `Cancelled: ${result.cancelled}` : null;
+}
+
+function toDocument(document: CaseDocument): OrchestratorCaseDocument {
+  return {
+    pageId: document.pageId,
+    title: document.title,
+    url: document.url,
+    kind: document.kind,
+    version: document.version,
+    attachments: document.attachments,
+    publishedAt: document.publishedAt.toISOString(),
+  };
+}
+
+function readJson<T>(schema: z.ZodType<T>, value: unknown): T | null {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }

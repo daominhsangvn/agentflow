@@ -50,7 +50,7 @@ done
 # A fresh token for the machine (Gitea shows a token only once).
 dev_token="$(docker exec -u git agentflow-local-git-1 gitea admin user generate-access-token \
   --username "$DEV_USER" --token-name "an-ubuntu-$(date +%s)" \
-  --scopes write:repository,read:user,read:organization --raw)"
+  --scopes write:repository,write:issue,read:user,read:organization --raw)"
 
 echo "== Credentials and project folder in the machine"
 printf '%s\n' "$dev_token" | docker exec -i -e GITEA="$GITEA_IN_CONTAINER" \

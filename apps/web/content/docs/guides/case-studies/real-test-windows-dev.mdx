@@ -1,0 +1,38 @@
+---
+title: "Real test with a Windows personal Dev Agent"
+description: "LD-7 and LD-8 with the Dev Agent on a Windows machine: answers, a failed resume, queueing, a pull request that was not opened and what was fixed."
+---
+
+Test run on 2026-11-08 (times are local).
+
+## Setup
+
+LeaveDesk with the Dev role as a [personal Agent](/docs/guides/recipes/personal-agents) on a Windows machine on the LAN, run as a Windows service, one task at a time, with its own Gitea account. BA and QC were automatic Agents.
+
+## Timeline
+
+**LD-7, Planning.** People answered the BA's 9 questions in one reply. The orchestrator resumed the BA and QC, and tried to resume the old Dev plan task. That was refused: "A task resumes on the runner of the task it continues: its session is there." The earlier Dev Agent had been removed, so the orchestrator started `/writing-plans` on the new Agent instead.
+
+**The failed plan task.** It failed twice within about 10 seconds ("Process exited with code 1"). Git Bash rewrote the `/writing-plans` argument into a Windows path; this was fixed in the runner. The orchestrator reported the failure on the ticket while BA and QC finished (PRD v3, test plan updated). After the fix a person asked again and the plan task succeeded in about 8 minutes, as plan v2 on the same page.
+
+**Queueing.** LD-8's `/writing-plans` started at 07:14 on the same Agent. LD-7 moved to Implement at 07:16 and its `/executing-plans` waited Queued until 07:28, when LD-8's task ended. It then ran for about 49 minutes.
+
+**Pull request.** The Agent pushed branch LD-7 (7 commits) but `tea pr create` failed because the token lacked the issue scope. `pull_request_open` was refused ("The task pushed no branch ...") because AgentFlow had not pushed it. Fixed by giving the token `write:issue`.
+
+**Duplicate announcement.** One turn posted an announcement on the case page and the same text on Jira, because a reply's default target followed the last case-page message. The rules now name `where`; see [Approval before posting](/docs/guides/recipes/approval-before-posting).
+
+## Other Windows lessons
+
+- An npm-installed Claude Code made loops fail ("Input must be provided..."). `doctor.bat` finds it.
+- The Agents tab offered Ask while questions were open. Fixed: the questions form replaces Ask. See [Asking an Agent](/docs/guides/recipes/asking-an-agent).
+
+## Not exercised
+
+Questions posted by the Agent itself (`commentId`). The approval test plan covers them.
+
+## Lessons
+
+- A personal Agent queues its tasks: plan for waiting when two tickets use the same machine ([Personal Agents](/docs/guides/recipes/personal-agents)).
+- Resuming a task needs the runner that holds its session; a removed Agent means a new task.
+- Check pushes and tokens before the first pull request.
+- Name the target of every write in the rules ([Approval before posting](/docs/guides/recipes/approval-before-posting)).

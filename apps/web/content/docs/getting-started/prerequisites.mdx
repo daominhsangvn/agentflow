@@ -1,77 +1,44 @@
 ---
-title: Prerequisites
-description: The exact tools, versions, and system dependencies you need before installing AgentFlow.
+title: "Prerequisites"
+description: "What the server machine, the network, the Claude credentials and the outside accounts need before you install AgentFlow."
 ---
 
-AgentFlow relies on a specific toolchain so agents can execute reliably. Install everything below before you install the plugins or the desktop client.
+## The server machine
 
-## Required tools
+The server runs the web app (port 3000), the API (3002) and the MCP server (3010) with Node.js, and the backing services with Docker.
 
-| Tool | Minimum version | Used by |
+| Requirement | Version | Notes |
 |---|---|---|
-| Claude Code CLI | current stable | the six AgentFlow plugins and every loop |
-| Python | 3.11+ (3.13 recommended) | plugin tooling (self-learning, code-review, judges) |
-| Node.js | 22+ | desktop client build and runtime |
-| pnpm | 9.15+ | desktop client workspace |
-| `just` | current | desktop client command runner |
-| `jq` | current | plugin installers and shell scripts |
-| `git` | 2.30+ | plan/critic/judge workflows and worktrees |
-| `gh` CLI | current | PR automation (creation, comments, reviews) |
-| `bash` | 3.2+ | plugin shell scripts |
-
-## Optional tools
-
-| Tool | Purpose |
-|---|---|
-| Codex CLI | plan debate loops, `plan-with-codex`, and Codex code review |
-| Playwright | visual QA phase (the visual-qa subagent uses headless browsers) |
-| `tree-sitter` Python package | richer code map extraction in the `code` plugin |
-
-## Operating system support
-
-| OS | Desktop client | Plugins |
-|---|---|---|
-| macOS (Apple Silicon and Intel) | packaged DMG, primary target | supported |
-| Linux | runs in dev mode via `just desktop-dev`; not packaged | supported |
-| Windows | not supported for the desktop client | plugins work inside WSL or supported terminals |
-
-## Accounts and credentials
-
-- A AgentFlow account with access to at least one team and project.
-- A AgentFlow API key. The desktop client reads it from `AGENTFLOW_API_KEY` or from encrypted local storage. `SYMPHONY_API_KEY` is accepted as a legacy fallback.
-- A GitHub account authorized for any repositories you plan to connect, and `gh auth login` completed.
-
-## Installing the base tools
-
-### macOS
+| Node.js | 24 or newer | Required by the repository's `engines` |
+| pnpm | 11.7.0 | Pinned in `packageManager`; run `corepack enable` |
+| Docker | Recent | Runs Postgres, RustFS, Mailpit and Local Git |
 
 ```bash
-# Claude Code CLI
-brew install anthropic/claude/claude
-
-# Language toolchains
-brew install node@22 python@3.13 pnpm just jq git gh
-
-# Enable pnpm via corepack
-corepack enable && corepack prepare pnpm@9.15.0 --activate
+corepack enable
 ```
 
-### Linux (Debian or Ubuntu)
+## URLs
 
-```bash
-# Language toolchains
-sudo apt-get update
-sudo apt-get install -y python3.13 python3-pip jq git
+- **An API URL your Agents can reach over HTTPS.** The API key travels over this connection, so plain HTTP is refused except for localhost and the hosts you list in `AGENTFLOW_ALLOW_HTTP_HOSTS` (only for a network you trust, such as `host.docker.internal` with Docker Desktop).
+- **A public HTTPS URL for Jira webhooks**, set as `PUBLIC_WEBHOOK_BASE_URL` on the API. Jira Cloud only calls public HTTPS URLs. On a machine without one, set the Jira connection to **poll** mode; poll mode only sees issues assigned to the bot, so labels, status changes and mentions need a webhook.
 
-# Node via nvm (recommended)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-nvm install 22
-corepack enable && corepack prepare pnpm@9.15.0 --activate
+## Claude credentials
 
-# just
-cargo install just
+Every Agent runs Claude Code. Provide one of:
 
-# Claude Code CLI and gh via their official installers
-```
+- A Claude subscription token: `CLAUDE_CODE_OAUTH_TOKEN`, created with `claude setup-token` on any machine with a browser.
+- `ANTHROPIC_API_KEY` on the Agent.
+- An Anthropic-compatible provider (base URL, token, default model) set in AgentFlow on the Agent's **Model provider**. It is stored sealed and sent with each task; it wins over the Agent's own credentials.
 
-After you finish this page, continue to [Install the plugins](./install-plugins).
+## Bot accounts
+
+AgentFlow writes to outside systems as a bot. Create an account for each system you use:
+
+- Jira (and Confluence, if people review documents there): a bot user with an API token.
+- Your Git server: a token for the bot. Local Git (Gitea, started by Docker) is included for projects without a remote.
+
+Changes the bot makes are ignored as triggers, so it never starts itself. See [Connections](/docs/guides/setup/connections) for the exact permissions.
+
+## Next
+
+[Install the server](/docs/getting-started/install-server).

@@ -1,0 +1,42 @@
+---
+title: "Sessions and cost"
+description: "What a session is, what Agents report to the Sessions page and when, tokens and cost, the transcript (Trace), and stale sessions."
+---
+
+A **session** is one Claude Code conversation that an Agent ran for AgentFlow. Sessions show what the Agents did and what it cost.
+
+## Sessions list
+
+**Sessions** (sidebar, Work) lists the sessions of your organization. A time window, a **Filter** (status, repository) and a **View** menu narrow and group the list. Summary cards above the table show the number of sessions, total tokens, cost and pull requests shipped. Click a session for `/sessions/[id]`: its timeline, tools, subagents, tokens and the **Trace**.
+
+If the page is empty, no Agent has reported yet: check that an Agent is online ([Agents](/docs/guides/operate/agents)).
+
+## What an Agent reports
+
+Every loop an Agent runs is reported as a session, unless the Agent has `AGENTFLOW_RUNNER_REPORT_SESSIONS=false` (default `true`).
+
+- It is named after its command and item and linked to the loop, the run's documents and the Agent.
+- It is **active** while the loop runs and refreshed about every 20 seconds (tool calls, subagents, input tokens). When the loop ends it becomes inactive, or error, with the final totals per model (input, output and cache tokens).
+- A loop that retries in a fresh Claude session, or a step that resumes the session before it, stays one session with the totals of all of them.
+- AgentFlow always ingests them. No organization setting turns it off, and the data stays in your database.
+- If the API refuses or fails a report, the Agent pauses reporting for five minutes.
+
+## Tokens and cost
+
+Tokens come from Claude Code's stream. A **cost** is reported only when Claude Code knows the model's price. For an Anthropic-compatible provider (for example DeepSeek) it can only guess a rate, so the cost is left out and shows as unknown. Case pages and Home add up the sessions and the orchestrator's turns ([Cases](/docs/guides/operate/cases#time-and-cost)).
+
+## The transcript (Trace)
+
+The Agent archives the transcripts of a loop's Claude sessions every 5 minutes while it runs and in full when it ends. They are stored in RustFS (the S3-compatible storage) and shown as the session's **Trace**.
+
+- The Agent uploads to URLs the API signs with `S3_PUBLIC_ENDPOINT`, so that endpoint must be reachable from the Agent. For an Agent container next to a local RustFS use `http://host.docker.internal:9000` (or the host port set by `S3_PORT`).
+- The browser reads the transcript from RustFS, so `S3_CORS_ALLOWED_ORIGINS` must include the app's origin (default: the origin of `NEXT_PUBLIC_APP_URL`). Run `pnpm storage:init` again after you change it. Without the rule the Trace does not show.
+
+## Stale sessions
+
+An hourly job ends sessions still marked active after their machine stopped reporting for `STALE_SESSION_AGE_HOURS` (default 24). `SELF_HOSTED_CRON_DISABLED=true` turns the built-in schedule off when you call the cron routes yourself ([Server environment](/docs/reference/server-env)).
+
+## See also
+
+- [Agents](/docs/guides/operate/agents)
+- [Troubleshooting](/docs/resources/troubleshooting)

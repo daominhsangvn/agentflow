@@ -1,0 +1,90 @@
+---
+title: "Orchestrator tools"
+description: "The tools the Orchestrator Agent uses in a turn: what each does, which ones a turn sees, and the guards that refuse a call."
+---
+
+In each turn, the Orchestrator Agent of an [orchestrated workflow](/docs/concepts/orchestrated-vs-process) gets a set of tools served by the AgentFlow API. They read the case, talk to people, start tasks on Agents, wait, and write to the ticket, Confluence and the Git server. Every call is checked by the server; a refused call is recorded on the case as a **Refused** message.
+
+The tool `runners_list` lists Agents: the name keeps the old word.
+
+## Case and ticket
+
+| Tool | What it does | Main inputs |
+|---|---|---|
+| `case_get` | Reads the case as AgentFlow records it: notes, conversations with their latest messages, tasks and decisions | none |
+| `case_update_notes` | Replaces the case's notes: what later turns must know. Read them with `case_get` first and keep what still holds | `notes` (up to 20 000 characters) |
+| `source_item_get` | Reads the conversation's item (the ticket or Teams thread): title, status, description, latest comments, attachment names, and the `blockedBy` / `blocks` relations | none |
+| `case_notify` | Leaves a message on another case of the same workflow (same connection) and wakes it, reopening it if closed. Refused when no case exists for that key, for this case's own item, when the calling conversation has no source item, or when the target case has no conversation on this connection | `itemKey`, `message` |
+| `runners_list` | Lists the project's Agents with their `AGENTFLOW.md`: declared commands (mode, what each produces and needs), skills and whether each is online | none |
+
+## Talking
+
+| Tool | What it does | Main inputs |
+|---|---|---|
+| `reply` | Posts a Markdown message in the conversation's thread (a ticket comment, a Teams reply), or on the case page. A reply to it comes back to the conversation | `text`; `replyTo` (the reference of the message you answer, so the answer lands in that comment's thread); `where` (`thread` or `case_page`); `attachments` (files of this case's tasks, attached to the ticket first; refused where the thread takes no files, such as Teams) |
+| `edit_reply` | Replaces the text of a message this conversation posted, for example the summary of a plan once a new version is out. It takes no files | `reference`, `text`, `version` |
+| `request_decision` | Asks for an approval (a plan, a go to implement): posts the question with the case's link, where an admin approves or rejects. With a `draft`, AgentFlow posts the comment and makes the move itself once it is approved. Under `approvals: required` only `where: case_page` is allowed. End the turn with `wait_human` | `question`; `where`; `draft` (`comment` with `text`, `replyTo`, `attachments`; `transitionName`) |
+| `record_decision` | Records a decision someone gave in the thread on a pending decision: who, approved or not, and what they said. Under `approvals: required` it cannot approve a decision with a draft (only an admin's Approve button does); rejecting works | `decisionId`, `approved`, `decidedBy`, `comment` |
+
+## Tasks and waiting
+
+| Tool | What it does | Main inputs |
+|---|---|---|
+| `task_run` | Starts one of an Agent's declared commands as a task. Its answer, questions and files come back when it ends | `runner` (the Agent's name), `command`, `args`, `prompt`, `mode` (`read` or `write`; default what the command declares), `resumeTaskId` and `fork` (continue an earlier task's session, in a copy with `fork`), `files` (files of earlier tasks, or `{page, name}` for a Confluence page's content), `replyTo` |
+| `task_get` | Reads a task: status (`queued`, `running`, `succeeded`, `failed`, `cancelled`), answer, questions, error and files | `taskId` |
+| `task_cancel` | Stops a task that belongs to a status or label the ticket left: a running task is stopped, a queued one never starts | `taskId`, `reason` |
+| `wait_for` | Ends the turn waiting for tasks: all of them (default) or the first (`kind: any`). A failed task wakes the turn at once unless `wakeOnFailure` is false | `taskIds` (up to 20), `kind`, `timeoutMinutes` (up to 1440), `wakeOnFailure` |
+| `wait_human` | Ends the turn waiting for people: an answer, a decision or the next request wakes the conversation | none |
+| `close_case` | Ends the turn and closes the case. A new message reopens it | `summary` |
+
+A turn ends with `wait_for`, `wait_human` or `close_case`.
+
+## Writing outside
+
+| Tool | What it does | Main inputs |
+|---|---|---|
+| `source_item_transition` | Moves the case's ticket to another status. Refused when the transition is not available from the current status | `transitionName` |
+| `source_item_label` | Adds and removes labels (Jira) or tags (Azure DevOps) | `add`, `remove` (up to 20 each) |
+| `source_item_link` | Adds a titled web link to the ticket | `url`, `title` |
+| `page_publish` | Creates or updates a Confluence page from a task's Markdown file. With `page` it updates that page; otherwise it finds the page with that title under `parent` (default the project's parent page; `root` for the top of the space) or creates it. Screenshots in `attachments` are uploaded to the page. It refuses to replace people's edits unless `overwrite` is set. The case records the page under Documents | `file`, `title`, `kind` (`ticket`, `prd`, `plan`, `test_plan`, `test_run`, `other`), `page`, `parent`, `space`, `attachments`, `overwrite`, `connection` |
+| `page_get` | Reads a page of the project's spaces: current Markdown, version, URL and last editor | `page`, `connection` |
+| `pull_request_open` | Opens the pull request of each branch a succeeded task pushed (a command with `push` on an automatic Agent); reuses an open one | `taskId`, `title`, `description`, `draft` |
+
+## Which tools a turn sees
+
+The writes are opt-in per workflow, in `agent.orchestrator.connections`. Without a grant, the tool is not offered and the turn only reads the ticket.
+
+| Tool | Offered when |
+|---|---|
+| `source_item_transition` | `source` includes `transition` |
+| `source_item_label` | `source` includes `label` |
+| `source_item_link` | `source` includes `link` |
+| `page_get` | a Confluence key is granted `read` or `publish` |
+| `page_publish` | a Confluence key is granted `publish` |
+| `pull_request_open` | `pull_requests` includes `open` |
+| all others | always |
+
+`comment` and `attach` in `source` control writing comments and attaching files on the ticket. See [Connection grants](/docs/guides/setup/connection-grants) and [Orchestrator setup](/docs/guides/setup/orchestrator).
+
+```yaml
+agent:
+  orchestrator:
+    connections:
+      source: [comment, attach, transition, label, link]
+      confluence: [publish]
+      pull_requests: [open]
+```
+
+## Guards
+
+The server refuses, and records on the case:
+
+- a command the Agent's `AGENTFLOW.md` does not declare, or an Agent whose `AGENTFLOW.md` does not parse;
+- a `write` task for a command declared `mode: read`;
+- a command whose `needs` (files produced by another command) are neither passed in `files` nor attached to the ticket;
+- `case_notify` for a key with no case in this workflow, for the case's own item, from a conversation with no source item, for a case with no conversation on this connection, or from a superseded turn;
+- a write by a turn that a newer message superseded: end the turn with `wait_human` and a one-line note, and the next turn answers both;
+- `task_cancel` in a turn that does not handle a ticket change listed in `agent.orchestrator.cancelOn` (default `status_changed` and `label_removed`);
+- any tool that is not granted.
+
+See [Writing orchestrator rules](/docs/guides/recipes/orchestrator-rules), [Blocked tasks](/docs/guides/recipes/blocked-tasks) and [Cancelling tasks](/docs/guides/recipes/cancelling).

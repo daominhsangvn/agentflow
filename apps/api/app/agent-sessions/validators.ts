@@ -141,13 +141,7 @@ export type AgentSessionUsageQuery = z.infer<
 
 /**
  * ISS-6039: the exact query params `GET /agent-sessions` accepts, derived from
- * the schema rather than hand-listed. The published REST reference
- * (`apps/web/content/docs/api-reference/openapi.json`) documents this endpoint
- * by hand, and every array facet above was missing from it — a client generated
- * from the spec could reach only the single-value back-compat spellings. The
- * drift guard in `apps/api/__tests__/unit/openapi-agent-sessions-params.test.ts`
- * compares this list against the spec so a newly added facet fails a test
- * instead of silently vanishing from the public contract.
+ * the schema rather than hand-listed.
  */
 export const AGENT_SESSION_LIST_QUERY_PARAM_NAMES = Object.keys(
   rawAgentSessionListQuerySchema.shape
@@ -159,11 +153,8 @@ export const AGENT_SESSION_LIST_QUERY_PARAM_NAMES = Object.keys(
  * Membership is recorded by `queryArray` at construction, so a new facet joins
  * by building one and cannot be forgotten here.
  *
- * This exists so the drift guard can take its expectation from the validator
- * instead of from the spec it is checking. Deriving multiplicity from
- * openapi.json (`schema.type === "array"`) lets a facet that is wrongly
- * documented as a scalar drop out of its own expectation, and the check then
- * passes vacuously on the very defect it is meant to catch.
+ * Multiplicity is taken from the validator itself, not from a hand-written
+ * description of it.
  */
 export const AGENT_SESSION_REPEATABLE_QUERY_PARAM_NAMES = Object.entries(
   rawAgentSessionListQuerySchema.shape

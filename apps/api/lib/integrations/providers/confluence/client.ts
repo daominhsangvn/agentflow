@@ -56,11 +56,14 @@ export type ConfluenceRequest = {
   /** Path below `/wiki/` (`api/v2/pages/1`), segments already encoded. */
   path: string;
   query?: Record<string, string | number | undefined>;
-  body?: JsonValue;
+  body?: JsonValue | FormData;
+  headers?: Record<string, string>;
+  /** Defaults to the HTTP client's timeout. */
+  timeoutMs?: number;
 };
 
 export const CONFLUENCE_CREDENTIALS_REJECTED =
-  "Confluence rejected the credentials (HTTP 401). Check the bot account's email address and API token. An API token with scopes also needs the read:confluence-user, read:page:confluence, write:page:confluence, read:comment:confluence, write:comment:confluence, read:space:confluence and search:confluence scopes.";
+  "Confluence rejected the credentials (HTTP 401). Check the bot account's email address and API token. An API token with scopes also needs the read:confluence-user, read:page:confluence, write:page:confluence, read:comment:confluence, write:comment:confluence, read:space:confluence, search:confluence, read:attachment:confluence and write:attachment:confluence scopes.";
 const CONFLUENCE_UNEXPECTED_RESPONSE =
   "Confluence returned an unexpected response. Check the site URL.";
 
@@ -73,12 +76,14 @@ export async function confluenceRequest<T>(
     method: request.method,
     url: buildConfluenceUrl(ctx.connection.config, request.path, request.query),
     headers: {
+      ...request.headers,
       authorization: atlassianBasicAuthorization(
         ctx.connection.config.email,
         ctx.connection.secrets.apiToken
       ),
     },
     body: request.body,
+    timeoutMs: request.timeoutMs,
   });
   const failure = classifyFailure(response);
   if (failure) {

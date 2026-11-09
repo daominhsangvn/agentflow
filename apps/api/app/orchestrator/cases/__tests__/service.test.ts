@@ -1,6 +1,8 @@
 import {
   OrchestratorCaseStatus,
   OrchestratorDecisionStatus,
+  OrchestratorDocumentKind,
+  OrchestratorDraftOutcome,
   OrchestratorTaskStatus,
   OrchestratorTurnStatus,
 } from "@repo/api/src/types/orchestrator";
@@ -22,6 +24,20 @@ const mocks = vi.hoisted(() => ({
   turnUpdateMany: vi.fn(),
   userFindFirst: vi.fn(),
   cancel: vi.fn(),
+  loadCaseStats: vi.fn(),
+  listCaseDocuments: vi.fn(),
+}));
+
+vi.mock("@/app/orchestrator/cases/service/case-messages", () => ({
+  postCaseMessage: vi.fn(),
+}));
+
+vi.mock("@/app/orchestrator/cases/service/case-stats", () => ({
+  loadCaseStats: mocks.loadCaseStats,
+}));
+
+vi.mock("@/lib/orchestrator/case-documents", () => ({
+  listCaseDocuments: mocks.listCaseDocuments,
 }));
 
 vi.mock("@repo/database", () => {
@@ -56,6 +72,7 @@ const SUMMARY_ROW = {
   status: OrchestratorCaseStatus.Open,
   createdAt: D("2026-10-23T08:00:00.000Z"),
   updatedAt: D("2026-10-23T09:00:00.000Z"),
+  closedAt: null,
   _count: { conversations: 1, decisions: 2, tasks: 3 },
 };
 
@@ -90,6 +107,14 @@ const DETAIL_ROW = {
           text: "first",
           turnId: null,
           createdAt: D("2026-10-23T08:01:00.000Z"),
+          payload: {
+            toAgent: { computeTargetId: "r1", name: "runner-1" },
+            answers: [
+              { taskId: "task-1", questionId: "q1", answer: "A" },
+              { taskId: "task-1", questionId: "q2", answer: "B" },
+              { taskId: "task-2", questionId: "q1", answer: "C" },
+            ],
+          },
         },
       ],
       turns: [
@@ -149,11 +174,22 @@ const DETAIL_ROW = {
       fork: false,
       resumeTaskId: null,
       loopId: null,
+      openQuestionCount: 1,
       result: {
         reply: "answer",
         questions: [{ id: "q1", question: "Which?" }],
         error: "boom",
         waiting: "Waiting for runner-1.",
+        files: [
+          { name: "PRD.md", size: 1200, storageKey: "k/PRD.md", skipped: null },
+          {
+            name: "big.bin",
+            size: 9_000_000,
+            storageKey: null,
+            skipped: "too large",
+          },
+        ],
+        filesOmitted: 2,
       },
       createdAt: D("2026-10-23T08:03:30.000Z"),
       finishedAt: null,
@@ -165,6 +201,22 @@ const DETAIL_ROW = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.turnFindMany.mockResolvedValue([]);
+  mocks.listCaseDocuments.mockResolvedValue([]);
+  mocks.loadCaseStats.mockResolvedValue(
+    new Map([
+      [
+        CASE_ID,
+        {
+          taskCount: 4,
+          turnCount: 5,
+          costUsd: 0.5,
+          inputTokens: 100,
+          outputTokens: 50,
+          activeMs: 5_400_000,
+        },
+      ],
+    ])
+  );
   mocks.workflowFindFirst.mockResolvedValue({ id: "workflow-1" });
 });
 
@@ -200,7 +252,14 @@ describe("orchestratorCaseService.listForWorkflow", () => {
       pendingDecisionCount: 2,
       activeTaskCount: 3,
       turnRunning: true,
+      taskCount: 4,
+      turnCount: 5,
+      costUsd: 0.5,
+      inputTokens: 100,
+      outputTokens: 50,
+      activeMs: 5_400_000,
       updatedAt: "2026-10-23T09:00:00.000Z",
+      closedAt: null,
     });
   });
 });
@@ -233,13 +292,46 @@ describe("orchestratorCaseService.get", () => {
 
   it("maps the rows: oldest-first, task results, usage", async () => {
     mocks.caseFindFirst.mockResolvedValue(DETAIL_ROW);
+    mocks.listCaseDocuments.mockResolvedValue([
+      {
+        pageId: "page-1",
+        title: "Plan",
+        url: "https://x.atlassian.net/wiki/pages/1",
+        version: 3,
+        kind: OrchestratorDocumentKind.Plan,
+        space: "ENG",
+        attachments: ["shot.png"],
+        conversationId: "conv-1",
+        publishedAt: D("2026-10-23T09:00:00.000Z"),
+      },
+    ]);
 
     const detail = await orchestratorCaseService.get(ORG, CASE_ID);
 
+    expect(mocks.listCaseDocuments).toHaveBeenCalledWith(ORG, CASE_ID);
+    expect(detail?.documents).toEqual([
+      {
+        pageId: "page-1",
+        title: "Plan",
+        url: "https://x.atlassian.net/wiki/pages/1",
+        kind: OrchestratorDocumentKind.Plan,
+        version: 3,
+        attachments: ["shot.png"],
+        publishedAt: "2026-10-23T09:00:00.000Z",
+      },
+    ]);
     const conversation = detail?.conversations[0];
     expect(conversation?.messages.map((m) => m.text)).toEqual([
       "first",
       "second",
+    ]);
+    expect(conversation?.messages.map((m) => m.answeredTaskIds)).toEqual([
+      ["task-1", "task-2"],
+      [],
+    ]);
+    expect(conversation?.messages.map((m) => m.toAgentId)).toEqual([
+      "r1",
+      null,
     ]);
     expect(conversation?.turns.map((t) => t.id)).toEqual([
       "t-done",
@@ -258,9 +350,27 @@ describe("orchestratorCaseService.get", () => {
       error: "boom",
       runnerName: "runner-1",
       waiting: "Waiting for runner-1.",
+      filesOmitted: 2,
+      openQuestionCount: 1,
     });
+    expect(detail?.tasks[0]?.files).toEqual([
+      { name: "PRD.md", size: 1200, stored: true, skipped: null },
+      { name: "big.bin", size: 9_000_000, stored: false, skipped: "too large" },
+    ]);
     expect(detail?.workflow).toEqual({ id: "workflow-1", name: "Questions" });
     expect(detail?.waits[0]?.taskIds).toEqual(["task-1"]);
+  });
+});
+
+describe("orchestratorCaseService.getLoops", () => {
+  it("is null for an unknown or other-organization case", async () => {
+    mocks.caseFindFirst.mockResolvedValue(null);
+
+    expect(await orchestratorCaseService.getLoops(ORG, "nope")).toBeNull();
+    expect(mocks.caseFindFirst.mock.calls[0]?.[0].where).toEqual({
+      id: "nope",
+      organizationId: ORG,
+    });
   });
 });
 
@@ -274,11 +384,27 @@ describe("orchestratorCaseService.setStatus", () => {
 
     expect(mocks.caseUpdateMany).toHaveBeenCalledWith({
       where: { id: CASE_ID, organizationId: ORG },
-      data: { status: OrchestratorCaseStatus.Closed },
+      data: {
+        status: OrchestratorCaseStatus.Closed,
+        closedAt: expect.any(Date),
+      },
     });
     expect(result).toEqual({
       ok: true,
       value: { status: OrchestratorCaseStatus.Closed },
+    });
+  });
+
+  it("clears closedAt when reopening", async () => {
+    mocks.caseUpdateMany.mockResolvedValue({ count: 1 });
+
+    await orchestratorCaseService.setStatus(ORG, CASE_ID, {
+      status: OrchestratorCaseStatus.Open,
+    });
+
+    expect(mocks.caseUpdateMany).toHaveBeenCalledWith({
+      where: { id: CASE_ID, organizationId: ORG },
+      data: { status: OrchestratorCaseStatus.Open, closedAt: null },
     });
   });
 
@@ -359,5 +485,60 @@ describe("orchestratorCaseService.cancelTurn", () => {
     const result = await orchestratorCaseService.cancelTurn(ORG, "u1", "t1");
 
     expect(result).toEqual({ ok: false, error: Status.BadGateway });
+  });
+});
+
+describe("orchestratorCaseService.get decision drafts", () => {
+  const DECISION = {
+    id: "d1",
+    conversationId: "conv-1",
+    question: "Post it?",
+    status: OrchestratorDecisionStatus.Approved,
+    via: null,
+    decidedBy: "Ann",
+    comment: null,
+    decidedAt: D("2026-10-23T09:00:00.000Z"),
+    createdAt: D("2026-10-23T08:00:00.000Z"),
+  };
+
+  it("maps a stored draft and its result, dropping the turn id", async () => {
+    const draft = {
+      itemKey: "LD-9",
+      comment: { text: "Hello", replyTo: null, attachments: [] },
+      transitionName: "Planning",
+      turnId: "turn-1",
+    };
+    const draftResult = {
+      outcome: OrchestratorDraftOutcome.Done,
+      commentRef: "123",
+      transition: { from: "To Do", to: "Planning" },
+      error: null,
+      carriedOutAt: "2026-10-23T09:00:01.000Z",
+    };
+    mocks.caseFindFirst.mockResolvedValue({
+      ...DETAIL_ROW,
+      decisions: [{ ...DECISION, draft, draftResult }],
+    });
+
+    const detail = await orchestratorCaseService.get(ORG, CASE_ID);
+
+    expect(detail?.decisions[0]?.draft).toEqual({
+      itemKey: "LD-9",
+      comment: { text: "Hello", replyTo: null, attachments: [] },
+      transitionName: "Planning",
+    });
+    expect(detail?.decisions[0]?.draftResult).toEqual(draftResult);
+  });
+
+  it("maps invalid draft JSON to null", async () => {
+    mocks.caseFindFirst.mockResolvedValue({
+      ...DETAIL_ROW,
+      decisions: [{ ...DECISION, draft: { nope: 1 }, draftResult: "x" }],
+    });
+
+    const detail = await orchestratorCaseService.get(ORG, CASE_ID);
+
+    expect(detail?.decisions[0]?.draft).toBeNull();
+    expect(detail?.decisions[0]?.draftResult).toBeNull();
   });
 });

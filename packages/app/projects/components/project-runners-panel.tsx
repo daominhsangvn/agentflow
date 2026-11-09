@@ -1,8 +1,10 @@
 "use client";
 
+import { AgentKind } from "@repo/api/src/types/agent-fleet";
 import {
   PROJECT_RUNNERS_MAX,
   type ProjectRunner,
+  readPersonalAgentProjectKey,
 } from "@repo/api/src/types/project-runners";
 // Cross-slice: same retryable error block as the repositories list.
 import { QueryErrorMessage } from "@repo/app/integrations/components/query-error-message";
@@ -24,15 +26,15 @@ import {
 
 export type ProjectRunnersPanelProps = {
   projectId: string;
-  /** Org admins choose the runners; members see them (the API enforces it). */
+  /** Org admins choose the agents; members see them (the API enforces it). */
   isAdmin: boolean;
 };
 
 /**
- * Project → Repositories → Runners: the computers the project's agent loops
- * run on. Each runner needs the toolchains of every repository above; a new
- * loop goes to the least busy one online. Without runners, loops run on the
- * computer the user (or the workflow) picks.
+ * Project → Agents: the computers the project's agent loops run on. Each
+ * agent needs the toolchains of every repository; a new loop goes to the least
+ * busy one online. Without agents, loops run on the computer the user (or the
+ * workflow) picks.
  */
 export function ProjectRunnersPanel({
   projectId,
@@ -41,20 +43,21 @@ export function ProjectRunnersPanel({
   const runners = useProjectRunners(projectId);
   const save = useSaveProjectRunners(projectId);
   const [isAdding, setIsAdding] = useState(false);
-  const assigned = runners.data ?? [];
+  const assigned = runners.data?.runners ?? [];
+  const waiting = runners.data?.waiting ?? [];
   const saveIds = (runnerIds: string[]) => save.mutate({ runnerIds });
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h4 className="font-medium text-sm">Runners</h4>
+          <h4 className="font-medium text-sm">Agents</h4>
           <p className="text-muted-foreground text-xs">
-            Computers that run this project&apos;s agent loops. Each one needs
-            the toolchains of all the repositories above (for example .NET, Rust
-            and Node.js), so set them up alike; a new loop goes to the least
-            busy one online. Without runners, loops run on the computer each
-            user picks.
+            Agents are the computers that run this project&apos;s agent loops.
+            Each one needs the toolchains of all the repositories (for example
+            .NET, Rust and Node.js), so set them up alike; a new loop goes to
+            the least busy one online. Without agents, loops run on the computer
+            each user picks.
             {isAdmin ? null : " Only organization admins can change them."}
           </p>
         </div>
@@ -71,7 +74,7 @@ export function ProjectRunnersPanel({
             ) : (
               <>
                 <PlusIcon className="size-3.5" />
-                Add runner
+                Add agent
               </>
             )}
           </Button>
@@ -81,7 +84,7 @@ export function ProjectRunnersPanel({
         <QueryErrorMessage
           error={runners.error}
           onRetry={() => runners.refetch()}
-          title="Couldn't load the runners"
+          title="Couldn't load the agents"
         />
       ) : (
         <RunnerList
@@ -100,6 +103,15 @@ export function ProjectRunnersPanel({
           runners={assigned}
         />
       )}
+      {waiting.length > 0 ? (
+        <WaitingList
+          canAdd={isAdmin && assigned.length < PROJECT_RUNNERS_MAX}
+          isAdmin={isAdmin}
+          isBusy={save.isPending}
+          onAdd={(id) => saveIds([...assigned.map((runner) => runner.id), id])}
+          runners={waiting}
+        />
+      ) : null}
       {isAdmin && isAdding ? (
         <AddRunnerForm
           assignedIds={assigned.map((runner) => runner.id)}
@@ -108,8 +120,65 @@ export function ProjectRunnersPanel({
             saveIds([...assigned.map((runner) => runner.id), id]);
             setIsAdding(false);
           }}
+          projectKey={runners.data?.projectKey ?? null}
         />
       ) : null}
+    </div>
+  );
+}
+
+type WaitingListProps = {
+  runners: ProjectRunner[];
+  isAdmin: boolean;
+  canAdd: boolean;
+  isBusy: boolean;
+  onAdd: (id: string) => void;
+};
+
+function WaitingList({
+  runners,
+  isAdmin,
+  canAdd,
+  isBusy,
+  onAdd,
+}: Readonly<WaitingListProps>) {
+  return (
+    <div className="space-y-1">
+      <h5 className="font-medium text-xs">Waiting to be added</h5>
+      <ul className="divide-y rounded-md border border-dashed">
+        {runners.map((runner) => (
+          <li
+            className="flex items-center gap-2 px-3 py-2"
+            data-testid="project-runner-waiting-row"
+            key={runner.id}
+          >
+            <span
+              aria-hidden="true"
+              className={`size-2 shrink-0 rounded-full ${runner.isOnline ? "bg-green-500" : "bg-muted-foreground/40"}`}
+            />
+            <div className="min-w-0 flex-1">
+              <span className="block truncate font-medium text-sm">
+                {runner.machineName}
+              </span>
+              <span className="block truncate text-muted-foreground text-xs">
+                Personal Agent registered for this project
+              </span>
+            </div>
+            {isAdmin ? (
+              <Button
+                aria-label={`Add ${runner.machineName}`}
+                disabled={isBusy || !canAdd}
+                onClick={() => onAdd(runner.id)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Add
+              </Button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -118,7 +187,7 @@ type RunnerListProps = {
   runners: ProjectRunner[];
   isLoading: boolean;
   isBusy: boolean;
-  /** Null: the viewer cannot remove runners. */
+  /** Null: the viewer cannot remove agents. */
   onRemove: ((id: string) => void) | null;
 };
 
@@ -134,7 +203,7 @@ function RunnerList({
   if (runners.length === 0) {
     return (
       <p className="rounded-md border border-dashed p-3 text-muted-foreground text-sm">
-        No runners yet: loops run on the computer each user picks.
+        No agents yet: loops run on the computer each user picks.
       </p>
     );
   }
@@ -205,19 +274,23 @@ function ToolList({ tools }: Readonly<{ tools: Record<string, string> }>) {
 
 type AddRunnerFormProps = {
   assignedIds: string[];
+  projectKey: string | null;
   isBusy: boolean;
   onAdd: (id: string) => void;
 };
 
 function AddRunnerForm({
   assignedIds,
+  projectKey,
   isBusy,
   onAdd,
 }: Readonly<AddRunnerFormProps>) {
   const computers = useAssignableComputers(true);
   const [selectedId, setSelectedId] = useState("");
   const choices = (computers.data ?? []).filter(
-    (computer) => !assignedIds.includes(computer.id)
+    (computer) =>
+      !assignedIds.includes(computer.id) &&
+      belongsToProject(computer, projectKey)
   );
 
   if (computers.error) {
@@ -235,7 +308,7 @@ function AddRunnerForm({
   if (choices.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        No other computer is available. Connect a runner, or share a computer
+        No other computer is available. Connect an agent, or share a computer
         with the organization.
       </p>
     );
@@ -250,6 +323,9 @@ function AddRunnerForm({
           {choices.map((computer) => (
             <SelectItem key={computer.id} value={computer.id}>
               {computer.machineName}
+              {readPersonalAgentProjectKey(computer.capabilities)
+                ? " (personal)"
+                : ""}
               {computer.isOnline ? "" : " (offline)"}
             </SelectItem>
           ))}
@@ -267,8 +343,21 @@ function AddRunnerForm({
   );
 }
 
+/** A personal Agent can only join the project it registered for. */
+function belongsToProject(
+  computer: { capabilities?: unknown },
+  projectKey: string | null
+): boolean {
+  const key = readPersonalAgentProjectKey(computer.capabilities);
+  return key === null || key === projectKey;
+}
+
 function describeRunner(runner: ProjectRunner): string {
-  const parts = [runner.isOnline ? "Online" : "Offline", describeLoad(runner)];
+  const parts = [
+    runner.isOnline ? "Online" : "Offline",
+    runner.kind === AgentKind.Personal ? "Personal" : "Automatic",
+    describeLoad(runner),
+  ];
   if (runner.ownerName) {
     parts.push(runner.ownerName);
   }

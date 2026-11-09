@@ -45,6 +45,8 @@ export const TIMEOUT_LOOPS_INTERVAL_MS = 5 * 60_000;
 export const STALE_SESSIONS_INTERVAL_MS = 60 * 60_000;
 /** Daily: auto runners re-read AGENTFLOW.md from the project's toolkit. */
 export const RUNNER_CAPABILITIES_INTERVAL_MS = 24 * 60 * 60_000;
+/** Daily: workflow events and inbound deliveries older than 30 days are deleted. */
+export const INBOUND_HISTORY_PRUNE_INTERVAL_MS = 24 * 60 * 60_000;
 
 const LOG_PREFIX = "[self-hosted-cron]";
 
@@ -126,7 +128,8 @@ export function startSelfHostedCronRunner(
  * Jobs and intervals: workflows every WORKFLOW_TICK_SECONDS, loop reaper every
  * 5 min, and the stale-session reaper hourly (agent sessions whose machine
  * stopped reporting before it sent their end), and the runner capabilities
- * refresh daily (AGENTFLOW.md read from the toolkit).
+ * refresh daily (AGENTFLOW.md read from the toolkit), and the inbound history
+ * prune daily (workflow events and deliveries older than 30 days).
  */
 export function resolveSelfHostedCronJobs(
   env: SelfHostedCronEnv
@@ -141,6 +144,10 @@ export function resolveSelfHostedCronJobs(
     {
       path: "/cron/refresh-runner-capabilities",
       intervalMs: RUNNER_CAPABILITIES_INTERVAL_MS,
+    },
+    {
+      path: "/cron/prune-inbound-history",
+      intervalMs: INBOUND_HISTORY_PRUNE_INTERVAL_MS,
     },
   ];
 }

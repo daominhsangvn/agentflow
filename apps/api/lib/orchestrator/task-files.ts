@@ -15,6 +15,7 @@ import {
   readTaskResult,
   type TaskFile,
   type TaskInputFile,
+  type TaskPageInput,
 } from "./task-result";
 
 /**
@@ -147,7 +148,8 @@ export async function resolveTaskInputs(
 
 /** Reads the stored input files again, as the step's `inputs`. */
 export async function loadTaskInputs(
-  inputs: TaskInputFile[]
+  inputs: TaskInputFile[],
+  pageInputs: TaskPageInput[] = []
 ): Promise<Result<LoopStepInputFile[], string>> {
   const loaded: LoopStepInputFile[] = [];
   for (const input of inputs) {
@@ -162,7 +164,48 @@ export async function loadTaskInputs(
       content: content.value.text,
     });
   }
+  for (const page of pageInputs) {
+    loaded.push({ name: inputFileName(page.name), content: page.content });
+  }
   return Result.ok(loaded);
+}
+
+/** Checks the files of earlier tasks and the Confluence pages fit one step's inputs together. */
+export function checkInputsFit(
+  files: TaskInputFile[],
+  pages: TaskPageInput[]
+): Result<null, string> {
+  if (files.length + pages.length > LOOP_STEP_INPUTS_MAX) {
+    return Result.err(
+      `A task takes at most ${LOOP_STEP_INPUTS_MAX} files from earlier tasks and pages together.`
+    );
+  }
+  const names = new Set<string>();
+  for (const name of [
+    ...files.map((file) => file.name),
+    ...pages.map((page) => page.name),
+  ]) {
+    const cleaned = inputFileName(name);
+    if (names.has(cleaned)) {
+      return Result.err(
+        `Two files would be named "${cleaned}" in the task's inputs.`
+      );
+    }
+    names.add(cleaned);
+  }
+  const tooLarge = pages.find((page) => page.size > LOOP_STEP_FILE_BYTES_MAX);
+  if (tooLarge) {
+    return Result.err(
+      `"${tooLarge.title}" is too large to hand to a task: ${LOOP_STEP_FILE_BYTES_MAX} bytes at most.`
+    );
+  }
+  const total = [...files, ...pages].reduce((sum, file) => sum + file.size, 0);
+  if (total > LOOP_STEP_INPUTS_TOTAL_BYTES_MAX) {
+    return Result.err(
+      `The files are too large to hand to a task: ${LOOP_STEP_INPUTS_TOTAL_BYTES_MAX} bytes at most together.`
+    );
+  }
+  return Result.ok(null);
 }
 
 /** The POSIX basename with every character outside `[\w.-]` replaced by `_`. */

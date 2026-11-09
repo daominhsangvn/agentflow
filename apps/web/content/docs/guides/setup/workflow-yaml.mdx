@@ -1,0 +1,231 @@
+---
+title: "Workflow YAML"
+description: "Every key of a workflow, a trigger, the agent team (agent) and an action, with defaults, limits and what each one changes in how the Agents work; the run events and the template variables."
+---
+
+A workflow is written as YAML in Workflows → New workflow, or a workflow's **Configuration** tab. The editor suggests keys and values (Ctrl+Space anywhere), underlines problems as you type, and lists them by line on save. The **Configuration guide** above the editor documents the keys of your organization's connections; **Actions in run order** below it shows what will run on each event.
+
+```yaml
+name: Implement Jira requirements
+description: BA assigns a ready story to the bot
+enabled: true
+project: LeaveDesk
+triggers:
+  - connection: jira
+    type: jira.issue_conditions
+    config:
+      match: all
+      labels: [ready-for-dev]
+      projectKeys: [LD]
+agent:
+  runAs: admin@agentflow.local
+  runner: runner-1
+  mode: plan_and_execute
+  stopOnOpenQuestions: true
+  titleTemplate: "{{source.key}}: {{source.title}}"
+  instructions: |
+    Use npm. Run npm test before you finish.
+actions:
+  - on: workflow.triggered
+    type: jira.transition_issue
+    config:
+      transitionName: In Progress
+  - on: workflow.completed
+    type: local_git.create_pull_request
+  - on: execute.completed
+    instruction: |
+      Summarize what was implemented for {{source.key}} (files, tests, the
+      pull request {{pr.url}}) and post it as one comment on the issue.
+    connections:
+      source: [comment]
+```
+
+**Names, not ids.** Projects, connections and Agents are written by name (exact match first, then ignoring case), the run-as user by email. An id also works, and is needed when two entries share a name. Unknown keys are warnings that name the closest key; errors block the save.
+
+## Top level
+
+| Key | Type | Default | What it does |
+|---|---|---|---|
+| `name` | text, required, up to 120 | | How the workflow is listed. |
+| `description` | text, up to 2000 | | What the workflow is for. An orchestrated workflow's description is also told to the Orchestrator Agent on every turn. |
+| `enabled` | `true` or `false` | `true` | Triggers start runs (or reach the orchestrator) only while it is enabled. |
+| `project` | project name or id, required | | The project the runs belong to: imported Issues, PRDs and plans are created in it, and connection keys are its. |
+| `triggers` | list, 1 to 10 | | Events that start a run (below). An event that matches a run waiting for answers resumes that run instead. |
+| `agent` | mapping, required | | How the agent team works on each item (below). |
+| `actions` | list, up to 20 | none | What runs on each run event (below). Without actions the run changes nothing outside AgentFlow. |
+| `preActions`, `postActions` | lists | | Older forms of `actions`; still read, with a warning. |
+
+## `triggers` items
+
+| Key | Type | Default | What it does |
+|---|---|---|---|
+| `connection` | project connection key, or `http`, required | | Whose events start runs. `http` is the workflow's own signed HTTPS URL. |
+| `type` | trigger type, required | | One of the types the connection's provider offers, e.g. `jira.issue_status_changed`. All types and their options: [Triggers and actions](/docs/guides/setup/triggers-and-actions). |
+| `config` | mapping | the type's defaults | The type's filters: `projectKeys`, `labels`, `from` and `to` statuses, ... |
+| `project` | project name or id | the workflow's | The trigger's own project, when it differs: its connection key is looked up there and its runs belong to it. |
+| `enabled` | `true` or `false` | `true` | `false` keeps the trigger in the YAML but starts nothing from it. |
+
+## `agent`: the agent team
+
+These keys decide **which Agent works, how, and on what**.
+
+| Key | Type | Default | What it does |
+|---|---|---|---|
+| `runner` | Agent name or id, required | | The Agent the loops run on: one the run-as user owns, or one shared with the organization. When the project has Agents, this must be one of them (saving refuses another; the editor suggests only those). With `runners:` rules, the Agent when no rule matches. **Orchestrated**: the Orchestrator Agent's computer. |
+| `runners` | list of `{ runner, condition }`, up to 50 | none | **Runner rules**: once per run, when the item is imported, the first rule whose condition holds names the Agent, which must be a project Agent when the project has any (e.g. the assignee's personal Agent). The choice is kept for every step and later cycle of the run. Not allowed in orchestrated mode. |
+| `runAs` | user email, name or id | whoever saves a new workflow | The commit author and the concurrency budget of the loops. |
+| `mode` | `plan`, `plan_and_execute` or `orchestrated` | `plan_and_execute` | `plan`: write the implementation plan only. `plan_and_execute`: plan, then implement and push a branch to every repository changed (a create pull request action opens the pull requests). A **process** replaces both: its steps say what runs. `orchestrated`: start no run; every request goes to the workflow's Orchestrator Agent, which follows `instructions`. |
+| `stopOnOpenQuestions` | `true` or `false` | `true` | Without a process: when the plan has open questions, wait for people (`input.needed`). `false` implements the plan as it is. A process step's `questions:` replaces it. |
+| `prd` | mapping | none | Which items are imported as a **PRD** instead of an Issue (below). |
+| `titleTemplate` | text with variables, up to 300 | `{{source.key}}: {{source.title}}` | Title of the imported PRD or Issue. |
+| `instructions` | text, up to 16000 characters (the editor warns above 8000) | none | Run-based: appended to every imported PRD or Issue under "Additional instructions", so every loop reads it. **Orchestrated**: the Orchestrator Agent's **rules**, sent with every turn. |
+| `repository` | `{ fullName, branch }` | every project repository | A repository of the team pool to use instead of the project's repositories: `fullName` (`owner/name`) and `branch` (the base branch). |
+| `process` | mapping | the project's process | The workflow's own process: `toolkit` and `steps`, written like Project → Process ([Process YAML](/docs/guides/setup/process-yaml)). Without one, the project's process; a project without one runs `mode`. Not allowed in orchestrated mode. |
+| `orchestrator` | mapping | the defaults | Orchestrated mode only: how the orchestrator takes a thread's messages (below). |
+
+### `agent.runners`: runner rules
+
+```yaml
+agent:
+  runner: runner-1                     # when no rule matches
+  runners:
+    - runner: an-PRO-1
+      condition: source.assignee_email == "an@example.com"
+    - runner: runner-qc
+      condition: source.status == "Testing" && source.labels contains "e2e"
+```
+
+A condition compares a field with a quoted value using `==`, `!=`, `contains` (a list field has the value, a text field contains it) or `in ["a", "b"]`, combined with `&&` (`and`), `||` (`or`), `!` (`not`) and parentheses, up to 1000 characters. Case and surrounding spaces are ignored; a field the item lacks is empty.
+
+| Field | Holds |
+|---|---|
+| `source.key` | Item key, e.g. `LD-6` |
+| `source.title` | Item title |
+| `source.type` | Item type, e.g. Story, Bug |
+| `source.status` | Item status |
+| `source.priority` | Item priority |
+| `source.labels` | Item labels (a list) |
+| `source.assignee`, `source.reporter` | Display names |
+| `source.assignee_email`, `source.reporter_email` | Emails, where the provider shares them (Jira only per the user's profile visibility: match by name when it hides them) |
+| `source.provider` | `jira`, `azure_devops`, ... |
+
+### `agent.prd`: PRD or Issue
+
+```yaml
+agent:
+  prd:
+    instruction: PRD when the description has functional requirements and acceptance criteria; a ticket that only links an existing PRD is an Issue.
+```
+
+| Key | Type | What it does |
+|---|---|---|
+| `instruction` | text, up to 4000 | When an item is a PRD, in plain language. Once per run, the run's Agent reads it with the item's type, labels, status, priority, title and description (Claude Code without tools) and answers PRD or Issue with a reason, shown on the run page. Without an instruction every item is an Issue; when the Agent cannot answer within 15 minutes the item is an Issue and the run page says why. Later cycles keep the decision. |
+
+### `agent.orchestrator`
+
+| Key | Type | Default | What it does |
+|---|---|---|---|
+| `concurrency` | `supersede` or `queue` | `supersede` | A message arriving while a turn of the same thread runs: `supersede` stops that turn (its writes are refused from then on) and the next turn answers all messages; `queue` lets it finish and answers the new messages next. Different threads always run in parallel. |
+| `debounceSeconds` | 0 to 600 | `20` | Quiet time after the last message of a thread before a turn starts, so a burst (a status flipped twice, a comment and its edit) is one turn. `0` starts at once. |
+| `turnTimeoutMinutes` | 1 to 60 | `10` | A turn running longer is stopped. |
+| `cancelOn` | list of `status_changed`, `label_added`, `label_removed` | `[status_changed, label_removed]` | Which ticket changes let a turn cancel tasks (`task_cancel`) started for the status or label the ticket left. `[]`: the orchestrator never cancels. A comment, question or reply never cancels. |
+| `mentionOnly` | `true` or `false` | `false` | A thread reply that no trigger matched (no mention of the Agent) does not wake a turn. See [Side conversations](/docs/guides/recipes/side-conversations). |
+| `caseLookup` | `true` or `false` | `false` | Turns the `case_lookup` tool on, which reads another item's case in the project. |
+| `caseHandoff` | `true` or `false` | `false` | Turns the `case_handoff` tool on, which sends an approved summary to another item's case. |
+| `approvals` | `optional` or `required` | `optional` | `required`: `reply` / `edit_reply` on the thread and `source_item_*` writes are refused; a comment or a move reaches the ticket only as the `draft` of an approved `request_decision`, which AgentFlow carries out only after an organization admin presses Approve. `request_decision` with `where: thread` is refused, and `record_decision` cannot approve a draft (a rejection still works). |
+| `connections` | mapping of connection key to a list of operations (or `read`) | `{}` | What the orchestrator may write. `source` (the ticket the conversation is about): `comment`, `attach` (needs `comment`), `transition`, `label`, `link`. A Confluence connection key: `read` or `[publish]`. `pull_requests`: `[open]`. The default `{}` only reads the ticket. Checked at save (a trigger's connection must offer each `source` operation; a Teams thread takes only `comment`) and on every tool call. Only with `agent.mode: orchestrated`. |
+
+See [Orchestrator](/docs/guides/setup/orchestrator) for the rules and tools.
+
+## `actions` items
+
+Each action has `on` and either an `instruction` or a `type` with its `config`.
+
+| Key | Type | Default | What it does |
+|---|---|---|---|
+| `on` | run event, or a list of them, required | | When it runs. `workflow.triggered` runs before the agent team and must stand alone (not in a list). |
+| `instruction` | text with variables, up to 4000 | | What an Agent does, in plain words: "Move the issue to In Progress", "Summarize the change as one comment". It reads the run's plan folder and only reads unless `connections:` grants writes. |
+| `connections` | grant map | read the source item only | Instructions only: what its Agent may read and write ([Connection grants](/docs/guides/setup/connection-grants)). |
+| `type` | action type | | Instead of an instruction: a provider action (`jira.add_comment`, `local_git.create_pull_request`, ...) or `agentflow.email`. All types: [Triggers and actions](/docs/guides/setup/triggers-and-actions). |
+| `config` | mapping | the type's defaults | The type's options; variables work in text options. An instruction has no `config`. |
+| `connection` | project connection key, or `http` | chosen by the run | Typed actions only. Left out: an action on the source item works on the connection the run came from; a create pull request action on every connection holding a pushed repository; any other type on the project's only connection offering it (with several, saving asks you to name one). With a key, a source item action runs only for runs from that connection. |
+| `continueOnError` | `true` or `false` | `false` | `workflow.triggered` only: go on to the agent team when this action fails. Otherwise a failed `workflow.triggered` action fails the run. |
+| `enabled` | `true` or `false` | `true` | `false` keeps the action but never runs it. |
+
+**Order.** Actions run one at a time in list order, also when one step reports several events. Put the pull request action before an instruction that links `{{pr.url}}`. An action still waiting (its retry or its agent) holds the ones after it.
+
+**How an instruction runs.** A short Claude Code session (about 20 to 60 seconds) on the run's Agent reads the run's plan folder: the PRD (`prd.md`), the plan (`plan.md`, `plan.json`), what implementation did (`execution-result.json`) and the repositories. What exists depends on the event. It acts through the integration tools its grant gives, at most 5 writes per attempt; AgentFlow carries the writes out. Once a write succeeded the instruction is not retried; a failed one is retried after 30 seconds, 2, 10 and 30 minutes. Its note, tool calls and cost are on the run page under Actions.
+
+## Run events
+
+| Event | When it fires |
+|---|---|
+| `workflow.triggered` | A trigger fired (or a waiting run resumed) and the item was imported; runs before the agent team. |
+| `workflow.started` | The agent team was launched (first cycle only). |
+| `plan.started` | A plan loop was launched. |
+| `plan.completed` | The plan loop completed; the plan has content. |
+| `input.needed` | The run waits for people: open questions of the plan or a step, an approval, a review round. |
+| `execute.started` | The implement loop, or a process step that pushes, was launched. |
+| `execute.completed` | It completed. |
+| `workflow.completed` | Plan mode: the plan is ready. Otherwise: the run finished. |
+| `workflow.failed` | The run failed (also when an approval is rejected). Cancelling a run on the run page fires no event. |
+
+## Template variables
+
+`{{variable}}` works in action text options, instructions and `titleTemplate`. A variable without a value renders empty.
+
+| Variable | Value | Has a value |
+|---|---|---|
+| `summary` | A ready-made Markdown message for the event (the plan link, the questions, the pull request, the failure) | every event |
+| `event`, `run.status`, `run.url`, `workflow.name` | The event, the run's status and link, the workflow | every event |
+| `source.provider`, `source.key`, `source.title`, `source.url` | The item that started the run | every event |
+| `feature.url` | The imported Issue or PRD | once imported |
+| `plan.url` | The implementation plan | once imported; written at `plan.completed` |
+| `plan.excerpt`, `plan.openQuestions` | The start of the plan; open questions, one per line | from `plan.completed` |
+| `pr.url`, `pr.number`, `pr.branch` | The first pull request | once a create pull request action opened one |
+| `pr.urls` | Every pull request of the run, one per line | same |
+| `repository.name`, `repository.url`, `repository.baseBranch` | The first repository the agent team pushed to | from `execute.started` |
+| `repository.branch` | The branch pushed | from `execute.completed` |
+| `error.message` | The failure reason | `workflow.failed` |
+| `step.name`, `step.questions` | The process step the run is in; its questions | with a process |
+| `reply` | The latest `reply:` file a process step wrote | once that step ended |
+| `steps.<id>.reply` | One step's reply file, e.g. `{{steps.draft.reply}}` | once that step ended |
+| `steps.<id>.document.url`, `steps.<id>.document.title` | The document a step published | once that step ended |
+| `releaseNotes`, `releaseNotes.url` | The release notes an implement step wrote, and their document | from `execute.completed` of that step |
+
+Agent step instructions in a process have their own variables (`{{issue.key}}`, `{{issue.body}}`, ...): see [Process YAML](/docs/guides/setup/process-yaml#instruction-variables).
+
+## Orchestrated workflows
+
+`agent.mode: orchestrated` keeps the triggers but starts no run: each request goes to the workflow's Orchestrator Agent. Saving refuses `agent.process` and `agent.runners`. Actions never run, since there are no runs: the orchestrator writes through its own tools.
+
+```yaml
+name: LeaveDesk · Questions
+description: People move LD tickets through the flow and ask questions in comments; the orchestrator runs the BA, Dev and QC Agents.
+project: LeaveDesk
+triggers:
+  - connection: jira
+    type: jira.issue_mentioned
+    config:
+      projectKeys: [LD]
+  - connection: jira
+    type: jira.issue_status_changed
+    config:
+      projectKeys: [LD]
+agent:
+  runAs: admin@agentflow.local
+  runner: runner-orch
+  mode: orchestrated
+  orchestrator:
+    concurrency: supersede
+    debounceSeconds: 20
+    turnTimeoutMinutes: 10
+    cancelOn: [status_changed, label_removed]
+    connections:
+      source: [comment, attach]          # what it may write on the ticket
+      confluence: [publish]              # a project connection key: read or [publish]
+      pull_requests: [open]
+  instructions: |
+    ## Roles
+    ...
+```

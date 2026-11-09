@@ -45,6 +45,7 @@ const FINISH_PUSH_RE = /finish: push/;
 const ONE_AT_A_TIME_RE = /one loop at a time/;
 const EXCLUDE_LINE_RE = /^\.agentflow-ai\/$/m;
 const QUESTIONS_FILE_RE = /questions\.json/;
+const COMMENT_ID_RE = /commentId/;
 const AGENTFLOW_WORKDIR_RE = /\$AGENTFLOW_WORKDIR/;
 const BYPASS_RE = /bypassPermissions/;
 const NO_TERMINAL_RE = /do not ask in the terminal/;
@@ -279,10 +280,13 @@ describe("a personal step's agent", () => {
     assert.ok(text.includes(path.join(workDir, "questions.json")));
     assert.match(text, AGENTFLOW_WORKDIR_RE);
     assert.match(text, NO_TERMINAL_RE);
-    assert.doesNotMatch(
-      personalStepInstructions(step({ askQuestions: false }), workDir),
-      QUESTIONS_FILE_RE
+    assert.match(text, COMMENT_ID_RE);
+    const quiet = personalStepInstructions(
+      step({ askQuestions: false }),
+      workDir
     );
+    assert.doesNotMatch(quiet, QUESTIONS_FILE_RE);
+    assert.doesNotMatch(quiet, COMMENT_ID_RE);
   });
 
   test("gets its instructions in the system prompt and no AgentFlow integration tools", async () => {

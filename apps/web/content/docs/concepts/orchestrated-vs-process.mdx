@@ -1,0 +1,34 @@
+---
+title: "Orchestrated or run-based"
+description: "The two ways to run a workflow: an Orchestrator Agent following your rules, or a fixed process of steps."
+---
+
+A trigger can start a workflow in two ways.
+
+| | Run-based (a process, `plan`, `plan_and_execute`) | Orchestrated (`agent.mode: orchestrated`) |
+|---|---|---|
+| A trigger | Starts a **run** | Sends a **message** to the Orchestrator Agent |
+| Next step decided by | The process, in the order you wrote it | The Orchestrator Agent, following your rules |
+| Shows up as | A run under **Runs** | A case under **Cases** |
+| Writes outside AgentFlow | `actions:` and the `connections:` grants of steps | The orchestrator's tools |
+
+The full comparison is in the [Setup overview](/docs/guides/setup#two-ways-to-run-a-workflow).
+
+## Choose run-based when
+
+- One trigger always leads to the same pipeline, such as "label `ready-for-dev` → plan → implement → pull request".
+- You want the steps, approvals and retries written down once and the same every time.
+
+Write it with [Process YAML](/docs/guides/setup/process-yaml).
+
+## Choose orchestrated when
+
+- A ticket moves through statuses and the work depends on the status.
+- People ask questions in comments and expect answers in the thread.
+- Several Agents work at the same time, or work must go back a status.
+
+Write it with the [Orchestrator guide](/docs/guides/setup/orchestrator) and [Writing orchestrator rules](/docs/guides/recipes/orchestrator-rules).
+
+## An example
+
+LeaveDesk started with four run-based workflows (BA, Dev, QC design and QC run), each started by a label. It moved to one orchestrated workflow that follows the Jira status, so the ticket's whole life is one case. Both versions are described in the [LeaveDesk example](/docs/guides/setup/leavedesk-example).

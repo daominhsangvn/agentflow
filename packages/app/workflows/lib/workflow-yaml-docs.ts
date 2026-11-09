@@ -16,6 +16,7 @@ import { CONNECTIONS_GRANT_DOC } from "@repo/app/integrations/lib/connection-gra
 import {
   BUILT_IN_HTTP_REFERENCE,
   BUILT_IN_HTTPS_CALL_TYPE,
+  WORKFLOW_INSTRUCTIONS_WARN_LENGTH,
 } from "./workflow-yaml-schema";
 
 /**
@@ -123,12 +124,12 @@ export const WORKFLOW_YAML_KEY_DOCS: Record<string, WorkflowYamlKeyDoc> = {
     info: `Title of the imported PRD or Issue. Default: ${WORKFLOW_DEFAULT_TITLE_TEMPLATE}.`,
   },
   instructions: {
-    detail: `text, up to ${WORKFLOW_INSTRUCTIONS_MAX} characters`,
-    info: 'Appended to every imported PRD or Issue under "Additional instructions". Orchestrated: the orchestrator\'s rules, sent with every turn.',
+    detail: `text, up to ${WORKFLOW_INSTRUCTIONS_MAX} characters (warning above ${WORKFLOW_INSTRUCTIONS_WARN_LENGTH})`,
+    info: 'Appended to every imported PRD or Issue under "Additional instructions". Orchestrated: the orchestrator\'s rules, sent with every turn. Long rules cost tokens on every turn: keep them to the process.',
   },
   orchestrator: {
     detail: "mapping, orchestrated mode",
-    info: "How the orchestrator takes a thread's messages: concurrency, debounceSeconds, turnTimeoutMinutes and cancelOn. Left out: the defaults.",
+    info: "How the orchestrator takes a thread's messages: concurrency, debounceSeconds, turnTimeoutMinutes, connections (what it may write), cancelOn, and the opt-in switches mentionOnly, caseLookup and caseHandoff, and approvals. Left out: the defaults.",
   },
   process: {
     detail: "mapping",
@@ -386,9 +387,29 @@ export const WORKFLOW_ORCHESTRATOR_KEY_DOCS: Record<
     detail: `1 to ${ORCHESTRATOR_TURN_TIMEOUT_MINUTES_MAX}, default ${ORCHESTRATOR_TURN_TIMEOUT_MINUTES_DEFAULT}`,
     info: "A turn running longer than this is stopped.",
   },
+  connections: {
+    detail: "mapping, default {}",
+    info: "What the orchestrator may write: source: [comment, attach, transition, label, link] on the case's ticket, a Confluence connection key: read or [publish], pull_requests: [open]. Default {}: it only reads the ticket. A tool not granted is refused and recorded on the case.",
+  },
   cancelOn: {
     detail:
       "list of status_changed | label_added | label_removed, default [status_changed, label_removed]",
     info: "Which ticket changes may cancel the tasks of the status or label the ticket left (task_cancel). [] means the orchestrator never cancels. A comment, question or reply never cancels; they are not options.",
+  },
+  mentionOnly: {
+    detail: "true | false, default false",
+    info: "A reply in a thread the orchestrator talks in wakes it only when it mentions the bot (or replies to the bot's message). Other replies are not recorded; the orchestrator reads the thread when it needs it.",
+  },
+  caseLookup: {
+    detail: "true | false, default false",
+    info: "Adds case_lookup: the orchestrator may read the case of another item of this project (read only), e.g. a Teams thread asking about LD-6.",
+  },
+  caseHandoff: {
+    detail: "true | false, default false",
+    info: "Adds case_handoff: after people approve a summary (request_decision), the orchestrator sends it to another item's case, whose orchestrator acts on it.",
+  },
+  approvals: {
+    detail: "optional | required, default optional",
+    info: "required: reply/edit_reply on the thread and source_item_transition/label/link are refused; the orchestrator puts the comment or move in request_decision's draft and AgentFlow posts it once an admin presses Approve. request_decision where: thread is refused, and record_decision cannot approve a draft (rejecting works).",
   },
 };

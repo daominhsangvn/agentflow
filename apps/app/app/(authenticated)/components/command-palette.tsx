@@ -9,7 +9,12 @@ import {
   LABS_NAV_SECTION_FEATURE_FLAG_KEY,
 } from "@repo/app/shared/lib/feature-flags";
 import {
+  CASES_NAV_PATH,
+  CONNECTIONS_NAV_PATH,
+  HOME_NAV_PATH,
   PRIMARY_NAV_DESTINATIONS,
+  RUNS_NAV_PATH,
+  SKILLS_CATALOG_NAV_PATH,
   WORKFLOWS_NAV_PATH,
 } from "@repo/app/shared/lib/primary-nav-destinations";
 import {
@@ -22,7 +27,14 @@ import {
 } from "@repo/design-system/components/ui/command";
 import { useNavigation } from "@repo/navigation/use-navigation";
 import { useOrgPath } from "@repo/navigation/use-org-path";
-import { BarChart3, type LucideIcon } from "lucide-react";
+import {
+  BarChart3,
+  BlocksIcon,
+  CalendarClockIcon,
+  CopyCheckIcon,
+  FileTextIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 type PaletteCommand = {
@@ -51,10 +63,17 @@ type PaletteCommand = {
 // only these intent keywords are palette-specific — a path or gating change in
 // the registry can no longer split cmd+k from the sidebar.
 const PALETTE_KEYWORDS_BY_PATH: Record<string, string[]> = {
-  "/dashboard": ["home", "overview"],
-  "/my-tasks": ["tasks", "assigned"],
+  [HOME_NAV_PATH]: ["dashboard", "overview", "stats"],
+  [CASES_NAV_PATH]: ["orchestrator", "tickets"],
+  [RUNS_NAV_PATH]: ["workflow runs", "process"],
   "/sessions": ["agent", "runs"],
-  "/documents": ["docs"],
+  [CONNECTIONS_NAV_PATH]: [
+    "integrations",
+    "jira",
+    "azure devops",
+    "teams",
+    "webhook",
+  ],
   [WORKFLOWS_NAV_PATH]: [
     "automation",
     "trigger",
@@ -86,6 +105,35 @@ const PRIMARY_NAV_COMMANDS: PaletteCommand[] = PRIMARY_NAV_DESTINATIONS.map(
 // Labs container flag — the palette must not stay a back door into a section
 // the sidebar has hidden and the route now 404s.
 const PALETTE_EXTRA_COMMANDS: PaletteCommand[] = [
+  {
+    id: "routines",
+    title: "Routines",
+    icon: CalendarClockIcon,
+    href: "/routines",
+    featureFlag: ROUTINES_FEATURE_FLAG_KEY,
+    containerFlag: LABS_NAV_SECTION_FEATURE_FLAG_KEY,
+  },
+  {
+    id: "skills-catalog",
+    title: "Skills catalog",
+    icon: BlocksIcon,
+    href: SKILLS_CATALOG_NAV_PATH,
+    containerFlag: LABS_NAV_SECTION_FEATURE_FLAG_KEY,
+  },
+  {
+    id: "documents",
+    title: "Documents",
+    icon: FileTextIcon,
+    href: "/documents",
+    keywords: ["docs"],
+  },
+  {
+    id: "my-tasks",
+    title: "My Tasks",
+    icon: CopyCheckIcon,
+    href: "/my-tasks",
+    keywords: ["tasks", "assigned"],
+  },
   {
     id: "insights",
     title: "Insights",

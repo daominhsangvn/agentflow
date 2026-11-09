@@ -1,0 +1,55 @@
+// Element kinds, tags and deployment nodes of the AgentFlow architecture model.
+
+specification {
+  element actor {
+    style {
+      shape person
+      color green
+    }
+  }
+
+  element external {
+    style {
+      color muted
+    }
+  }
+
+  element system {
+    style {
+      color primary
+    }
+  }
+
+  element container {
+    style {
+      color primary
+    }
+  }
+
+  element component {
+    style {
+      color sky
+    }
+  }
+
+  element agent {
+    notation "LLM agent (Claude Code)"
+    style {
+      color amber
+    }
+  }
+
+  element datastore {
+    style {
+      shape storage
+      color slate
+    }
+  }
+
+  tag llm
+  tag deterministic
+
+  deploymentNode environment
+  deploymentNode server
+  deploymentNode runner
+}

@@ -118,7 +118,7 @@ export const jiraIssueLabeledTrigger = defineTrigger<
   key: JiraTriggerType.IssueLabeled,
   displayName: "Label added to or removed from an issue",
   description:
-    "Starts a run when the label is added to a Jira issue (or an issue is created with it), removed from it, or either, per the change option. Needs webhook delivery (polling only detects assignments); a removal is only seen through webhooks.",
+    'Starts a run when the label is added to a Jira issue (or an issue is created with it), removed from it, or either, per the change option. Needs webhook delivery, or Poll with poll scope "Every change".',
   configSchema: jiraIssueLabeledConfigSchema,
   configFields: [
     {
@@ -157,7 +157,7 @@ export const jiraIssueMentionedTrigger = defineTrigger<
   key: JiraTriggerType.IssueMentioned,
   displayName: "Bot mentioned on an issue",
   description:
-    "Starts a run when a comment, or the description of an issue, mentions the bot account with @. Needs webhook delivery with the Comment created / updated events.",
+    'Starts a run when a comment, or the description of an issue, mentions the bot account with @. Needs webhook delivery, or Poll with poll scope "Every change". With webhooks, select the Comment created / updated events.',
   configSchema: jiraIssueAssignedConfigSchema,
   configFields: jiraIssueAssignedTrigger.configFields,
   manualRun: { label: "Issue key", placeholder: "PROJ-123" },
@@ -299,7 +299,7 @@ export const jiraIssueConditionsTrigger = defineTrigger<
   key: JiraTriggerType.IssueConditions,
   displayName: "Issue matches conditions (assigned, label, mention)",
   description:
-    "Starts a run when an issue is assigned to the bot, gets one of the labels and/or mentions the bot, combined with AND (all) or OR (any): e.g. assigned to the bot AND labeled ai-ready, in either order. Labels and mentions need webhook delivery; polling only sees issues assigned to the bot.",
+    'Starts a run when an issue is assigned to the bot, gets one of the labels and/or mentions the bot, combined with AND (all) or OR (any): e.g. assigned to the bot AND labeled ai-ready, in either order. Labels and mentions: needs webhook delivery, or Poll with poll scope "Every change".',
   configSchema: jiraIssueConditionsConfigSchema,
   configFields: [
     TRIGGER_CONDITION_MATCH_FIELD,
@@ -387,7 +387,7 @@ export const jiraIssueStatusChangedTrigger = defineTrigger<
   key: JiraTriggerType.IssueStatusChanged,
   displayName: "Issue status changed",
   description:
-    "Starts when a person moves a Jira issue to another status (from / to filters, case-insensitive names). Needs webhook delivery with the Issue updated event; the bot's own transitions are ignored.",
+    'Starts when a person moves a Jira issue to another status (from / to filters, case-insensitive names). Needs webhook delivery with the Issue updated event, or Poll with poll scope "Every change"; the bot\'s own transitions are ignored.',
   configSchema: jiraIssueStatusChangedConfigSchema,
   configFields: [
     {

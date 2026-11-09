@@ -7,7 +7,7 @@ import {
   RunnerCapabilitiesSource,
   RunnerCommandMode,
 } from "@repo/api/src/types/runner-capabilities";
-// Cross-slice: same retryable error block as the runners list.
+// Cross-slice: same retryable error block as the agents list.
 import { QueryErrorMessage } from "@repo/app/integrations/components/query-error-message";
 import { Badge } from "@repo/design-system/components/ui/badge";
 import { Button } from "@repo/design-system/components/ui/button";
@@ -36,9 +36,9 @@ export type ProjectRunnerCapabilitiesProps = {
 const PROCESS_TOOLKIT_VALUE = "__process_toolkit__";
 
 /**
- * Project → Runners → Commands: what each runner declares it can do for the
+ * Project → Agents → Commands: what each agent declares it can do for the
  * project in its `AGENTFLOW.md` (the commands and skills the orchestrator
- * chooses from). Loaded when opened: the panel above already reads the runners.
+ * chooses from). Loaded when opened: the panel above already reads the agents.
  */
 export function ProjectRunnerCapabilities({
   projectId,
@@ -53,11 +53,11 @@ export function ProjectRunnerCapabilities({
         <div>
           <h4 className="font-medium text-sm">Commands</h4>
           <p className="text-muted-foreground text-xs">
-            What each runner says it can do, from the{" "}
+            What each agent says it can do, from the{" "}
             {RUNNER_CAPABILITIES_FILE_NAME} in its project folder (a personal
-            runner, uploaded when it connects and whenever it changes) or in its
-            toolkit repository (an auto runner, read daily, when the project's
-            process toolkit changes, or on Refresh).
+            agent, uploaded when it connects and whenever it changes) or in its
+            toolkit repository (an automatic agent, read daily, when the
+            project's process toolkit changes, or on Refresh).
           </p>
         </div>
         <Button
@@ -94,7 +94,7 @@ function CapabilitiesBody({
       <QueryErrorMessage
         error={files.error}
         onRetry={() => files.refetch()}
-        title="Couldn't load the runners' commands"
+        title="Couldn't load the agents' commands"
       />
     );
   }
@@ -106,7 +106,7 @@ function CapabilitiesBody({
     <div className="space-y-3">
       {list.length === 0 ? (
         <p className="rounded-md border border-dashed p-3 text-muted-foreground text-sm">
-          No runner has uploaded an {RUNNER_CAPABILITIES_FILE_NAME} for this
+          No agent has uploaded an {RUNNER_CAPABILITIES_FILE_NAME} for this
           project yet.
         </p>
       ) : (
@@ -281,7 +281,7 @@ function RefreshStatus({
   if (data?.status === RunnerCapabilitiesRefreshStatus.Failed) {
     return (
       <p className="text-destructive text-xs" role="alert">
-        {data.error ?? "The runner could not read its toolkit."}
+        {data.error ?? "The agent could not read its toolkit."}
       </p>
     );
   }
@@ -315,7 +315,7 @@ function ReadFromToolkitForm({ projectId }: Readonly<{ projectId: string }>) {
         type="button"
         variant="outline"
       >
-        Read from a runner's toolkit
+        Read from an agent's toolkit
       </Button>
     );
   }
@@ -342,8 +342,8 @@ function ReadFromToolkitForm({ projectId }: Readonly<{ projectId: string }>) {
     <div className="space-y-2 rounded-md border p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Select onValueChange={setComputeTargetId} value={computeTargetId}>
-          <SelectTrigger aria-label="Runner" className="flex-1">
-            <SelectValue placeholder="Choose a runner" />
+          <SelectTrigger aria-label="Agent" className="flex-1">
+            <SelectValue placeholder="Choose an agent" />
           </SelectTrigger>
           <SelectContent>
             {(computers.data ?? []).map((computer) => (

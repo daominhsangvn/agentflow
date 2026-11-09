@@ -1,14 +1,10 @@
 {
-  "title": "Getting Started",
+  "title": "Getting started",
   "pages": [
-    "index",
     "prerequisites",
-    "install-plugins",
-    "install-claude-plugins",
-    "install-desktop",
-    "first-launch",
-    "prepare-your-repo-and-targets",
-    "from-onboarding-to-first-loop",
-    "first-loop"
+    "install-server",
+    "first-admin",
+    "install-agent",
+    "quickstart"
   ]
 }

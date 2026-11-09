@@ -61,6 +61,8 @@ export const LOOP_STEP_QUESTION_MAX = 2000;
 export const LOOP_STEP_OPTIONS_MAX = 10;
 /** Longest option of a question. */
 export const LOOP_STEP_OPTION_MAX = 500;
+/** Max length of a question's commentId (the item comment where the agent asked it). */
+export const LOOP_STEP_COMMENT_ID_MAX = 255;
 /** Files collected from the step's artifact globs. */
 export const LOOP_STEP_FILES_MAX = 20;
 /** Bytes kept of one collected file; the rest is cut (`truncated`). */
@@ -165,6 +167,12 @@ export const LoopStepQuestionSchema = z.object({
     .array(z.string().min(1).max(LOOP_STEP_OPTION_MAX))
     .max(LOOP_STEP_OPTIONS_MAX)
     .optional(),
+  /**
+   * The id of the comment where the agent already asked this question on the
+   * source item (its person's own account). AgentFlow then does not post it
+   * and routes replies to that comment.
+   */
+  commentId: z.string().min(1).max(LOOP_STEP_COMMENT_ID_MAX).optional(),
 });
 export type LoopStepQuestion = z.infer<typeof LoopStepQuestionSchema>;
 
