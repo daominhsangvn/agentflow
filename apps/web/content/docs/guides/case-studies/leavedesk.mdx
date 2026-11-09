@@ -69,13 +69,15 @@ These are the rules of the LeaveDesk workflow as exported to the YAML in the exa
 
 ```text
 ## Approval before posting
-- Nothing goes on the Jira ticket without an admin's approval (comments, edits, files, status changes): request_decision where: case_page with the full draft verbatim as the question (the whole comment text, never a summary; for a status change, the move), then wait_human. Approved: post exactly that (where: thread). Rejected: revise with the admin's comment, ask again.
+- Nothing goes on the Jira ticket without an admin's approval (comments, files, status changes): request_decision where: case_page with a one-line question and draft (the whole comment in draft.comment.text, never a summary; files in draft.comment.attachments; a status change in draft.transitionName), then wait_human. Approved: AgentFlow posts the draft itself; never post it again. Rejected: revise with the admin's comment, ask again. A posted comment is not edited; a correction is a new draft.
 - Not gated: Confluence pages, tasks, pull requests, case-page replies, questions an agent posted on the ticket itself.
 - Agents' questions are answered in AgentFlow, never posted on the ticket (this replaces every "post its questions" above and below): end the turn with wait_human asked "<N> questions from <agent> on the case page". Questions an agent posted on the ticket itself are answered there.
 - If someone asks on the case page to post an agent's questions on the ticket, draft that comment and ask for approval like any other post.
 ```
 
 **Why.** Admins want to see every write on the ticket before it happens. Approving happens in AgentFlow (see [Approval before posting](/docs/guides/recipes/approval-before-posting)); the approved text is posted unchanged. Agents' questions stay in AgentFlow: admins answer them in the Agents tab or on the case page, so they create no decision; an admin who wants them on the ticket asks the orchestrator on the case page, and that comment is approved like any other post.
+
+**Incident (LD-9).** An admin approved a summary of the comment, and the orchestrator then posted its own, longer text. Now the whole comment is the `draft` of `request_decision`, the Decisions card shows it in full, and AgentFlow posts the approved draft itself; the workflow sets `approvals: required`.
 
 **Incident.** Added on 2026-11-08 at the user's request. In the LD-7 test one turn posted an announcement on the case page and the same text on Jira, because a reply's default target followed the last case-page message. The rule now names `where` on every call.
 

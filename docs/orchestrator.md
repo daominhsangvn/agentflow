@@ -44,6 +44,7 @@ Set in the workflow (editor or YAML) with `agent.mode: orchestrated`.
 | `agent.orchestrator.cancelOn` | Ticket-change kinds whose turn may cancel tasks with `task_cancel`: `status_changed`, `label_added`, `label_removed`. Default `[status_changed, label_removed]`; `[]` = the orchestrator never cancels. |
 | `agent.orchestrator.mentionOnly` | `true` or `false`, default false. A reply in a thread the orchestrator talks in wakes it only when it mentions the bot (or replies to the bot's message). Other replies are not recorded; the orchestrator reads the thread when it needs it. |
 | `agent.orchestrator.caseLookup` | `true` or `false`, default false. Adds `case_lookup`: the orchestrator may read the case of another item of this project (read only), e.g. a Teams thread asking about LD-6. |
+| `agent.orchestrator.approvals` | `optional` (default) or `required`. `required` refuses `reply` / `edit_reply` on the thread and `source_item_*` writes: a comment or a move reaches the ticket only as the `draft` of an approved `request_decision`. `request_decision` with `where: thread` is refused too (the request and its draft stay on the case page), and `record_decision` cannot approve a draft: only an organization admin's Approve button does (rejecting still works). `reply` with `where: case_page` stays allowed. |
 | `agent.orchestrator.caseHandoff` | `true` or `false`, default false. Adds `case_handoff`: after people approve a summary (`request_decision`), the orchestrator sends it to another item's case, whose orchestrator acts on it. |
 
 ```yaml
@@ -222,7 +223,7 @@ tools for that token from `GET /orchestrator-tools/session` and
 | `source_item_label` | `{ add, remove }`: adds and removes labels on the ticket (grant `source: label`) |
 | `source_item_link` | `{ url, title }`: adds a link to the ticket (grant `source: link`) |
 | `case_notify` | `{ itemKey, message }`: an internal message on the item conversation of another case of the same workflow (same connection), which wakes it after its debounce and reopens it if closed; refused when no case exists for that key, for the case's own item, when the calling conversation has no source item, or when the target case has no conversation on this project connection. No grant |
-| `request_decision` | `{ question, where? }`: asks people to approve or reject: a decision row, and the question posted with `where: thread` (the item's thread, with the case's link; needs the `comment` grant) or `where: case_page` (the case page only, no grant). Default: where the message it answers came from |
+| `request_decision` | `{ question, where?, draft? }`: asks people to approve or reject: a decision row, and the question posted with `where: thread` (the item's thread, with the case's link; needs the `comment` grant) or `where: case_page` (the case page only, no grant). Default: where the message it answers came from. `draft` (`{ comment: { text, replyTo?, attachments? }, transitionName? }`) is what AgentFlow does on the item once the decision is approved; it is checked like `reply` / `source_item_transition` (grants, files, thread) and needs those grants |
 | `record_decision` | Records a decision someone gave in the thread (`via: message`) |
 | `page_publish` | (grant: the Confluence key `[publish]`) Publishes a task's Markdown file as a Confluence page, with attachments ("Confluence documents" below) |
 | `page_get` | (grant: the Confluence key `read` or `[publish]`) Reads a Confluence page as Markdown, with its version and last editor |
@@ -245,7 +246,7 @@ says what the orchestrator may write. Default `{}`.
 
 | Key | Values | Allows |
 |---|---|---|
-| `source` | `comment`, `attach` (needs `comment`), `transition`, `label`, `link` | `reply` / `edit_reply` / `request_decision` (`where: thread`) on the ticket; `reply attachments`; `source_item_transition`; `source_item_label`; `source_item_link` |
+| `source` | `comment`, `attach` (needs `comment`), `transition`, `label`, `link` | `reply` / `edit_reply` / `request_decision` (`where: thread`) on the ticket; `reply attachments`; `source_item_transition`; `source_item_label`; `source_item_link`; the `draft` of `request_decision` (its comment needs `comment`, its files `attach`, its move `transition`) |
 | a Confluence key | `read` or `[publish]` | `page_get` and page files; `page_publish` (publish implies read). With several granted connections the call names `connection` |
 | `pull_requests` | `[open]` | `pull_request_open` |
 
@@ -528,9 +529,30 @@ or reject it under Decisions, or answer here.", and needs no grant. Without
 the case page is approved or rejected with the Decisions card (on the case
 page, or on the orchestrator node's case in the Agents tab), or answered by a
 case-page message that the orchestrator records with `record_decision`.
-Rules use this for "nothing goes on the ticket without an admin's approval";
-the platform does not enforce that rule, the rules do (see
-[orchestrator-guide.md](orchestrator-guide.md) section 3).
+Rules use this for "nothing goes on the ticket without an admin's approval"
+(see [orchestrator-guide.md](orchestrator-guide.md) section 3).
+
+**Draft.** `request_decision` may carry a `draft`: the whole comment
+(`comment.text`, `replyTo`, `attachments`) and/or a status move
+(`transitionName`). The draft is validated when the decision is requested and
+stored on the decision; the Decisions card shows it in full. When the decision
+is approved, by the button or (without `approvals: required`) by `record_decision`, the server carries the
+draft out exactly once (the claim is the same `updateMany` that decides it),
+through the same code as `reply` and `source_item_transition`. The result
+(`draftResult`: `running`, `done` or `failed`, the comment reference, the move,
+the error) is written on the decision. The `decision` message that wakes the
+orchestrator says the draft was already posted (or why it failed), so it must
+not post it again. A rejected decision posts nothing. If the process stops
+while posting, the result stays `running` and the draft is not retried.
+
+With `agent.orchestrator.approvals: required`, a thread write that does not
+come from an approved draft is refused, `request_decision` with `where: thread`
+is refused (nothing reaches the ticket before approval), and `record_decision`
+with `approved: true` on a decision that has a draft is refused ("only an
+admin's Approve button approves a draft"; audit `tool_refused`). A rejection
+through `record_decision` still works. If the comment was posted but writing it
+to the history failed, the comment is still reported as posted and is never
+posted again.
 
 ## What runners can do (AGENTFLOW.md)
 

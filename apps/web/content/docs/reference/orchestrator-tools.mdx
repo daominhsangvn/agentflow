@@ -23,8 +23,8 @@ The tool `runners_list` lists Agents: the name keeps the old word.
 |---|---|---|
 | `reply` | Posts a Markdown message in the conversation's thread (a ticket comment, a Teams reply), or on the case page. A reply to it comes back to the conversation | `text`; `replyTo` (the reference of the message you answer, so the answer lands in that comment's thread); `where` (`thread` or `case_page`); `attachments` (files of this case's tasks, attached to the ticket first; refused where the thread takes no files, such as Teams) |
 | `edit_reply` | Replaces the text of a message this conversation posted, for example the summary of a plan once a new version is out. It takes no files | `reference`, `text`, `version` |
-| `request_decision` | Asks for an approval (a plan, a go to implement): posts the question with the case's link, where an admin approves or rejects. End the turn with `wait_human` | `question` |
-| `record_decision` | Records a decision someone gave in the thread on a pending decision: who, approved or not, and what they said | `decisionId`, `approved`, `decidedBy`, `comment` |
+| `request_decision` | Asks for an approval (a plan, a go to implement): posts the question with the case's link, where an admin approves or rejects. With a `draft`, AgentFlow posts the comment and makes the move itself once it is approved. Under `approvals: required` only `where: case_page` is allowed. End the turn with `wait_human` | `question`; `where`; `draft` (`comment` with `text`, `replyTo`, `attachments`; `transitionName`) |
+| `record_decision` | Records a decision someone gave in the thread on a pending decision: who, approved or not, and what they said. Under `approvals: required` it cannot approve a decision with a draft (only an admin's Approve button does); rejecting works | `decisionId`, `approved`, `decidedBy`, `comment` |
 
 ## Tasks and waiting
 

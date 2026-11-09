@@ -87,6 +87,10 @@ views {
     agentflow.app -> agentflow.orchestrator.core "decision" {
       notes "Recorded in the admin's name; an internal message wakes the conversation."
     }
+    agentflow.orchestrator.core -> agentflow.integration "carry out the approved draft" {
+      notes "Once, before the wake; the same code path as reply / source_item_transition."
+    }
+    agentflow.integration -> channel "the approved comment / move"
     person -> channel "answers in the thread" {
       notes "Way B: someone answers in the thread instead."
     }

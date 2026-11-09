@@ -63,7 +63,7 @@ agent:
     ...
 ```
 
-The settings (`concurrency`, `debounceSeconds`, `turnTimeoutMinutes`, `cancelOn`, `mentionOnly`, `caseLookup`, `caseHandoff`) are described in [Workflow YAML](/docs/guides/setup/workflow-yaml#agentorchestrator). `agent.process` and `agent.runners` are refused; `actions` never run. `mentionOnly`, `caseLookup` and `caseHandoff` are explained in [Side conversations](/docs/guides/recipes/side-conversations). The rules may be up to 16000 characters; the YAML editor warns above 8000 (they are sent with every turn).
+The settings (`concurrency`, `debounceSeconds`, `turnTimeoutMinutes`, `cancelOn`, `mentionOnly`, `caseLookup`, `caseHandoff`, `approvals`) are described in [Workflow YAML](/docs/guides/setup/workflow-yaml#agentorchestrator). `agent.process` and `agent.runners` are refused; `actions` never run. `mentionOnly`, `caseLookup` and `caseHandoff` are explained in [Side conversations](/docs/guides/recipes/side-conversations). The rules may be up to 16000 characters; the YAML editor warns above 8000 (they are sent with every turn).
 
 ## What each turn sees
 
@@ -110,9 +110,9 @@ The default is `{}`: no writes. Tools whose grant is missing are not offered to 
 
 | Grant | Tools it allows | It cannot |
 |---|---|---|
-| `source: [comment]` | `reply` and `edit_reply` on the ticket or in a comment's thread; `request_decision` on the ticket | Anything else on the ticket |
+| `source: [comment]` | `reply` and `edit_reply` on the ticket or in a comment's thread; `request_decision` on the ticket (and its `draft` comment) | Anything else on the ticket |
 | `source: [attach]` (needs `comment`) | `reply attachments`: task files uploaded to the ticket and shown under the comment | |
-| `source: [transition]` | `source_item_transition`: move the ticket to another status | Move to a status the ticket's workflow does not allow from where it is |
+| `source: [transition]` | `source_item_transition`: move the ticket (also a `draft` move) to another status | Move to a status the ticket's workflow does not allow from where it is |
 | `source: [label]` | `source_item_label`: add or remove labels | Assign the ticket |
 | `source: [link]` | `source_item_link`: add a link to the ticket | |
 | `<confluence key>: read` | `page_get`, and page files for `task_run files [{page, name}]` | Publish |
@@ -319,12 +319,14 @@ Limits: the blocker's workflow needs a status-changed trigger, or no turn runs w
 
 ### Approvals
 
-**Tools.** `request_decision { question, where? }` creates a pending decision and posts the question. `where: thread` posts on the ticket with the case's link and needs `comment`; `where: case_page` stays in AgentFlow and needs no grant. Default: where the answered message came from. `record_decision { decisionId, approved, decidedBy, comment? }` records a decision someone gave in the thread. End the turn with `wait_human`.
+**Tools.** `request_decision { question, where?, draft? }` creates a pending decision and posts the question. `where: thread` posts on the ticket with the case's link and needs `comment`; `where: case_page` stays in AgentFlow and needs no grant. Default: where the answered message came from. `record_decision { decisionId, approved, decidedBy, comment? }` records a decision someone gave in the thread. End the turn with `wait_human`.
+
+**Draft.** Put the whole comment in `draft.comment.text` (files in `draft.comment.attachments`, a status change in `draft.transitionName`). The Decisions card shows it in full. When an admin approves, AgentFlow posts it itself, once, and wakes the orchestrator with a note that it was posted; the orchestrator must not post it again. A rejection posts nothing. With `approvals: required` in the workflow, the orchestrator cannot write to the ticket any other way: `request_decision` must use `where: case_page`, and only an admin's Approve button approves a draft (`record_decision` with `approved: true` is refused for it; rejecting works).
 
 There are three ways to approve. Write the rule for the one your team uses.
 
 1. **The AgentFlow button.** The orchestrator calls `request_decision`; an org admin approves or rejects in AgentFlow (the case page), which wakes the conversation. Use it for decisions that matter.
-2. **A comment.** Someone writes "approved" in the thread. The orchestrator reads it and calls `record_decision` with who wrote it. Who may approve in the thread is not checked: the orchestrator trusts its reading of who wrote it.
+2. **A comment.** Someone writes "approved" in the thread. The orchestrator reads it and calls `record_decision` with who wrote it. Who may approve in the thread is not checked: the orchestrator trusts its reading of who wrote it. Under `approvals: required` this does not approve a decision that has a draft; an admin presses Approve.
 3. **A status change people make.** The move itself is the approval (for example PRD → Planning). It arrives as a `status_changed` message; the rules say what each status means.
 
 ```markdown
@@ -392,7 +394,7 @@ With a `microsoft_teams.bot_mentioned` trigger, each Teams thread is a conversat
 | Confluence | Writes stay in the project's spaces; publishing never drops a person's edit unless `overwrite` |
 | Refusals recorded | Every refused call is a "Refused" message on the case |
 
-Not guarded yet: who may approve in the thread (`record_decision`), approval before posting (rules only), budgets per case or project (turns, tasks, cost) and cancelling only on backward moves (your rules decide). Ticket text is marked untrusted in the prompt but not otherwise filtered.
+Not guarded yet: who may approve in the thread (`record_decision`), approval before posting (a guard only with `approvals: required`; otherwise rules), budgets per case or project (turns, tasks, cost) and cancelling only on backward moves (your rules decide). Ticket text is marked untrusted in the prompt but not otherwise filtered.
 
 ## The case page
 

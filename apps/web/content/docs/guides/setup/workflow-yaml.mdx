@@ -132,6 +132,7 @@ agent:
 | `mentionOnly` | `true` or `false` | `false` | A thread reply that no trigger matched (no mention of the Agent) does not wake a turn. See [Side conversations](/docs/guides/recipes/side-conversations). |
 | `caseLookup` | `true` or `false` | `false` | Turns the `case_lookup` tool on, which reads another item's case in the project. |
 | `caseHandoff` | `true` or `false` | `false` | Turns the `case_handoff` tool on, which sends an approved summary to another item's case. |
+| `approvals` | `optional` or `required` | `optional` | `required`: `reply` / `edit_reply` on the thread and `source_item_*` writes are refused; a comment or a move reaches the ticket only as the `draft` of an approved `request_decision`, which AgentFlow carries out only after an organization admin presses Approve. `request_decision` with `where: thread` is refused, and `record_decision` cannot approve a draft (a rejection still works). |
 | `connections` | mapping of connection key to a list of operations (or `read`) | `{}` | What the orchestrator may write. `source` (the ticket the conversation is about): `comment`, `attach` (needs `comment`), `transition`, `label`, `link`. A Confluence connection key: `read` or `[publish]`. `pull_requests`: `[open]`. The default `{}` only reads the ticket. Checked at save (a trigger's connection must offer each `source` operation; a Teams thread takes only `comment`) and on every tool call. Only with `agent.mode: orchestrated`. |
 
 See [Orchestrator](/docs/guides/setup/orchestrator) for the rules and tools.

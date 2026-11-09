@@ -139,19 +139,17 @@ reaches the orchestrator even without a mention and carries `task` and
 `question`.
 
 **Approval before posting on the ticket.**
-Write: *"Nothing goes on the Jira ticket without an admin's approval
-(comments, edits, files, status changes): request_decision where: case_page
-with the full draft verbatim as the question (the whole comment text, never a
-summary; for a status change, the move), then wait_human. Approved: post exactly that
-(where: thread). Rejected: revise with the admin's comment, ask again. Not
-gated: Confluence pages, tasks, pull requests, case-page replies, questions an
-agent posted on the ticket itself."*
+Write: *"Nothing goes on the Jira ticket without an admin's approval (comments, files, status changes): request_decision where: case_page with a one-line question and draft (the whole comment in draft.comment.text, never a summary; files in draft.comment.attachments; a status change in draft.transitionName), then wait_human. Approved: AgentFlow posts the draft itself; never post it again. Rejected: revise with the admin's comment, ask again. A posted comment is not edited; a correction is a new draft. Not gated: Confluence pages, tasks, pull requests, case-page replies, questions an agent posted on the ticket itself."*
+Workflow setting: `agent.orchestrator.approvals: required` refuses the other
+thread writes and `where: thread` for the request, and only an admin's Approve
+button approves a draft (a case-page "ok" does not), so the rule is also a guard.
 Why: a bot posts under one identity; an admin reads the text before it is
 public.
-Platform: rules only. `request_decision where: case_page` keeps the request
-off the ticket and shows it under Decisions; nothing refuses an unapproved
-reply. The only hard limit is the grants (leave out `transition` if the
-orchestrator must never move the ticket).
+Platform: `request_decision where: case_page` keeps the request off the ticket
+and shows it, with its draft, under Decisions; on approval the server posts the
+draft. Without `approvals: required` nothing refuses an unapproved reply; the
+grants are the other hard limit (leave out `transition` if the orchestrator
+must never move the ticket).
 
 **BLOCKED.**
 Write: *"A task answer that starts with BLOCKED: did nothing. Comment what is
