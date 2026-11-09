@@ -63,6 +63,8 @@ export type TurnPromptInput = {
     caseLookup: boolean;
     caseHandoff: boolean;
   };
+  /** agent.orchestrator.approvals is required. */
+  approvalsRequired: boolean;
 };
 
 export function buildTurnPrompt(input: TurnPromptInput): string {
@@ -79,7 +81,10 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "Your rules",
       input.rules.trim().slice(0, WORKFLOW_INSTRUCTIONS_MAX) || "(none)"
     ),
-    section("Your writes", describeWrites(input.grants)),
+    section(
+      "Your writes",
+      describeWrites(input.grants, input.approvalsRequired)
+    ),
     section("This conversation", describeChannel(input.channel)),
     ...describeSideConversations(input.sideConversations),
     section("The case", input.caseMarkdown.slice(0, CASE_MAX)),
@@ -238,7 +243,10 @@ function messageSender(
   return viaAgentFlow ? `${actor} (AgentFlow)` : actor;
 }
 
-function describeWrites(grants: OrchestratorGrantSet): string {
+function describeWrites(
+  grants: OrchestratorGrantSet,
+  approvalsRequired: boolean
+): string {
   const granted = [
     ...describeSourceWrites(grants),
     ...describePageWrites(grants),
@@ -257,6 +265,21 @@ function describeWrites(grants: OrchestratorGrantSet): string {
     lines.push(
       "",
       `Not granted: ${notGranted.join(", ")} — a call is refused; ask people to do it, e.g. move the ticket.`
+    );
+  }
+  if (
+    grants.source.has(OrchestratorSourceOperation.Comment) ||
+    grants.source.has(OrchestratorSourceOperation.Transition)
+  ) {
+    lines.push(
+      "",
+      `To post on the ticket only after approval, put the whole comment (never a summary) and/or the move in ${OrchestratorToolName.RequestDecision}'s draft; on approval AgentFlow posts it and tells you; never post it again.`
+    );
+  }
+  if (approvalsRequired) {
+    lines.push(
+      "",
+      `approvals: required — ${OrchestratorToolName.Reply} where: thread, ${OrchestratorToolName.EditReply} and the source_item_* writes are refused; everything on the ticket goes through ${OrchestratorToolName.RequestDecision} with a draft and where: case_page (where: thread is refused); only an admin's Approve button approves a draft, so ${OrchestratorToolName.RecordDecision} approved: true is refused for it (rejecting works). End the turn with wait_human.`
     );
   }
   lines.push(

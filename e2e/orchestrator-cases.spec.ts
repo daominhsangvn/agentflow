@@ -49,6 +49,7 @@ const OPERATOR_MESSAGE = "Use the staging database.";
 const PENDING_QUESTION = "Which environment?";
 const PENDING_QUESTION_ID = "env";
 const PENDING_ANSWER = "staging";
+const DRAFT_TEXT = "Scope agreed:\n- CSV export only\n- Staging first";
 
 test("orchestrator cases: open a case from the workflow and approve its decision", {
   tag: E2ETag.Smoke,
@@ -103,6 +104,12 @@ test("orchestrator cases: open a case from the workflow and approve its decision
       detail.getByRole("link", { name: workflow.name })
     ).toHaveAttribute("href", `/${orgSlug}/workflows/${workflow.id}?tab=cases`);
 
+    const draft = detail.getByTestId("decision-draft");
+    await expect(draft).toContainText("Scope agreed:");
+    await expect(draft).toContainText("CSV export only");
+    await expect(draft).toContainText("Staging first");
+    await expect(detail.getByText("Comment on PROJ-7")).toBeVisible();
+    await expect(detail.getByText("Move PROJ-7 to Planning")).toBeVisible();
     await detail.getByRole("button", { name: "Approve" }).click();
     await expect.poll(() => served.decisions).toEqual([{ approved: true }]);
 
@@ -351,6 +358,12 @@ async function serveCases(
         decidedBy: null,
         comment: null,
         decidedAt: null,
+        draft: {
+          itemKey: "PROJ-7",
+          comment: { text: DRAFT_TEXT, replyTo: null, attachments: [] },
+          transitionName: "Planning",
+        },
+        draftResult: null,
         createdAt: now,
       },
     ],

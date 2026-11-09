@@ -9,6 +9,7 @@ import {
   ORCHESTRATOR_DEBOUNCE_SECONDS_MAX,
   ORCHESTRATOR_TURN_TIMEOUT_MINUTES_DEFAULT,
   ORCHESTRATOR_TURN_TIMEOUT_MINUTES_MAX,
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "./orchestrator.ts";
@@ -461,6 +462,10 @@ export const workflowOrchestratorConfigSchema = z.object({
   caseLookup: z.boolean().default(false),
   /** The case_handoff tool, which sends an approved summary to another item's case. */
   caseHandoff: z.boolean().default(false),
+  /** required: reply/edit_reply on the thread and source_item_* only through an approved request_decision draft. */
+  approvals: z
+    .enum(OrchestratorApprovals)
+    .default(OrchestratorApprovals.Optional),
   /**
    * What the orchestrator may write; default {}: it only reads the ticket
    * (docs/orchestrator.md).

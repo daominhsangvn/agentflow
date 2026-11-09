@@ -8,6 +8,7 @@ import {
 } from "@repo/api/src/types/orchestrator";
 import { OrchestratorSourceOperation } from "@repo/api/src/types/orchestrator-grants";
 import { withDb } from "@repo/database";
+import { log } from "@repo/observability/log";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import { createProviderContext } from "@/lib/integrations/connection-service";
 import type { SourceItemFile } from "@/lib/integrations/types";
@@ -104,12 +105,20 @@ export async function reply(
       retryable: posted.retryable,
     };
   }
-  await recordReply(context, text, posted.externalRef, connection.record.id);
+  // The comment is on the item already: a failed history write must not look
+  // like a failed post, or the caller posts it a second time.
+  const recorded = await recordReplySafely(
+    context,
+    text,
+    posted.externalRef,
+    connection.record.id
+  );
   return {
     ok: true,
     output: {
       posted: true,
       reference: posted.externalRef,
+      ...(recorded ? {} : { recorded: false }),
       ...(files.length > 0 ? { attached: files.map((file) => file.name) } : {}),
     } as JsonObject,
   };
@@ -169,6 +178,23 @@ export async function editReply(
     );
   }
   return { ok: true, output: { edited: true, reference: input.reference } };
+}
+
+async function recordReplySafely(
+  context: TurnContext,
+  text: string,
+  externalRef: string | null,
+  connectionId: string
+): Promise<boolean> {
+  try {
+    await recordReply(context, text, externalRef, connectionId);
+    return true;
+  } catch (error) {
+    log.error(`${LOG_PREFIX} reply posted but not recorded in the history`, {
+      error,
+    });
+    return false;
+  }
 }
 
 /** The orchestrator's message in the history, and an anchor for replies to it. */

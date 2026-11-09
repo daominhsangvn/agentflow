@@ -106,6 +106,7 @@ export const WORKFLOW_YAML_KEYS = {
     "mentionOnly",
     "caseLookup",
     "caseHandoff",
+    "approvals",
   ],
   /** An item of `agent.runners`. */
   runnerRule: ["runner", "condition"],

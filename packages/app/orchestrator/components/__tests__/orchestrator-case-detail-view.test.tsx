@@ -175,6 +175,8 @@ function makeDetail(): OrchestratorCaseDetail {
         decidedBy: null,
         comment: null,
         decidedAt: null,
+        draft: null,
+        draftResult: null,
         createdAt: "2026-10-26T08:06:00.000Z",
       },
     ],

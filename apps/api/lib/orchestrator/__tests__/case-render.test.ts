@@ -230,6 +230,53 @@ describe("renderCase task lines", () => {
     );
   });
 
+  it("shows a decision's draft and its result", async () => {
+    mocks.findUnique.mockResolvedValue({
+      organizationId: "org-1",
+      title: "LD-7",
+      status: "open",
+      sourceKey: null,
+      notes: "",
+      conversations: [],
+      tasks: [],
+      decisions: [
+        {
+          id: "d1",
+          question: "ok?",
+          status: "approved",
+          decidedBy: "Ann",
+          draft: {
+            turnId: "3f1c0a52-8d0e-4f4e-9a57-0c5c1d2e7b11",
+            itemKey: "LD-7",
+            comment: { text: "Hello", replyTo: null, attachments: [] },
+            transitionName: "Planning",
+          },
+          draftResult: {
+            outcome: "done",
+            commentRef: "123",
+            transition: { from: null, to: "Planning" },
+            error: null,
+            carriedOutAt: "2026-11-09T00:00:00.000Z",
+          },
+        },
+        {
+          id: "d2",
+          question: "plain?",
+          status: "pending",
+          decidedBy: null,
+          draft: null,
+          draftResult: null,
+        },
+      ],
+    });
+    const out = await renderCase("c1");
+    expect(out).toContain(
+      "ok?\u0020— draft: comment (5 chars) + move to Planning; posted (reference 123)"
+    );
+    expect(out).toContain("plain?");
+    expect(out).not.toContain("plain? — draft");
+  });
+
   it("shows a handoff message with its kind", async () => {
     mocks.findUnique.mockResolvedValue({
       organizationId: "org-1",

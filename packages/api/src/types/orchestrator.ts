@@ -139,6 +139,24 @@ export const OrchestratorDecisionVia = {
 export type OrchestratorDecisionVia =
   (typeof OrchestratorDecisionVia)[keyof typeof OrchestratorDecisionVia];
 
+/** How far the server got with an approved decision's draft. */
+export const OrchestratorDraftOutcome = {
+  /** Claimed; posting now (or the process stopped while posting). */
+  Running: "running",
+  Done: "done",
+  Failed: "failed",
+} as const;
+export type OrchestratorDraftOutcome =
+  (typeof OrchestratorDraftOutcome)[keyof typeof OrchestratorDraftOutcome];
+
+/** agent.orchestrator.approvals: required = thread writes only from an approved draft. */
+export const OrchestratorApprovals = {
+  Optional: "optional",
+  Required: "required",
+} as const;
+export type OrchestratorApprovals =
+  (typeof OrchestratorApprovals)[keyof typeof OrchestratorApprovals];
+
 // ---------------------------------------------------------------------------
 // A turn on the orchestrator's runner (desktop command)
 // ---------------------------------------------------------------------------
@@ -252,6 +270,40 @@ export type OrchestratorToolName =
 export const ORCHESTRATOR_TASK_REPLY_FILE =
   ".agentflow-ai/work/orchestrator-reply.md";
 export const ORCHESTRATOR_TASK_REPLY_MAX = 30_000;
+
+/** What an approved decision does on the conversation's item (request_decision draft). */
+export const orchestratorDecisionDraftSchema = z.object({
+  /** The item it acts on, e.g. LD-9. */
+  itemKey: z.string().min(1).max(255),
+  comment: z
+    .object({
+      text: z.string().min(1),
+      replyTo: z.string().nullable(),
+      attachments: z.array(z.object({ taskId: z.string(), name: z.string() })),
+    })
+    .nullable(),
+  /** Jira transition / Azure DevOps state; null: no move. */
+  transitionName: z.string().nullable(),
+});
+export type OrchestratorDecisionDraft = z.infer<
+  typeof orchestratorDecisionDraftSchema
+>;
+
+export const orchestratorDecisionDraftResultSchema = z.object({
+  outcome: z.enum(OrchestratorDraftOutcome),
+  /** The posted comment's provider reference; null: not posted. */
+  commentRef: z.string().nullable(),
+  /** The move done; null: none or not done. */
+  transition: z
+    .object({ from: z.string().nullable(), to: z.string().nullable() })
+    .nullable(),
+  error: z.string().nullable(),
+  /** ISO; when the server claimed the draft. */
+  carriedOutAt: z.string(),
+});
+export type OrchestratorDecisionDraftResult = z.infer<
+  typeof orchestratorDecisionDraftResultSchema
+>;
 
 /** An admin's decision in AgentFlow (POST /orchestrator/decisions/{id}). */
 export const decideOrchestratorDecisionInputSchema = z.object({
@@ -389,6 +441,8 @@ export type OrchestratorCaseDecision = {
   decidedBy: string | null;
   comment: string | null;
   decidedAt: string | null;
+  draft: OrchestratorDecisionDraft | null;
+  draftResult: OrchestratorDecisionDraftResult | null;
   createdAt: string;
 };
 

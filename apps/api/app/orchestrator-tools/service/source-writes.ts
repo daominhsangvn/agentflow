@@ -22,7 +22,14 @@ import type {
 import type { ConversationChannel } from "@/lib/orchestrator/channel";
 import { ticketChangeMessage } from "@/lib/orchestrator/ticket-change";
 import { scrubProviderError } from "@/lib/workflows/engine/errors";
-import { refused, type ToolOutcome } from "./turn";
+import {
+  caseLink,
+  loadConversationConnection,
+  notGranted,
+  refused,
+  type ToolOutcome,
+  type TurnContext,
+} from "./turn";
 
 /**
  * The orchestrator's writes on the case's own ticket (source_item_transition,
@@ -237,4 +244,32 @@ async function changeOf(
     return { labels: { added: write.add, removed: write.remove } };
   }
   return null;
+}
+
+/** A write on the conversation's own item: needs its grant and connection. */
+export async function writeOnItem(
+  context: TurnContext,
+  write: SourceWrite
+): Promise<ToolOutcome> {
+  if (!context.grants.source.has(write.op)) {
+    return notGranted(`source: ${write.op}`);
+  }
+  const connection = await loadConversationConnection(context);
+  if (!(connection && context.channel)) {
+    return refused("This conversation has no item AgentFlow can change.");
+  }
+  const link = await caseLink(context);
+  return await runSourceWrite(
+    {
+      organizationId: context.organizationId,
+      caseId: context.caseId,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      channel: context.channel,
+      connection,
+      workflow: { id: context.workflowId, name: context.workflowName },
+      caseUrl: link ?? "",
+    },
+    write
+  );
 }

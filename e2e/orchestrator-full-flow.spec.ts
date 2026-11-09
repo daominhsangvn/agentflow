@@ -23,10 +23,14 @@ import {
   type OrchestratorCaseListItem,
   OrchestratorCaseStatus,
   OrchestratorConcurrency,
+  OrchestratorDecisionStatus,
+  OrchestratorDraftOutcome,
   OrchestratorMessageKind,
+  OrchestratorReplyTarget,
   OrchestratorToolName,
   type WorkflowAgentMap,
 } from "@repo/api/src/types/orchestrator";
+import { OrchestratorSourceOperation } from "@repo/api/src/types/orchestrator-grants";
 import { RunnerCapabilitiesSource } from "@repo/api/src/types/runner-capabilities";
 import type { Workflow } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
@@ -76,6 +80,7 @@ const ENV_ANSWER = "staging";
 const SCOPE_REPLY = "Scope: CSV export only, on staging.";
 const ASK_TEXT = "Is the PRD final?";
 const FORK_REPLY = "The PRD is final.";
+const DRAFT_COMMENT = "Scope agreed: CSV export only, on staging.";
 const ASKED_HUMAN = "Confirm the PRD is final before planning.";
 const DELIM_QUESTION = "Which CSV delimiter?";
 /**
@@ -397,7 +402,77 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       env.expectNoAgentErrors();
     });
 
-    await test.step("7. an Agent removed from the project gets no more tasks; an Agent outside it never does", async () => {
+    await test.step("7. a decision with a draft: the admin sees it in full; Approve posts it on Jira once", async () => {
+      const posted = () =>
+        jira
+          .postedComments(issue.key)
+          .filter((c) => JSON.stringify(c.body).includes(DRAFT_COMMENT));
+      let carriedOutTurn = false;
+      orch.onTurn(async (turn) => {
+        await turn.tool(OrchestratorToolName.RequestDecision, {
+          question: "Post the scope summary on the ticket?",
+          where: OrchestratorReplyTarget.CasePage,
+          draft: { comment: { text: DRAFT_COMMENT } },
+        });
+        await turn.tool(OrchestratorToolName.WaitHuman, {});
+        return { answer: "Asked for approval." };
+      });
+      orch.onTurn(async (turn) => {
+        expect(turn.request.prompt).toContain("Do not post or move it again");
+        await turn.tool(OrchestratorToolName.WaitHuman, {});
+        carriedOutTurn = true;
+        return { answer: "Posted by AgentFlow." };
+      });
+
+      const response = await env.postCaseMessage({
+        text: "Draft the scope comment for the ticket.",
+      });
+      expect(response.status()).toBe(200);
+      await expect
+        .poll(
+          async () =>
+            (await env.caseDetail()).decisions.some(
+              (d) => d.status === OrchestratorDecisionStatus.Pending
+            ),
+          { timeout: STEP_TIMEOUT_MS }
+        )
+        .toBe(true);
+      expect(posted()).toHaveLength(0);
+
+      await openAgentsTab(page, orgSlug, flow.workflow.id);
+      // With no agent selected the tab lists the orchestrator's cases.
+      await page.getByTestId("agent-case-row").first().click();
+      await expect(page).toHaveURL(CASE_PARAM_RE, { timeout: UI_TIMEOUT_MS });
+      const draft = page.getByTestId("decision-draft");
+      await expect(draft).toContainText(DRAFT_COMMENT, {
+        timeout: UI_TIMEOUT_MS,
+      });
+      await expect(
+        page.getByText(`Comment on ${issue.key}`).first()
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Approve" }).click();
+
+      await env.waitForCase(
+        (c) => carriedOutTurn && !(c.turnRunning || c.needsPerson)
+      );
+      expect(posted()).toHaveLength(1);
+      const detail = await env.caseDetail();
+      const decision = detail.decisions.find((d) => d.draft !== null);
+      expect(decision?.draftResult?.outcome).toBe(
+        OrchestratorDraftOutcome.Done
+      );
+      expect(decision?.draftResult?.commentRef).not.toBeNull();
+
+      const again = await request.post(
+        `${getApiBaseUrl()}/orchestrator/decisions/${decision?.id}`,
+        { data: { approved: true }, headers: bearer(token) }
+      );
+      expect(again.status()).toBe(404);
+      expect(posted()).toHaveLength(1);
+      env.expectNoAgentErrors();
+    });
+
+    await test.step("8. an Agent removed from the project gets no more tasks; an Agent outside it never does", async () => {
       await env.setProjectAgents([orch.id]);
       const baLoops = ba.loops().length;
       let listed = "";
@@ -433,7 +508,7 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       env.expectNoAgentErrors();
     });
 
-    await test.step("8. only the orchestrator ran turns and only the BA ran tasks", () => {
+    await test.step("9. only the orchestrator ran turns and only the BA ran tasks", () => {
       expect(outside.operations()).toEqual([]);
       expect(orch.loops()).toEqual([]);
       expect(ba.turns()).toEqual([]);
@@ -611,6 +686,7 @@ class FlowEnv {
               debounceSeconds: 0,
               turnTimeoutMinutes: 5,
               mentionOnly: true,
+              connections: { source: [OrchestratorSourceOperation.Comment] },
             },
           },
           triggers: [

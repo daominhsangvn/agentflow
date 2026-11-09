@@ -2,6 +2,7 @@ import {
   OrchestratorCaseStatus,
   OrchestratorDecisionStatus,
   OrchestratorDocumentKind,
+  OrchestratorDraftOutcome,
   OrchestratorTaskStatus,
   OrchestratorTurnStatus,
 } from "@repo/api/src/types/orchestrator";
@@ -484,5 +485,60 @@ describe("orchestratorCaseService.cancelTurn", () => {
     const result = await orchestratorCaseService.cancelTurn(ORG, "u1", "t1");
 
     expect(result).toEqual({ ok: false, error: Status.BadGateway });
+  });
+});
+
+describe("orchestratorCaseService.get decision drafts", () => {
+  const DECISION = {
+    id: "d1",
+    conversationId: "conv-1",
+    question: "Post it?",
+    status: OrchestratorDecisionStatus.Approved,
+    via: null,
+    decidedBy: "Ann",
+    comment: null,
+    decidedAt: D("2026-10-23T09:00:00.000Z"),
+    createdAt: D("2026-10-23T08:00:00.000Z"),
+  };
+
+  it("maps a stored draft and its result, dropping the turn id", async () => {
+    const draft = {
+      itemKey: "LD-9",
+      comment: { text: "Hello", replyTo: null, attachments: [] },
+      transitionName: "Planning",
+      turnId: "turn-1",
+    };
+    const draftResult = {
+      outcome: OrchestratorDraftOutcome.Done,
+      commentRef: "123",
+      transition: { from: "To Do", to: "Planning" },
+      error: null,
+      carriedOutAt: "2026-10-23T09:00:01.000Z",
+    };
+    mocks.caseFindFirst.mockResolvedValue({
+      ...DETAIL_ROW,
+      decisions: [{ ...DECISION, draft, draftResult }],
+    });
+
+    const detail = await orchestratorCaseService.get(ORG, CASE_ID);
+
+    expect(detail?.decisions[0]?.draft).toEqual({
+      itemKey: "LD-9",
+      comment: { text: "Hello", replyTo: null, attachments: [] },
+      transitionName: "Planning",
+    });
+    expect(detail?.decisions[0]?.draftResult).toEqual(draftResult);
+  });
+
+  it("maps invalid draft JSON to null", async () => {
+    mocks.caseFindFirst.mockResolvedValue({
+      ...DETAIL_ROW,
+      decisions: [{ ...DECISION, draft: { nope: 1 }, draftResult: "x" }],
+    });
+
+    const detail = await orchestratorCaseService.get(ORG, CASE_ID);
+
+    expect(detail?.decisions[0]?.draft).toBeNull();
+    expect(detail?.decisions[0]?.draftResult).toBeNull();
   });
 });

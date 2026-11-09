@@ -6,6 +6,7 @@ import {
   type IntegrationProviderSummary,
 } from "@repo/api/src/types/integration";
 import {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "@repo/api/src/types/orchestrator";
@@ -326,6 +327,11 @@ function agentValueCandidates(
   if (where === "agent/orchestrator" && key === "concurrency") {
     return Object.values(OrchestratorConcurrency).map((concurrency) =>
       value(concurrency, ORCHESTRATOR_CONCURRENCY_DESCRIPTIONS[concurrency])
+    );
+  }
+  if (where === "agent/orchestrator" && key === "approvals") {
+    return Object.values(OrchestratorApprovals).map((approvals) =>
+      value(approvals, ORCHESTRATOR_APPROVALS_DESCRIPTIONS[approvals])
     );
   }
   if (where === "agent/repository" && key === "fullName") {
@@ -841,6 +847,15 @@ const ORCHESTRATOR_CONCURRENCY_DESCRIPTIONS: Record<
     "A new message stops the running turn and starts one with all messages",
   [OrchestratorConcurrency.Queue]:
     "A new message waits until the running turn ends",
+};
+
+const ORCHESTRATOR_APPROVALS_DESCRIPTIONS: Record<
+  OrchestratorApprovals,
+  string
+> = {
+  [OrchestratorApprovals.Optional]: "Rules decide; writes are not checked.",
+  [OrchestratorApprovals.Required]:
+    "Thread comments, edits and ticket changes only through an approved request_decision draft.",
 };
 
 const TICKET_CHANGE_DESCRIPTIONS: Record<OrchestratorTicketChange, string> = {

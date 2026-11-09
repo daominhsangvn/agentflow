@@ -1,4 +1,5 @@
 import {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "@repo/api/src/types/orchestrator";
@@ -615,6 +616,7 @@ describe("workflowToYaml", () => {
       mentionOnly: true,
       caseLookup: false,
       caseHandoff: true,
+      approvals: OrchestratorApprovals.Required,
     };
     const custom = makeWorkflow({
       agent: {

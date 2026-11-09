@@ -72,6 +72,7 @@ const BASE = {
     caseLookup: false,
     caseHandoff: false,
   },
+  approvalsRequired: false,
 };
 
 describe("buildTurnPrompt", () => {
@@ -242,6 +243,20 @@ describe("buildTurnPrompt writes", () => {
     });
     expect(prompt).toContain(OrchestratorToolName.SourceItemTransition);
     expect(prompt).not.toContain("You only read the ticket.");
+  });
+
+  it("tells the draft path when the comment grant is held", () => {
+    const prompt = buildTurnPrompt({
+      ...BASE,
+      grants: resolveOrchestratorGrants({ source: ["comment"] }),
+    });
+    expect(prompt).toContain("never a summary");
+    expect(prompt).not.toContain("approvals: required");
+  });
+
+  it("states approvals: required when on", () => {
+    const prompt = buildTurnPrompt({ ...BASE, approvalsRequired: true });
+    expect(prompt).toContain("approvals: required");
   });
 
   it("marks a message written in AgentFlow", () => {

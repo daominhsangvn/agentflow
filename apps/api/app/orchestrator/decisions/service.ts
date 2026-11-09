@@ -2,6 +2,7 @@ import type { DecideOrchestratorDecisionInput } from "@repo/api/src/types/orches
 import { OrchestratorDecisionVia } from "@repo/api/src/types/orchestrator";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { withDb } from "@repo/database";
+import { carryOutDecisionDraft } from "@/app/orchestrator-tools/service/decision-drafts";
 import { advanceConversation } from "@/lib/orchestrator/advance";
 import { decide } from "@/lib/orchestrator/decisions";
 import { displayUserName } from "@/lib/user-display-name";
@@ -36,10 +37,14 @@ export const orchestratorDecisionService = {
       via: OrchestratorDecisionVia.Button,
       decidedBy: displayUserName(user),
       decidedById: userId,
+      carryOut: (decision) => carryOutDecisionDraft(organizationId, decision),
     });
     if (decided.ok) {
       waitUntil(advanceConversation(decided.value.conversationId));
     }
-    return decided;
+    if (!decided.ok) {
+      return decided;
+    }
+    return Result.ok({ conversationId: decided.value.conversationId });
   },
 };

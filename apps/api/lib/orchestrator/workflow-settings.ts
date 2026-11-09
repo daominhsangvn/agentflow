@@ -1,4 +1,5 @@
 import type {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "@repo/api/src/types/orchestrator";
@@ -33,6 +34,8 @@ export type OrchestratorWorkflow = {
   caseLookup: boolean;
   /** agent.orchestrator.caseHandoff */
   caseHandoff: boolean;
+  /** agent.orchestrator.approvals */
+  approvals: OrchestratorApprovals;
   /** What the orchestrator may write (agent.orchestrator.connections). */
   connections: OrchestratorConnectionGrants;
 };
@@ -79,6 +82,7 @@ export async function loadOrchestratorWorkflows(
       mentionOnly: settings.mentionOnly,
       caseLookup: settings.caseLookup,
       caseHandoff: settings.caseHandoff,
+      approvals: settings.approvals,
       connections: settings.connections,
     });
   }

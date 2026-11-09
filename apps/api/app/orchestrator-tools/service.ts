@@ -17,7 +17,6 @@ import {
   OrchestratorPageAccess,
   OrchestratorSourceOperation,
   pageKeysWith,
-  resolveOrchestratorGrants,
 } from "@repo/api/src/types/orchestrator-grants";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { RunnerCommandMode } from "@repo/api/src/types/runner-capabilities";
@@ -29,7 +28,7 @@ import { createProviderContext } from "@/lib/integrations/connection-service";
 import { RetryableSourceError } from "@/lib/integrations/types";
 import { jsonValueSchema } from "@/lib/json-schema";
 import { renderCase } from "@/lib/orchestrator/case-render";
-import { readChannel } from "@/lib/orchestrator/channel";
+import type { StoredDecisionDraft } from "@/lib/orchestrator/decision-draft";
 import { decide, requestDecision } from "@/lib/orchestrator/decisions";
 import {
   TURN_SUPERSEDED_ERROR,
@@ -50,6 +49,12 @@ import { recordRefusedCall } from "./service/audit";
 import { caseHandoffInputSchema, handOffCase } from "./service/case-handoff";
 import { caseLookupInputSchema, lookupCases } from "./service/case-lookup";
 import { caseNotifyInputSchema, notifyCase } from "./service/case-notify";
+import {
+  carryOutDecisionDraft,
+  type DecisionDraftInput,
+  decisionDraftInputSchema,
+  prepareDecisionDraft,
+} from "./service/decision-drafts";
 import {
   NOTES_MAX,
   REPLY_MAX,
@@ -72,11 +77,10 @@ import {
 } from "./service/pull-requests";
 import { editReply, reply, resolveReplyTarget } from "./service/replies";
 import {
-  runSourceWrite,
-  type SourceWrite,
   sourceLabelInputSchema,
   sourceLinkInputSchema,
   sourceTransitionInputSchema,
+  writeOnItem,
 } from "./service/source-writes";
 import { messageThread } from "./service/threads";
 import { buildInstructions, visibleTools } from "./service/tools";
@@ -87,6 +91,7 @@ import {
   refused,
   type ToolOutcome,
   type TurnContext,
+  turnContextOf,
 } from "./service/turn";
 import { hashOrchestratorToken } from "./token";
 
@@ -143,6 +148,7 @@ const taskCancelInputSchema = z.object({
 const requestDecisionInputSchema = z.object({
   question: z.string().trim().min(1).max(4000),
   where: z.enum(OrchestratorReplyTarget).optional(),
+  draft: decisionDraftInputSchema.optional(),
 });
 const recordDecisionInputSchema = z.object({
   decisionId: z.uuid(),
@@ -255,22 +261,7 @@ async function authenticate(token: string | null): Promise<TurnContext | null> {
     turn.conversation.case.workflowId,
   ]);
   const workflow = workflows.get(turn.conversation.case.workflowId);
-  return {
-    turnId: turn.id,
-    organizationId: turn.organizationId,
-    conversationId: turn.conversation.id,
-    projectId: turn.conversation.projectId,
-    caseId: turn.conversation.caseId,
-    projectConnectionId: turn.conversation.projectConnectionId,
-    channel: readChannel(turn.conversation.channel),
-    grants: resolveOrchestratorGrants(workflow?.connections),
-    workflowId: turn.conversation.case.workflowId,
-    workflowName: workflow?.name ?? "",
-    features: {
-      caseLookup: workflow?.caseLookup ?? false,
-      caseHandoff: workflow?.caseHandoff ?? false,
-    },
-  };
+  return turnContextOf(turn, turn.conversation, workflow);
 }
 
 type Handler = (
@@ -343,26 +334,34 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   [OrchestratorToolName.SourceItemTransition]: async (context, input) => {
+    const blocked = needsApprovedDraft(context, "source_item_transition");
+    if (blocked) {
+      return blocked;
+    }
     const parsed = sourceTransitionInputSchema.safeParse(input);
     if (!parsed.success) {
       return refused(
         "transitionName: the transition (Jira) or state (Azure DevOps) to move the item to."
       );
     }
-    return await sourceWrite(context, {
+    return await writeOnItem(context, {
       op: SourceOperation.Transition,
       transitionName: parsed.data.transitionName,
     });
   },
 
   [OrchestratorToolName.SourceItemLabel]: async (context, input) => {
+    const blocked = needsApprovedDraft(context, "source_item_label");
+    if (blocked) {
+      return blocked;
+    }
     const parsed = sourceLabelInputSchema.safeParse(input);
     if (!parsed.success) {
       return refused(
         "add and remove: the labels to add and to remove, at least one."
       );
     }
-    return await sourceWrite(context, {
+    return await writeOnItem(context, {
       op: SourceOperation.Label,
       add: parsed.data.add,
       remove: parsed.data.remove,
@@ -370,11 +369,15 @@ const HANDLERS: Record<string, Handler> = {
   },
 
   [OrchestratorToolName.SourceItemLink]: async (context, input) => {
+    const blocked = needsApprovedDraft(context, "source_item_link");
+    if (blocked) {
+      return blocked;
+    }
     const parsed = sourceLinkInputSchema.safeParse(input);
     if (!parsed.success) {
       return refused("url (http or https) and title of the link to add.");
     }
-    return await sourceWrite(context, {
+    return await writeOnItem(context, {
       op: SourceOperation.Link,
       url: parsed.data.url,
       title: parsed.data.title,
@@ -413,6 +416,17 @@ const HANDLERS: Record<string, Handler> = {
     const parsed = replyInputSchema.safeParse(input);
     if (!parsed.success) {
       return refused("text: the message to post, in markdown.");
+    }
+    const target = await resolveReplyTarget(
+      context,
+      parsed.data.replyTo,
+      parsed.data.where
+    );
+    if (target === OrchestratorReplyTarget.Thread) {
+      const blocked = needsApprovedDraft(context, "reply on the thread");
+      if (blocked) {
+        return blocked;
+      }
     }
     return await reply(
       context,
@@ -560,7 +574,7 @@ const HANDLERS: Record<string, Handler> = {
     const parsed = requestDecisionInputSchema.safeParse(input);
     if (!parsed.success) {
       return refused(
-        "question: what people must approve or reject; optional where: thread or case_page."
+        "question: what people must approve or reject; optional where: thread or case_page; optional draft: {comment: {text, replyTo?, attachments?}, transitionName?}."
       );
     }
     const target = await resolveReplyTarget(
@@ -574,30 +588,46 @@ const HANDLERS: Record<string, Handler> = {
     ) {
       return notGranted("source: comment");
     }
+    if (
+      target === OrchestratorReplyTarget.Thread &&
+      context.features.approvalsRequired
+    ) {
+      return refused(
+        "request_decision where: thread is refused: approvals: required (agent.orchestrator.approvals) keeps the request and its draft on the case page. Use where: case_page, then wait_human."
+      );
+    }
+    const prepared = await prepareDraftOrRefuse(context, parsed.data.draft);
+    if (!prepared.ok) {
+      return prepared.error;
+    }
+    const stored = prepared.value;
+    const link =
+      target === OrchestratorReplyTarget.Thread
+        ? await caseLink(context)
+        : null;
+    const text = decisionText(parsed.data.question, link, target, stored);
+    if (target === OrchestratorReplyTarget.Thread && text.length > REPLY_MAX) {
+      return refused(
+        "The question with the draft is too long for the thread; use where: case_page (the draft is shown there)."
+      );
+    }
     const decisionId = await requestDecision({
       organizationId: context.organizationId,
       caseId: context.caseId,
       conversationId: context.conversationId,
       question: parsed.data.question,
+      draft: stored,
     });
-    const link =
-      target === OrchestratorReplyTarget.Thread
-        ? await caseLink(context)
-        : null;
-    const posted = await reply(
-      context,
-      decisionText(parsed.data.question, link, target),
-      [],
-      undefined,
-      target
-    );
+    const posted = await reply(context, text, [], undefined, target);
     return {
       ok: true,
       output: {
         decisionId,
         posted: posted.ok,
         where: target,
-        next: "End the turn with wait_human: the decision wakes you.",
+        next: stored
+          ? "End the turn with wait_human. On approval AgentFlow posts the draft itself; do not post it again."
+          : "End the turn with wait_human: the decision wakes you.",
       },
     };
   },
@@ -619,10 +649,25 @@ const HANDLERS: Record<string, Handler> = {
       decidedById: null,
       caseId: context.caseId,
       notify: false,
+      refuseDraftApproval: context.features.approvalsRequired,
+      carryOut: (decision) =>
+        carryOutDecisionDraft(context.organizationId, decision),
     });
-    return decided.ok
-      ? { ok: true, output: "The decision is recorded." }
-      : refused("No pending decision of this case has that id.");
+    if (!decided.ok && decided.error === Status.Forbidden) {
+      return refused(
+        "Under approvals: required only an admin's Approve button approves a draft. End the turn with wait_human; the decision wakes you. Rejecting still works here."
+      );
+    }
+    if (!decided.ok) {
+      return refused("No pending decision of this case has that id.");
+    }
+    if (decided.value.draftNote) {
+      return {
+        ok: true,
+        output: { recorded: true, draft: decided.value.draftNote },
+      };
+    }
+    return { ok: true, output: "The decision is recorded." };
   },
 
   [OrchestratorToolName.EditReply]: async (context, input) => {
@@ -631,6 +676,10 @@ const HANDLERS: Record<string, Handler> = {
       return refused(
         "reference (what reply returned), text, optional version."
       );
+    }
+    const blocked = needsApprovedDraft(context, "edit_reply");
+    if (blocked) {
+      return blocked;
     }
     return await editReply(context, parsed.data);
   },
@@ -789,34 +838,6 @@ async function endTurn(
   });
 }
 
-/** A write on the conversation's own item: needs its grant and connection. */
-async function sourceWrite(
-  context: TurnContext,
-  write: SourceWrite
-): Promise<ToolOutcome> {
-  if (!context.grants.source.has(write.op)) {
-    return notGranted(`source: ${write.op}`);
-  }
-  const connection = await loadConversationConnection(context);
-  if (!(connection && context.channel)) {
-    return refused("This conversation has no item AgentFlow can change.");
-  }
-  const link = await caseLink(context);
-  return await runSourceWrite(
-    {
-      organizationId: context.organizationId,
-      caseId: context.caseId,
-      conversationId: context.conversationId,
-      turnId: context.turnId,
-      channel: context.channel,
-      connection,
-      workflow: { id: context.workflowId, name: context.workflowName },
-      caseUrl: link ?? "",
-    },
-    write
-  );
-}
-
 function pageContext(context: TurnContext) {
   return {
     ...context,
@@ -861,11 +882,53 @@ const SUPERSEDABLE_TOOLS: ReadonlySet<string> = new Set<string>([
 function decisionText(
   question: string,
   link: string | null,
-  target: OrchestratorReplyTarget
+  target: OrchestratorReplyTarget,
+  draft: StoredDecisionDraft | null
 ): string {
   if (target === OrchestratorReplyTarget.CasePage) {
     return `${question}\n\nApprove or reject it under Decisions, or answer here.`;
   }
   const where = link ? ` in AgentFlow (${link})` : " in AgentFlow";
-  return `${question}\n\nApprove or reject${where}, or answer here.`;
+  if (!draft) {
+    return `${question}\n\nApprove or reject${where}, or answer here.`;
+  }
+  const shown = draft.comment ? `:\n\n${draft.comment.text}` : "";
+  return `${question}\n\nOn approval AgentFlow will ${draftActions(draft)}${shown}\n\nApprove or reject${where}, or answer here.`;
+}
+
+/** Under approvals: required, thread writes come only from an approved draft. */
+function needsApprovedDraft(
+  context: TurnContext,
+  what: string
+): ToolOutcome | null {
+  if (!context.features.approvalsRequired) {
+    return null;
+  }
+  return refused(
+    `${what} is refused: approvals: required (agent.orchestrator.approvals). Put the comment or the move in request_decision's draft, where: case_page, then wait_human; AgentFlow carries it out once approved.`
+  );
+}
+
+async function prepareDraftOrRefuse(
+  context: TurnContext,
+  draft: DecisionDraftInput | undefined
+): Promise<Result<StoredDecisionDraft | null, ToolOutcome>> {
+  if (!draft) {
+    return Result.ok(null);
+  }
+  const prepared = await prepareDecisionDraft(context, draft);
+  return prepared.ok
+    ? Result.ok(prepared.value)
+    : Result.err(refused(prepared.error));
+}
+
+function draftActions(draft: StoredDecisionDraft): string {
+  const actions: string[] = [];
+  if (draft.comment) {
+    actions.push(`post this comment on ${draft.itemKey}`);
+  }
+  if (draft.transitionName !== null) {
+    actions.push(`move ${draft.itemKey} to ${draft.transitionName}`);
+  }
+  return actions.join(" and ");
 }

@@ -2071,7 +2071,9 @@ CREATE TABLE public.orchestrator_decisions (
     comment text,
     decided_at timestamp(3) without time zone,
     created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp(3) without time zone NOT NULL
+    updated_at timestamp(3) without time zone NOT NULL,
+    draft jsonb,
+    draft_result jsonb
 );
 
 CREATE TABLE public.orchestrator_messages (
@@ -3758,7 +3760,7 @@ CREATE INDEX oauth_revoked_tokens_expires_at_idx ON public.oauth_revoked_tokens 
 
 CREATE UNIQUE INDEX oauth_revoked_tokens_token_fingerprint_key ON public.oauth_revoked_tokens USING btree (token_fingerprint);
 
-CREATE UNIQUE INDEX orchestrator_anchors_organization_id_connection_id_external_ref ON public.orchestrator_anchors USING btree (organization_id, connection_id, external_ref);
+CREATE UNIQUE INDEX orchestrator_anchors_organization_id_connection_id_external_key ON public.orchestrator_anchors USING btree (organization_id, connection_id, external_ref);
 
 CREATE UNIQUE INDEX orchestrator_cases_workflow_id_source_key_key ON public.orchestrator_cases USING btree (workflow_id, source_key);
 

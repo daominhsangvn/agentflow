@@ -129,7 +129,7 @@ export const WORKFLOW_YAML_KEY_DOCS: Record<string, WorkflowYamlKeyDoc> = {
   },
   orchestrator: {
     detail: "mapping, orchestrated mode",
-    info: "How the orchestrator takes a thread's messages: concurrency, debounceSeconds, turnTimeoutMinutes, connections (what it may write), cancelOn, and the opt-in switches mentionOnly, caseLookup and caseHandoff. Left out: the defaults.",
+    info: "How the orchestrator takes a thread's messages: concurrency, debounceSeconds, turnTimeoutMinutes, connections (what it may write), cancelOn, and the opt-in switches mentionOnly, caseLookup and caseHandoff, and approvals. Left out: the defaults.",
   },
   process: {
     detail: "mapping",
@@ -407,5 +407,9 @@ export const WORKFLOW_ORCHESTRATOR_KEY_DOCS: Record<
   caseHandoff: {
     detail: "true | false, default false",
     info: "Adds case_handoff: after people approve a summary (request_decision), the orchestrator sends it to another item's case, whose orchestrator acts on it.",
+  },
+  approvals: {
+    detail: "optional | required, default optional",
+    info: "required: reply/edit_reply on the thread and source_item_transition/label/link are refused; the orchestrator puts the comment or move in request_decision's draft and AgentFlow posts it once an admin presses Approve. request_decision where: thread is refused, and record_decision cannot approve a draft (rejecting works).",
   },
 };

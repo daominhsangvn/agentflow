@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "../orchestrator.ts";
@@ -29,6 +30,7 @@ describe("workflow orchestrator config", () => {
       mentionOnly: false,
       caseLookup: false,
       caseHandoff: false,
+      approvals: OrchestratorApprovals.Optional,
       connections: {},
     });
   });
@@ -60,6 +62,7 @@ describe("workflow orchestrator config", () => {
       mentionOnly: false,
       caseLookup: false,
       caseHandoff: false,
+      approvals: OrchestratorApprovals.Optional,
       connections: {},
     });
   });
@@ -72,6 +75,14 @@ describe("workflow orchestrator config", () => {
     expect(parsed.mentionOnly).toBe(true);
     expect(parsed.caseHandoff).toBe(true);
     expect(parsed.caseLookup).toBe(false);
+  });
+
+  it("parses approvals required", () => {
+    expect(
+      workflowOrchestratorConfigSchema.parse({
+        approvals: OrchestratorApprovals.Required,
+      }).approvals
+    ).toBe(OrchestratorApprovals.Required);
   });
 
   it("accepts rules up to the limit and rejects longer ones", () => {

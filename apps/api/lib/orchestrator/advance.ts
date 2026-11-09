@@ -1,6 +1,7 @@
 import { DesktopCommandStatus } from "@repo/api/src/types/compute-target";
 import {
   ORCHESTRATOR_TURN_STOPPED_ERROR,
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorConversationStatus,
   OrchestratorMessageKind,
@@ -605,6 +606,7 @@ async function startTurnIfDue(
       caseLookup: settings.caseLookup,
       caseHandoff: settings.caseHandoff,
     },
+    approvalsRequired: settings.approvals === OrchestratorApprovals.Required,
   });
   try {
     const commandId = await dispatchOrchestratorTurn({

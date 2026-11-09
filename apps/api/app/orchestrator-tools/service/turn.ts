@@ -1,8 +1,16 @@
 import type { IntegrationToolCallResponse } from "@repo/api/src/types/integration-tools";
-import type { OrchestratorGrantSet } from "@repo/api/src/types/orchestrator-grants";
+import { OrchestratorApprovals } from "@repo/api/src/types/orchestrator";
+import {
+  type OrchestratorGrantSet,
+  resolveOrchestratorGrants,
+} from "@repo/api/src/types/orchestrator-grants";
 import { withDb } from "@repo/database";
 import { loadProjectConnectionRuntime } from "@/lib/integrations/project-connections";
-import type { ConversationChannel } from "@/lib/orchestrator/channel";
+import {
+  type ConversationChannel,
+  readChannel,
+} from "@/lib/orchestrator/channel";
+import type { OrchestratorWorkflow } from "@/lib/orchestrator/workflow-settings";
 import { orchestratorCaseUrl } from "@/lib/workflows/engine/links";
 
 /** What the orchestrator's tool modules share about one running turn. */
@@ -62,4 +70,40 @@ export function notGranted(what: string): ToolOutcome {
 export type OrchestratorToolFeatures = {
   caseLookup: boolean;
   caseHandoff: boolean;
+  /** agent.orchestrator.approvals = required: thread writes only from an approved draft. */
+  approvalsRequired: boolean;
 };
+
+export type TurnConversation = {
+  id: string;
+  projectId: string;
+  caseId: string;
+  projectConnectionId: string | null;
+  channel: unknown;
+  case: { workflowId: string };
+};
+
+/** A turn's context from its conversation and its workflow's settings (undefined: not orchestrated any more). */
+export function turnContextOf(
+  turn: { id: string; organizationId: string },
+  conversation: TurnConversation,
+  workflow: OrchestratorWorkflow | undefined
+): TurnContext {
+  return {
+    turnId: turn.id,
+    organizationId: turn.organizationId,
+    conversationId: conversation.id,
+    projectId: conversation.projectId,
+    caseId: conversation.caseId,
+    projectConnectionId: conversation.projectConnectionId,
+    channel: readChannel(conversation.channel),
+    grants: resolveOrchestratorGrants(workflow?.connections),
+    workflowId: conversation.case.workflowId,
+    workflowName: workflow?.name ?? "",
+    features: {
+      caseLookup: workflow?.caseLookup ?? false,
+      caseHandoff: workflow?.caseHandoff ?? false,
+      approvalsRequired: workflow?.approvals === OrchestratorApprovals.Required,
+    },
+  };
+}

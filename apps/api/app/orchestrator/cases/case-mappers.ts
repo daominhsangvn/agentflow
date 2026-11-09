@@ -21,6 +21,8 @@ import type {
 } from "@repo/api/src/types/orchestrator";
 import {
   OrchestratorCaseStatus,
+  orchestratorDecisionDraftResultSchema,
+  orchestratorDecisionDraftSchema,
   readOrchestratorMessageAnsweredTaskIds,
   readOrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
@@ -124,6 +126,8 @@ export type CaseDetailRow = CaseSummaryRow & {
       decidedBy: string | null;
       comment: string | null;
       decidedAt: Date | null;
+      draft: unknown;
+      draftResult: unknown;
     }
   >;
 };
@@ -327,6 +331,11 @@ function toDecision(
     decidedBy: row.decidedBy,
     comment: row.comment,
     decidedAt: iso(row.decidedAt),
+    draft: readJson(orchestratorDecisionDraftSchema, row.draft),
+    draftResult: readJson(
+      orchestratorDecisionDraftResultSchema,
+      row.draftResult
+    ),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -347,4 +356,9 @@ function toDocument(document: CaseDocument): OrchestratorCaseDocument {
     attachments: document.attachments,
     publishedAt: document.publishedAt.toISOString(),
   };
+}
+
+function readJson<T>(schema: z.ZodType<T>, value: unknown): T | null {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }

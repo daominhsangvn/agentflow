@@ -1,6 +1,8 @@
 import {
+  type OrchestratorDecisionDraftResult,
   OrchestratorDecisionStatus,
   OrchestratorDecisionVia,
+  OrchestratorDraftOutcome,
   OrchestratorMessageKind,
 } from "@repo/api/src/types/orchestrator";
 import { Status } from "@repo/api/src/types/result";
@@ -81,13 +83,44 @@ beforeEach(() => {
   mocks.wakes = [];
 });
 
-async function ask() {
+async function ask(draft: typeof DRAFT | null = null) {
   return await requestDecision({
     organizationId: "org-1",
     caseId: "case-1",
     conversationId: "conversation-1",
     question: "Approve plan v2 of LD-7?",
+    draft,
   });
+}
+
+const TURN_ID = "11111111-1111-4111-8111-111111111111";
+
+const DRAFT = {
+  itemKey: "LD-9",
+  comment: { text: "Plan v2 attached.", replyTo: null, attachments: [] },
+  transitionName: "Planning",
+  turnId: TURN_ID,
+};
+
+const DONE: OrchestratorDecisionDraftResult = {
+  outcome: OrchestratorDraftOutcome.Done,
+  commentRef: "123",
+  transition: { from: "Backlog", to: "Planning" },
+  error: null,
+  carriedOutAt: NOW.toISOString(),
+};
+
+function approval(decisionId: string, extra: Record<string, unknown> = {}) {
+  return {
+    organizationId: "org-1",
+    decisionId,
+    approved: true,
+    comment: null,
+    via: OrchestratorDecisionVia.Button,
+    decidedBy: "Ada Admin",
+    decidedById: "user-1",
+    ...extra,
+  };
 }
 
 describe("decide", () => {
@@ -108,7 +141,11 @@ describe("decide", () => {
 
     expect(first).toEqual({
       ok: true,
-      value: { conversationId: "conversation-1" },
+      value: {
+        conversationId: "conversation-1",
+        draftResult: null,
+        draftNote: null,
+      },
     });
     expect(second).toEqual({ ok: false, error: Status.NotFound });
     expect(mocks.decisions[0]).toMatchObject({
@@ -168,5 +205,105 @@ describe("decide", () => {
     });
 
     expect(result).toEqual({ ok: false, error: Status.NotFound });
+  });
+
+  it("approval with a draft carries it out once", async () => {
+    const decisionId = await ask(DRAFT);
+    const carryOut = vi.fn().mockResolvedValue(DONE);
+
+    const results = await Promise.all([
+      decide(approval(decisionId, { carryOut }), NOW),
+      decide(approval(decisionId, { carryOut }), NOW),
+    ]);
+
+    expect(carryOut).toHaveBeenCalledTimes(1);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results.filter((result) => !result.ok)).toEqual([
+      { ok: false, error: Status.NotFound },
+    ]);
+    expect(mocks.decisions[0]?.draftResult).toEqual(DONE);
+  });
+
+  it("button and record_decision race: carry-out runs once", async () => {
+    const decisionId = await ask(DRAFT);
+    const carryOut = vi.fn().mockResolvedValue(DONE);
+
+    await Promise.all([
+      decide(approval(decisionId, { carryOut, notify: false }), NOW),
+      decide(approval(decisionId, { carryOut, notify: true }), NOW),
+    ]);
+
+    expect(carryOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("the wake message carries the result note and comes after carry-out", async () => {
+    const decisionId = await ask(DRAFT);
+    const carryOut = vi.fn().mockImplementation(() => {
+      expect(mocks.messages).toEqual([]);
+      expect(mocks.wakes).toEqual([]);
+      return Promise.resolve(DONE);
+    });
+
+    const result = await decide(approval(decisionId, { carryOut }), NOW);
+
+    expect(mocks.messages).toMatchObject([
+      { text: expect.stringContaining("Do not post or move it again") },
+    ]);
+    expect(mocks.wakes).toEqual([{ id: "conversation-1", nextWakeAt: NOW }]);
+    expect(result).toMatchObject({
+      ok: true,
+      value: { draftNote: expect.stringContaining("LD-9") },
+    });
+  });
+
+  it("a throwing carryOut is recorded as failed", async () => {
+    const decisionId = await ask(DRAFT);
+    const carryOut = vi.fn().mockRejectedValue(new Error("Jira is down"));
+
+    await decide(approval(decisionId, { carryOut }), NOW);
+
+    expect(mocks.decisions[0]?.draftResult).toMatchObject({
+      outcome: OrchestratorDraftOutcome.Failed,
+      error: "Jira is down",
+    });
+    expect(mocks.messages).toHaveLength(1);
+  });
+
+  it("refuseDraftApproval keeps a draft decision pending and posts nothing", async () => {
+    const decisionId = await ask(DRAFT);
+    const carryOut = vi.fn().mockResolvedValue(DONE);
+
+    const result = await decide(
+      approval(decisionId, { carryOut, refuseDraftApproval: true }),
+      NOW
+    );
+
+    expect(result).toEqual({ ok: false, error: Status.Forbidden });
+    expect(carryOut).not.toHaveBeenCalled();
+    expect(mocks.decisions[0]?.status).toBe(OrchestratorDecisionStatus.Pending);
+  });
+
+  it("rejection never carries out", async () => {
+    const decisionId = await ask(DRAFT);
+    const carryOut = vi.fn().mockResolvedValue(DONE);
+
+    await decide(approval(decisionId, { carryOut, approved: false }), NOW);
+
+    expect(carryOut).not.toHaveBeenCalled();
+    expect(mocks.decisions[0]?.draftResult).toBeUndefined();
+  });
+});
+
+describe("requestDecision", () => {
+  it("stores the draft", async () => {
+    await ask(DRAFT);
+
+    expect(mocks.decisions[0]?.draft).toEqual(DRAFT);
+  });
+
+  it("leaves the draft out when there is none", async () => {
+    await ask();
+
+    expect(mocks.decisions[0]).not.toHaveProperty("draft");
   });
 });

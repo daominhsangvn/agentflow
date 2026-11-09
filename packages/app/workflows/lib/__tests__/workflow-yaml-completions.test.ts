@@ -242,6 +242,11 @@ describe("workflowYamlCompletions", () => {
       "mentionOnly",
       "caseLookup",
       "caseHandoff",
+      "approvals",
+    ]);
+    expect(at("agent:\n  orchestrator:\n    approvals: §").labels).toEqual([
+      "optional",
+      "required",
     ]);
     expect(at("agent:\n  orchestrator:\n    concurrency: §").labels).toEqual([
       "supersede",

@@ -1,14 +1,17 @@
 import {
   DOCUMENT_KIND_LABELS,
+  OrchestratorDraftOutcome,
   OrchestratorMessageOrigin,
   OrchestratorMessageVia,
   OrchestratorTaskStatus,
+  orchestratorDecisionDraftResultSchema,
   readOrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
 import { withDb } from "@repo/database";
 import { askedOnItem } from "./asked-questions";
 import { listCaseDocuments } from "./case-documents";
 import { readChannel } from "./channel";
+import { readStoredDraft, type StoredDecisionDraft } from "./decision-draft";
 import { readTaskResult } from "./task-result";
 import { isTicketChangeKind } from "./ticket-change";
 
@@ -81,7 +84,14 @@ export async function renderCase(caseId: string): Promise<string> {
         },
         decisions: {
           orderBy: { createdAt: "desc" },
-          select: { id: true, question: true, status: true, decidedBy: true },
+          select: {
+            id: true,
+            question: true,
+            status: true,
+            decidedBy: true,
+            draft: true,
+            draftResult: true,
+          },
         },
       },
     })
@@ -122,7 +132,7 @@ export async function renderCase(caseId: string): Promise<string> {
   }
   for (const decision of found.decisions) {
     lines.push(
-      `- ${decision.id} ${decision.status}${decision.decidedBy ? ` by ${decision.decidedBy}` : ""}: ${preview(decision.question)}`
+      `- ${decision.id} ${decision.status}${decision.decidedBy ? ` by ${decision.decidedBy}` : ""}: ${preview(decision.question)}${decisionDraftNote(decision)}`
     );
   }
   lines.push("", "## Conversations");
@@ -224,4 +234,44 @@ function messageActor(message: {
     OrchestratorMessageVia.AgentFlow
     ? `${actor} (AgentFlow)`
     : actor;
+}
+
+/** " — draft: comment (N chars) + move to X; posted (reference R)", or "" without a draft. */
+function decisionDraftNote(decision: {
+  draft: unknown;
+  draftResult: unknown;
+}): string {
+  const draft = readStoredDraft(decision.draft);
+  if (!draft) {
+    return "";
+  }
+  return ` — draft: ${draftWhat(draft)}; ${draftState(decision.draftResult)}`;
+}
+
+function draftWhat(draft: StoredDecisionDraft): string {
+  const parts: string[] = [];
+  if (draft.comment) {
+    parts.push(`comment (${draft.comment.text.length} chars)`);
+  }
+  if (draft.transitionName !== null) {
+    parts.push(`move to ${draft.transitionName}`);
+  }
+  return parts.join(" + ");
+}
+
+function draftState(value: unknown): string {
+  const parsed = orchestratorDecisionDraftResultSchema.safeParse(value);
+  if (!parsed.success) {
+    return "not posted";
+  }
+  const result = parsed.data;
+  if (result.outcome === OrchestratorDraftOutcome.Done) {
+    return result.commentRef === null
+      ? "done"
+      : `posted (reference ${result.commentRef})`;
+  }
+  if (result.outcome === OrchestratorDraftOutcome.Failed) {
+    return `failed: ${result.error ?? "unknown error"}`;
+  }
+  return "being carried out";
 }

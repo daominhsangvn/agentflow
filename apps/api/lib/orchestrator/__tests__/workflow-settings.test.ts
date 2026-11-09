@@ -1,4 +1,5 @@
 import {
+  OrchestratorApprovals,
   OrchestratorConcurrency,
   OrchestratorTicketChange,
 } from "@repo/api/src/types/orchestrator";
@@ -66,6 +67,7 @@ describe("loadOrchestratorWorkflows", () => {
       mentionOnly: false,
       caseLookup: false,
       caseHandoff: false,
+      approvals: OrchestratorApprovals.Optional,
     });
   });
 

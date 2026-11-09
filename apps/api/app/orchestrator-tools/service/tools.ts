@@ -260,7 +260,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.RequestDecision,
     title: "Ask people to decide",
     description:
-      "Asks for an approval (a plan, a go to implement, a comment before it is posted): stores a pending decision and posts the question with where: thread (on the item, with the case's link; needs source: comment) or case_page (in AgentFlow only; no grant). Default: where the message you answer came from. An admin approves or rejects in AgentFlow; someone may also answer in the thread or on the case page: record_decision then. End the turn with wait_human.",
+      "Asks for an approval (a plan, a go to implement, a comment before it is posted): stores a pending decision and posts the question with where: thread (on the item, with the case's link; needs source: comment) or case_page (in AgentFlow only; no grant); under approvals: required only case_page. Default: where the message you answer came from. An admin approves or rejects in AgentFlow; someone may also answer in the thread or on the case page: record_decision then. Put what should go on the item in draft (the whole comment, never a summary; and/or the status move): people see it in full, and on approval AgentFlow posts it itself; never post it again. End the turn with wait_human.",
     inputSchema: {
       type: "object",
       properties: {
@@ -270,6 +270,35 @@ export const TOOLS: IntegrationToolDescriptor[] = [
           enum: Object.values(OrchestratorReplyTarget),
           description:
             "thread (the item's thread) or case_page (only the case page in AgentFlow; nothing is posted on the item). Default: where the message you answer came from.",
+        },
+        draft: {
+          type: "object",
+          properties: {
+            comment: {
+              type: "object",
+              properties: {
+                text: { type: "string", minLength: 1, maxLength: REPLY_MAX },
+                replyTo: { type: "string" },
+                attachments: {
+                  type: "array",
+                  maxItems: REPLY_ATTACHMENTS_MAX,
+                  items: {
+                    type: "object",
+                    properties: {
+                      taskId: { type: "string" },
+                      name: { type: "string" },
+                    },
+                    required: ["taskId", "name"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["text"],
+              additionalProperties: false,
+            },
+            transitionName: { type: "string", minLength: 1, maxLength: 128 },
+          },
+          additionalProperties: false,
         },
       },
       required: ["question"],
@@ -281,7 +310,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.RecordDecision,
     title: "Record a decision",
     description:
-      "Records the decision someone gave in the thread on a pending decision (request_decision): who, approved or not, and what they said.",
+      "Records the decision someone gave in the thread on a pending decision (request_decision): who, approved or not, and what they said. A decision with a draft: approving it here carries the draft out, except under approvals: required, where only an admin's Approve button approves a draft (rejecting still works).",
     inputSchema: {
       type: "object",
       properties: {
@@ -536,6 +565,11 @@ function describeFeatures(features: OrchestratorToolFeatures): string {
   if (features.caseHandoff) {
     parts.push(
       `${OrchestratorToolName.CaseHandoff} sends a summary people approved (${OrchestratorToolName.RequestDecision}) to another item's case.`
+    );
+  }
+  if (features.approvalsRequired) {
+    parts.push(
+      `Approvals are required: ${OrchestratorToolName.Reply} on the thread, ${OrchestratorToolName.EditReply} and the source_item_* writes are refused; put the comment or the move in ${OrchestratorToolName.RequestDecision}'s draft, where: case_page; AgentFlow carries it out once an admin presses Approve (${OrchestratorToolName.RecordDecision} cannot approve a draft).`
     );
   }
   return parts.length > 0 ? ` ${parts.join(" ")}` : "";
