@@ -157,6 +157,9 @@ COPY --from=builder /app/apps/api/.next ./apps/api/.next
 COPY --from=builder /app/packages/database/generated ./packages/database/generated
 COPY --from=builder /app/packages/design-system/dist ./packages/design-system/dist
 COPY --from=builder /app/packages/telemetry-contract/dist ./packages/telemetry-contract/dist
+# loops-api/dist is git-ignored: `tsx server.ts` requires it at runtime
+# (@repo/api → @agentflow-ai/loops-api/compute-target).
+COPY --from=builder /app/packages/loops-api/dist ./packages/loops-api/dist
 # Lets `node scripts/storage-init.mjs` create buckets + CORS from this image
 # (production compose job); it resolves @aws-sdk/client-s3 through packages/storage.
 COPY scripts/storage-init.mjs ./scripts/storage-init.mjs
