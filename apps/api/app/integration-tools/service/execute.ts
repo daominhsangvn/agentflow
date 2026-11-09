@@ -338,7 +338,9 @@ export function toItemOutput(item: SourceItem): JsonObject {
     priority: item.priority,
     labels: item.labels,
     assignee: item.assignee,
+    assigneeEmail: item.assigneeEmail ?? null,
     reporter: item.reporter,
+    reporterEmail: item.reporterEmail ?? null,
     description: item.bodyMarkdown.slice(0, DESCRIPTION_MAX),
     sections: item.sections.map((section) => ({
       title: section.title,
