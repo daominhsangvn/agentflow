@@ -21,6 +21,10 @@ A task resumes only on the Agent that ran it: its session is there. When an Agen
 
 The personal Agent pushes and opens its pull request with the person's credentials. A Gitea token needs `write:repository` and `write:issue`. `pull_request_open` only works for tasks AgentFlow pushed, so the orchestrator does not open the pull request of a personal Agent's task.
 
+## No repositories needed
+
+A project used only by personal Agents does not need repositories. An orchestrator task, a process step or an instruction action on a personal Agent starts anyway: the loop carries no repository and works in the project folder. If the project has repositories, they are sent but not cloned. An automatic Agent still refuses a project without repositories (see [Agents](/docs/guides/setup/agents)). Instruction actions need an Agent bundle released after 2026-11-10.
+
 ## Windows
 
 Run `doctor.bat --project <KEY>` first and fix every `FAIL` line. Use native Claude Code, not the npm package. To start the Agent with Windows, set it up as a Windows service: [Personal Agent](/docs/guides/setup/personal-agent).

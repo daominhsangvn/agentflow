@@ -62,7 +62,7 @@ TESTCASES-<KEY>.md. Asks when an acceptance criterion cannot be decided.
 
 | Field | Type | Required | What it does |
 |---|---|---|---|
-| `runner` | text, up to 120 characters | no | The Agent's **role** as people and the rules name it, e.g. `BA (LeaveDesk)`, `Dev (LeaveDesk, An)`. The orchestrator can pick an Agent by its name, this role or its id; write rules with roles ("BA writes the PRD"). |
+| `runner` | text, up to 120 characters | no | The **shared role** of every Agent that uses this file, as people and the rules name it, e.g. `BA (LeaveDesk)`, `Dev (LeaveDesk)`. The file is committed and shared by many computers, so it holds no per-machine identity. A personal Agent's own role (set with `setup`, `--role` or `AGENTFLOW_RUNNER_ROLE`) replaces it. The orchestrator picks an Agent by its id, then its name, then its role, and refuses a `task_run` when a name or role matches several Agents: use the id (`runners_list` shows it). Write rules with roles ("BA writes the PRD"). |
 | `toolkit` | mapping | automatic Agents | Where an automatic Agent's commands and skills come from (below). A personal Agent ignores it. |
 | `commands` | list, up to 100 | no | The commands the Agent offers (below). An Agent without commands gets no tasks. |
 | `skills` | list, up to 100 | no | Skill names (`tdd`), or `{ name, description }`. Shown to the orchestrator; AgentFlow warns when a skill is not found. |
@@ -92,6 +92,8 @@ TESTCASES-<KEY>.md. Asks when an acceptance criterion cannot be decided.
 Tags (`produces`, `needs`) are free words (lowercase letters, digits and `-`, up to 40 characters): agree on them across the project's Agents.
 
 ## What AgentFlow checks
+
+A personal Agent checks its `AGENTFLOW.md` with the same parser as AgentFlow. It refuses to start on a file that does not parse and lists each problem with its field path (for example `commands.0.mode`). While it runs, it never uploads an invalid edit: AgentFlow keeps the last valid file, and the Agent uploads again once the file is fixed. It also warns about keys it does not read (for example `comands`) and about a file with no commands (the orchestrator gives that Agent no tasks; skills alone are not offered as tasks). Warnings never stop the Agent. To check the file without starting the Agent, run `node runner.mjs check --project <key>`. Automatic Agents, which read the file from a toolkit, are unchanged.
 
 When the orchestrator calls `task_run`, AgentFlow refuses the task before it starts when:
 

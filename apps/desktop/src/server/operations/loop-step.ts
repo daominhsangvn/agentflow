@@ -59,6 +59,8 @@ import {
   writeAttachHelper,
 } from "./integration-session-client.js";
 import {
+  COMMAND_DECIDES_LINE,
+  COMMAND_QUESTIONS_LINE,
   collectPersonalStepFiles,
   type PersonalRunnerProject,
   personalStepInstructions,
@@ -161,12 +163,14 @@ export function buildStepWorkspaceInstructions(
   if (step.askQuestions) {
     lines.push(
       `- When you need a decision from the developer, do not guess: write the questions to \`${LOOP_STEP_WORK_DIR}/${LoopStepFile.Questions}\` as a JSON array of \`{"id": "q1", "question": "...", "options": ["..."]}\` (options optional), then stop. The run resumes this session with the answers.`,
+      COMMAND_QUESTIONS_LINE,
       '- If you already asked a question as a comment on the ticket, put that comment\'s id in its "commentId".',
       `- Limits of that file: at most ${LOOP_STEP_QUESTIONS_MAX} questions; each question at most ${LOOP_STEP_QUESTION_MAX} characters; at most ${LOOP_STEP_OPTIONS_MAX} options per question, each at most ${LOOP_STEP_OPTION_MAX} characters (keep options short, put the reasoning in the question).`
     );
   } else {
     lines.push(
-      "- Do not stop to ask questions: make the most reasonable choice and note it."
+      "- Do not stop to ask questions: make the most reasonable choice and note it.",
+      COMMAND_DECIDES_LINE
     );
   }
   if (step.finish === LoopStepFinish.Push) {
@@ -298,16 +302,19 @@ export async function buildStepLaunch(input: {
             : []),
         ]
       : [];
-  const readOnly = readOnlyStepArgs(step);
+  const denied = stepDisallowedToolsArgs(
+    step,
+    input.runtime.harness.adapter.harness === LoopHarness.Claude
+  );
   const baseClaudeArgs = [
     ...withIntegrationToolArgs(input.baseClaudeArgs, tools),
     ...systemPrompt,
-    ...readOnly,
+    ...denied,
   ];
   const stdinClaudeArgs = [
     ...withIntegrationToolArgs(input.stdinClaudeArgs, tools),
     ...systemPrompt,
-    ...readOnly,
+    ...denied,
   ];
   const prompt = input.body.prompt?.trim() ?? "";
   const resume = resumeArgs(input.body);
@@ -423,10 +430,29 @@ export const READ_ONLY_STEP_DISALLOWED_TOOLS = [
   "Bash(git push:*)",
 ].join(",");
 
-export function readOnlyStepArgs(step: LoopStepConfig | undefined): string[] {
-  return step?.readOnly
-    ? [`--disallowedTools=${READ_ONLY_STEP_DISALLOWED_TOOLS}`]
-    : [];
+/**
+ * What no step may use: nobody answers an interactive question while it
+ * runs. Its questions go to questions.json (askQuestions) instead.
+ */
+export const UNATTENDED_STEP_DISALLOWED_TOOLS = "AskUserQuestion";
+
+/**
+ * The tools a step's agent is denied, as one `--disallowedTools` flag:
+ * AskUserQuestion for every Claude step, plus editing, committing and
+ * pushing for a read-only step.
+ */
+export function stepDisallowedToolsArgs(
+  step: LoopStepConfig | undefined,
+  claude = true
+): string[] {
+  if (!step) {
+    return [];
+  }
+  const denied = [
+    ...(claude ? [UNATTENDED_STEP_DISALLOWED_TOOLS] : []),
+    ...(step.readOnly ? [READ_ONLY_STEP_DISALLOWED_TOOLS] : []),
+  ];
+  return denied.length > 0 ? [`--disallowedTools=${denied.join(",")}`] : [];
 }
 
 /**

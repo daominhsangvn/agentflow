@@ -210,6 +210,46 @@ describe("startTask", () => {
     expect(unknown.ok ? "" : unknown.error).toContain('No Agent "runner-qc"');
   });
 
+  it("starts a personal Agent's task when the project has no repositories", async () => {
+    mocks.noRepositories = true;
+
+    const started = await startTask({
+      ...BASE,
+      runner: "an-PRO-1",
+      command: "/executing-plans",
+    });
+
+    expect(started.ok && started.value.status).toBe(
+      OrchestratorTaskStatus.Running
+    );
+    expect(mocks.createLoop).toHaveBeenCalledWith(
+      IDS.org,
+      IDS.owner,
+      expect.objectContaining({
+        command: LoopCommand.Step,
+        computeTargetId: IDS.dev,
+        repo: undefined,
+        additionalRepos: undefined,
+      })
+    );
+  });
+
+  it("refuses an automatic Agent's task when the project has no repositories", async () => {
+    mocks.noRepositories = true;
+
+    const started = await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+    });
+
+    expect(started.ok && started.value.status).toBe(
+      OrchestratorTaskStatus.Failed
+    );
+    expect(started.ok && started.value.error).toContain("has no repositories");
+    expect(mocks.createLoop).not.toHaveBeenCalled();
+  });
+
   it("leaves pushing to a personal runner's own command", async () => {
     await startTask({
       ...BASE,

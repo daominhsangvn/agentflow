@@ -7,8 +7,9 @@
  * to `<data dir>/runner.env`. It first asks for the mode: `auto` (the
  * default) clones the project repositories into the workspace; `personal`
  * works for one AgentFlow project in a folder of this computer and asks for
- * the project key, that folder, and whether the project's commands can run
- * several loops at once; its answers go to the project's own data directory
+ * the project key, that folder, whether the project's commands can run
+ * several loops at once, and an optional role of this computer (it replaces
+ * the `runner:` of the project's AGENTFLOW.md); its answers go to the project's own data directory
  * (`<data dir>/personal/<project key>`), so several personal runners can
  * share one computer. At startup the runner reads that file; a
  * variable set in the environment wins over it. Any other variable written
@@ -20,6 +21,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseEnv } from "node:util";
+import { runnerRoleSchema } from "@repo/api/src/types/runner-capabilities";
 import {
   checkApiKeySetting,
   checkApiUrlSetting,
@@ -49,6 +51,10 @@ const RANDOM_PORT = "random";
 const PORT_RE = /^\d+$/;
 const PORT_MIN = 1024;
 const PORT_MAX = 65_535;
+/** What Enter keeps for the role when none is set; also clears a set one. */
+const NO_ROLE = "none";
+/** The role goes into runner.env, where these would end or quote the value. */
+const UNSAFE_ROLE_CHARACTERS_RE = /[#"'`\r\n]/;
 
 /** The settings the questions ask for, in the order they are asked. */
 export const SETUP_SETTINGS = [
@@ -56,6 +62,7 @@ export const SETUP_SETTINGS = [
   HeadlessRunnerEnv.ApiUrl,
   HeadlessRunnerEnv.ApiKey,
   HeadlessRunnerEnv.RunnerName,
+  HeadlessRunnerEnv.RunnerRole,
   HeadlessRunnerEnv.Workspace,
   HeadlessRunnerEnv.ProjectKey,
   HeadlessRunnerEnv.ProjectDir,
@@ -238,17 +245,51 @@ async function askPersonalRunnerSettings(
         : `${defaultRunnerName(context.username)}-${projectKey}`,
     check: checkRunnerName,
   });
+  const role = await askRunnerRole(context);
   const gatewayPort = await askGatewayPort(context);
   return {
     [HeadlessRunnerEnv.Mode]: RunnerMode.Personal,
     ...connection,
     [HeadlessRunnerEnv.RunnerName]: runnerName,
+    [HeadlessRunnerEnv.RunnerRole]: role,
     [HeadlessRunnerEnv.ProjectKey]: projectKey,
     [HeadlessRunnerEnv.ProjectDir]: projectDir,
     [HeadlessRunnerEnv.Parallel]: parallel,
     [HeadlessRunnerEnv.SkipPermissions]: skipPermissions,
     [HeadlessRunnerEnv.GatewayPort]: gatewayPort,
   };
+}
+
+/**
+ * The role of this computer, optional: Enter keeps the configured one (or
+ * none); `none` clears it (saved empty, which counts as unset).
+ */
+async function askRunnerRole(context: SetupContext): Promise<string> {
+  const configured = context.current[HeadlessRunnerEnv.RunnerRole] ?? "";
+  for (;;) {
+    const answer = (
+      await context.ask(
+        `Role of this computer for the orchestrator, replaces runner: of the project's AGENTFLOW.md (e.g. Dev (LeaveDesk, An); ${NO_ROLE} = the file's)`,
+        configured || NO_ROLE
+      )
+    ).trim();
+    const value = answer === "" ? configured : answer;
+    if (value === "" || value.toLowerCase() === NO_ROLE) {
+      context.say("  Role: the file's runner:.");
+      return "";
+    }
+    const parsed = runnerRoleSchema.safeParse(value);
+    if (!parsed.success) {
+      context.say(`  ${parsed.error.issues[0]?.message ?? "invalid role"}`);
+    } else if (UNSAFE_ROLE_CHARACTERS_RE.test(parsed.data)) {
+      context.say(
+        "  must not contain #, quotes, backticks or line breaks (it is saved in runner.env)"
+      );
+    } else {
+      context.say(`  Role: ${parsed.data}.`);
+      return parsed.data;
+    }
+  }
 }
 
 /**

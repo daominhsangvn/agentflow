@@ -160,6 +160,7 @@ test("personal mode works in the project folder, one loop at a time by default",
       projectDir: path.resolve(projectDir),
       parallel: false,
       skipPermissions: false,
+      role: null,
     });
     assert.equal(result.config.workspaceDir, path.resolve(projectDir));
   } finally {
@@ -185,4 +186,31 @@ test("personal mode needs a project key and an existing project folder", () => {
 test("auto mode has no personal settings", () => {
   const result = loadHeadlessConfig(baseEnv());
   assert.equal(result.ok && result.config.personal, null);
+});
+
+test("personal mode reads this computer's role", () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-role-"));
+  try {
+    const env = {
+      ...baseEnv(),
+      [HeadlessRunnerEnv.Mode]: "personal",
+      [HeadlessRunnerEnv.ProjectKey]: "PRO-1",
+      [HeadlessRunnerEnv.ProjectDir]: projectDir,
+    };
+    const withRole = loadHeadlessConfig({
+      ...env,
+      [HeadlessRunnerEnv.RunnerRole]: " Dev (LeaveDesk, An) ",
+    });
+    assert.equal(
+      withRole.ok && withRole.config.personal?.role,
+      "Dev (LeaveDesk, An)"
+    );
+    const tooLong = loadHeadlessConfig({
+      ...env,
+      [HeadlessRunnerEnv.RunnerRole]: "x".repeat(121),
+    });
+    assert.equal(tooLong.ok, false);
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
 });

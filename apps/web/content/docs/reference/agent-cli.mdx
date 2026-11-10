@@ -13,7 +13,9 @@ In environment variable names, `RUNNER` means Agent: the names keep the old word
 |---|---|
 | `node runner.mjs` | The automatic Agent (one per computer) |
 | `node runner.mjs --project <key>` | The personal Agent of an AgentFlow project (for example `--project PRO-1`) |
+| `node runner.mjs --project <key> --role "<role>"` | The personal Agent with this computer's role for this start (not saved) |
 | `node runner.mjs setup [--project <key>]` | Asks the setup questions and saves them to `<data dir>/runner.env` |
+| `node runner.mjs check --project <key>` | Validates the personal Agent's `AGENTFLOW.md` and exits (0 valid or missing, 2 invalid or no project folder configured) |
 | `node runner.mjs uninstall [--project <key>]` | Windows: removes the Agent's service; asks whether to delete its local data |
 
 Any other argument is rejected. Settings come from the environment and from `<data dir>/runner.env` (one `NAME=value` per line; a variable set in the environment wins). A start from a terminal with no API URL or key asks the setup questions first. Empty variables count as unset.
@@ -31,6 +33,7 @@ Exit codes: `2` for an invalid configuration (the message names the variable), `
 | `AGENTFLOW_RUNNER_MODE` | `auto` | `auto` or `personal` |
 | `AGENTFLOW_RUNNER_PROJECT_KEY` | none | Personal: the AgentFlow project key, such as `PRO-1` (required in personal mode) |
 | `AGENTFLOW_RUNNER_PROJECT_DIR` | none | Personal: the project folder runs happen in; it must exist (required in personal mode). Replaces the workspace |
+| `AGENTFLOW_RUNNER_ROLE` | none | Personal: this computer's role, such as `Dev (LeaveDesk, An)` (at most 120 characters). Replaces the `runner:` of the shared `AGENTFLOW.md`. `--role` wins |
 | `AGENTFLOW_RUNNER_PARALLEL` | `false` | Personal: `true` lets several runs share the folder (the commands make their own worktrees); `false` runs them one at a time |
 | `AGENTFLOW_RUNNER_SKIP_PERMISSIONS` | `false` | Personal: `true` lets Claude Code use any tool without a permission prompt (`--permission-mode bypassPermissions`). Otherwise it uses the run's allowed tools plus the person's own `permissions.allow` |
 | `AGENTFLOW_RUNNER_WORKSPACE` | `/workspace` | Automatic: where repositories are cloned and runs work in worktrees |

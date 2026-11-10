@@ -182,6 +182,24 @@ describe("personal runner STEP loops", () => {
     assert.ok(upload?.body.includes("Which export format for run-1?"));
   });
 
+  test("runs the step in the project folder when the loop has no repository", async () => {
+    const { projectDir, capture, mock, post } = await startGateway();
+    const loopId = "22220000-0000-0000-0000-0000000000a1";
+
+    const response = await post({ loopId, projectKey: "pro-1", repo: null });
+    assert.equal(response.ok, true, await response.text());
+    const terminal = await waitForTerminalEvent(mock.requests, loopId);
+    assert.equal(terminal.type, "completed", JSON.stringify(terminal));
+
+    const cwd = readFileSync(path.join(capture, "cwd.txt"), "utf8").trim();
+    assert.equal(await fs.realpath(cwd), await fs.realpath(projectDir));
+    assert.ok(
+      existsSync(
+        path.join(projectDir, ".agentflow-ai", "runs", "run-1", "issue.md")
+      )
+    );
+  });
+
   test("tells a plan step to write the plan in the run's work directory", async () => {
     const { projectDir, capture, mock, post } = await startGateway();
     const loopId = "22220000-0000-0000-0000-000000000003";

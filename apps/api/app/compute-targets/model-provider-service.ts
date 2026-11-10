@@ -2,8 +2,11 @@ import {
   ClaudeCodeVersionChannel,
   type ComputeTargetModelProvider,
   claudeCodeVersionSchema,
+  countPemCertificates,
+  MODEL_PROVIDER_CA_PEM_ENV_KEY,
   MODEL_PROVIDER_MODEL_ENV_KEYS,
   ModelProviderMode,
+  modelProviderCaCertificateSchema,
   type UpdateComputeTargetModelProviderInput,
 } from "@repo/api/src/types/compute-target-model-provider";
 import { type Prisma, withDb } from "@repo/database";
@@ -29,6 +32,9 @@ const storedSettingsSchema = z.object({
   baseUrl: z.string().nullable(),
   model: z.string().nullable(),
   env: z.record(z.string(), z.string()),
+  // Public CA certificates (not a secret); settings saved before it existed
+  // have none.
+  caCertificate: modelProviderCaCertificateSchema.nullable().catch(null),
   // Settings saved before the version existed (or holding one the runner
   // would refuse) run the latest release instead of losing the provider.
   claudeCodeVersion: claudeCodeVersionSchema.catch(
@@ -42,6 +48,7 @@ const MACHINE_DEFAULT: StoredSettings = {
   baseUrl: null,
   model: null,
   env: {},
+  caCertificate: null,
   claudeCodeVersion: ClaudeCodeVersionChannel.Latest,
 };
 
@@ -94,6 +101,7 @@ export const computeTargetModelProviderService = {
             baseUrl: input.baseUrl,
             model: input.model || null,
             env: input.env,
+            caCertificate: nextCaCertificate(input, target.modelProvider),
             claudeCodeVersion: input.claudeCodeVersion,
           };
     const token = nextToken(input, target.token);
@@ -175,6 +183,17 @@ function nextToken(
   return input.token === undefined ? stored : input.token;
 }
 
+/** Keep the stored certificate unless the input sets or clears it. */
+function nextCaCertificate(
+  input: UpdateComputeTargetModelProviderInput,
+  stored: Prisma.JsonValue
+): StoredSettings["caCertificate"] {
+  if (input.caCertificate === undefined) {
+    return readSettings(stored).caCertificate;
+  }
+  return input.caCertificate;
+}
+
 function openToken(
   computeTargetId: string,
   sealed: string | null
@@ -206,6 +225,12 @@ function toDto(
       isSet: token !== null,
       lastFour: token ? token.slice(-TOKEN_HINT_LENGTH) : null,
     },
+    caCertificate: settings.caCertificate
+      ? {
+          fileName: settings.caCertificate.fileName,
+          certificateCount: countPemCertificates(settings.caCertificate.pem),
+        }
+      : null,
     claudeCodeVersion: settings.claudeCodeVersion,
   };
 }
@@ -226,6 +251,9 @@ function buildClaudeEnv(
     }
   }
   env.ANTHROPIC_BASE_URL = settings.baseUrl;
+  if (settings.caCertificate) {
+    env[MODEL_PROVIDER_CA_PEM_ENV_KEY] = settings.caCertificate.pem;
+  }
   const token = openToken(computeTargetId, sealedToken);
   if (token) {
     env.ANTHROPIC_AUTH_TOKEN = token;

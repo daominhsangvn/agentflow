@@ -29,8 +29,8 @@ const AppLayout = async ({ children }: AppLayoutProperties) => {
   if (!user) {
     // FEA-632: nearly everyone landing on the app unauthenticated is a new
     // user, so default them to sign-up rather than sign-in to avoid the extra
-    // click. Clerk's sign-up embed still surfaces the "Already have an account?
-    // Sign in" link for returning users.
+    // click. The sign-up form links to sign-in for returning users. With
+    // AUTH_ALLOW_SIGN_UP=false this lands on sign-in instead.
     return redirectToSignUp();
   }
 

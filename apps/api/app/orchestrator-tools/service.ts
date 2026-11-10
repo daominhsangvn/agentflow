@@ -299,6 +299,7 @@ const HANDLERS: Record<string, Handler> = {
     // The commands' optional fields are dropped by the JSON round trip.
     const output = files.map((file) => ({
       runner: file.runnerName,
+      id: file.computeTargetId,
       online: file.isOnline,
       role: file.capabilities?.runner ?? null,
       commands: file.capabilities?.commands ?? [],

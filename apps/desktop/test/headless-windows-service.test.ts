@@ -109,6 +109,7 @@ test("personal service xml has project, env and escapes", () => {
     baseDataDir: "/d",
   });
   assert.ok(xml.includes("--project PRO-1"));
+  assert.ok(!xml.includes("--role"));
   assert.ok(xml.includes("AGENTFLOW_RUNNER_DATA_DIR"));
   assert.ok(
     xml.includes('AGENTFLOW_RUNNER_SERVICE" value="agentflow-agent-pro-1"')

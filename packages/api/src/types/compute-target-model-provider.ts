@@ -25,14 +25,22 @@ export type ModelProviderMode =
  * the computer.
  */
 export const MODEL_PROVIDER_ENV_KEY_RE =
-  /^(ANTHROPIC_[A-Z0-9_]+|CLAUDE_CODE_[A-Z0-9_]+|DISABLE_[A-Z0-9_]+|API_TIMEOUT_MS|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS)$/;
+  /^(ANTHROPIC_[A-Z0-9_]+|CLAUDE_CODE_[A-Z0-9_]+|DISABLE_[A-Z0-9_]+|API_TIMEOUT_MS|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|HTTPS_PROXY|HTTP_PROXY|NO_PROXY)$/;
 
-/** Set through the dedicated fields (base URL, token), never through `env`. */
+/**
+ * Carries the provider's CA certificates (PEM text) with a loop. The computer
+ * writes them to a file and replaces this key with NODE_EXTRA_CA_CERTS
+ * pointing at it; Claude Code never sees this key.
+ */
+export const MODEL_PROVIDER_CA_PEM_ENV_KEY = "AGENTFLOW_MODEL_PROVIDER_CA_PEM";
+
+/** Set through the dedicated fields (base URL, token, CA certificate), never through `env`. */
 export const MODEL_PROVIDER_RESERVED_ENV_KEYS: readonly string[] = [
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
+  "NODE_EXTRA_CA_CERTS",
 ];
 
 /** Variables the "Model" field fills, unless `env` sets them explicitly. */
@@ -46,6 +54,11 @@ export const MODEL_PROVIDER_MODEL_ENV_KEYS: readonly string[] = [
 
 export const MODEL_PROVIDER_ENV_MAX = 30;
 const ENV_VALUE_MAX = 4096;
+
+/** A PEM bundle of one or more certificates; a few certificates fit easily. */
+export const MODEL_PROVIDER_CA_PEM_MAX = 64 * 1024;
+const PEM_CERTIFICATE_RE =
+  /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/;
 
 /**
  * Claude Code version a headless runner runs loops with: `latest`, looked up
@@ -81,20 +94,56 @@ export type ComputeTargetModelProvider = {
   /** Additional non-secret Claude Code variables. */
   env: Record<string, string>;
   token: { isSet: boolean; lastFour: string | null };
+  /** CA certificates trusted for the provider (and the proxy), sent as NODE_EXTRA_CA_CERTS. */
+  caCertificate: { fileName: string; certificateCount: number } | null;
   /** `latest` or an exact release; applies to headless runners only. */
   claudeCodeVersion: string;
 };
 
 /** Environment sent to the computer with a loop (the computer re-checks the keys). */
 export const modelProviderEnvSchema = z
-  .record(
-    z.string().regex(MODEL_PROVIDER_ENV_KEY_RE, "Unsupported variable"),
-    z.string().max(ENV_VALUE_MAX)
-  )
-  .refine(
-    (env) => Object.keys(env).length <= MODEL_PROVIDER_ENV_MAX + 8,
-    "Too many variables"
-  );
+  .record(z.string(), z.string())
+  .superRefine((env, ctx) => {
+    for (const [key, value] of Object.entries(env)) {
+      if (key === MODEL_PROVIDER_CA_PEM_ENV_KEY) {
+        if (value.length > MODEL_PROVIDER_CA_PEM_MAX) {
+          ctx.addIssue({ code: "custom", path: [key], message: "Too long" });
+        }
+      } else if (!MODEL_PROVIDER_ENV_KEY_RE.test(key)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [key],
+          message: "Unsupported variable",
+        });
+      } else if (value.length > ENV_VALUE_MAX) {
+        ctx.addIssue({ code: "custom", path: [key], message: "Too long" });
+      }
+    }
+    if (Object.keys(env).length > MODEL_PROVIDER_ENV_MAX + 9) {
+      ctx.addIssue({ code: "custom", message: "Too many variables" });
+    }
+  });
+
+/** A PEM file's text: at least one certificate, nothing that is not PEM. */
+export const modelProviderCaCertificateSchema = z.object({
+  fileName: z.string().trim().min(1).max(255),
+  pem: z
+    .string()
+    .trim()
+    .max(MODEL_PROVIDER_CA_PEM_MAX, "The certificate file is too large")
+    .refine(
+      (pem) => PEM_CERTIFICATE_RE.test(pem),
+      "Upload a PEM certificate (-----BEGIN CERTIFICATE----- …)"
+    ),
+});
+export type ModelProviderCaCertificate = z.infer<
+  typeof modelProviderCaCertificateSchema
+>;
+
+/** Number of certificates in a PEM bundle. */
+export function countPemCertificates(pem: string): number {
+  return pem.split("-----BEGIN CERTIFICATE-----").length - 1;
+}
 
 export const updateComputeTargetModelProviderInputSchema = z
   .object({
@@ -108,6 +157,8 @@ export const updateComputeTargetModelProviderInputSchema = z
     env: z.record(z.string(), z.string().max(ENV_VALUE_MAX)).default({}),
     /** Omitted: keep the stored token. Null: remove it. */
     token: z.string().trim().min(1).max(ENV_VALUE_MAX).nullable().optional(),
+    /** Omitted: keep the stored certificate. Null: remove it. */
+    caCertificate: modelProviderCaCertificateSchema.nullable().optional(),
     claudeCodeVersion: claudeCodeVersionSchema.default(
       ClaudeCodeVersionChannel.Latest
     ),
@@ -145,7 +196,7 @@ export const updateComputeTargetModelProviderInputSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["env"],
-        message: `Set ${reserved.join(", ")} with the base URL and token fields`,
+        message: `Set ${reserved.join(", ")} with the base URL, token and CA certificate fields`,
       });
     }
   });

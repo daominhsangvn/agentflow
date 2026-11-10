@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   parseRunnerCapabilitiesMarkdown,
+  RunnerCapabilitiesSource,
   RunnerCommandMode,
   runnerCapabilitiesGitCredentialPath,
   runnerCapabilitiesRefreshRequestSchema,
   runnerCapabilitiesRefreshResultSchema,
+  runnerRoleSchema,
+  unknownRunnerCapabilitiesKeys,
+  uploadRunnerCapabilitiesInputSchema,
 } from "../runner-capabilities";
 
 const NOT_YAML_RE = /not valid YAML/;
@@ -190,6 +194,83 @@ describe("capabilities refresh contract", () => {
   it("encodes the git credential path", () => {
     expect(runnerCapabilitiesGitCredentialPath("a b", "c")).toBe(
       "/compute-targets/a%20b/capabilities/refresh/c/git-credential"
+    );
+  });
+});
+
+describe("runnerRoleSchema", () => {
+  it("trims and accepts up to 120 characters", () => {
+    expect(runnerRoleSchema.parse("  Dev (LeaveDesk, An) ")).toBe(
+      "Dev (LeaveDesk, An)"
+    );
+    expect(runnerRoleSchema.safeParse("a".repeat(120)).success).toBe(true);
+  });
+
+  it("rejects empty, blank and too long roles", () => {
+    expect(runnerRoleSchema.safeParse("").success).toBe(false);
+    expect(runnerRoleSchema.safeParse("   ").success).toBe(false);
+    expect(runnerRoleSchema.safeParse("a".repeat(121)).success).toBe(false);
+  });
+});
+
+describe("uploadRunnerCapabilitiesInputSchema role", () => {
+  const base = {
+    project: "PRO-1",
+    source: RunnerCapabilitiesSource.Personal,
+    content: "x",
+  };
+
+  it("accepts with and without a role", () => {
+    expect(uploadRunnerCapabilitiesInputSchema.safeParse(base).success).toBe(
+      true
+    );
+    expect(
+      uploadRunnerCapabilitiesInputSchema.safeParse({ ...base, role: "Dev" })
+        .success
+    ).toBe(true);
+  });
+
+  it("rejects a 121-character role", () => {
+    expect(
+      uploadRunnerCapabilitiesInputSchema.safeParse({
+        ...base,
+        role: "a".repeat(121),
+      }).success
+    ).toBe(false);
+  });
+});
+
+describe("unknownRunnerCapabilitiesKeys", () => {
+  it("returns nothing for a file without extras", () => {
+    expect(unknownRunnerCapabilitiesKeys(FILE)).toEqual([]);
+  });
+
+  it("names a misspelled top-level key", () => {
+    expect(
+      unknownRunnerCapabilitiesKeys("---\ncomands:\n  - name: /a\n---\n")
+    ).toEqual(["comands"]);
+  });
+
+  it("names an unknown key of a command", () => {
+    expect(
+      unknownRunnerCapabilitiesKeys(
+        "---\ncommands:\n  - name: /a\n    descripton: x\n---\n"
+      )
+    ).toEqual(["commands.0.descripton"]);
+  });
+
+  it("names an unknown key of the toolkit", () => {
+    expect(
+      unknownRunnerCapabilitiesKeys(
+        "---\ntoolkit:\n  repository: a/b\n  mounts: []\n  extra: 1\n---\n"
+      )
+    ).toEqual(["toolkit.extra"]);
+  });
+
+  it("returns nothing when the file does not parse", () => {
+    expect(unknownRunnerCapabilitiesKeys("# none")).toEqual([]);
+    expect(unknownRunnerCapabilitiesKeys("---\ncommands: [\n---\n")).toEqual(
+      []
     );
   });
 });

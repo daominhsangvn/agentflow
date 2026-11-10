@@ -10,11 +10,21 @@ vi.mock("next/headers", () => ({
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 test("Sign In Page", () => {
   const { container } = render(<Page />);
   expect(container).toBeDefined();
+});
+
+test("hides the sign-up link when sign-up is disabled", async () => {
+  vi.stubEnv("AUTH_ALLOW_SIGN_UP", "false");
+
+  const { findByText, queryByText } = render(<Page />);
+
+  await findByText("Welcome to AgentFlow");
+  expect(queryByText("Create one")).toBeNull();
 });
 
 test("generateMetadata resolves document metadata from redirect_url", async () => {

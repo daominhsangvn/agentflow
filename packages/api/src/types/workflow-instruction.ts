@@ -24,11 +24,17 @@ export const workflowInstructionRequestSchema = z.object({
   actionRunId: z.string().uuid(),
   /** The run's workspace key: the slug of the document its loops run on. */
   workspaceKey: z.string().trim().min(1).max(200),
-  /** The run's primary repository: the workspace sits next to its checkout. */
-  repository: z.object({
-    fullName: z.string().trim().min(3).max(256),
-    cloneUrl: z.string().trim().min(1).max(2048),
-  }),
+  /**
+   * The run's primary repository: the workspace sits next to its checkout.
+   * null when the project has no repositories (a personal Agent works in its
+   * project folder).
+   */
+  repository: z
+    .object({
+      fullName: z.string().trim().min(3).max(256),
+      cloneUrl: z.string().trim().min(1).max(2048),
+    })
+    .nullable(),
   prompt: z.string().min(1).max(WORKFLOW_INSTRUCTION_PROMPT_MAX),
 });
 export type WorkflowInstructionRequest = z.infer<

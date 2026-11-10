@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   openSession: vi.fn(),
   loadToolSession: vi.fn(),
   resolveProjectComputeTarget: vi.fn(),
+  findTarget: vi.fn(),
   getCommandById: vi.fn(),
   getCommandEvents: vi.fn(),
   markCommandExpired: vi.fn(),
@@ -64,6 +65,9 @@ vi.mock(
     };
   }
 );
+vi.mock("@/app/compute-targets/service", () => ({
+  computeTargetsService: { findById: mocks.findTarget },
+}));
 vi.mock("@/app/integration-tools/integration-tool-session-service", () => ({
   integrationToolSessionService: { openForInstruction: mocks.openSession },
 }));
@@ -383,6 +387,39 @@ describe("startInstruction", () => {
         request: expect.objectContaining({ workspaceKey: "ISS-9" }),
       })
     );
+  });
+
+  it("works in a personal Agent's project folder when the project has no repositories", async () => {
+    mocks.checkouts = [];
+    mocks.findTarget.mockResolvedValue({
+      organizationId: "org-1",
+      capabilities: { personalRunner: { projectKey: "PRO-1", parallel: true } },
+    });
+
+    const started = await start();
+
+    expect(started).toMatchObject({ kind: "dispatched" });
+    expect(mocks.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ repository: null }),
+      })
+    );
+  });
+
+  it("skips an automatic Agent's run when the project has no repositories", async () => {
+    mocks.checkouts = [];
+    mocks.findTarget.mockResolvedValue({
+      organizationId: "org-1",
+      capabilities: {},
+    });
+
+    const started = await start();
+
+    expect(started).toMatchObject({
+      kind: "skip",
+      reason: expect.stringContaining("has no repositories"),
+    });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
   });
 
   it("skips a run that stopped before its documents existed", async () => {

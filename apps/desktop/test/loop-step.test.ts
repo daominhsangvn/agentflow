@@ -43,6 +43,10 @@ import {
   prepareLoopStep,
   readStepOutputs,
 } from "../src/server/operations/loop-step.js";
+import {
+  COMMAND_DECIDES_LINE,
+  COMMAND_QUESTIONS_LINE,
+} from "../src/server/operations/personal-runner.js";
 
 const LARGER_THAN_4MB_RE = /larger than 4 MB/;
 const TOOLKIT_MISSING_RE = /acme\/speckit is not in the loop workspace/;
@@ -461,6 +465,7 @@ describe("buildStepWorkspaceInstructions", () => {
 
     assert.ok(text.includes("## Process step: Specify"));
     assert.ok(text.includes(".agentflow-ai/work/questions.json"));
+    assert.ok(text.includes(COMMAND_QUESTIONS_LINE));
     assert.ok(
       text.includes(
         "at most 10 options per question, each at most 500 characters"
@@ -482,6 +487,8 @@ describe("buildStepWorkspaceInstructions", () => {
 
     assert.ok(!text.includes("questions.json"));
     assert.ok(text.includes("Do not stop to ask questions"));
+    assert.ok(text.includes(COMMAND_DECIDES_LINE));
+    assert.ok(!text.includes(COMMAND_QUESTIONS_LINE));
     assert.ok(text.includes("committed and pushed when you finish"));
     assert.ok(text.includes("Do not push, open pull requests"));
   });

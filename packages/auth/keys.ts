@@ -13,6 +13,9 @@ export const keys = () =>
       // Where server code reaches apps/api for sessions and JWKS. Defaults to
       // NEXT_PUBLIC_API_URL; set it when the internal address differs (Docker).
       AUTH_API_URL: z.url().optional(),
+      // Same variable as apps/api: "false" makes the deployment invite-only, so
+      // the app hides sign-up and sends visitors to sign-in.
+      AUTH_ALLOW_SIGN_UP: z.enum(["true", "false"]).optional(),
     },
     client: {
       NEXT_PUBLIC_LOGO_URL: z.url().optional(),
@@ -20,6 +23,7 @@ export const keys = () =>
     runtimeEnv: {
       AUTH_MODE: process.env.AUTH_MODE,
       AUTH_API_URL: process.env.AUTH_API_URL,
+      AUTH_ALLOW_SIGN_UP: process.env.AUTH_ALLOW_SIGN_UP,
       NEXT_PUBLIC_LOGO_URL: process.env.NEXT_PUBLIC_LOGO_URL,
     },
   });

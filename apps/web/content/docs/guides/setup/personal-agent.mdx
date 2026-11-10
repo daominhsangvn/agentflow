@@ -13,6 +13,8 @@ A **personal Agent** runs AgentFlow's tasks on a person's own computer, in the p
 - The project folder, already cloned, with an `AGENTFLOW.md` that declares its commands ([Agent capabilities](/docs/guides/setup/agent-capabilities)).
 - The API URL over HTTPS and an API key with the `write` scope ([First admin and organization](/docs/getting-started/first-admin#create-an-api-key-for-agents)).
 
+No repositories are needed in the AgentFlow project. If only personal Agents work on it, you do not have to add repositories from an integration connection: tasks, process steps and instruction actions start without them and work in the project folder. Repositories the project does have are sent but not cloned. An automatic Agent still refuses a project without repositories. Instruction actions need an Agent bundle released after 2026-11-10; tasks and process steps work with older ones.
+
 ## Install
 
 Download the Agent bundle from the repository's GitHub releases (tags `runner-v*`):
@@ -48,6 +50,7 @@ Answer `personal` to the first question, then:
 | Several tasks at once | Default no. Yes only when the project's commands keep their own work apart (a worktree or branch per ticket) |
 | Any tool without a permission prompt | Default no. Nobody is at the terminal to approve a prompt, so tools the commands need must be allowed in their `allowed-tools` or the person's `permissions.allow`. Yes lets the agent do anything the account can |
 | Name | Default `<user name>-<project key>` |
+| Role (optional) | This computer's role, for example `Dev (LeaveDesk, An)`. It replaces the `runner:` of the shared `AGENTFLOW.md`. Enter keeps the current role, `none` clears it |
 | Local gateway port | Enter picks a free port |
 
 The answers are saved in `~/.agentflow-runner/personal/<project key>/runner.env` (Windows: `%USERPROFILE%\.agentflow-runner\personal\<project key>\runner.env`). `node runner.mjs setup --project PRO-1` asks that Agent's questions again. All settings: [Agent CLI and environment](/docs/reference/agent-cli).
@@ -58,7 +61,17 @@ The answers are saved in `~/.agentflow-runner/personal/<project key>/runner.env`
 node runner.mjs --project PRO-1          # Windows: start-runner.cmd --project PRO-1
 ```
 
-It uploads the folder's `AGENTFLOW.md` and waits for tasks. The data directory keeps the Agent's identity, so the next start is the same Agent in AgentFlow. A second process for the same project refuses to start (`runner.lock`).
+To set the role for one start, add `--role`; it wins over the saved role:
+
+```bash
+node runner.mjs --project PRO-1 --role "Dev (LeaveDesk, An)"
+```
+
+The role belongs to the computer, not to `AGENTFLOW.md`, which is committed and shared by every computer. Without a role the Agent keeps the file's `runner:`.
+
+The Agent first checks the folder's `AGENTFLOW.md`. When the file does not parse, it lists the problems and refuses to start (exit code `2`). To validate the file without starting the Agent, run `node runner.mjs check --project PRO-1` (Windows: `start-runner.cmd check --project PRO-1`). A service, systemd or Docker restart policy keeps restarting the Agent until the file is fixed.
+
+It uploads the folder's `AGENTFLOW.md` (and its role) and waits for tasks. The data directory keeps the Agent's identity, so the next start is the same Agent in AgentFlow. A second process for the same project refuses to start (`runner.lock`).
 
 ## After it starts
 
@@ -131,6 +144,7 @@ journalctl --user -u agentflow-runner-pro-1 -f
 
 | Symptom | Cause and fix |
 |---|---|
+| Exits with code `2` and lists problems | `AGENTFLOW.md` is not valid. Fix the listed fields (`commands.0.mode: ...`), then start again; `node runner.mjs check --project PRO-1` validates it without starting |
 | Exits with code `3` | A required tool is missing or not on the login shell's `PATH`. The message names it |
 | Tasks wait with `runner_busy` | One task at a time is the default; the next one starts when the current one ends (tried every minute) |
 | Every task fails with `claude install <version>` | The pinned Claude Code version differs from `claude --version`. Install it, or set the Agent to `latest` |

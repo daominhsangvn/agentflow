@@ -172,7 +172,8 @@ describe("withIntegrationToolArgs", () => {
   });
 });
 
-const MCP_THEN_PROMPT_RE = /'--mcp-config' '[^']+' '--' '\/investigate'/;
+const MCP_THEN_PROMPT_RE =
+  /'--mcp-config' '[^']+' '--disallowedTools=AskUserQuestion' '--' '\/investigate'/;
 
 describe("buildStepLaunch with integration tools", () => {
   test("asks for the loop's session and hands the agent its tools", async () => {

@@ -220,12 +220,14 @@ export function personalStepInstructions(
   if (step.askQuestions) {
     lines.push(
       `- When you need a decision, do not ask in the terminal and do not guess: write the questions to \`${path.join(workDir, LoopStepFile.Questions)}\` as a JSON array of \`{"id": "q1", "question": "...", "options": ["..."]}\` (options optional), then stop. The questions are shown in AgentFlow; the run resumes this session with the answers.`,
+      COMMAND_QUESTIONS_LINE,
       '- If your instructions have you ask the question on the ticket yourself (a comment with this computer\'s own account), still write it to that file and put the comment\'s id in "commentId" (`{"id": "q1", "question": "...", "commentId": "10234"}`): AgentFlow then does not post it again and takes the reply to that comment as the answer.',
       `- Limits of that file: at most ${LOOP_STEP_QUESTIONS_MAX} questions; each question at most ${LOOP_STEP_QUESTION_MAX} characters; at most ${LOOP_STEP_OPTIONS_MAX} options per question, each at most ${LOOP_STEP_OPTION_MAX} characters.`
     );
   } else {
     lines.push(
-      "- Do not stop to ask questions: make the most reasonable choice and note it."
+      "- Do not stop to ask questions: make the most reasonable choice and note it.",
+      COMMAND_DECIDES_LINE
     );
   }
   lines.push(...roleLines);
@@ -267,3 +269,13 @@ function isDirectory(file: string): boolean {
     return false;
   }
 }
+
+/**
+ * Commands and skills are often written for a person at the terminal: where
+ * they say to ask the user or wait for a confirmation, an unattended step
+ * asks through questions.json (askQuestions) or decides.
+ */
+export const COMMAND_QUESTIONS_LINE =
+  "- Your command or skill may have been written for a person at the terminal. Wherever it says to ask the user, use AskUserQuestion, wait for a reply or confirm before going on, write those questions to the questions file above and stop instead; first do the work that does not depend on the answers.";
+export const COMMAND_DECIDES_LINE =
+  "- Your command or skill may have been written for a person at the terminal. Wherever it says to ask the user, use AskUserQuestion, wait for a reply or confirm before going on, make the most reasonable choice instead and note it in your answer.";

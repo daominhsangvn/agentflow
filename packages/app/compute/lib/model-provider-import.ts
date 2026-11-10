@@ -9,7 +9,9 @@ import { z } from "zod";
  * the model provider dialog: the base URL, token and model go to their own
  * fields, model names equal to the model are dropped (the model fills them),
  * the other Claude Code variables become custom variables, and anything else
- * is reported as ignored.
+ * is reported as ignored. NODE_EXTRA_CA_CERTS is a path on the computer the
+ * settings came from, so only its path is kept, as a reminder to upload the
+ * file.
  */
 
 export type ImportedModelProvider = {
@@ -18,6 +20,8 @@ export type ImportedModelProvider = {
   model: string | null;
   env: Array<{ key: string; value: string }>;
   ignoredKeys: string[];
+  /** NODE_EXTRA_CA_CERTS of the imported settings: the certificate to upload. */
+  caCertificatePath: string | null;
 };
 
 const envMapSchema = z.record(z.string(), z.unknown());
@@ -71,6 +75,7 @@ export function importClaudeSettings(
     model,
     env,
     ignoredKeys,
+    caCertificatePath: values.NODE_EXTRA_CA_CERTS ?? null,
   };
 }
 
@@ -79,4 +84,5 @@ const CONSUMED_KEYS = new Set([
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_MODEL",
+  "NODE_EXTRA_CA_CERTS",
 ]);

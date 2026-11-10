@@ -6,9 +6,10 @@
  * shuts down cleanly on SIGTERM/SIGINT. See docs/runner.md.
  *
  *   node runner.mjs                       the auto runner (one per computer)
- *   node runner.mjs --project <key>       the personal runner of a project
+ *   node runner.mjs --project <key> [--role "<role>"]   the personal runner of a project
  *   node runner.mjs setup [--project <key>]   asks the setup questions
  *   node runner.mjs uninstall [--project <key>]   removes the Windows service, optionally the data
+ *   node runner.mjs check --project <key>   validates AGENTFLOW.md and exits
  */
 
 import fs from "node:fs";
@@ -25,12 +26,20 @@ import { isWindows } from "../server/platform-shell.js";
 import { createClaudeCodeVersionCheck } from "./claude-code-version-check.js";
 import { createClaudeCodeVersions } from "./claude-code-versions.js";
 import {
+  PROJECT_OPTION,
+  parseRunnerArgs,
+  SETUP_COMMAND,
+} from "./headless-args.js";
+import {
+  capabilitiesFileAllowsStart,
+  runCapabilitiesCheck,
+} from "./headless-capabilities-check.js";
+import {
   type HeadlessRunnerConfig,
   loadHeadlessConfig,
 } from "./headless-config.js";
 import {
   HeadlessRunnerEnv,
-  normalizeProjectKey,
   RUNNER_DATA_DIR_ENV,
   RunnerMode,
   resolvePersonalRunnerDataDir,
@@ -82,19 +91,8 @@ const EXIT_CONFIG_ERROR = 2;
 const EXIT_PREFLIGHT_ERROR = 3;
 const EXIT_RUNTIME_ERROR = 1;
 const EXIT_INTERRUPTED = 130;
-const SETUP_COMMAND = "setup";
-const UNINSTALL_COMMAND = "uninstall";
-/** `--project <key>`: the personal runner of that AgentFlow project. */
-const PROJECT_OPTION = "--project";
-
-type RunnerArgs = {
-  setup: boolean;
-  uninstall: boolean;
-  projectKey: string | null;
-};
-
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseRunnerArgs(process.argv.slice(2));
   if (!args.ok) {
     gatewayLog.error(LOG_TAG, args.error);
     process.exitCode = EXIT_CONFIG_ERROR;
@@ -104,10 +102,18 @@ async function main(): Promise<void> {
     await runUninstallCommand(args.value.projectKey);
     return;
   }
+  if (args.value.check) {
+    runCheckCommand(args.value.projectKey);
+    return;
+  }
   let dataDir = instanceDataDir(args.value.projectKey);
   if (args.value.setup) {
     await runInteractiveSetup(dataDir, args.value.projectKey);
     return;
+  }
+  if (args.value.role) {
+    // The flag wins over the environment and runner.env.
+    process.env[HeadlessRunnerEnv.RunnerRole] = args.value.role;
   }
   logServiceMode();
   applyRunnerConfig(
@@ -141,6 +147,21 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (
+    config.personal &&
+    !capabilitiesFileAllowsStart(
+      config.personal.projectDir,
+      {
+        info: (m) => gatewayLog.info(LOG_TAG, m),
+        error: (m) => gatewayLog.error(LOG_TAG, m),
+      },
+      config.personal.projectKey
+    )
+  ) {
+    process.exitCode = EXIT_CONFIG_ERROR;
+    return;
+  }
+
   // Before the preflight: it reads PATH, which then starts with the shims.
   const executables = isWindows()
     ? windowsToolOverrides(await prepareWindowsTools(config.dataDir))
@@ -162,45 +183,6 @@ async function main(): Promise<void> {
   await setUpClaudeCode(config, report);
   const runner = await startHeadlessRunner(config, toCapabilities(report));
   installShutdownHandlers(runner);
-}
-
-/** `[setup] [--project <key>]`. */
-function parseArgs(
-  argv: readonly string[]
-): { ok: true; value: RunnerArgs } | { ok: false; error: string } {
-  const value: RunnerArgs = {
-    setup: false,
-    uninstall: false,
-    projectKey: null,
-  };
-  for (let index = 0; index < argv.length; index++) {
-    const arg = argv[index];
-    if (arg === SETUP_COMMAND && index === 0) {
-      value.setup = true;
-      continue;
-    }
-    if (arg === UNINSTALL_COMMAND && index === 0) {
-      value.uninstall = true;
-      continue;
-    }
-    if (arg === PROJECT_OPTION) {
-      const key = normalizeProjectKey(argv[index + 1] ?? "");
-      if (!key) {
-        return {
-          ok: false,
-          error: `${PROJECT_OPTION} needs an AgentFlow project key, e.g. ${PROJECT_OPTION} PRO-1`,
-        };
-      }
-      value.projectKey = key;
-      index++;
-      continue;
-    }
-    return {
-      ok: false,
-      error: `Unknown argument "${arg}": run without arguments (auto runner), with "${PROJECT_OPTION} <project key>" (personal runner), "${SETUP_COMMAND}" or "${UNINSTALL_COMMAND}"`,
-    };
-  }
-  return { ok: true, value };
 }
 
 /** The default data directory, or the personal one of the project. */
@@ -273,7 +255,7 @@ function loadInstanceConfig(
     configurePersonalRunnerProject(config.personal);
     gatewayLog.info(
       LOG_TAG,
-      `Personal runner of project ${config.personal.projectKey}: loops run in ${config.personal.projectDir} with this computer's credentials, ${config.personal.parallel ? "several at once" : "one at a time"}`
+      `Personal runner of project ${config.personal.projectKey}: loops run in ${config.personal.projectDir} with this computer's credentials, ${config.personal.parallel ? "several at once" : "one at a time"}${config.personal.role ? `, role ${config.personal.role}` : ""}`
     );
   } else {
     fs.mkdirSync(config.workspaceDir, { recursive: true });
@@ -476,6 +458,32 @@ async function runUninstallCommand(projectKey: string | null): Promise<void> {
   } finally {
     close();
   }
+}
+
+/** `check --project <key>`: validates the project folder's AGENTFLOW.md, no network. */
+function runCheckCommand(projectKey: string | null): void {
+  if (!projectKey) {
+    process.exitCode = EXIT_CONFIG_ERROR;
+    return;
+  }
+  const dataDir = resolvePersonalRunnerDataDir(projectKey);
+  const env = { ...process.env };
+  applyRunnerConfig(env, readRunnerConfigFile(runnerConfigFile(dataDir)));
+  const projectDir = env[HeadlessRunnerEnv.ProjectDir]?.trim();
+  if (!projectDir) {
+    gatewayLog.error(
+      LOG_TAG,
+      `No project folder configured for ${projectKey}: run node runner.mjs ${SETUP_COMMAND} ${PROJECT_OPTION} ${projectKey}`
+    );
+    process.exitCode = EXIT_CONFIG_ERROR;
+    return;
+  }
+  process.exitCode = runCapabilitiesCheck({
+    projectKey,
+    projectDir: path.resolve(projectDir),
+    homeDir: os.homedir(),
+    write: (line) => process.stdout.write(`${line}\n`),
+  });
 }
 
 /** Notes in the log that this process is the Windows service. */

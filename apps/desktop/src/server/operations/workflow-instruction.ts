@@ -146,15 +146,19 @@ export function resolveInstructionWorkspace(
   if (personal) {
     return personal.projectDir;
   }
+  const repository = request.repository;
+  if (repository === null) {
+    throw new Error("the run has no repository");
+  }
   const parent = allowedDirs[0];
   if (!parent) {
     throw new Error("no allowed directories configured");
   }
-  const cloneUrl = parseProjectRepoCloneUrl(request.repository.cloneUrl);
+  const cloneUrl = parseProjectRepoCloneUrl(repository.cloneUrl);
   const checkout = path.join(
     expandHome(parent),
     projectRepoHostDirName(cloneUrl),
-    projectRepoCheckoutDirName(request.repository.fullName)
+    projectRepoCheckoutDirName(repository.fullName)
   );
   const workspace = path.join(
     resolveWorktreeParentDir(path.dirname(checkout)),
