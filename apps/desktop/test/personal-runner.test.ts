@@ -24,6 +24,8 @@ import {
   matchStepFiles,
 } from "../src/server/operations/loop-step.js";
 import {
+  COMMAND_DECIDES_LINE,
+  COMMAND_QUESTIONS_LINE,
   collectPersonalStepFiles,
   configurePersonalRunnerProject,
   isPersonalProjectDir,
@@ -287,6 +289,19 @@ describe("a personal step's agent", () => {
     );
     assert.doesNotMatch(quiet, QUESTIONS_FILE_RE);
     assert.doesNotMatch(quiet, COMMENT_ID_RE);
+  });
+
+  test("is told that its command's own questions go to the file, or are decided", () => {
+    const workDir = path.join(root, "brenock", ".agentflow-ai", "runs", "r");
+    const asks = personalStepInstructions(step(), workDir);
+    assert.ok(asks.includes(COMMAND_QUESTIONS_LINE));
+    assert.ok(!asks.includes(COMMAND_DECIDES_LINE));
+    const decides = personalStepInstructions(
+      step({ askQuestions: false }),
+      workDir
+    );
+    assert.ok(decides.includes(COMMAND_DECIDES_LINE));
+    assert.ok(!decides.includes(COMMAND_QUESTIONS_LINE));
   });
 
   test("gets its instructions in the system prompt and no AgentFlow integration tools", async () => {

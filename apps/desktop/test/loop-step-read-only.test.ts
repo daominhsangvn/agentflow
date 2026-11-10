@@ -6,7 +6,8 @@ import {
 } from "@agentflow-ai/loops-api/loop-step";
 import {
   READ_ONLY_STEP_DISALLOWED_TOOLS,
-  readOnlyStepArgs,
+  stepDisallowedToolsArgs,
+  UNATTENDED_STEP_DISALLOWED_TOOLS,
 } from "../src/server/operations/loop-step.js";
 
 const STEP = {
@@ -22,8 +23,8 @@ const STEP = {
 
 test("a read-only step denies editing, committing and pushing", () => {
   const step = LoopStepConfigSchema.parse({ ...STEP, readOnly: true });
-  assert.deepEqual(readOnlyStepArgs(step), [
-    `--disallowedTools=${READ_ONLY_STEP_DISALLOWED_TOOLS}`,
+  assert.deepEqual(stepDisallowedToolsArgs(step), [
+    `--disallowedTools=${UNATTENDED_STEP_DISALLOWED_TOOLS},${READ_ONLY_STEP_DISALLOWED_TOOLS}`,
   ]);
   const denied = READ_ONLY_STEP_DISALLOWED_TOOLS.split(",");
   for (const tool of [
@@ -38,7 +39,23 @@ test("a read-only step denies editing, committing and pushing", () => {
   assert.ok(!denied.includes("Write"));
 });
 
-test("other steps keep their tools", () => {
-  assert.deepEqual(readOnlyStepArgs(LoopStepConfigSchema.parse(STEP)), []);
-  assert.deepEqual(readOnlyStepArgs(undefined), []);
+test("every Claude step is denied AskUserQuestion and keeps its other tools", () => {
+  assert.deepEqual(stepDisallowedToolsArgs(LoopStepConfigSchema.parse(STEP)), [
+    "--disallowedTools=AskUserQuestion",
+  ]);
+  assert.deepEqual(stepDisallowedToolsArgs(undefined), []);
+});
+
+test("a step of another harness gets only the read-only denials", () => {
+  assert.deepEqual(
+    stepDisallowedToolsArgs(LoopStepConfigSchema.parse(STEP), false),
+    []
+  );
+  assert.deepEqual(
+    stepDisallowedToolsArgs(
+      LoopStepConfigSchema.parse({ ...STEP, readOnly: true }),
+      false
+    ),
+    [`--disallowedTools=${READ_ONLY_STEP_DISALLOWED_TOOLS}`]
+  );
 });

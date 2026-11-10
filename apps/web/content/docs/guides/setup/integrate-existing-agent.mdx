@@ -50,6 +50,7 @@ A **task** is one run of one declared command. The agent cannot talk to the orch
 ## What the agent must not do
 
 - **Ask people directly**: no `AskUserQuestion`, no "Proceed? (y/n)", no terminal prompt, no Slack, Teams or Jira comment asking something, unless the command comments the question itself and writes the comment's id as `commentId` in `questions.json`. Nobody is at the terminal, and the orchestrator would not know a question was asked.
+  AgentFlow already guards against a command written for the terminal: every run denies `AskUserQuestion`, and the agent is told that wherever its command says to ask the user, wait for a reply or confirm, it writes the questions to `questions.json` and stops (`asks: true`) or decides and notes it (otherwise). A command written to ask in the terminal usually works unchanged; the blocks below make it reliable and keep its questions well written.
 - **Report directly**: no comment or attachment on the ticket, even with the person's own Jira MCP server. The orchestrator decides what is posted where.
 - **Wait** inside a run, poll, or plan to come back later. Write the questions and stop.
 - **Stop or start other work**: cancelling tasks and starting other Agents is the orchestrator's job. Say what should happen next in the answer.
