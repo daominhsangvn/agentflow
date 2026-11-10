@@ -1,6 +1,4 @@
 import {
-  LOOP_STEP_INPUTS_DIR,
-  LOOP_STEP_WORK_DIR,
   type LoopStepConfig,
   LoopStepFinish,
   type LoopStepInputFile,
@@ -64,6 +62,7 @@ import {
   taskFilesFromStep,
 } from "./task-files";
 import { checkTaskCommand, checkTaskNeeds } from "./task-guards";
+import { buildTaskPrompt, stepAttachGlob } from "./task-prompt";
 import {
   mergeTaskResult,
   readTaskResult,
@@ -394,6 +393,7 @@ async function launchLoop(task: TaskRow): Promise<Result<string, string>> {
       computeTargetId,
       prompt: buildTaskPrompt(task, {
         attach,
+        attachChanged: step.attachChanged === true,
         inputs: inputs.map((file) => file.name),
       }),
       repo: repositories?.primary,
@@ -555,50 +555,13 @@ async function buildStep(
       : null,
     ...(task.mode === RunnerCommandMode.Read ? { readOnly: true } : {}),
     ...(task.fork ? { forkSession: true } : {}),
-    ...(attach.length > 0
-      ? { attach: attach.map((glob) => `${LOOP_STEP_WORK_DIR}/${glob}`) }
+    ...(attach.length > 0 ? { attach: attach.map(stepAttachGlob) } : {}),
+    ...(declared?.attachChanged === true && attach.length > 0
+      ? { attachChanged: true }
       : {}),
     ...(inputs.length > 0 ? { inputs } : {}),
   };
   return Result.ok({ step, attach });
-}
-
-/** The command and its arguments first (a slash command is expanded), then the request. */
-export function buildTaskPrompt(
-  task: {
-    command: string;
-    args: string;
-    prompt: string;
-    mode: string;
-  },
-  files: { attach: string[]; inputs: string[] } = { attach: [], inputs: [] }
-): string {
-  const head = [task.command, task.args].filter(Boolean).join(" ");
-  const readOnly =
-    task.mode === RunnerCommandMode.Read
-      ? " This task only reads: change no file of the project, commit nothing."
-      : "";
-  return [
-    head,
-    task.prompt.trim(),
-    `---\nYou run as a task of the project's orchestrator in AgentFlow. When you are done, write your answer for the orchestrator to \`${ORCHESTRATOR_TASK_REPLY_FILE}\` (on a personal runner: \`$AGENTFLOW_WORKDIR/orchestrator-reply.md\`): what you found or did, concise, with file paths and links where they help.${readOnly}${attachNote(files.attach)}${inputsNote(files.inputs)}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function attachNote(attach: string[]): string {
-  if (attach.length === 0) {
-    return "";
-  }
-  return ` Leave the files your command writes for the ticket (${attach.join(", ")}) in \`${LOOP_STEP_WORK_DIR}/\` (on a personal runner: \`$AGENTFLOW_WORKDIR\`): AgentFlow collects them when you finish and the orchestrator attaches them to the ticket.`;
-}
-
-function inputsNote(inputs: string[]): string {
-  if (inputs.length === 0) {
-    return "";
-  }
-  return ` Files from earlier tasks of this case are in \`${LOOP_STEP_WORK_DIR}/${LOOP_STEP_INPUTS_DIR}/\` (on a personal runner: \`$AGENTFLOW_WORKDIR/${LOOP_STEP_INPUTS_DIR}/\`): ${inputs.join(", ")}.`;
 }
 
 /**

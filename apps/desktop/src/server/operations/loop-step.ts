@@ -4,6 +4,7 @@ import {
   lstatSync,
   readdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import fs from "node:fs/promises";
@@ -40,6 +41,7 @@ import {
   type LoopStepResult,
   LoopStepRole,
   type LoopStepToolkit,
+  splitAttachGlob,
 } from "@agentflow-ai/loops-api/loop-step";
 import {
   INTEGRATION_MCP_SERVER_NAME,
@@ -47,6 +49,10 @@ import {
 } from "@repo/api/src/types/integration-tools";
 import { z } from "zod";
 import { CLAUDE_OUTPUT_SIDECAR_FILE } from "../../main/cost/token-usage.js";
+import {
+  collectNamedAttachEntries,
+  type NamedAttachEntry,
+} from "./attach-roots.js";
 import {
   buildClaudePipeline,
   buildNativePromptPipeline,
@@ -104,6 +110,14 @@ const PREVIOUS_STEP_FILES = [
 ] as const;
 
 const SESSION_ID_FILE = "session-id.txt";
+/** Written just before the agent starts: when the step began (attachChanged). */
+const STEP_STARTED_FILE = "step-started.json";
+/** Clock slack for `attachChanged`: files this close before the start count. */
+const STEP_CHANGED_SLACK_MS = 2000;
+const stepStartedSchema = z.object({
+  stepId: z.string(),
+  startedAt: z.number(),
+});
 const CLAUDE_OUTPUT_FILE = "claude-output.jsonl";
 /** Directories never searched for step artifacts. */
 const SKIPPED_DIRS: ReadonlySet<string> = new Set([
@@ -224,6 +238,11 @@ export async function prepareLoopStep(input: {
   await fs.writeFile(
     path.join(claudeWorkDir, LoopStepFile.Request),
     `${JSON.stringify(input.step, null, 2)}\n`,
+    "utf8"
+  );
+  await fs.writeFile(
+    path.join(claudeWorkDir, STEP_STARTED_FILE),
+    JSON.stringify({ stepId: input.step.stepId, startedAt: Date.now() }),
     "utf8"
   );
   await fs.writeFile(
@@ -487,21 +506,7 @@ export function readStepOutputs(
   };
   if (step.attach?.length) {
     const collected = buildStepAttachments(
-      personalRoot
-        ? collectPersonalStepFiles({
-            projectDir: personalRoot,
-            claudeWorkDir,
-            globs: step.attach,
-            collect: (root, globs) =>
-              matchStepFiles(root, globs).map((p) => ({
-                path: p,
-                file: path.join(root, p),
-              })),
-          })
-        : matchStepFiles(workspaceRoot, step.attach).map((p) => ({
-            path: p,
-            file: path.join(workspaceRoot, p),
-          }))
+      collectStepAttachments(step, claudeWorkDir, personalRoot, workspaceRoot)
     );
     result.attachments = collected.attachments;
     if (collected.omitted > 0) {
@@ -571,19 +576,27 @@ export function matchStepFiles(
  * limits. `path` is reported, `file` is read. A file over a limit is listed as
  * skipped; matches beyond the count limit are only counted.
  */
-export function buildStepAttachments(
-  entries: ReadonlyArray<{ path: string; file: string }>
-): { attachments: LoopStepAttachment[]; omitted: number } {
+export function buildStepAttachments(entries: readonly NamedAttachEntry[]): {
+  attachments: LoopStepAttachment[];
+  omitted: number;
+} {
   const attachments: LoopStepAttachment[] = [];
   let omitted = 0;
   let totalBytes = 0;
   for (const entry of entries) {
-    const stat = lstatOrNull(entry.file);
-    if (!stat?.isFile()) {
+    const stat = entry.skipped ? null : lstatOrNull(entry.file);
+    if (!(entry.skipped || stat?.isFile())) {
       continue;
     }
     if (attachments.length >= LOOP_STEP_ATTACH_FILES_MAX) {
       omitted += 1;
+      continue;
+    }
+    if (entry.skipped) {
+      attachments.push({ path: entry.path, size: 0, skipped: entry.skipped });
+      continue;
+    }
+    if (!stat) {
       continue;
     }
     const skipped = attachmentSkipReason(stat.size, totalBytes);
@@ -962,12 +975,95 @@ async function removePreviousAttachFiles(
   workspaceRoot: string,
   claudeWorkDir: string
 ): Promise<void> {
-  if (!step.attach?.length || personalStepWorkspaceRoot(claudeWorkDir)) {
+  const plain = (step.attach ?? []).filter(
+    (glob) => splitAttachGlob(glob).root === null
+  );
+  if (plain.length === 0 || personalStepWorkspaceRoot(claudeWorkDir)) {
     return;
   }
   await Promise.all(
-    matchStepFiles(workspaceRoot, step.attach).map((relative) =>
+    matchStepFiles(workspaceRoot, plain).map((relative) =>
       fs.rm(path.join(workspaceRoot, relative), { force: true })
     )
   );
+}
+
+/**
+ * The files an `attach` step left: plain globs from the work directory or
+ * project, named globs (`<name>:`) from the personal Agent's own folders. An
+ * auto Agent refuses named globs. With `attachChanged`, files older than the
+ * step's start are dropped.
+ */
+function collectStepAttachments(
+  step: LoopStepConfig,
+  claudeWorkDir: string,
+  personalRoot: string | null,
+  workspaceRoot: string
+): NamedAttachEntry[] {
+  const globs = step.attach ?? [];
+  const plain = globs.filter((g) => splitAttachGlob(g).root === null);
+  const named = globs.filter((g) => splitAttachGlob(g).root !== null);
+  const toEntries = (root: string) => (matched: string[]) =>
+    matched.map((p) => ({ path: p, file: path.join(root, p) }));
+  const plainEntries: NamedAttachEntry[] = personalRoot
+    ? collectPersonalStepFiles({
+        projectDir: personalRoot,
+        claudeWorkDir,
+        globs: plain,
+        collect: (root, g) => toEntries(root)(matchStepFiles(root, g)),
+      })
+    : toEntries(workspaceRoot)(matchStepFiles(workspaceRoot, plain));
+  const namedEntries = namedAttachEntries(named, personalRoot);
+  const skipped = namedEntries.filter((e) => e.skipped);
+  const files = [...namedEntries.filter((e) => !e.skipped), ...plainEntries];
+  if (!step.attachChanged) {
+    return [...skipped, ...files];
+  }
+  const since =
+    stepStartedAt(claudeWorkDir, step.stepId) - STEP_CHANGED_SLACK_MS;
+  return [...skipped, ...files.filter((e) => modifiedSince(e.file, since))];
+}
+
+function namedAttachEntries(
+  named: readonly string[],
+  personalRoot: string | null
+): NamedAttachEntry[] {
+  if (named.length === 0) {
+    return [];
+  }
+  if (personalRoot === null) {
+    return named.map((glob) => ({
+      path: glob,
+      file: "",
+      skipped: `named folders (${splitAttachGlob(glob).root}:) are collected on a personal Agent only`,
+    }));
+  }
+  return collectNamedAttachEntries({
+    projectDir: personalRoot,
+    globs: named,
+    match: matchStepFiles,
+  });
+}
+
+/** When the step started: step-started.json, else the request file's mtime. */
+function stepStartedAt(claudeWorkDir: string, stepId: string): number {
+  const started = stepStartedSchema.safeParse(
+    readJsonFile(path.join(claudeWorkDir, STEP_STARTED_FILE))
+  );
+  if (started.success && started.data.stepId === stepId) {
+    return started.data.startedAt;
+  }
+  try {
+    return statSync(path.join(claudeWorkDir, LoopStepFile.Request)).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+function modifiedSince(file: string, sinceMs: number): boolean {
+  try {
+    return statSync(file).mtimeMs >= sinceMs;
+  } catch {
+    return false;
+  }
 }

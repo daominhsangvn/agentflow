@@ -820,11 +820,14 @@ commands:
     needs: [prd]                 # what must exist before it runs
     asks: true                   # may stop with questions
     push: false                  # commits and pushes
-    attach: ["PLAN-*.md"]        # files it writes for the ticket (in its work dir)
+    attach: ["PLAN-*.md", "features:PRD-*.md"]  # files it writes for the ticket
+    attachChanged: true          # only files changed during the task
   - name: /explain-code
     mode: read
     produces: answer
 skills: [tdd, systematic-debugging]
+attachRoots:                     # extra folders for `<name>:` attach globs
+  features: ../shared/features   # absolute, relative to this file, or ~/...
 ---
 
 # Dev runner (LeaveDesk)
@@ -864,7 +867,34 @@ an approved PRD; to answer questions about a plan, resume its session.
   runner collects the matches as bytes (at most 20 files, 4 MB each, 5 MB in
   total), and the orchestrator can attach them to the ticket. Only
   orchestrator tasks use it (process steps use `artifacts` and
-  `$AGENTFLOW_ATTACH`). Name the files in the command's body text.
+  `$AGENTFLOW_ATTACH`). Name the files in the command's body text. The case
+  page shows each stored file with View and Download.
+- `attachRoots` (front matter, personal Agents) maps a name to a folder, so
+  `attach` can reach files outside the work directory. A name is lowercase
+  letters, digits and `-`, starting with a letter (at most 40 characters). The
+  path is absolute, relative to the folder of the `AGENTFLOW.md`, or starts
+  with `~/`; declare as many as needed. `project` is built in (the Agent's
+  project folder, without `.agentflow-ai/`) and cannot be declared. A glob
+  `<name>:<pattern>` (for example `features:**/*.md`) is matched in that
+  folder; the pattern is relative (no leading `/` or `~`, no `..`). The file
+  is reported as `<name>:<relative path>`.
+  - The name is resolved at collection time from the Agent's own
+    `AGENTFLOW.md`, never from the step request. Every match is checked with
+    its real path to lie inside the root, so a symlink cannot escape it.
+  - A glob that cannot be collected is listed as skipped with a reason: the
+    name is not in `attachRoots`, the folder is not found, the match is outside
+    the root, or `AGENTFLOW.md` is missing or does not parse. A file over a
+    limit is skipped like any other.
+  - An auto Agent never collects `<name>:` globs (it skips them with a
+    reason), and the upload of its toolkit `AGENTFLOW.md` carries a warning.
+  - `attachChanged: true` (per command, default off) keeps only files modified
+    since the task started, for all the command's globs (plain and named). The
+    start time is `step-started.json` in the step's work directory, with 2
+    seconds of clock slack. Without it, every match is collected, old files
+    too.
+  - Two tasks running at once in the same folders (for example two cases on one
+    Agent) can collect each other's changed files; `attachChanged` does not
+    tell them apart.
 - On upload the API adds warnings (stored with the file, never blocking): a
   line that looks like a secret (line number and kind, never the value) and a
   `mode: read` command that declares `push`.

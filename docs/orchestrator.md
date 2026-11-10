@@ -298,9 +298,13 @@ The loop:
   from the command's `push` on an auto runner (a personal runner's command
   pushes itself), and `readOnly` for a read: Edit, MultiEdit, NotebookEdit,
   `git commit` and `git push` are denied (`READ_ONLY_STEP_DISALLOWED_TOOLS`,
-  the answer file is still written), `attach` from the command's `attach`
-  globs, and `inputs` from `task_run files` (written to `inputs/` before the
-  agent starts).
+  the answer file is still written), `attach` and `attachChanged` from the
+  command's (a `<name>:` glob is collected from a folder in the personal
+  Agent's `attachRoots` or the built-in `project`; an auto Agent skips it; the
+  prompt says where the files go; see "Capabilities" in `docs/runner.md`),
+  and `inputs` from `task_run files` (written to `inputs/` before the agent
+  starts). The case page lists each stored task file with View and
+  Download.
 - runs as the runner's owner. When the runner is offline the task fails with
   "Runner X is offline: the task was not started..." if the case has no work
   there yet; otherwise it stays `queued` with a waiting reason until the Agent

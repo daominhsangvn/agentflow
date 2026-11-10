@@ -29,6 +29,7 @@ import {
   loadOrgCaseRows,
   toCaseListItem,
 } from "@/app/orchestrator/cases/service/org-case-list";
+import { readCaseTaskFile } from "@/app/orchestrator/cases/service/task-file";
 import { dispatchOrchestratorTurnCancel } from "@/lib/loops/loop-desktop";
 import { listCaseDocuments } from "@/lib/orchestrator/case-documents";
 import { readTurnTimeoutMs } from "@/lib/orchestrator/turn-usage";
@@ -52,6 +53,9 @@ export const orchestratorCaseService = {
   agentMapForWorkflow: loadWorkflowAgentMap,
 
   postMessage: postCaseMessage,
+
+  /** Null when the file is not a stored file of a task of this organization's case. */
+  readTaskFile: readCaseTaskFile,
 
   /** Null when the organization has no such workflow. */
   async listForWorkflow(

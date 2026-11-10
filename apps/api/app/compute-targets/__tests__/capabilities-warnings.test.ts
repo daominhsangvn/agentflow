@@ -1,14 +1,21 @@
-import { parseRunnerCapabilitiesMarkdown } from "@repo/api/src/types/runner-capabilities";
+import {
+  parseRunnerCapabilitiesMarkdown,
+  RunnerCapabilitiesSource,
+} from "@repo/api/src/types/runner-capabilities";
 import { describe, expect, it } from "vitest";
 import { serverCapabilityWarnings } from "@/app/compute-targets/capabilities-warnings";
 
 const CLEAN =
   '---\ncommands:\n  - { name: /ba-requirement, mode: read, args: "<ticket-key>", attach: ["PRD-*.md"] }\n---\n# Dev\n';
 
-function warn(content: string): string[] {
+function warn(
+  content: string,
+  source: RunnerCapabilitiesSource = RunnerCapabilitiesSource.Personal
+): string[] {
   return serverCapabilityWarnings(
     content,
-    parseRunnerCapabilitiesMarkdown(content)
+    parseRunnerCapabilitiesMarkdown(content),
+    source
   );
 }
 
@@ -67,5 +74,15 @@ describe("serverCapabilityWarnings", () => {
       () => "password: hunter2hunter2x"
     ).join("\n");
     expect(warn(lines)).toHaveLength(10);
+  });
+
+  it("warns for named attach roots from a toolkit file only", () => {
+    const content =
+      '---\nattachRoots:\n  features: ../f\ncommands:\n  - { name: /ba, mode: read, attach: ["features:**/*.md"] }\n---\n';
+    expect(warn(content, RunnerCapabilitiesSource.Toolkit)).toEqual([
+      "/ba attaches from named folders (features:): only a personal Agent collects those; an auto Agent skips them",
+    ]);
+    expect(warn(content, RunnerCapabilitiesSource.Personal)).toEqual([]);
+    expect(warn(CLEAN, RunnerCapabilitiesSource.Toolkit)).toEqual([]);
   });
 });

@@ -141,6 +141,60 @@ describe("parseRunnerCapabilitiesMarkdown", () => {
     ]);
   });
 
+  describe("attachRoots", () => {
+    const doc = (front: string) => `---\n${front}\n---\nbody`;
+    const cmd = (glob: string) =>
+      `commands:\n  - name: /a\n    mode: write\n    attach: ["${glob}"]\n    attachChanged: true`;
+
+    it("parses declared roots and attachChanged", () => {
+      const r = parseRunnerCapabilitiesMarkdown(
+        doc(`attachRoots:\n  features: ../f\n${cmd("features:**/*.md")}`)
+      );
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.value.attachRoots).toEqual({ features: "../f" });
+        expect(r.value.commands[0]?.attachChanged).toBe(true);
+      }
+    });
+
+    it("accepts the built-in project root", () => {
+      expect(
+        parseRunnerCapabilitiesMarkdown(doc(cmd("project:docs/*.md"))).ok
+      ).toBe(true);
+    });
+
+    it("has no attachRoots key when none is declared", () => {
+      const r = parseRunnerCapabilitiesMarkdown(doc(cmd("PRD-*.md")));
+      expect(r.ok && "attachRoots" in r.value).toBe(false);
+    });
+
+    it("refuses an undeclared root", () => {
+      const r = parseRunnerCapabilitiesMarkdown(doc(cmd("nope:a.md")));
+      expect(r.ok).toBe(false);
+    });
+
+    it("refuses declaring project", () => {
+      const r = parseRunnerCapabilitiesMarkdown(
+        doc("attachRoots:\n  project: ../x\ncommands: []")
+      );
+      expect(r.ok).toBe(false);
+    });
+
+    it("refuses .. after the prefix", () => {
+      const r = parseRunnerCapabilitiesMarkdown(
+        doc(`attachRoots:\n  features: ../f\n${cmd("features:../x")}`)
+      );
+      expect(r.ok).toBe(false);
+    });
+
+    it("refuses a bad root name", () => {
+      const r = parseRunnerCapabilitiesMarkdown(
+        doc("attachRoots:\n  Features: ../f\ncommands: []")
+      );
+      expect(r.ok).toBe(false);
+    });
+  });
+
   it("refuses a toolkit mount outside the repository", () => {
     const result = parseRunnerCapabilitiesMarkdown(
       "---\ntoolkit:\n  repository: workshop/kb\n  mounts: [../secrets]\n---\n"

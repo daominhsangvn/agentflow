@@ -1,6 +1,10 @@
 import {
+  ATTACH_ROOT_NAME_RE,
+  isSafeAttachPattern,
   LoopStepConfigSchema,
   LoopStepToolkitSchema,
+  PROJECT_ATTACH_ROOT,
+  splitAttachGlob,
 } from "@agentflow-ai/loops-api/loop-step";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -27,7 +31,9 @@ import { z } from "zod";
  *       produces: plan
  *       needs: [prd]
  *       asks: true
- *       attach: ["PLAN-*.md"]
+ *       attach: ["PLAN-*.md", "features:PRD-*.md"]
+ *   attachRoots:
+ *     features: ../shared/features
  *   skills: [tdd]
  *   ---
  *   # Dev runner
@@ -101,12 +107,15 @@ export const runnerCommandSchema = z.object({
    * directory (`.agentflow-ai/work/` of an auto runner's workspace,
    * `$AGENTFLOW_WORKDIR` on a personal runner), e.g. PRD-*.md. An
    * orchestrator task collects them when it ends; the orchestrator can attach
-   * them to the ticket.
+   * them to the ticket. A glob may start with `<name>:` (a root from
+   * `attachRoots`, or the built-in `project`); personal Agents only.
    */
   attach: z
     .array(LoopStepConfigSchema.shape.artifacts.element)
     .max(RUNNER_COMMAND_ATTACH_MAX)
     .optional(),
+  /** Only files created or changed during the task are collected. */
+  attachChanged: z.boolean().optional(),
 });
 export type RunnerCommand = z.infer<typeof runnerCommandSchema>;
 
@@ -155,6 +164,18 @@ export const runnerCapabilitiesFrontMatterSchema = z.object({
     .array(runnerSkillSchema)
     .max(RUNNER_CAPABILITIES_MAX_SKILLS)
     .default([]),
+  /**
+   * Extra folders a command's `attach` globs can name (`<name>:<glob>`).
+   * Paths: absolute, relative to the AGENTFLOW.md folder, or `~/...`.
+   */
+  attachRoots: z
+    .record(
+      z
+        .string()
+        .regex(ATTACH_ROOT_NAME_RE, "a lowercase name such as features"),
+      z.string().trim().min(1).max(1000)
+    )
+    .optional(),
 });
 
 export const runnerCapabilitiesSchema = z.object({
@@ -165,6 +186,7 @@ export const runnerCapabilitiesSchema = z.object({
   skills: z.array(
     z.object({ name: z.string(), description: z.string().optional() })
   ),
+  attachRoots: z.record(z.string(), z.string()).optional(),
 });
 
 /** The front matter of an `AGENTFLOW.md`, normalized (as stored). */
@@ -258,6 +280,10 @@ export function parseRunnerCapabilitiesMarkdown(
       problems: duplicates.map((name) => `commands: ${name} is listed twice`),
     };
   }
+  const rootProblems = attachRootProblems(parsed.data);
+  if (rootProblems.length > 0) {
+    return { ok: false, problems: rootProblems };
+  }
   return {
     ok: true,
     value: {
@@ -267,9 +293,50 @@ export function parseRunnerCapabilitiesMarkdown(
       skills: parsed.data.skills.map((skill) =>
         typeof skill === "string" ? { name: skill } : skill
       ),
+      ...(parsed.data.attachRoots
+        ? { attachRoots: parsed.data.attachRoots }
+        : {}),
     },
     body: content.slice(match[0].length).trim(),
   };
+}
+
+function attachRootProblems(
+  data: z.infer<typeof runnerCapabilitiesFrontMatterSchema>
+): string[] {
+  const problems: string[] = [];
+  const declared = data.attachRoots ?? {};
+  if (Object.hasOwn(declared, PROJECT_ATTACH_ROOT)) {
+    problems.push(
+      `attachRoots: ${PROJECT_ATTACH_ROOT} is built in; do not declare it`
+    );
+  }
+  data.commands.forEach((command, i) => {
+    (command.attach ?? []).forEach((glob, j) => {
+      const problem = attachGlobProblem(glob, declared);
+      if (problem) {
+        problems.push(`commands.${i}.attach.${j}: ${problem}`);
+      }
+    });
+  });
+  return problems;
+}
+
+function attachGlobProblem(
+  glob: string,
+  declared: Record<string, string>
+): string | null {
+  const { root, pattern } = splitAttachGlob(glob);
+  if (root === null) {
+    return null;
+  }
+  if (root !== PROJECT_ATTACH_ROOT && !Object.hasOwn(declared, root)) {
+    return `${root} is not declared in attachRoots`;
+  }
+  if (!isSafeAttachPattern(pattern)) {
+    return `the pattern after ${root}: may not contain ".", ".." or empty segments`;
+  }
+  return null;
 }
 
 function duplicateNames(names: string[]): string[] {

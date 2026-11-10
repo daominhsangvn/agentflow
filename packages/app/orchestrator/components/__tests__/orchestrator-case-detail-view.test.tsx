@@ -44,6 +44,15 @@ vi.mock("../../hooks/use-orchestrator-cases", () => ({
     isPending: false,
   }),
   useOrchestratorCase: () => mocks.query,
+  useDownloadOrchestratorTaskFile: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useOrchestratorTaskFile: () => ({
+    data: undefined,
+    isPending: true,
+    isError: false,
+  }),
   useSetOrchestratorCaseStatus: () => ({
     mutate: vi.fn(),
     mutateAsync: vi.fn(),

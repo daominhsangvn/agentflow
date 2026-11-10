@@ -123,6 +123,9 @@ export function useApiClient() {
       getRaw: <T>(path: string, options?: ApiRequestOptions) =>
         run<T>(path, options, readRawBody),
 
+      getBlob: (path: string, options?: ApiRequestOptions) =>
+        run<Blob>(path, options, readBlobBody),
+
       postRaw: <T>(path: string, data: unknown, options?: ApiRequestOptions) =>
         run<T>(path, withBody("POST", data, options), readRawBody),
     };
@@ -242,6 +245,20 @@ async function readRawBody<T>(response: Response): Promise<T> {
   }
 
   return body as T;
+}
+
+/** Read a binary response body, throwing `ApiError` on an error status. */
+async function readBlobBody(response: Response): Promise<Blob> {
+  if (response.ok) {
+    return response.blob();
+  }
+  const body = await response.json().catch((error: unknown) => {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return null;
+  });
+  return throwApiErrorFromResponseWithBody(response, body);
 }
 
 function throwApiErrorFromResponseWithBody(

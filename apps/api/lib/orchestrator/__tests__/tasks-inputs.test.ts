@@ -257,6 +257,25 @@ describe("task files", () => {
     expect(call.prompt).toContain("PRD-*.md");
   });
 
+  it("passes named attach globs through and carries attachChanged", async () => {
+    mocks.baAttach = ["PRD-*.md", "features:**/*.md"];
+    mocks.baAttachChanged = true;
+
+    await startTask({
+      ...BASE,
+      runner: "runner-1",
+      command: "/ba-requirement",
+    });
+
+    const call = mocks.createLoop.mock.calls[0]?.[2];
+    expect(call.metadata.step.attach).toEqual([
+      ".agentflow-ai/work/PRD-*.md",
+      "features:**/*.md",
+    ]);
+    expect(call.metadata.step.attachChanged).toBe(true);
+    expect(call.prompt).toContain("features:**/*.md");
+  });
+
   it("keeps a queued task's inputs and launches it with them later", async () => {
     addSibling([PRD_FILE]);
     mocks.stored.set(PRD_KEY, new TextEncoder().encode("# PRD"));

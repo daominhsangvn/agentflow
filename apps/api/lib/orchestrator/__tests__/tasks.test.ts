@@ -14,11 +14,8 @@ import {
   taskMocks as mocks,
   resetTaskMocks,
 } from "@/lib/orchestrator/__tests__/support/tasks.test-fake";
-import {
-  advanceTasks,
-  buildTaskPrompt,
-  startTask,
-} from "@/lib/orchestrator/tasks";
+import { buildTaskPrompt } from "@/lib/orchestrator/task-prompt";
+import { advanceTasks, startTask } from "@/lib/orchestrator/tasks";
 
 /**
  * An orchestrator task (docs/orchestrator.md): a runner's command as a STEP

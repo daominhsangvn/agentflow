@@ -15,3 +15,20 @@ export function downloadAsMarkdown(content: string, filename: string): void {
     URL.revokeObjectURL(url);
   }
 }
+
+/**
+ * Download a blob as a file with the given name
+ */
+export function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = globalThis.document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    globalThis.document.body.appendChild(a);
+    a.click();
+    globalThis.document.body.removeChild(a);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
