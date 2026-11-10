@@ -480,7 +480,7 @@ const HANDLERS: Record<string, Handler> = {
     const parsed = taskRunInputSchema.safeParse(input);
     if (!parsed.success) {
       return refused(
-        "runner (its name), command (a slash command it declares), args, prompt (what you want and the context it needs), optional mode, resumeTaskId, fork, optional files ([{taskId, name}] of earlier tasks, or [{page, name}] for a Confluence page's current content), optional replyTo (the <message> ref the task answers)."
+        "runner (its name, role or id; with a role AgentFlow picks the case's Agent), command (a slash command it declares), args, prompt (what you want and the context it needs), optional mode, resumeTaskId, fork, optional files ([{taskId, name}] of earlier tasks, or [{page, name}] for a Confluence page's current content), optional replyTo (the <message> ref the task answers)."
       );
     }
     const { replyTo } = parsed.data;

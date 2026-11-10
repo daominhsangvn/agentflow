@@ -282,6 +282,14 @@ The loop:
   loop becomes the parent; `fork: true` resumes in a copy, e.g. to ask about
   a plan without changing its session). One loop runs on an Issue at a time:
   a second task of the case on the same runner waits (`queued`).
+- keeps **case affinity**: a case's tasks of one role run on the same Agent.
+  It is derived from `orchestrator_tasks` (the latest started task of the case
+  on an Agent of that role; no stored column). When a runner name or role
+  matches several Agents, the case's Agent is used, else one is auto-picked
+  (online first, then free capacity via `maxInFlightCommands`, then load, then
+  name). If none is online the task is refused. Naming a different Agent of the
+  role is refused, for read and write tasks alike (a read task elsewhere sees
+  none of the uncommitted code and would move the affinity).
 - has step settings (`LoopStepConfig`): `runId` = the case (a personal
   runner keeps one work directory per case), `stepId` = the task,
   `askQuestions` from the command's `asks`, the answer file collected
@@ -294,7 +302,9 @@ The loop:
   globs, and `inputs` from `task_run files` (written to `inputs/` before the
   agent starts).
 - runs as the runner's owner. When the runner is offline the task fails with
-  "Runner X is offline: the task was not started..."; when it is busy the task
+  "Runner X is offline: the task was not started..." if the case has no work
+  there yet; otherwise it stays `queued` with a waiting reason until the Agent
+  is back (the case's workspace is there). When it is busy the task
   stays `queued` and `task_run`, `task_get`, wait results, CASE.md and the case
   page show it as `waiting` with the reason. A queued task that fails on a later
   tick wakes the wait. A personal runner that runs one task at a time

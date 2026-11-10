@@ -19,6 +19,7 @@ import {
 import { readPersonalAgentProjectKey } from "@repo/api/src/types/project-runners";
 import { Result } from "@repo/api/src/types/result";
 import {
+  type ComputeTargetCapabilities,
   RunnerCapabilitiesSource,
   RunnerCommandMode,
 } from "@repo/api/src/types/runner-capabilities";
@@ -70,7 +71,8 @@ import {
   type TaskPageInput,
   type TaskResult,
 } from "./task-result";
-import { matchTaskRunner } from "./task-runner-match";
+import { loadCaseRunnerContext } from "./task-runner-context";
+import { matchTaskRunners, pickCaseTaskRunner } from "./task-runner-match";
 
 /**
  * The orchestrator's tasks (docs/orchestrator.md): one command of one runner,
@@ -82,7 +84,9 @@ import { matchTaskRunner } from "./task-runner-match";
  * tasks in turn (`queued`). The agent leaves its answer in
  * ORCHESTRATOR_TASK_REPLY_FILE; questions it writes come back with the result.
  * A task that task_cancel closed stays cancelled: it is never resumed, and no
- * later write here overwrites that status.
+ * later write here overwrites that status. A case's tasks of one role stay on one Agent (its
+ * workspace holds the case's uncommitted work): `pickCaseTaskRunner` derives it from the case's
+ * started tasks.
  */
 
 const LOG_PREFIX = "[orchestrator/tasks]";
@@ -129,7 +133,7 @@ export async function startTask(input: StartTaskInput): Promise<
     input.organizationId,
     input.projectId
   );
-  const matched = matchTaskRunner(files, input.runner);
+  const matched = await resolveTaskRunner(input, files);
   if (!matched.ok) {
     return Result.err(matched.error);
   }
@@ -323,9 +327,13 @@ async function launchLoop(task: TaskRow): Promise<Result<string, string>> {
       "The task's runner no longer exists, or its owner left the organization."
     );
   }
-  const blocked = unsupportedFork(task) ?? offlineMessage(task);
+  const blocked = unsupportedFork(task);
   if (blocked) {
     return Result.err(blocked);
+  }
+  const offline = await offlineOutcome(task);
+  if (offline) {
+    return offline;
   }
   const busy = await personalRunnerBusy({
     organizationId: task.organizationId,
@@ -500,16 +508,7 @@ async function buildStep(
   task: TaskRow,
   inputs: LoopStepInputFile[]
 ): Promise<Result<{ step: LoopStepConfig; attach: string[] }, string>> {
-  const earlier = await withDb((db) =>
-    db.orchestratorTask.count({
-      where: {
-        caseId: task.caseId,
-        computeTargetId: task.computeTargetId,
-        loopId: { not: null },
-        id: { not: task.id },
-      },
-    })
-  );
+  const earlier = await countEarlierStarted(task);
   const capabilities = await computeTargetCapabilitiesService.listForProject(
     task.organizationId,
     task.case.projectId
@@ -907,4 +906,96 @@ function taskRepositories(
   return Result.err(
     "The project has no repositories: a task on an automatic Agent works in them. Add them from an integration connection."
   );
+}
+
+/** The Agent the task runs on: the runner's match, narrowed by the case's affinity and load. */
+async function resolveTaskRunner(
+  input: StartTaskInput,
+  files: ComputeTargetCapabilities[]
+): Promise<Result<ComputeTargetCapabilities, string>> {
+  const candidates = matchTaskRunners(files, input.runner);
+  if (!candidates.ok) {
+    return candidates;
+  }
+  const context = await loadCaseRunnerContext({
+    organizationId: input.organizationId,
+    caseId: input.caseId,
+    candidateIds: candidates.value.map((file) => file.computeTargetId),
+    pinnedTargetId: await resumedTargetId(input),
+  });
+  return pickCaseTaskRunner(files, input.runner, context);
+}
+
+/** A resumed task is pinned to its own Agent (its session is there): that beats case affinity. */
+async function resumedTargetId(input: StartTaskInput): Promise<string | null> {
+  if (!input.resumeTaskId) {
+    return null;
+  }
+  const resumed = await withDb((db) =>
+    db.orchestratorTask.findFirst({
+      where: {
+        id: input.resumeTaskId ?? "",
+        caseId: input.caseId,
+        loopId: { not: null },
+      },
+      select: { computeTargetId: true },
+    })
+  );
+  return resumed?.computeTargetId ?? null;
+}
+
+/** Other started tasks of the case on the task's Agent: its workspace there is not fresh. */
+function countEarlierStarted(task: TaskRow): Promise<number> {
+  return withDb((db) =>
+    db.orchestratorTask.count({
+      where: {
+        caseId: task.caseId,
+        computeTargetId: task.computeTargetId,
+        loopId: { not: null },
+        id: { not: task.id },
+      },
+    })
+  );
+}
+
+/**
+ * Other tasks of the case on the task's Agent, started or queued: the case's Agent for the role
+ * (its workspace is, or will be, there) when above 0.
+ */
+function countCaseTasksOnAgent(task: TaskRow): Promise<number> {
+  return withDb((db) =>
+    db.orchestratorTask.count({
+      where: {
+        caseId: task.caseId,
+        computeTargetId: task.computeTargetId,
+        OR: [
+          { loopId: { not: null } },
+          { status: OrchestratorTaskStatus.Queued },
+        ],
+        id: { not: task.id },
+      },
+    })
+  );
+}
+
+/**
+ * Null when the task's Agent is online. Offline: the task waits when the case's workspace is on
+ * that Agent, else it fails.
+ */
+async function offlineOutcome(
+  task: TaskRow
+): Promise<Result<string, string> | null> {
+  const message = offlineMessage(task);
+  if (!message) {
+    return null;
+  }
+  if ((await countCaseTasksOnAgent(task)) > 0) {
+    return queueWaiting(task, offlineWaitingMessage(task));
+  }
+  return Result.err(message);
+}
+
+function offlineWaitingMessage(task: TaskRow): string {
+  const name = task.computeTarget?.machineName ?? "the runner";
+  return `Waiting for ${name}: it is offline, and this case's workspace (its uncommitted work) is there. The task starts when it is back.`;
 }
