@@ -9,6 +9,7 @@ import {
 } from "./local-trusted-session";
 import type { AuthObject } from "./server-auth-object";
 import { resolveSessionClaims, verifySessionToken } from "./session-token";
+import { isSignUpAllowed } from "./sign-up-policy";
 import {
   type AuthUser,
   authStateFromClaims,
@@ -77,8 +78,14 @@ export function buildAuthObject(
     has: (params) => hasAccess(state.orgRole, params),
     redirectToSignIn: (options) =>
       redirect(withReturnUrl(SIGN_IN_PATH, options?.returnBackUrl)),
+    // Invite-only deployments have no open sign-up: land on sign-in instead.
     redirectToSignUp: (options) =>
-      redirect(withReturnUrl(SIGN_UP_PATH, options?.returnBackUrl)),
+      redirect(
+        withReturnUrl(
+          isSignUpAllowed() ? SIGN_UP_PATH : SIGN_IN_PATH,
+          options?.returnBackUrl
+        )
+      ),
   };
 }
 

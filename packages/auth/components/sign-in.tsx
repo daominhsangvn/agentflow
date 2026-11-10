@@ -9,8 +9,13 @@ import {
   readRedirectTarget,
 } from "./auth-card";
 
+type SignInProps = {
+  /** Show the "Create one" link; false on invite-only deployments. */
+  readonly allowSignUp?: boolean;
+};
+
 /** Email/password sign-in, with an inline "forgot password" request. */
-export const SignIn = () => {
+export const SignIn = ({ allowSignUp = true }: SignInProps) => {
   const [mode, setMode] = useState<"sign-in" | "forgot">("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -85,12 +90,14 @@ export const SignIn = () => {
     <AuthCard
       error={error}
       footer={
-        <span>
-          No account?{" "}
-          <a className="underline" href="/sign-up">
-            Create one
-          </a>
-        </span>
+        allowSignUp ? (
+          <span>
+            No account?{" "}
+            <a className="underline" href="/sign-up">
+              Create one
+            </a>
+          </span>
+        ) : undefined
       }
       onSubmit={signIn}
       submitLabel="Sign in"

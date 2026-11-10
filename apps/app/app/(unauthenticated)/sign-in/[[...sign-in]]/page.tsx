@@ -1,3 +1,4 @@
+import { isSignUpAllowed } from "@repo/auth/sign-up-policy";
 import { createMetadata } from "@repo/seo/metadata";
 import dynamic from "next/dynamic";
 import { createAuthPageMetadataGenerator } from "@/lib/og-metadata";
@@ -17,6 +18,6 @@ const DEFAULT_METADATA = createMetadata({
 export const generateMetadata =
   createAuthPageMetadataGenerator(DEFAULT_METADATA);
 
-const SignInPage = () => <SignIn />;
+const SignInPage = () => <SignIn allowSignUp={isSignUpAllowed()} />;
 
 export default SignInPage;

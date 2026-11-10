@@ -4,17 +4,52 @@ import Page, {
   generateMetadata,
 } from "../app/(unauthenticated)/sign-up/[[...sign-up]]/page";
 
+const { redirectMock } = vi.hoisted(() => ({
+  redirectMock: vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT ${path}`);
+  }),
+}));
+
 vi.mock("next/headers", () => ({
   headers: () => Promise.resolve(new Headers({ host: "app.agentflow.ai" })),
 }));
 
+vi.mock("next/navigation", () => ({ redirect: redirectMock }));
+
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  redirectMock.mockClear();
 });
 
-test("Sign Up Page", () => {
-  const { container } = render(<Page />);
+test("Sign Up Page", async () => {
+  const { container } = render(
+    await Page({ searchParams: Promise.resolve({}) })
+  );
   expect(container).toBeDefined();
+});
+
+test("redirects to sign-in, keeping the query, when sign-up is disabled", async () => {
+  vi.stubEnv("AUTH_ALLOW_SIGN_UP", "false");
+
+  await expect(
+    Page({ searchParams: Promise.resolve({ redirect_url: "/acme/prds" }) })
+  ).rejects.toThrow("NEXT_REDIRECT");
+
+  expect(redirectMock).toHaveBeenCalledWith(
+    "/sign-in?redirect_url=%2Facme%2Fprds"
+  );
+});
+
+test("still renders for an invitation link when sign-up is disabled", async () => {
+  vi.stubEnv("AUTH_ALLOW_SIGN_UP", "false");
+
+  const { container } = render(
+    await Page({ searchParams: Promise.resolve({ email: "a@example.com" }) })
+  );
+
+  expect(container).toBeDefined();
+  expect(redirectMock).not.toHaveBeenCalled();
 });
 
 // FEA-632 sends unauthenticated visitors (including link-unfurler bots) to
