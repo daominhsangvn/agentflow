@@ -160,10 +160,10 @@ describe("OrchestratorCaseConversationCard", () => {
     });
   });
 
-  it("badges a message written on the case page", () => {
+  it("says a message was written on the case page", () => {
     renderCard([], OrchestratorMessageVia.AgentFlow);
 
-    expect(screen.getByText("AgentFlow (case page)")).toBeInTheDocument();
+    expect(screen.getByText("Message on the case page")).toBeInTheDocument();
   });
 
   it("renders message text as markdown", () => {
@@ -239,6 +239,9 @@ function makeTask(
     files: [],
     filesOmitted: 0,
     openQuestionCount: 1,
+    inputs: [],
+    replyTo: null,
+    replyToMessageId: null,
     questions: [
       { id: QUESTION_ID, question: QUESTION, options: ["MySQL", "Postgres"] },
     ],

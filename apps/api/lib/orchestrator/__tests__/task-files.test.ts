@@ -133,4 +133,17 @@ describe("mergeTaskResult", () => {
     expect(merged.pageInputs).toEqual(pageInputs);
     expect(merged.reply).toBe("done");
   });
+
+  it("keeps inputs and replyTo when a later write fails the task", () => {
+    const inputs = [
+      { taskId: "task-0", name: "PRD.md", storageKey: "k/PRD.md", size: 10 },
+    ];
+    const merged = mergeTaskResult(
+      { reply: null, questions: [], error: null, inputs, replyTo: "c-1" },
+      { reply: null, questions: [], error: "boom" }
+    );
+    expect(merged.inputs).toEqual(inputs);
+    expect(merged.replyTo).toBe("c-1");
+    expect(merged.error).toBe("boom");
+  });
 });

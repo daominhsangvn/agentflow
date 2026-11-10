@@ -2,6 +2,7 @@
 
 import type {
   OrchestratorCaseConversation,
+  OrchestratorCaseMessage,
   OrchestratorCaseTask,
   OrchestratorCaseWait,
 } from "@repo/api/src/types/orchestrator";
@@ -22,11 +23,13 @@ const EMPTY_VALUE = "—";
 export function OrchestratorCaseConversationCard({
   caseId,
   conversation,
+  caseMessages,
   tasks,
   isAdmin,
 }: Readonly<{
   caseId: string;
   conversation: OrchestratorCaseConversation;
+  caseMessages?: OrchestratorCaseMessage[];
   tasks: OrchestratorCaseTask[];
   isAdmin: boolean;
 }>) {
@@ -39,6 +42,7 @@ export function OrchestratorCaseConversationCard({
       <CardContent className="space-y-3">
         <OrchestratorConversationTimeline
           caseId={caseId}
+          caseMessages={caseMessages}
           conversation={conversation}
           isAdmin={isAdmin}
           tasks={tasks}

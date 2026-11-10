@@ -6,6 +6,7 @@ import type {
   OrchestratorCaseMessage,
   OrchestratorCaseSummary,
   OrchestratorCaseTask,
+  OrchestratorCaseTaskInput,
   OrchestratorCaseTurn,
   OrchestratorCaseWait,
   OrchestratorConversationStatus,
@@ -30,7 +31,10 @@ import { z } from "zod";
 import type { CaseStats } from "@/app/orchestrator/cases/service/case-stats";
 import type { CaseDocument } from "@/lib/orchestrator/case-documents";
 import { readMessageToAgent } from "@/lib/orchestrator/message-to-agent";
-import { readTaskResult } from "@/lib/orchestrator/task-result";
+import {
+  readTaskResult,
+  type TaskResult,
+} from "@/lib/orchestrator/task-result";
 
 /**
  * Rows of the orchestrator tables as the case API returns them (pure: dates
@@ -70,6 +74,7 @@ export type CaseDetailRow = CaseSummaryRow & {
           actor: string | null;
           text: string;
           turnId: string | null;
+          externalRef: string | null;
           payload: unknown;
         }
       >;
@@ -166,13 +171,21 @@ export function toCaseDetail(
   stats: CaseStats,
   documents: CaseDocument[]
 ): OrchestratorCaseDetail {
+  const messageIdsByRef = new Map<string, string>();
+  for (const conversation of row.conversations) {
+    for (const message of conversation.messages) {
+      if (message.externalRef) {
+        messageIdsByRef.set(message.externalRef, message.id);
+      }
+    }
+  }
   return {
     ...toCaseSummary(row, turnRunning, stats),
     notes: row.notes,
     project: row.project,
     workflow: row.workflow,
     conversations: row.conversations.map(toConversation),
-    tasks: oldestFirst(row.tasks).map(toTask),
+    tasks: oldestFirst(row.tasks).map((task) => toTask(task, messageIdsByRef)),
     waits: oldestFirst(row.conversations.flatMap((c) => c.waits)).map(toWait),
     decisions: oldestFirst(row.decisions).map(toDecision),
     documents: documents.map(toDocument),
@@ -271,7 +284,10 @@ function toTurn(
   };
 }
 
-function toTask(row: CaseDetailRow["tasks"][number]): OrchestratorCaseTask {
+function toTask(
+  row: CaseDetailRow["tasks"][number],
+  messageIdsByRef: Map<string, string>
+): OrchestratorCaseTask {
   const result = readTaskResult(row.result);
   return {
     id: row.id,
@@ -298,6 +314,9 @@ function toTask(row: CaseDetailRow["tasks"][number]): OrchestratorCaseTask {
     questions: result?.questions ?? [],
     error: result?.error ?? cancelledError(result),
     waiting: result?.waiting ?? null,
+    inputs: taskInputs(result),
+    replyTo: result?.replyTo ?? null,
+    replyToMessageId: replyToMessageId(result, messageIdsByRef),
     openQuestionCount: row.openQuestionCount,
     createdAt: row.createdAt.toISOString(),
     finishedAt: iso(row.finishedAt),
@@ -361,4 +380,30 @@ function toDocument(document: CaseDocument): OrchestratorCaseDocument {
 function readJson<T>(schema: z.ZodType<T>, value: unknown): T | null {
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+function taskInputs(result: TaskResult | null): OrchestratorCaseTaskInput[] {
+  const files = (result?.inputs ?? []).map((input) => ({
+    name: input.name,
+    size: input.size,
+    fromTaskId: input.taskId,
+    page: null,
+  }));
+  const pages = (result?.pageInputs ?? []).map((page) => ({
+    name: page.name,
+    size: page.size,
+    fromTaskId: null,
+    page: { title: page.title, url: page.url, version: page.version },
+  }));
+  return [...files, ...pages];
+}
+
+function replyToMessageId(
+  result: TaskResult | null,
+  messageIdsByRef: Map<string, string>
+): string | null {
+  if (!result?.replyTo) {
+    return null;
+  }
+  return messageIdsByRef.get(result.replyTo) ?? null;
 }

@@ -132,6 +132,7 @@ function OrchestratorThread({
         <>
           <OrchestratorConversationTimeline
             caseId={detail.id}
+            caseMessages={conversations.flatMap((item) => item.messages)}
             conversation={chosen}
             isAdmin={isAdmin}
             tasks={detail.tasks}
