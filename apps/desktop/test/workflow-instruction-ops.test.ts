@@ -12,6 +12,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 import { WORKFLOW_INSTRUCTION_GATEWAY_PATH } from "@repo/api/src/types/workflow-instruction";
 import { OperationDispatcher } from "../src/server/operation-dispatcher.js";
 import type { OpenIntegrationSession } from "../src/server/operations/integration-session-client.js";
+import { configurePersonalRunnerProject } from "../src/server/operations/personal-runner.js";
 import {
   INSTRUCTION_ACTIONS_DIR,
   INSTRUCTION_ALLOWED_TOOLS,
@@ -150,6 +151,41 @@ describe("resolveInstructionWorkspace", () => {
           []
         ),
       NO_ALLOWED_DIRS_RE
+    );
+  });
+});
+
+const NO_REPOSITORY_RE = /no repository/;
+
+describe("resolveInstructionWorkspace without a repository", () => {
+  afterEach(() => {
+    configurePersonalRunnerProject(null);
+  });
+
+  test("throws when no personal runner is configured", () => {
+    const root = makeRoot();
+    assert.throws(
+      () =>
+        resolveInstructionWorkspace(
+          { workspaceKey: "PLN-5", repository: null },
+          [root]
+        ),
+      NO_REPOSITORY_RE
+    );
+  });
+
+  test("is the project folder on a personal runner", () => {
+    const root = makeRoot();
+    configurePersonalRunnerProject({
+      projectKey: "PRO-1",
+      projectDir: root,
+    } as Parameters<typeof configurePersonalRunnerProject>[0]);
+    assert.equal(
+      resolveInstructionWorkspace(
+        { workspaceKey: "PLN-5", repository: null },
+        []
+      ),
+      path.resolve(root)
     );
   });
 });

@@ -28,6 +28,7 @@ export const taskMocks = {
   tasks: [] as Row[],
   loops: new Map<string, Row>(),
   busy: false,
+  noRepositories: false,
   dropBaCommand: false,
   onBusyCheck: null as (() => void) | null,
   online: true,
@@ -64,7 +65,13 @@ export function databaseModule() {
     computeTarget: {
       userId: IDS.owner,
       machineName: row.computeTargetId === IDS.ba ? "runner-1" : "an-PRO-1",
-      capabilities: taskMocks.runnerCapabilities,
+      capabilities:
+        row.computeTargetId === IDS.dev
+          ? {
+              ...taskMocks.runnerCapabilities,
+              personalRunner: { projectKey: "PRO-1", parallel: false },
+            }
+          : taskMocks.runnerCapabilities,
       isOnline: taskMocks.online,
     },
   });
@@ -191,13 +198,17 @@ export function loopsServiceModule() {
 
 export function checkoutsModule() {
   return {
-    listProjectRepositoryCheckouts: () => Promise.resolve([{}]),
+    listProjectRepositoryCheckouts: () =>
+      Promise.resolve(taskMocks.noRepositories ? [] : [{}]),
     findRepositoryCheckout: (_checkouts: unknown, fullName: string) =>
       fullName === "workshop/leavedesk-knowledge" ? {} : undefined,
-    toLoopRepositorySelection: () => ({
-      primary: { fullName: "workshop/leavedesk-app", branch: "main" },
-      additional: [],
-    }),
+    toLoopRepositorySelection: () =>
+      taskMocks.noRepositories
+        ? null
+        : {
+            primary: { fullName: "workshop/leavedesk-app", branch: "main" },
+            additional: [],
+          },
   };
 }
 
@@ -265,6 +276,7 @@ export function resetTaskMocks() {
   taskMocks.tasks = [];
   taskMocks.loops = new Map();
   taskMocks.busy = false;
+  taskMocks.noRepositories = false;
   taskMocks.dropBaCommand = false;
   taskMocks.onBusyCheck = null;
   taskMocks.online = true;

@@ -1,6 +1,7 @@
 import { DesktopCommandStatus } from "@repo/api/src/types/compute-target";
 import type { ConnectionGrants } from "@repo/api/src/types/connection-grants";
 import { IntegrationToolCallStatus } from "@repo/api/src/types/integration-tools";
+import { readPersonalAgentProjectKey } from "@repo/api/src/types/project-runners";
 import { Result } from "@repo/api/src/types/result";
 import {
   type WorkflowInstructionOperationResult,
@@ -15,6 +16,7 @@ import {
 } from "@repo/api/src/types/workflow-instruction";
 import { withDb } from "@repo/database";
 import { parseError } from "@repo/observability/error";
+import { computeTargetsService } from "@/app/compute-targets/service";
 import { integrationToolSessionService } from "@/app/integration-tools/integration-tool-session-service";
 import {
   findRepositoryCheckout,
@@ -275,7 +277,8 @@ const DETAIL_CALLS_MAX = 50;
 type RunWorkspace = {
   computeTargetId: string;
   workspaceKey: string;
-  repository: { fullName: string; cloneUrl: string };
+  /** null when a personal Agent works in its project folder (no repositories). */
+  repository: { fullName: string; cloneUrl: string } | null;
 };
 
 const WORKSPACE_GUIDE = `Your working directory is the run's workspace: the folder the run's agents work in, on the computer that runs them. What is there depends on how far the run got:
@@ -366,9 +369,9 @@ async function resolveRunWorkspace(
   const primary =
     findRepositoryCheckout(checkouts, agent?.repository?.fullName) ??
     checkouts[0];
-  if (!(agent && primary)) {
+  if (!agent) {
     return Result.err(
-      "The project has no repositories, so the run has no workspace for the instruction."
+      "The run has no Agent settings, so the instruction has no workspace."
     );
   }
   const computeTargetId = await resolveWorkspaceComputer({
@@ -381,11 +384,44 @@ async function resolveRunWorkspace(
   if (!computeTargetId.ok) {
     return computeTargetId;
   }
+  const repository = await workspaceRepository(
+    primary,
+    computeTargetId.value,
+    organizationId
+  );
+  if (!repository.ok) {
+    return repository;
+  }
   return Result.ok({
     computeTargetId: computeTargetId.value,
     workspaceKey,
-    repository: { fullName: primary.fullName, cloneUrl: primary.cloneUrl },
+    repository: repository.value,
   });
+}
+
+/**
+ * The primary repository of the run's workspace. Without one, only a personal
+ * Agent can work (in its project folder): the repository is then null.
+ */
+async function workspaceRepository(
+  primary: { fullName: string; cloneUrl: string } | undefined,
+  computeTargetId: string,
+  organizationId: string
+): Promise<Result<RunWorkspace["repository"], string>> {
+  if (primary) {
+    return Result.ok({
+      fullName: primary.fullName,
+      cloneUrl: primary.cloneUrl,
+    });
+  }
+  const found = await computeTargetsService.findById(computeTargetId);
+  const target = found?.organizationId === organizationId ? found : null;
+  if (readPersonalAgentProjectKey(target?.capabilities) !== null) {
+    return Result.ok(null);
+  }
+  return Result.err(
+    "The project has no repositories, so the run has no workspace for the instruction."
+  );
 }
 
 async function resolveWorkspaceComputer(input: {

@@ -7,6 +7,7 @@ import {
   LoopStatus,
   MAX_ADDITIONAL_REPOS,
 } from "@repo/api/src/types/loop";
+import { readPersonalAgentProjectKey } from "@repo/api/src/types/project-runners";
 import { Result } from "@repo/api/src/types/result";
 import {
   type WorkflowAgentConfig,
@@ -48,7 +49,8 @@ import { recordRunRepositories } from "./run-repository";
  * process"). Every expected failure comes back as a run error.
  *
  * - A step works in the project repositories (integration connections); the
- *   GitHub App team pool is not used.
+ *   GitHub App team pool is not used. A step on a personal Agent may have
+ *   none: it works in the Agent's project folder.
  * - The run's steps share one workspace on one computer: the first loop of a
  *   run picks the computer like PLAN does, every later loop runs where the
  *   run's earlier loops ran.
@@ -101,6 +103,12 @@ export async function launchStepLoop(
     return target;
   }
   const computeTargetId = target.value;
+  if (repositories.value === null) {
+    const refusal = await requirePersonalTarget(input, computeTargetId);
+    if (refusal) {
+      return Result.err(refusal);
+    }
+  }
   // An old runner would resume the parent session in place: refuse before
   // the busy check, so it fails instead of queueing.
   const forkRefusal = await forkRefusalFor(input, computeTargetId);
@@ -139,8 +147,8 @@ export async function launchStepLoop(
         parentLoopId: input.resumeLoopId,
         computeTargetId,
         prompt: input.prompt,
-        repo: repositories.value.primary,
-        additionalRepos: repositories.value.additional,
+        repo: repositories.value?.primary,
+        additionalRepos: repositories.value?.additional,
         contextRefs: sourceContextRefs(input),
         metadata: {
           workflowRunId: input.runId,
@@ -187,7 +195,7 @@ export async function launchStepLoop(
   // Repository actions ("Create pull request") work on the repositories a
   // pushing step records on the run; the first one records them, so a later
   // step never clears the branches an earlier one pushed.
-  if (await shouldRecordRepositories(input)) {
+  if (repositories.value && (await shouldRecordRepositories(input))) {
     await recordRunRepositories({
       runId: input.runId,
       organizationId: input.organizationId,
@@ -231,11 +239,13 @@ const STEP_TOOL_SESSION_MS = 25 * 60 * 60_000;
 /**
  * The project repositories the step works in: the workflow's repository (or
  * the project's primary) first, then every other one. The toolkit must be
- * one of them, so its worktree is in the workspace to load it from.
+ * one of them, so its worktree is in the workspace to load it from. Null when
+ * the project has none: only a personal Agent can run such a step (the caller
+ * checks), and it ignores the toolkit.
  */
 async function resolveStepRepositories(
   input: LaunchStepLoopInput
-): Promise<Result<LoopRepositorySelection, WorkflowRunError>> {
+): Promise<Result<LoopRepositorySelection | null, WorkflowRunError>> {
   const checkouts = await listProjectRepositoryCheckouts(
     input.organizationId,
     input.projectId
@@ -245,12 +255,7 @@ async function resolveStepRepositories(
     input.agent.repository?.fullName
   );
   if (!selection) {
-    return Result.err(
-      runError(
-        WorkflowRunErrorCode.NoRepository,
-        "The project has no repositories. Add the project's repositories from an integration connection to run its process."
-      )
-    );
+    return Result.ok(null);
   }
   const toolkit = input.step.toolkit;
   if (toolkit && !findRepositoryCheckout(checkouts, toolkit.repository)) {
@@ -313,5 +318,21 @@ async function forkRefusalFor(
       advice:
         "Update the runner, or retry the step with Restart (a new session).",
     })
+  );
+}
+
+/** The run error when a step without project repositories is not on a personal Agent, or null. */
+async function requirePersonalTarget(
+  input: LaunchStepLoopInput,
+  computeTargetId: string
+): Promise<WorkflowRunError | null> {
+  const found = await computeTargetsService.findById(computeTargetId);
+  const target = found?.organizationId === input.organizationId ? found : null;
+  if (readPersonalAgentProjectKey(target?.capabilities) !== null) {
+    return null;
+  }
+  return runError(
+    WorkflowRunErrorCode.NoRepository,
+    "The project has no repositories. Add the project's repositories from an integration connection to run its process on an automatic Agent."
   );
 }

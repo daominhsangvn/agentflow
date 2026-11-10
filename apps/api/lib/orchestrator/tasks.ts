@@ -16,9 +16,9 @@ import {
   ORCHESTRATOR_TASK_REPLY_MAX,
   OrchestratorTaskStatus,
 } from "@repo/api/src/types/orchestrator";
+import { readPersonalAgentProjectKey } from "@repo/api/src/types/project-runners";
 import { Result } from "@repo/api/src/types/result";
 import {
-  type ComputeTargetCapabilities,
   RunnerCapabilitiesSource,
   RunnerCommandMode,
 } from "@repo/api/src/types/runner-capabilities";
@@ -31,6 +31,7 @@ import { documentService } from "@/app/documents/document-service";
 import { loopsService } from "@/app/loops/service";
 import {
   findRepositoryCheckout,
+  type LoopRepositorySelection,
   listProjectRepositoryCheckouts,
   toLoopRepositorySelection,
 } from "@/app/projects/project-repository-checkouts";
@@ -69,14 +70,15 @@ import {
   type TaskPageInput,
   type TaskResult,
 } from "./task-result";
+import { matchTaskRunner } from "./task-runner-match";
 
 /**
  * The orchestrator's tasks (docs/orchestrator.md): one command of one runner,
  * run as a STEP loop on that runner. A task works on its case's Issue (made
- * with the case's first task), which carries the project, its repositories and
- * the workspace: every task of one case on one runner shares that workspace,
- * so a later task can resume an earlier one's session (`resumeTaskId`, in a
- * copy with `fork`). A personal runner that runs one task at a time takes the
+ * with the case's first task), which carries the project, its repositories (none for a personal Agent's
+ * project folder) and the workspace: every task of one case on one runner
+ * shares that workspace, so a later task can resume an earlier one's session
+ * (`resumeTaskId`, in a copy with `fork`). A personal runner that runs one task at a time takes the
  * tasks in turn (`queued`). The agent leaves its answer in
  * ORCHESTRATOR_TASK_REPLY_FILE; questions it writes come back with the result.
  * A task that task_cancel closed stays cancelled: it is never resumed, and no
@@ -127,12 +129,11 @@ export async function startTask(input: StartTaskInput): Promise<
     input.organizationId,
     input.projectId
   );
-  const runner = findRunner(files, input.runner);
-  if (!runner) {
-    return Result.err(
-      `No Agent "${input.runner}" of this project declared commands: ${files.map((file) => file.runnerName).join(", ") || "none did"}.`
-    );
+  const matched = matchTaskRunner(files, input.runner);
+  if (!matched.ok) {
+    return Result.err(matched.error);
   }
+  const runner = matched.value;
   const checked = checkTaskCommand(runner, input.command, input.mode);
   if (!checked.ok) {
     return Result.err(checked.error);
@@ -341,12 +342,11 @@ async function launchLoop(task: TaskRow): Promise<Result<string, string>> {
     task.organizationId,
     task.case.projectId
   );
-  const repositories = toLoopRepositorySelection(checkouts);
-  if (!repositories) {
-    return Result.err(
-      "The project has no repositories: a task works in them. Add them from an integration connection."
-    );
+  const selected = taskRepositories(task, checkouts);
+  if (!selected.ok) {
+    return Result.err(selected.error);
   }
+  const repositories = selected.value;
   const documentId = await ensureTaskDocument(task, owner.id);
   if (!documentId) {
     return Result.err("The case's Issue could not be created in the project.");
@@ -388,8 +388,8 @@ async function launchLoop(task: TaskRow): Promise<Result<string, string>> {
         attach,
         inputs: inputs.map((file) => file.name),
       }),
-      repo: repositories.primary,
-      additionalRepos: repositories.additional.slice(0, MAX_ADDITIONAL_REPOS),
+      repo: repositories?.primary,
+      additionalRepos: repositories?.additional.slice(0, MAX_ADDITIONAL_REPOS),
       metadata: {
         orchestratorTaskId: task.id,
         [LOOP_STEP_METADATA_KEY]: step,
@@ -435,6 +435,7 @@ async function launchLoop(task: TaskRow): Promise<Result<string, string>> {
   return Result.ok(OrchestratorTaskStatus.Running);
 }
 
+// An empty `checkouts` is fine for a personal Agent: its step has no toolkit.
 /** The step's settings, with the earlier tasks' files as inputs; refused when the toolkit is not a project repository. */
 async function prepareStep(
   task: TaskRow,
@@ -775,19 +776,6 @@ function loopErrorText(status: string, error: unknown): string {
     : `The task's loop ended ${status}.`;
 }
 
-function findRunner(
-  files: ComputeTargetCapabilities[],
-  runner: string
-): ComputeTargetCapabilities | undefined {
-  const wanted = runner.trim().toLowerCase();
-  return files.find(
-    (file) =>
-      file.computeTargetId === runner ||
-      file.runnerName.toLowerCase() === wanted ||
-      file.capabilities?.runner?.toLowerCase() === wanted
-  );
-}
-
 /** Why the task's runner cannot fork the session it resumes, or null. */
 function unsupportedFork(task: TaskRow): string | null {
   if (!task.fork || runnerForksSession(task.computeTarget?.capabilities)) {
@@ -901,5 +889,22 @@ async function initialResultFor(
   }
   return Result.ok(
     initialTaskResult(resolved, input.pageInputs, input.replyTo)
+  );
+}
+
+/** The repositories a task works in; none is fine for a personal Agent, which works in its project folder. */
+function taskRepositories(
+  task: TaskRow,
+  checkouts: Awaited<ReturnType<typeof listProjectRepositoryCheckouts>>
+): Result<LoopRepositorySelection | null, string> {
+  const repositories = toLoopRepositorySelection(checkouts);
+  if (repositories) {
+    return Result.ok(repositories);
+  }
+  if (readPersonalAgentProjectKey(task.computeTarget?.capabilities) !== null) {
+    return Result.ok(null);
+  }
+  return Result.err(
+    "The project has no repositories: a task on an automatic Agent works in them. Add them from an integration connection."
   );
 }

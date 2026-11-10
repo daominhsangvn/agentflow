@@ -13,6 +13,8 @@ A **personal Agent** runs AgentFlow's tasks on a person's own computer, in the p
 - The project folder, already cloned, with an `AGENTFLOW.md` that declares its commands ([Agent capabilities](/docs/guides/setup/agent-capabilities)).
 - The API URL over HTTPS and an API key with the `write` scope ([First admin and organization](/docs/getting-started/first-admin#create-an-api-key-for-agents)).
 
+No repositories are needed in the AgentFlow project. If only personal Agents work on it, you do not have to add repositories from an integration connection: tasks, process steps and instruction actions start without them and work in the project folder. Repositories the project does have are sent but not cloned. An automatic Agent still refuses a project without repositories. Instruction actions need an Agent bundle released after 2026-11-10; tasks and process steps work with older ones.
+
 ## Install
 
 Download the Agent bundle from the repository's GitHub releases (tags `runner-v*`):

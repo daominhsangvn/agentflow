@@ -674,6 +674,18 @@ already in use, since both would be the same computer in AgentFlow.
   session, so parallel runs never read each other's questions or answers.
   The project's commands must keep their own work apart (a worktree or a
   branch per ticket); the runner does not.
+- **No repositories needed.** An orchestrator task, a process step and an
+  instruction action on a personal runner start even when the AgentFlow
+  project has no repositories: the loop carries no repository and works in the
+  project folder. When the project has repositories they are still sent but
+  not cloned. An automatic runner still refuses a project without
+  repositories (`no_repository` for a process step, "The project has no
+  repositories" for a task). An instruction action needs a personal runner
+  released after 2026-11-10
+  (`apps/api/lib/orchestrator/tasks.ts`,
+  `apps/api/lib/workflows/engine/launch-step.ts`,
+  `apps/api/lib/workflows/engine/instruction-action.ts`,
+  `apps/desktop/src/server/operations/workflow-instruction.ts`).
 - The agent runs from the project folder. A run's first step creates its
   work directory empty and removes work directories unused for 30 days; in a
   git repository `.agentflow-ai/` is added to `.git/info/exclude`. Nothing
