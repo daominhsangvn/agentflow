@@ -135,6 +135,17 @@ test("orchestrator cases: open a case from the workflow and approve its decision
           },
         ],
       });
+
+    await detail.getByRole("button", { name: "Delete case" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete case" })
+      .click();
+    await expect.poll(() => served.deletes).toEqual([served.caseId]);
+    await expect(page).toHaveURL(
+      new RegExp(`/${orgSlug}/workflows/${workflow.id}\\?tab=cases$`),
+      { timeout: 30_000 }
+    );
   } finally {
     await fixture.cleanUp(request, token);
   }
@@ -232,6 +243,8 @@ type ServedCases = {
   questionTaskId: string;
   /** Bodies POSTed to the case message endpoint. */
   messages: unknown[];
+  /** Ids of the cases the DELETE endpoint was called for. */
+  deletes: string[];
 };
 
 /** Stubs the workflow case list, the case read and the decision POST. */
@@ -314,6 +327,9 @@ async function serveCases(
           { name: TASK_FILE_NAME, size: 2048, stored: true, skipped: null },
         ],
         filesOmitted: 0,
+        inputs: [],
+        replyTo: null,
+        replyToMessageId: null,
         openQuestionCount: 0,
         questions: [],
         error: null,
@@ -338,6 +354,9 @@ async function serveCases(
         reply: null,
         files: [],
         filesOmitted: 0,
+        inputs: [],
+        replyTo: null,
+        replyToMessageId: null,
         // The server's count of unanswered questions gates the answer form.
         openQuestionCount: 1,
         questions: [{ id: PENDING_QUESTION_ID, question: PENDING_QUESTION }],
@@ -370,13 +389,20 @@ async function serveCases(
   };
   const decisions: unknown[] = [];
   const messages: unknown[] = [];
+  const deletes: string[] = [];
 
   await page.route(`**/workflows/${workflow.id}/cases`, (route) =>
     route.fulfill({ json: { success: true, data: [summary] } })
   );
-  await page.route(`**/orchestrator/cases/${caseId}`, (route) =>
-    route.fulfill({ json: { success: true, data: detail } })
-  );
+  await page.route(`**/orchestrator/cases/${caseId}`, (route) => {
+    if (route.request().method() === "DELETE") {
+      deletes.push(caseId);
+      return route.fulfill({
+        json: { success: true, data: { deleted: true } },
+      });
+    }
+    return route.fulfill({ json: { success: true, data: detail } });
+  });
   await page.route(`**/orchestrator/cases/${caseId}/loops`, (route) =>
     route.fulfill({
       json: {
@@ -434,6 +460,7 @@ async function serveCases(
     caseId,
     conversationId,
     decisions,
+    deletes,
     loopId,
     messages,
     questionTaskId,

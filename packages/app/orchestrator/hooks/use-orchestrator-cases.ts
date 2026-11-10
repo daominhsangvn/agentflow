@@ -269,3 +269,25 @@ export function workflowCasesPollInterval(
   );
   return live ? CASE_POLL_INTERVAL_MS : CASE_BACKGROUND_POLL_MS;
 }
+
+/** Deletes a case (org admins); drops its cached reads, refreshes the lists. */
+export function useDeleteOrchestratorCase(caseId: string) {
+  const queryClient = useQueryClient();
+  const apiClient = useApiClient();
+
+  return useMutation({
+    mutationFn: () => apiClient.delete<{ deleted: true }>(casePath(caseId)),
+    onSuccess: () => {
+      queryClient.removeQueries({
+        queryKey: orchestratorCaseKeys.detail(caseId),
+      });
+      queryClient.removeQueries({
+        queryKey: orchestratorCaseKeys.loops(caseId),
+      });
+      return queryClient.invalidateQueries({
+        queryKey: orchestratorCaseKeys.all,
+      });
+    },
+    ...mutationErrorOptions("Couldn't delete the case"),
+  });
+}

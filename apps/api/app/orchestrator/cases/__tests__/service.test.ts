@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   workflowFindFirst: vi.fn(),
   caseFindFirst: vi.fn(),
   caseUpdateMany: vi.fn(),
+  caseDeleteMany: vi.fn(),
   turnFindMany: vi.fn(),
   turnFindFirst: vi.fn(),
   turnUpdateMany: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock("@repo/database", () => {
       findMany: mocks.caseFindMany,
       findFirst: mocks.caseFindFirst,
       updateMany: mocks.caseUpdateMany,
+      deleteMany: mocks.caseDeleteMany,
     },
     orchestratorTurn: {
       findMany: mocks.turnFindMany,
@@ -485,6 +487,65 @@ describe("orchestratorCaseService.setStatus", () => {
       status: OrchestratorCaseStatus.Open,
     });
 
+    expect(result).toEqual({ ok: false, error: Status.NotFound });
+  });
+});
+
+describe("orchestratorCaseService.remove", () => {
+  beforeEach(() => {
+    mocks.caseDeleteMany.mockReset();
+    mocks.caseFindFirst.mockReset();
+  });
+
+  it("deletes an idle case of the organization", async () => {
+    mocks.caseDeleteMany.mockResolvedValue({ count: 1 });
+
+    const result = await orchestratorCaseService.remove(ORG, CASE_ID);
+
+    expect(mocks.caseDeleteMany).toHaveBeenCalledWith({
+      where: {
+        id: CASE_ID,
+        organizationId: ORG,
+        tasks: {
+          none: {
+            status: {
+              in: [
+                OrchestratorTaskStatus.Queued,
+                OrchestratorTaskStatus.Running,
+              ],
+            },
+          },
+        },
+        conversations: {
+          none: {
+            turns: { some: { status: OrchestratorTurnStatus.Running } },
+          },
+        },
+      },
+    });
+    expect(mocks.caseFindFirst).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, value: { caseId: CASE_ID } });
+  });
+
+  it("is a conflict while the case has active work", async () => {
+    mocks.caseDeleteMany.mockResolvedValue({ count: 0 });
+    mocks.caseFindFirst.mockResolvedValue({ id: CASE_ID });
+
+    const result = await orchestratorCaseService.remove(ORG, CASE_ID);
+
+    expect(result).toEqual({ ok: false, error: Status.Conflict });
+  });
+
+  it("is not found for a missing or other-organization case", async () => {
+    mocks.caseDeleteMany.mockResolvedValue({ count: 0 });
+    mocks.caseFindFirst.mockResolvedValue(null);
+
+    const result = await orchestratorCaseService.remove(ORG, CASE_ID);
+
+    expect(mocks.caseFindFirst).toHaveBeenCalledWith({
+      where: { id: CASE_ID, organizationId: ORG },
+      select: { id: true },
+    });
     expect(result).toEqual({ ok: false, error: Status.NotFound });
   });
 });

@@ -369,6 +369,11 @@ lists them (name, size) in `task_get`, wait results and CASE.md.
 
 The case pages are on Workflow → Cases, with a breadcrumb back to the workflow.
 
+An organization admin can delete a case from its page (`DELETE /orchestrator/cases/{id}`):
+its conversations, messages, turns, tasks, waits and decisions go with it; its loops, sessions,
+pull requests and Issues stay. A case with a running turn or a queued or running task is refused
+(409). A new message about the same item opens a new case.
+
 ### The Agents tab
 
 An orchestrated workflow has an **Agents** tab. The left side is a diagram: the

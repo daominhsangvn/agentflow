@@ -12,7 +12,7 @@ import {
   OrchestratorTaskStatus,
   OrchestratorTurnStatus,
 } from "@repo/api/src/types/orchestrator";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,10 +32,17 @@ const mocks = vi.hoisted(() => ({
     refetch: vi.fn(),
   },
   decideMutate: vi.fn(),
+  deleteMutateAsync: vi.fn(),
+  replace: vi.fn(),
+  active: true,
 }));
 
 vi.mock("../../hooks/use-orchestrator-cases", () => ({
-  isCaseActive: () => true,
+  isCaseActive: () => mocks.active,
+  useDeleteOrchestratorCase: () => ({
+    mutateAsync: mocks.deleteMutateAsync,
+    isPending: false,
+  }),
   useOrchestratorCase: () => mocks.query,
   useSetOrchestratorCaseStatus: () => ({
     mutate: vi.fn(),
@@ -58,6 +65,15 @@ vi.mock("../../hooks/use-orchestrator-cases", () => ({
 
 vi.mock("../orchestrator-case-work-cards", () => ({
   OrchestratorCaseWorkCards: () => <div data-testid="work-cards" />,
+}));
+
+vi.mock("@repo/navigation/use-navigation", () => ({
+  useNavigation: () => ({
+    replace: mocks.replace,
+    navigate: vi.fn(),
+    back: vi.fn(),
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@repo/navigation/use-org-path", () => ({
@@ -243,6 +259,10 @@ describe("OrchestratorCaseDetailView", () => {
     mocks.query.isLoading = false;
     mocks.query.error = null;
     mocks.decideMutate.mockReset();
+    mocks.deleteMutateAsync.mockReset();
+    mocks.deleteMutateAsync.mockResolvedValue({ deleted: true });
+    mocks.replace.mockReset();
+    mocks.active = true;
   });
 
   it("approves a pending decision", async () => {
@@ -283,6 +303,30 @@ describe("OrchestratorCaseDetailView", () => {
     expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop turn" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Close case" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete case" })).toBeNull();
+  });
+
+  it("deletes an inactive case after confirmation and leaves the page", async () => {
+    mocks.active = false;
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete case" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Delete case",
+      })
+    );
+
+    await waitFor(() => expect(mocks.deleteMutateAsync).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(mocks.replace).toHaveBeenCalledWith("/acme/workflows/w1?tab=cases")
+    );
+  });
+
+  it("disables delete while the case is active", () => {
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    expect(screen.getByRole("button", { name: "Delete case" })).toBeDisabled();
   });
 
   it("lists task files with size and skipped reason", () => {

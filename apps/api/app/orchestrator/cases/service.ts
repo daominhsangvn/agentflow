@@ -259,6 +259,50 @@ export const orchestratorCaseService = {
   },
 
   /**
+   * Deletes a case and, by cascade, its conversations, messages, turns, tasks,
+   * waits and decisions. Refused (Conflict) while a turn runs or a task is
+   * queued or running; NotFound when the org has no such case.
+   */
+  async remove(
+    organizationId: string,
+    caseId: string
+  ): Promise<Result<{ caseId: string }, StatusCode>> {
+    const deleted = await withDb((db) =>
+      db.orchestratorCase.deleteMany({
+        where: {
+          id: caseId,
+          organizationId,
+          tasks: {
+            none: {
+              status: {
+                in: [
+                  OrchestratorTaskStatus.Queued,
+                  OrchestratorTaskStatus.Running,
+                ],
+              },
+            },
+          },
+          conversations: {
+            none: {
+              turns: { some: { status: OrchestratorTurnStatus.Running } },
+            },
+          },
+        },
+      })
+    );
+    if (deleted.count > 0) {
+      return Result.ok({ caseId });
+    }
+    const exists = await withDb((db) =>
+      db.orchestratorCase.findFirst({
+        where: { id: caseId, organizationId },
+        select: { id: true },
+      })
+    );
+    return Result.err(exists ? Status.Conflict : Status.NotFound);
+  },
+
+  /**
    * Stops a running turn: marks it (so it settles as failed, "Stopped by
    * <admin>.", without a retry) and asks its runner to stop it.
    */
