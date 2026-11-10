@@ -222,3 +222,20 @@ test("programFolderWarning", () => {
   assert.ok(programFolderWarning("/tmp/x", dirs));
   assert.equal(programFolderWarning("/opt/agent", dirs), null);
 });
+
+test("a server-keyed Agent gets its own service id, name and --server argument", () => {
+  const id = serviceId("PRO-1", "host-3002");
+  assert.equal(id, "agentflow-agent-pro-1-host-3002");
+  assert.equal(
+    serviceDisplayName("PRO-1", "host-3002"),
+    "AgentFlow Agent (PRO-1 @ host-3002)"
+  );
+  const xml = renderServiceXml({
+    ...spec("PRO-1"),
+    id,
+    server: "host-3002",
+  });
+  assert.ok(xml.includes("--project PRO-1 --server host-3002"));
+  assert.ok(xml.includes(`value="${id}"`));
+  assert.ok(!renderServiceXml(spec("PRO-1")).includes("--server"));
+});

@@ -13,6 +13,7 @@ test("no arguments is the auto runner", () => {
       check: false,
       projectKey: null,
       role: null,
+      server: null,
     },
   });
 });
@@ -67,4 +68,36 @@ test("check needs --project and only works as the first argument", () => {
     false
   );
   assert.equal(parseRunnerArgs(["--project", "PRO-1", "check"]).ok, false);
+});
+
+test("--server is reduced to the server slug", () => {
+  const result = parseRunnerArgs([
+    "--project",
+    "pro-1",
+    "--server",
+    "http://LocalHost:3002",
+  ]);
+  assert.equal(result.ok && result.value.server, "localhost-3002");
+});
+
+test("--server works with run, setup, uninstall and check", () => {
+  for (const command of ["setup", "uninstall", "check"]) {
+    const result = parseRunnerArgs([
+      command,
+      "--project",
+      "PRO-1",
+      "--server",
+      "host",
+    ]);
+    assert.equal(result.ok && result.value.server, "host");
+  }
+});
+
+test("--server needs --project and a valid value", () => {
+  assert.equal(parseRunnerArgs(["--server", "x"]).ok, false);
+  assert.equal(parseRunnerArgs(["--project", "PRO-1", "--server"]).ok, false);
+  assert.equal(
+    parseRunnerArgs(["--project", "PRO-1", "--server", "a b"]).ok,
+    false
+  );
 });

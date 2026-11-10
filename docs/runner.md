@@ -340,22 +340,24 @@ ConnectionStrings__DefaultConnection=Server=localhost;Database=App_Agent;Trusted
 **Start with Windows.** The last setup question offers to install the Agent
 as a Windows service ([WinSW](https://github.com/winsw/winsw), shipped in
 `winsw/`) that starts before anyone signs in. There is one service per Agent:
-`agentflow-agent`, or `agentflow-agent-pro-1` for the personal Agent of PRO-1.
+`agentflow-agent`, or `agentflow-agent-pro-1` for the personal Agent of PRO-1
+(`agentflow-agent-pro-1-<server>` for a second server's Agent of PRO-1).
 It runs under your Windows account: WinSW asks for that account's password
 (not a Windows Hello PIN; Microsoft accounts use the online password) and
 offers the "log on as a service" right. Windows asks for administrator
 approval once per action. Mapped network drives are not visible to services;
 use UNC paths. Logs are in `<data dir>\service\logs`
 (`%USERPROFILE%\.agentflow-runner\service\logs`, or
-`...\personal\PRO-1\service\logs`). Keep the unzipped folder in a permanent
+`...\personal\PRO-1\service\logs`, or
+`...\personal\PRO-1@<server>\service\logs`). Keep the unzipped folder in a permanent
 place, not Downloads or temp: the service runs `runner.mjs` from it.
 Answering no to the question removes an installed service.
 
-**Upgrade.** Unzip the new release, run `setup-runner.cmd [--project KEY]`
+**Upgrade.** Unzip the new release, run `setup-runner.cmd [--project KEY [--server HOST]]`
 from it and press Enter to every question; the service is re-pointed to the
 new folder and restarted.
 
-**Uninstall.** `uninstall-runner.cmd [--project KEY]` (`node runner.mjs
+**Uninstall.** `uninstall-runner.cmd [--project KEY [--server HOST]]` (`node runner.mjs
 uninstall`) removes the service and asks whether to delete the Agent's local
 data (default no). The Agent stays in AgentFlow as an offline computer;
 remove it there if you no longer need it. A service left behind by a deleted
@@ -631,7 +633,7 @@ migration aid, not a replacement for the auto runner.
 | Loops | PLAN, EXECUTE, STEP, ... | process steps (STEP loops) only |
 | At once | `AGENTFLOW_RUNNER_MAX_CONCURRENT` | one, the other runs waiting their turn, or several when the project's commands make their own worktrees (`AGENTFLOW_RUNNER_PARALLEL=true`) |
 | Permission prompts | the loop's allowed tools | the loop's allowed tools and the person's `permissions.allow`, or none at all (`AGENTFLOW_RUNNER_SKIP_PERMISSIONS=true`) |
-| Per computer | any number, each with its own `AGENTFLOW_RUNNER_DATA_DIR` | any number, one per project key |
+| Per computer | any number, each with its own `AGENTFLOW_RUNNER_DATA_DIR` | any number, one per project key and AgentFlow server |
 | Claude Code | the version set in AgentFlow | the `claude` on PATH (no pinning; a loop fails when the provider pins another version) |
 
 **Set up.** `node runner.mjs setup` (Windows: `setup-runner.cmd`) asks for the
@@ -644,10 +646,13 @@ runner name (default `<user name>-<project key>`), an optional role for this
 computer (replaces `runner:` of the shared AGENTFLOW.md; `none` clears it) and
 the local gateway port
 (Enter: any free port). The answers go to
-`<data dir>/personal/<project key>/runner.env`; start it with
+`<data dir>/personal/<project key>/runner.env`, or
+`<data dir>/personal/<project key>@<server>/runner.env` when that key already
+has an Agent for another AgentFlow server; start it with
 
 ```bash
 node runner.mjs --project PRO-1          # Windows: start-runner.cmd --project PRO-1
+node runner.mjs --project PRO-1 --server agentflow.example.com   # the Agent of PRO-1 for that server
 node runner.mjs --project PRO-1 --role "Dev (LeaveDesk, An)"   # role for this start
 node runner.mjs setup --project PRO-1    # asks that runner's questions again
 node runner.mjs check --project PRO-1    # validates AGENTFLOW.md and exits
@@ -656,11 +661,30 @@ node runner.mjs check --project PRO-1    # validates AGENTFLOW.md and exits
 On Windows each personal Agent can be its own service, and
 `uninstall-runner.cmd --project PRO-1` removes it.
 
+**Two AgentFlow servers on one computer.** One personal Agent exists per
+project key and AgentFlow server. The server name (slug) is the host of the
+API URL in lower case, with `-<port>` appended for an explicit port and no
+`:` (`http://agentflow.example.com:3002` gives `agentflow.example.com-3002`).
+The first Agent of a key keeps `personal/<KEY>` and its service name; existing
+directories are not migrated. When setup finds that `personal/<KEY>` belongs to
+another server, it stores the new Agent in `personal/<KEY>@<slug>` and prints
+the start command with `--server`.
+
+`--server <host|URL>` is accepted only together with `--project`, for run,
+setup, uninstall and check. With `--server`, the Agent of that server is used:
+`personal/<KEY>@<slug>`, or `personal/<KEY>` when its API URL is that server;
+if neither exists the command fails and names the setup command to run.
+Without `--server`, `personal/<KEY>` is used; if it does not exist and exactly
+one `<KEY>@<slug>` does, that one is used; if several do, the command fails
+and lists the `--server` values to choose from.
+
 Each personal runner has its own data directory (identity, job store, loop
 tokens, status, Windows shims), so any number of them, for different
 projects, run side by side with auto runners. Runners are not limited; a
 lock file (`runner.lock`) only keeps a second process off a data directory
-already in use, since both would be the same computer in AgentFlow.
+already in use, since both would be the same computer in AgentFlow. Two
+Agents pointed at the same project folder can still edit it at the same time;
+give each its own folder.
 
 **How a step runs** (`apps/desktop/src/server/operations/personal-runner.ts`):
 

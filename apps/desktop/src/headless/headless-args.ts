@@ -3,10 +3,11 @@
  * @description Command line of the headless runner bundle (headless-main.ts):
  *
  *   node runner.mjs                                   the auto runner
- *   node runner.mjs --project <key> [--role "<role>"] the personal runner of a project
- *   node runner.mjs setup [--project <key>]           asks the setup questions
- *   node runner.mjs uninstall [--project <key>]       removes the Windows service
- *   node runner.mjs check --project <key>             validates the project's AGENTFLOW.md
+ *   node runner.mjs --project <key> [--server <host>] [--role "<role>"]
+ *                                                     the personal runner of a project
+ *   node runner.mjs setup [--project <key> [--server <host>]]  asks the setup questions
+ *   node runner.mjs uninstall [--project <key> [--server <host>]]  removes the Windows service
+ *   node runner.mjs check --project <key> [--server <host>]  validates the project's AGENTFLOW.md
  */
 
 import {
@@ -14,6 +15,10 @@ import {
   runnerRoleSchema,
 } from "@repo/api/src/types/runner-capabilities";
 import { normalizeProjectKey } from "./headless-env.js";
+import {
+  normalizeServerOption,
+  SERVER_OPTION,
+} from "./headless-instance-dir.js";
 
 export const SETUP_COMMAND = "setup";
 export const UNINSTALL_COMMAND = "uninstall";
@@ -29,6 +34,7 @@ export type RunnerArgs = {
   check: boolean;
   projectKey: string | null;
   role: string | null;
+  server: string | null;
 };
 
 export type RunnerArgsResult =
@@ -47,6 +53,7 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgsResult {
     check: false,
     projectKey: null,
     role: null,
+    server: null,
   };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
@@ -76,6 +83,9 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgsResult {
 }
 
 function validateCombination(value: RunnerArgs): string | null {
+  if (value.server && !value.projectKey) {
+    return `${SERVER_OPTION} picks one of a project's personal Agents: use it with ${PROJECT_OPTION} <key>, e.g. node runner.mjs ${PROJECT_OPTION} PRO-1 ${SERVER_OPTION} agentflow.example.com`;
+  }
   if (value.check && !value.projectKey) {
     return `${CHECK_COMMAND} validates a personal Agent's AGENTFLOW.md: use it with ${PROJECT_OPTION} <key>, e.g. node runner.mjs ${CHECK_COMMAND} ${PROJECT_OPTION} PRO-1`;
   }
@@ -115,8 +125,19 @@ function readOption(
     value.role = role.data;
     return { ok: true, consumed: 1 };
   }
+  if (arg === SERVER_OPTION) {
+    const server = normalizeServerOption(next ?? "");
+    if (!server) {
+      return {
+        ok: false,
+        error: `${SERVER_OPTION} needs an AgentFlow server, its host or API URL, e.g. ${SERVER_OPTION} agentflow.example.com or ${SERVER_OPTION} localhost:3002`,
+      };
+    }
+    value.server = server;
+    return { ok: true, consumed: 1 };
+  }
   return {
     ok: false,
-    error: `Unknown argument "${arg}": run without arguments (auto runner), with "${PROJECT_OPTION} <project key>" [${ROLE_OPTION} "<role>"] (personal runner), "${SETUP_COMMAND}", "${UNINSTALL_COMMAND}" or "${CHECK_COMMAND} ${PROJECT_OPTION} <key>"`,
+    error: `Unknown argument "${arg}": run without arguments (auto runner), with "${PROJECT_OPTION} <project key>" [${SERVER_OPTION} <host>] [${ROLE_OPTION} "<role>"] (personal runner), "${SETUP_COMMAND}", "${UNINSTALL_COMMAND}" or "${CHECK_COMMAND} ${PROJECT_OPTION} <key>" [${SERVER_OPTION} <host>]`,
   };
 }

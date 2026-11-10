@@ -8,12 +8,20 @@ import {
   runUninstall,
   type UninstallDeps,
 } from "../src/headless/headless-uninstall.js";
-import { ServiceOutcome } from "../src/headless/headless-windows-service.js";
+import {
+  type ServiceLocation,
+  ServiceOutcome,
+} from "../src/headless/headless-windows-service.js";
 
 const BASE = path.resolve("/data/agent");
 
 function fakeDeps(overrides: Partial<UninstallDeps> = {}) {
-  const calls = { removed: [] as string[], service: 0, confirms: 0 };
+  const calls = {
+    removed: [] as string[],
+    service: 0,
+    confirms: 0,
+    locations: [] as ServiceLocation[],
+  };
   const deps: UninstallDeps = {
     say: () => undefined,
     confirm: () => {
@@ -22,8 +30,12 @@ function fakeDeps(overrides: Partial<UninstallDeps> = {}) {
     },
     isWindows: true,
     homeDir: path.resolve("/home/me"),
-    removeService: () => {
+    exists: () => false,
+    readApiUrl: () => null,
+    installedServiceId: () => null,
+    removeService: (location) => {
       calls.service++;
+      calls.locations.push(location);
       return Promise.resolve(ServiceOutcome.Removed);
     },
     isLockHeld: () => false,
@@ -107,6 +119,56 @@ describe("runUninstall", () => {
       1
     );
     assert.deepEqual(calls.removed, []);
+  });
+});
+
+describe("runUninstall with servers", () => {
+  it("removes the keyed dir and its service", async () => {
+    const keyed = path.join(BASE, "personal", "PRO-1@host-3002");
+    const { deps, calls } = fakeDeps({ exists: (d) => d === keyed });
+    assert.equal(
+      await runUninstall(
+        { baseDataDir: BASE, projectKey: "PRO-1", server: "host-3002" },
+        deps
+      ),
+      0
+    );
+    assert.deepEqual(calls.removed, [keyed]);
+    assert.equal(calls.locations[0]?.id, "agentflow-agent-pro-1-host-3002");
+  });
+
+  it("uses the installed service id", async () => {
+    const { deps, calls } = fakeDeps({ installedServiceId: () => "custom-id" });
+    await runUninstall({ baseDataDir: BASE, projectKey: "PRO-1" }, deps);
+    assert.equal(calls.locations[0]?.id, "custom-id");
+  });
+
+  it("refuses an ambiguous project", async () => {
+    const lines: string[] = [];
+    const { deps, calls } = fakeDeps({
+      say: (l) => lines.push(l),
+      listDir: () => ["PRO-1@a", "PRO-1@b"],
+    });
+    assert.equal(
+      await runUninstall({ baseDataDir: BASE, projectKey: "PRO-1" }, deps),
+      1
+    );
+    assert.equal(calls.service, 0);
+    assert.deepEqual(calls.removed, []);
+    assert.ok(lines.some((l) => l.includes("--server a")));
+  });
+
+  it("lists remaining Agents with their server option", async () => {
+    const lines: string[] = [];
+    const { deps } = fakeDeps({
+      say: (l) => lines.push(l),
+      listDir: (dir) =>
+        dir === BASE ? ["personal"] : ["PRO-1", "PRO-1@host-3002"],
+    });
+    await runUninstall({ baseDataDir: BASE, projectKey: null }, deps);
+    assert.ok(
+      lines.some((l) => l.includes("--project PRO-1 --server host-3002"))
+    );
   });
 });
 

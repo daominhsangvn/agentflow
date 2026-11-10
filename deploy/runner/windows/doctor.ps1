@@ -30,12 +30,32 @@ function Read-EnvFile($file) {
   return $values
 }
 
-$project = $null
-for ($i = 0; $i -lt $args.Count; $i++) {
-  if ($args[$i] -eq "--project" -and $i + 1 -lt $args.Count) { $project = $args[$i + 1].ToUpper() }
+# The short, file-name safe name of an AgentFlow server (host, lower case,
+# -port when explicit, no ":"). Same rule as serverSlug in headless-instance-dir.ts.
+function Get-ServerSlug($value) {
+  if (-not $value) { return $null }
+  $text = $value.Trim()
+  if ($text -notmatch '://') { $text = "http://$text" }
+  try { $uri = [Uri]$text } catch { return $null }
+  if (-not $uri.Host) { return $null }
+  $hostName = $uri.Host.ToLower().Replace("[", "").Replace("]", "").Replace(":", "-")
+  $slug = $hostName
+  if (-not $uri.IsDefaultPort) { $slug = "$hostName-$($uri.Port)" }
+  if ($slug -notmatch '^[a-z0-9][a-z0-9.-]*$') { return $null }
+  return $slug
 }
 
-Write-Host "AgentFlow Agent doctor$(if ($project) { " (personal Agent of $project)" })"
+$project = $null
+$serverArg = $null
+for ($i = 0; $i -lt $args.Count; $i++) {
+  if ($args[$i] -eq "--project" -and $i + 1 -lt $args.Count) { $project = $args[$i + 1].ToUpper() }
+  if ($args[$i] -eq "--server" -and $i + 1 -lt $args.Count) { $serverArg = $args[$i + 1] }
+}
+$server = Get-ServerSlug $serverArg
+
+$title = "AgentFlow Agent doctor"
+if ($project) { $title = "$title (personal Agent of $project" + $(if ($server) { " on $server" } else { "" }) + ")" }
+Write-Host $title
 Write-Host ""
 
 # --- Windows and the account ---------------------------------------------------
@@ -159,7 +179,45 @@ else { Warn "gh" "not found: loops cannot open GitHub pull requests (winget inst
 
 # --- The Agent's configuration, once set up -------------------------------------
 $dataDir = if ($env:AGENTFLOW_RUNNER_DATA_DIR) { $env:AGENTFLOW_RUNNER_DATA_DIR } else { Join-Path $env:USERPROFILE ".agentflow-runner" }
-$envFile = if ($project) { Join-Path $dataDir "personal\$project\runner.env" } else { Join-Path $dataDir "runner.env" }
+$envFile = Join-Path $dataDir "runner.env"
+$instanceDir = $dataDir
+$instanceServer = $null
+if ($project) {
+  $personal = Join-Path $dataDir "personal"
+  $legacyDir = Join-Path $personal $project
+  $instanceDir = $legacyDir
+  $envFile = Join-Path $legacyDir "runner.env"
+  if ($serverArg -and -not $server) {
+    Fail "instance" "cannot read '$serverArg' as a server (use a host, host:port or the API URL)"
+  } elseif ($server) {
+    $keyedDir = Join-Path $personal "$project@$server"
+    if (Test-Path $keyedDir) {
+      $instanceDir = $keyedDir
+      $instanceServer = $server
+      $envFile = Join-Path $keyedDir "runner.env"
+    } else {
+      $legacyConfig = Read-EnvFile (Join-Path $legacyDir "runner.env")
+      $legacySlug = Get-ServerSlug $legacyConfig["AGENTFLOW_API_URL"]
+      if (-not (Test-Path $legacyDir) -or $legacySlug -ne $server) {
+        $instanceDir = $keyedDir
+        $envFile = Join-Path $keyedDir "runner.env"
+        $instanceServer = $server
+        Info "runner.env" "no personal Agent of $project for $server set up yet (setup-runner.cmd --project $project --server $server)"
+      }
+    }
+  } elseif (-not (Test-Path $legacyDir)) {
+    $keyedDirs = @()
+    if (Test-Path $personal) { $keyedDirs = @(Get-ChildItem -Path $personal -Directory -Filter "$project@*") }
+    if ($keyedDirs.Count -eq 1) {
+      $instanceDir = $keyedDirs[0].FullName
+      $instanceServer = $keyedDirs[0].Name.Substring($project.Length + 1)
+      $envFile = Join-Path $instanceDir "runner.env"
+    } elseif ($keyedDirs.Count -gt 1) {
+      $choices = (@($keyedDirs | ForEach-Object { "--server " + $_.Name.Substring($project.Length + 1) })) -join " or "
+      Fail "instance" "several personal Agents of $project are set up here, one per AgentFlow server: add $choices"
+    }
+  }
+}
 if (-not (Test-Path $envFile)) { Info "runner.env" "$envFile not created yet (setup-runner.cmd writes it)" }
 else {
   $config = Read-EnvFile $envFile
@@ -190,7 +248,14 @@ else {
   }
 }
 
-$serviceId = if ($project) { "agentflow-agent-$($project.ToLower())" } else { "agentflow-agent" }
+$serviceId = "agentflow-agent"
+if ($project) {
+  $serviceId = "agentflow-agent-$($project.ToLower())"
+  if ($instanceServer) { $serviceId = "$serviceId-$instanceServer" }
+  # Prefer the id of an installed service definition in the instance dir.
+  $serviceXml = Get-ChildItem -Path (Join-Path $instanceDir "service") -Filter "*.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($serviceXml) { $serviceId = [IO.Path]::GetFileNameWithoutExtension($serviceXml.Name) }
+}
 $service = Get-Service $serviceId -ErrorAction SilentlyContinue
 if ($service) { Info "windows service" "$serviceId is $($service.Status)" }
 else { Info "windows service" "$serviceId not installed (setup-runner.cmd offers it)" }
