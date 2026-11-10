@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import { getShellEnv } from "../shell-path.js";
+import { materializeModelProviderCaCertificates } from "./model-provider-ca.js";
 
 export const ClaudeCodeOtelEnvVar = {
   EnableTelemetry: "CLAUDE_CODE_ENABLE_TELEMETRY",
@@ -96,7 +97,9 @@ export function createClaudeCodeShellEnvProvider(
   const warnedConflictSets = new Set<string>();
 
   return async (extra?: Record<string, string>) => {
-    const baseEnv = await getBaseShellEnv(extra);
+    const baseEnv = await getBaseShellEnv(
+      materializeModelProviderCaCertificates(extra)
+    );
     const status = readReceiverStatus(options.getReceiverStatus);
 
     if (status.state === ClaudeCodeOtelReceiverState.Unavailable) {

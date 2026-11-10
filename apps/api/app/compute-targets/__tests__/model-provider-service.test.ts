@@ -1,5 +1,6 @@
 import {
   ClaudeCodeVersionChannel,
+  MODEL_PROVIDER_CA_PEM_ENV_KEY,
   ModelProviderMode,
 } from "@repo/api/src/types/compute-target-model-provider";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,6 +95,7 @@ describe("computeTargetModelProviderService", () => {
       model: null,
       env: {},
       token: { isSet: false, lastFour: null },
+      caCertificate: null,
       claudeCodeVersion: ClaudeCodeVersionChannel.Latest,
     });
     await expect(
@@ -265,5 +267,44 @@ describe("Claude Code version", () => {
       ANTHROPIC_BASE_URL: "https://proxy.example.com",
       ANTHROPIC_CUSTOM_HEADERS: "x-key: 1",
     });
+  });
+});
+
+describe("CA certificate", () => {
+  const PEM =
+    "-----BEGIN CERTIFICATE-----\nMIIBroot\n-----END CERTIFICATE-----";
+
+  it("stores the certificate, keeps it when omitted, sends it with loops and removes it on null", async () => {
+    const saved = await computeTargetModelProviderService.update(
+      IDS.org,
+      IDS.owner,
+      IDS.target,
+      { ...deepseek, caCertificate: { fileName: "ca_179.crt", pem: PEM } }
+    );
+    expect(saved?.caCertificate).toEqual({
+      fileName: "ca_179.crt",
+      certificateCount: 1,
+    });
+
+    const kept = await computeTargetModelProviderService.update(
+      IDS.org,
+      IDS.owner,
+      IDS.target,
+      { ...deepseek, env: { HTTPS_PROXY: "http://172.16.0.1:8090" } }
+    );
+    expect(kept?.caCertificate?.fileName).toBe("ca_179.crt");
+    const runtime = await resolveComputeTargetClaudeRuntime(IDS.target);
+    expect(runtime.claudeEnv?.[MODEL_PROVIDER_CA_PEM_ENV_KEY]).toBe(PEM);
+    expect(runtime.claudeEnv?.HTTPS_PROXY).toBe("http://172.16.0.1:8090");
+
+    const removed = await computeTargetModelProviderService.update(
+      IDS.org,
+      IDS.owner,
+      IDS.target,
+      { ...deepseek, caCertificate: null }
+    );
+    expect(removed?.caCertificate).toBeNull();
+    const after = await resolveComputeTargetClaudeRuntime(IDS.target);
+    expect(after.claudeEnv).not.toHaveProperty(MODEL_PROVIDER_CA_PEM_ENV_KEY);
   });
 });

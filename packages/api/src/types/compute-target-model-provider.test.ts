@@ -2,7 +2,9 @@ import { describe, expect, test } from "vitest";
 import {
   ClaudeCodeVersionChannel,
   claudeCodeVersionSchema,
+  MODEL_PROVIDER_CA_PEM_ENV_KEY,
   ModelProviderMode,
+  modelProviderEnvSchema,
   updateComputeTargetModelProviderInputSchema,
 } from "./compute-target-model-provider";
 
@@ -59,6 +61,62 @@ describe("updateComputeTargetModelProviderInputSchema", () => {
         mode: ModelProviderMode.Machine,
         claudeCodeVersion: "2.1.290 && curl evil",
       }).success
+    ).toBe(false);
+  });
+});
+
+describe("proxy variables and CA certificate", () => {
+  const PEM =
+    "-----BEGIN CERTIFICATE-----\nMIIBroot\n-----END CERTIFICATE-----";
+  const custom = {
+    mode: ModelProviderMode.Custom,
+    baseUrl: "https://claude.example.com",
+  };
+
+  test("accepts the proxy variables and refuses NODE_EXTRA_CA_CERTS as a variable", () => {
+    expect(
+      updateComputeTargetModelProviderInputSchema.safeParse({
+        ...custom,
+        env: {
+          HTTPS_PROXY: "http://172.16.0.1:8090",
+          HTTP_PROXY: "http://172.16.0.1:8090",
+          NO_PROXY: "localhost,127.0.0.1,github.com",
+          ANTHROPIC_CUSTOM_HEADERS: "X-Api-Key:pk_test",
+        },
+      }).success
+    ).toBe(true);
+    expect(
+      updateComputeTargetModelProviderInputSchema.safeParse({
+        ...custom,
+        env: { NODE_EXTRA_CA_CERTS: "/Users/me/ca.crt" },
+      }).success
+    ).toBe(false);
+  });
+
+  test("accepts a PEM certificate and refuses other files", () => {
+    expect(
+      updateComputeTargetModelProviderInputSchema.safeParse({
+        ...custom,
+        caCertificate: { fileName: "ca.crt", pem: PEM },
+      }).success
+    ).toBe(true);
+    expect(
+      updateComputeTargetModelProviderInputSchema.safeParse({
+        ...custom,
+        caCertificate: { fileName: "ca.der", pem: "binary" },
+      }).success
+    ).toBe(false);
+  });
+
+  test("lets the loop environment carry the PEM but not other variables", () => {
+    expect(
+      modelProviderEnvSchema.safeParse({
+        [MODEL_PROVIDER_CA_PEM_ENV_KEY]: PEM.repeat(10),
+        HTTPS_PROXY: "http://172.16.0.1:8090",
+      }).success
+    ).toBe(true);
+    expect(
+      modelProviderEnvSchema.safeParse({ NODE_OPTIONS: "--require x" }).success
     ).toBe(false);
   });
 });

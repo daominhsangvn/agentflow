@@ -3,7 +3,7 @@ import {
   type ComputeTargetModelProvider,
   ModelProviderMode,
 } from "@repo/api/src/types/compute-target-model-provider";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelProviderDialog } from "../model-provider-dialog";
 
@@ -28,6 +28,7 @@ beforeEach(() => {
     model: null,
     env: {},
     token: { isSet: false, lastFour: null },
+    caCertificate: null,
     claudeCodeVersion: ClaudeCodeVersionChannel.Latest,
   };
 });
@@ -73,6 +74,72 @@ describe("ModelProviderDialog Claude Code version", () => {
     expect(saveButton()).toBeDisabled();
   });
 });
+
+describe("ModelProviderDialog CA certificate", () => {
+  const PEM =
+    "-----BEGIN CERTIFICATE-----\nMIIBroot\n-----END CERTIFICATE-----";
+  const customProvider = (): ComputeTargetModelProvider => ({
+    ...(mocks.provider as ComputeTargetModelProvider),
+    mode: ModelProviderMode.Custom,
+    baseUrl: "https://claude.example.com",
+  });
+
+  it("uploads a PEM file and saves it", async () => {
+    mocks.provider = customProvider();
+    renderDialog();
+
+    fireEvent.change(certificateInput(), {
+      target: { files: [new File([PEM], "ca_179.crt")] },
+    });
+
+    expect(await screen.findByText("ca_179.crt · 1 certificate")).toBeVisible();
+    fireEvent.click(saveButton());
+    expect(mocks.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        caCertificate: { fileName: "ca_179.crt", pem: PEM },
+      }),
+      expect.anything()
+    );
+  });
+
+  it("refuses a file that is not PEM", async () => {
+    mocks.provider = customProvider();
+    renderDialog();
+
+    fireEvent.change(certificateInput(), {
+      target: { files: [new File(["binary"], "ca.der")] },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Upload a PEM certificate (-----BEGIN CERTIFICATE----- …)"
+        )
+      ).toBeVisible()
+    );
+  });
+
+  it("keeps the stored certificate unless it is removed", () => {
+    mocks.provider = {
+      ...customProvider(),
+      caCertificate: { fileName: "ca.pem", certificateCount: 2 },
+    };
+    renderDialog();
+
+    expect(screen.getByText("ca.pem · 2 certificates")).toBeVisible();
+    fireEvent.click(saveButton());
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    fireEvent.click(saveButton());
+
+    expect(
+      mocks.mutate.mock.calls.map(([input]) => input.caCertificate)
+    ).toEqual([undefined, null]);
+  });
+});
+
+function certificateInput(): HTMLElement {
+  return screen.getByLabelText("CA certificate (optional)");
+}
 
 function renderDialog() {
   render(

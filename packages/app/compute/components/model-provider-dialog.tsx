@@ -4,7 +4,10 @@ import {
   ClaudeCodeVersionChannel,
   type ComputeTargetModelProvider,
   claudeCodeVersionSchema,
+  countPemCertificates,
+  type ModelProviderCaCertificate,
   ModelProviderMode,
+  modelProviderCaCertificateSchema,
   type UpdateComputeTargetModelProviderInput,
 } from "@repo/api/src/types/compute-target-model-provider";
 import { Button } from "@repo/design-system/components/ui/button";
@@ -26,13 +29,16 @@ import {
   SelectValue,
 } from "@repo/design-system/components/ui/select";
 import { Textarea } from "@repo/design-system/components/ui/textarea";
-import { PlusIcon, Trash2Icon } from "lucide-react";
-import { useState } from "react";
+import { PlusIcon, Trash2Icon, UploadIcon } from "lucide-react";
+import { type ChangeEvent, useRef, useState } from "react";
 import {
   useComputeTargetModelProvider,
   useUpdateComputeTargetModelProvider,
 } from "../hooks/use-compute-target-model-provider";
-import { importClaudeSettings } from "../lib/model-provider-import";
+import {
+  type ImportedModelProvider,
+  importClaudeSettings,
+} from "../lib/model-provider-import";
 
 export type ModelProviderDialogProps = {
   computeTargetId: string;
@@ -100,6 +106,10 @@ function ModelProviderForm({
   const [env, setEnv] = useState<EnvRow[]>(
     Object.entries(initial.env).map(([key, value]) => ({ key, value }))
   );
+  // Undefined: keep the stored certificate. Null: remove it.
+  const [caCertificate, setCaCertificate] = useState<
+    ModelProviderCaCertificate | null | undefined
+  >(undefined);
   const [importText, setImportText] = useState("");
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [claudeCodeVersion, setClaudeCodeVersion] = useState(
@@ -126,11 +136,7 @@ function ModelProviderForm({
     }
     setEnv(imported.env);
     setImportText("");
-    setImportMessage(
-      imported.ignoredKeys.length > 0
-        ? `Imported. Ignored (not Claude Code variables): ${imported.ignoredKeys.join(", ")}`
-        : "Imported."
-    );
+    setImportMessage(importSummary(imported));
   };
 
   const handleSave = () => {
@@ -155,6 +161,9 @@ function ModelProviderForm({
       input.token = null;
     } else if (token.trim()) {
       input.token = token.trim();
+    }
+    if (isCustom && caCertificate !== undefined) {
+      input.caCertificate = caCertificate;
     }
     return input;
   };
@@ -273,6 +282,12 @@ function ModelProviderForm({
             </div>
           </div>
 
+          <CaCertificateField
+            onChange={setCaCertificate}
+            stored={initial.caCertificate}
+            value={caCertificate}
+          />
+
           <EnvRows onChange={setEnv} rows={env} />
         </>
       ) : null}
@@ -329,8 +344,9 @@ function EnvRows({
     <div className="space-y-2">
       <Label>Claude Code variables</Label>
       <p className="text-muted-foreground text-xs">
-        ANTHROPIC_*, CLAUDE_CODE_* and other Claude Code settings, e.g.
-        CLAUDE_CODE_EFFORT_LEVEL or CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC.
+        ANTHROPIC_*, CLAUDE_CODE_*, HTTPS_PROXY / HTTP_PROXY / NO_PROXY and
+        other Claude Code settings, e.g. ANTHROPIC_CUSTOM_HEADERS or
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC.
       </p>
       {rows.map((row, index) => (
         <div
@@ -388,4 +404,120 @@ function tokenPlaceholder(
     return "sk-…";
   }
   return `Stored (ends in ${provider.token.lastFour ?? "…"}); type to replace`;
+}
+
+function importSummary(imported: ImportedModelProvider): string {
+  const notes: string[] = [];
+  if (imported.ignoredKeys.length > 0) {
+    notes.push(
+      `Ignored (not Claude Code variables): ${imported.ignoredKeys.join(", ")}.`
+    );
+  }
+  if (imported.caCertificatePath) {
+    notes.push(
+      `NODE_EXTRA_CA_CERTS points to ${imported.caCertificatePath}: upload that file as the CA certificate.`
+    );
+  }
+  return ["Imported.", ...notes].join(" ");
+}
+
+/**
+ * CA certificate the provider (or the proxy in front of it) is signed with,
+ * uploaded as a PEM file. The computer writes it to a file and sets
+ * NODE_EXTRA_CA_CERTS for Claude Code.
+ */
+function CaCertificateField({
+  stored,
+  value,
+  onChange,
+}: Readonly<{
+  stored: ComputeTargetModelProvider["caCertificate"];
+  value: ModelProviderCaCertificate | null | undefined;
+  onChange: (value: ModelProviderCaCertificate | null) => void;
+}>) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const current = currentCaCertificate(stored, value);
+
+  const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    const parsed = modelProviderCaCertificateSchema.safeParse({
+      fileName: file.name,
+      pem: await file.text(),
+    });
+    if (parsed.success) {
+      setError(null);
+      onChange(parsed.data);
+    } else {
+      setError(parsed.error.issues[0]?.message ?? "Invalid certificate");
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="model-provider-ca-certificate">
+        CA certificate (optional)
+      </Label>
+      <p className="text-muted-foreground text-xs">
+        A PEM file (.pem, .crt) to trust when the API or the proxy uses a
+        private certificate authority. Claude Code gets it as
+        NODE_EXTRA_CA_CERTS.
+      </p>
+      <input
+        accept=".pem,.crt,.cer,.ca-bundle,application/x-pem-file,application/x-x509-ca-cert"
+        className="hidden"
+        id="model-provider-ca-certificate"
+        onChange={handleFile}
+        ref={inputRef}
+        type="file"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          onClick={() => inputRef.current?.click()}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <UploadIcon className="size-3.5" />
+          {current ? "Replace file" : "Upload file"}
+        </Button>
+        {current ? (
+          <>
+            <span className="font-mono text-xs">
+              {current.fileName} · {pluralizeCertificates(current.count)}
+            </span>
+            <button
+              className="text-muted-foreground text-xs underline"
+              onClick={() => onChange(null)}
+              type="button"
+            >
+              Remove
+            </button>
+          </>
+        ) : null}
+      </div>
+      {error ? <p className="text-destructive text-xs">{error}</p> : null}
+    </div>
+  );
+}
+
+function currentCaCertificate(
+  stored: ComputeTargetModelProvider["caCertificate"],
+  value: ModelProviderCaCertificate | null | undefined
+): { fileName: string; count: number } | null {
+  if (value) {
+    return { fileName: value.fileName, count: countPemCertificates(value.pem) };
+  }
+  if (value === null || !stored) {
+    return null;
+  }
+  return { fileName: stored.fileName, count: stored.certificateCount };
+}
+
+function pluralizeCertificates(count: number): string {
+  return count === 1 ? "1 certificate" : `${count} certificates`;
 }
