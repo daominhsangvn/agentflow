@@ -63,7 +63,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.RunnersList,
     title: "List the runners",
     description:
-      "Each runner of the project with its AGENTFLOW.md: the commands it declares (mode read or write, what each produces and needs), its skills and whether it is online.",
+      "Each runner of the project with its id and role, and its AGENTFLOW.md: the commands it declares (mode read or write, what each produces and needs), its skills and whether it is online.",
     inputSchema: NO_ARGUMENTS,
     annotations: READS,
   },
@@ -156,7 +156,11 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     inputSchema: {
       type: "object",
       properties: {
-        runner: { type: "string", description: "The runner's name." },
+        runner: {
+          type: "string",
+          description:
+            "The runner's name, id or role; use the id when several runners share the name or role.",
+        },
         command: {
           type: "string",
           description:

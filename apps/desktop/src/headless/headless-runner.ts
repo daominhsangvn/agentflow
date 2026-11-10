@@ -274,6 +274,7 @@ export async function startHeadlessRunner(
         apiKey: config.apiKey,
         projectKey: config.personal.projectKey,
         projectDir: config.personal.projectDir,
+        role: config.personal.role,
         getComputeTargetId: () => status.computeTargetId,
       })
     : null;

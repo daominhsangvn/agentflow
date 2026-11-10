@@ -4,11 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { RunnerCapabilitiesSource } from "@repo/api/src/types/runner-capabilities";
+import { collectCapabilityWarnings } from "../src/headless/headless-capabilities-check.js";
+import { startHeadlessCapabilitiesReporter } from "../src/headless/headless-capabilities-reporter.js";
 import {
-  collectCapabilityWarnings,
-  startHeadlessCapabilitiesReporter,
-} from "../src/headless/headless-capabilities-reporter.js";
-import { collectCapabilityWarningsIn } from "../src/server/operations/capability-warnings.js";
+  collectCapabilityWarningsIn,
+  NO_COMMANDS_WARNING,
+} from "../src/server/operations/capability-warnings.js";
 
 const TARGET = "01a12707-7360-710b-b9f0-a498a6560081";
 const MISSING_COMMAND_RE = /^\/missing is not in/;
@@ -77,6 +78,7 @@ test("report uploads the file for the project with the runner's warnings", async
     apiUrl: "http://api.test/",
     apiKey: "sk_live_test",
     projectKey: "PRO-1",
+    role: null,
     projectDir: project,
     homeDir: tempDir("caps-home-"),
     getComputeTargetId: () => TARGET,
@@ -114,6 +116,7 @@ test("report skips an unchanged file unless forced, and skips before the runner 
     apiUrl: "http://api.test",
     apiKey: "sk_live_test",
     projectKey: "PRO-1",
+    role: null,
     projectDir: project,
     getComputeTargetId: () => targetId,
     fetchImpl,
@@ -145,6 +148,7 @@ test("a failed upload is tried again on the next report", async () => {
     apiUrl: "http://api.test",
     apiKey: "sk_live_test",
     projectKey: "PRO-1",
+    role: null,
     projectDir: project,
     getComputeTargetId: () => TARGET,
     fetchImpl,
@@ -170,6 +174,7 @@ test("a change to AGENTFLOW.md uploads it once it settles; other files are ignor
     apiUrl: "http://api.test",
     apiKey: "sk_live_test",
     projectKey: "PRO-1",
+    role: null,
     projectDir: project,
     getComputeTargetId: () => TARGET,
     fetchImpl: ((url: string, init: RequestInit) => {
@@ -199,6 +204,7 @@ test("no file: nothing is uploaded", async () => {
     apiUrl: "http://api.test",
     apiKey: "sk_live_test",
     projectKey: "PRO-1",
+    role: null,
     projectDir: tempDir("caps-project-"),
     getComputeTargetId: () => TARGET,
     fetchImpl,
@@ -225,4 +231,137 @@ test("collectCapabilityWarningsIn checks declared names against a file set", () 
   assert.ok(warnings.every((w) => !w.startsWith("/qa:lookup")));
   assert.ok(warnings.some((w) => w.includes("of the toolkit repository")));
   assert.ok(warnings.some((w) => w.startsWith("skill absent is not in")));
+});
+
+test("report sends the role when set, omits it when null, and uploads an unchanged file once", async () => {
+  const project = tempDir("caps-project-");
+  fs.writeFileSync(path.join(project, "AGENTFLOW.md"), FILE);
+  const start = (role: string | null) => {
+    const recorded = recordingFetch();
+    const reporter = startHeadlessCapabilitiesReporter({
+      apiUrl: "http://api.test",
+      apiKey: "sk_live_test",
+      projectKey: "PRO-1",
+      role,
+      projectDir: project,
+      homeDir: tempDir("caps-home-"),
+      getComputeTargetId: () => TARGET,
+      fetchImpl: recorded.fetchImpl,
+      watch: () => ({ close: () => undefined }),
+    });
+    return { ...recorded, reporter };
+  };
+  const withRole = start("Dev (LeaveDesk, An)");
+  await withRole.reporter.report();
+  await withRole.reporter.report();
+  withRole.reporter.stop();
+  assert.equal(withRole.calls.length, 1);
+  assert.equal(
+    JSON.parse(String(withRole.calls[0]?.init.body)).role,
+    "Dev (LeaveDesk, An)"
+  );
+  const without = start(null);
+  await without.reporter.report();
+  without.reporter.stop();
+  assert.ok(!("role" in JSON.parse(String(without.calls[0]?.init.body))));
+});
+
+test("collectCapabilityWarningsIn warns about keys AgentFlow does not read", () => {
+  const warnings = collectCapabilityWarningsIn(
+    "---\ncomands:\n  - name: /a\ncommands:\n  - { name: /b, mode: read }\n---\n",
+    () => true,
+    "x"
+  );
+  assert.ok(warnings.some((w) => w.startsWith("comands is not a field")));
+});
+
+test("collectCapabilityWarningsIn warns about a file with no commands only", () => {
+  assert.deepEqual(
+    collectCapabilityWarningsIn(
+      "---\nskills:\n  - name: tdd\n---\n",
+      () => true,
+      "x"
+    ),
+    [NO_COMMANDS_WARNING]
+  );
+  assert.ok(
+    !collectCapabilityWarningsIn(FILE, () => true, "x").includes(
+      NO_COMMANDS_WARNING
+    )
+  );
+});
+
+function newReporter(project: string, fetchImpl: typeof fetch) {
+  return startHeadlessCapabilitiesReporter({
+    apiUrl: "http://api.test/",
+    apiKey: "sk_live_test",
+    projectKey: "PRO-1",
+    role: null,
+    projectDir: project,
+    homeDir: tempDir("caps-home-"),
+    getComputeTargetId: () => TARGET,
+    fetchImpl,
+    watch: () => ({ close: () => undefined }),
+  });
+}
+
+test("report does not upload an invalid file, even when forced", async () => {
+  const project = tempDir("caps-project-");
+  fs.writeFileSync(
+    path.join(project, "AGENTFLOW.md"),
+    "---\ncommands: [\n---\n"
+  );
+  const { calls, fetchImpl } = recordingFetch();
+  const reporter = newReporter(project, fetchImpl);
+
+  await reporter.report();
+  await reporter.report({ force: true });
+  reporter.stop();
+
+  assert.equal(calls.length, 0);
+});
+
+test("an invalid edit keeps the last valid upload; the file is uploaded again once valid", async () => {
+  const project = tempDir("caps-project-");
+  const file = path.join(project, "AGENTFLOW.md");
+  fs.writeFileSync(file, FILE);
+  const { calls, fetchImpl } = recordingFetch();
+  const reporter = newReporter(project, fetchImpl);
+
+  await reporter.report();
+  assert.equal(calls.length, 1);
+
+  fs.writeFileSync(
+    file,
+    "---\ncommands:\n  - { name: /x, mode: maybe }\n---\n"
+  );
+  await reporter.report();
+  await reporter.report({ force: true });
+  assert.equal(calls.length, 1);
+
+  const fixed = "---\ncommands:\n  - { name: /x, mode: read }\n---\n";
+  fs.writeFileSync(file, fixed);
+  await reporter.report();
+  reporter.stop();
+
+  assert.equal(calls.length, 2);
+  assert.equal(JSON.parse(String(calls[1]?.init.body)).content, fixed);
+});
+
+test("an invalid file that is deleted and restored is still not uploaded", async () => {
+  const project = tempDir("caps-project-");
+  const file = path.join(project, "AGENTFLOW.md");
+  const invalid = "---\ncommands:\n  - { name: /x, mode: maybe }\n---\n";
+  fs.writeFileSync(file, invalid);
+  const { calls, fetchImpl } = recordingFetch();
+  const reporter = newReporter(project, fetchImpl);
+
+  await reporter.report();
+  fs.rmSync(file);
+  await reporter.report();
+  fs.writeFileSync(file, invalid);
+  await reporter.report({ force: true });
+  reporter.stop();
+
+  assert.equal(calls.length, 0);
 });

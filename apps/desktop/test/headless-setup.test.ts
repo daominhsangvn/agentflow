@@ -263,6 +263,7 @@ test("askRunnerSettings in personal mode asks for the project instead of a works
       "",
       "yes",
       "",
+      "Dev (LeaveDesk, An)",
       "",
     ]);
     const result = await askRunnerSettings(
@@ -280,13 +281,14 @@ test("askRunnerSettings in personal mode asks for the project instead of a works
       [HeadlessRunnerEnv.ApiUrl]: API_URL,
       [HeadlessRunnerEnv.ApiKey]: API_KEY,
       [HeadlessRunnerEnv.RunnerName]: "Nguyen-Van-An-PRO-1",
+      [HeadlessRunnerEnv.RunnerRole]: "Dev (LeaveDesk, An)",
       [HeadlessRunnerEnv.ProjectKey]: "PRO-1",
       [HeadlessRunnerEnv.ProjectDir]: projectDir,
       [HeadlessRunnerEnv.Parallel]: "false",
       [HeadlessRunnerEnv.SkipPermissions]: "true",
       [HeadlessRunnerEnv.GatewayPort]: "",
     });
-    assert.equal(said.length, 3);
+    assert.equal(said.length, 4);
     assert.ok(
       !questions.some((question) => question.question.includes("Workspace"))
     );
@@ -328,4 +330,46 @@ test("askStartWithWindows asks again after an invalid answer", async () => {
 test("askYesNo returns false for n", async () => {
   const { context } = yesNoContext(["n"]);
   assert.equal(await askYesNo(context, "Sure?", true), false);
+});
+
+test("askRunnerSettings in personal mode: none clears the role and a role with # is asked again", async () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-role-"));
+  try {
+    const run = async (roleAnswers: string[], current = {}) => {
+      const said: string[] = [];
+      const { ask } = scriptedAsk([
+        API_URL,
+        API_KEY,
+        "pro-1",
+        projectDir,
+        "",
+        "",
+        "",
+        ...roleAnswers,
+        "",
+      ]);
+      const result = await askRunnerSettings(
+        {
+          ask,
+          say: (line) => said.push(line),
+          current,
+          username: "an",
+          homeDir: HOME,
+        },
+        RunnerMode.Personal
+      );
+      return { result, said };
+    };
+    const cleared = await run(["NONE"], {
+      [HeadlessRunnerEnv.RunnerRole]: "Dev",
+    });
+    assert.equal(cleared.result[HeadlessRunnerEnv.RunnerRole], "");
+    const kept = await run([""], { [HeadlessRunnerEnv.RunnerRole]: "Dev" });
+    assert.equal(kept.result[HeadlessRunnerEnv.RunnerRole], "Dev");
+    const retried = await run(["Dev # An", "Dev (An)"]);
+    assert.equal(retried.result[HeadlessRunnerEnv.RunnerRole], "Dev (An)");
+    assert.equal(retried.said.length, 3);
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
 });

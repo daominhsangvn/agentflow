@@ -11,6 +11,9 @@ import { z } from "zod";
  * skills the runner has, with what each one is for, so a project's
  * orchestrator knows which command of which runner to send a request to.
  *
+ * The `runner:` line is the shared role of everyone using the file; a personal
+ * Agent may set its own (docs/runner.md "Personal runner").
+ *
  * The file is Markdown with a YAML front matter. The front matter is the part
  * AgentFlow reads (and later checks); the body is the detailed description the
  * orchestrator reads as it is.
@@ -44,6 +47,7 @@ export const RUNNER_CAPABILITIES_MAX_COMMANDS = 100;
 export const RUNNER_CAPABILITIES_MAX_SKILLS = 100;
 export const RUNNER_CAPABILITIES_MAX_WARNINGS = 50;
 export const RUNNER_COMMAND_ATTACH_MAX = 10;
+export const RUNNER_ROLE_MAX_CHARS = 120;
 
 /** Whether a command only reads or may change files, systems or the plan. */
 export const RunnerCommandMode = {
@@ -129,9 +133,19 @@ export const runnerToolkitSchema = z.object({
 });
 export type RunnerToolkit = z.infer<typeof runnerToolkitSchema>;
 
+/**
+ * A runner's role, e.g. Dev (LeaveDesk, An): the front matter's `runner:` or a
+ * personal Agent's own role.
+ */
+export const runnerRoleSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(RUNNER_ROLE_MAX_CHARS);
+
 export const runnerCapabilitiesFrontMatterSchema = z.object({
-  /** A display name for the runner's role, e.g. "Dev (LeaveDesk)". */
-  runner: z.string().trim().max(120).optional(),
+  /** The shared role of everyone using the file, e.g. "Dev (LeaveDesk)". */
+  runner: z.string().trim().max(RUNNER_ROLE_MAX_CHARS).optional(),
   toolkit: runnerToolkitSchema.optional(),
   commands: z
     .array(runnerCommandSchema)
@@ -172,6 +186,11 @@ export const uploadRunnerCapabilitiesInputSchema = z.object({
     .array(z.string().trim().min(1).max(500))
     .max(RUNNER_CAPABILITIES_MAX_WARNINGS)
     .default([]),
+  /**
+   * A personal Agent's own role (setup, --role or AGENTFLOW_RUNNER_ROLE); it
+   * replaces the file's `runner:`. Ignored for a toolkit file.
+   */
+  role: runnerRoleSchema.optional(),
 });
 export type UploadRunnerCapabilitiesInput = z.infer<
   typeof uploadRunnerCapabilitiesInputSchema
@@ -341,4 +360,64 @@ export function runnerCapabilitiesGitCredentialPath(
 /** The refresh command's idempotency key. */
 export function runnerCapabilitiesRefreshKey(refreshId: string): string {
   return `capabilities_refresh:${refreshId}`;
+}
+
+const looseObjectSchema = z.record(z.string(), z.unknown());
+const looseArraySchema = z.array(z.unknown());
+
+/**
+ * Keys of the front matter that the schemas do not read (they are stripped
+ * silently), as dot paths such as `comands` or `commands.0.descripton`. A
+ * file that does not parse gives `[]`: the parser reports that.
+ */
+export function unknownRunnerCapabilitiesKeys(content: string): string[] {
+  const match = FRONT_MATTER_RE.exec(content);
+  if (!match) {
+    return [];
+  }
+  let raw: unknown;
+  try {
+    raw = parseYaml(match[1] ?? "");
+  } catch {
+    return [];
+  }
+  const top = looseObjectSchema.safeParse(raw);
+  if (!top.success) {
+    return [];
+  }
+  const keys = unknownKeysOf(
+    top.data,
+    runnerCapabilitiesFrontMatterSchema.shape,
+    ""
+  );
+  keys.push(
+    ...unknownKeysOf(top.data.toolkit, runnerToolkitSchema.shape, "toolkit.")
+  );
+  const commands = looseArraySchema.safeParse(top.data.commands);
+  if (commands.success) {
+    commands.data.forEach((command, index) => {
+      keys.push(
+        ...unknownKeysOf(
+          command,
+          runnerCommandSchema.shape,
+          `commands.${index}.`
+        )
+      );
+    });
+  }
+  return keys;
+}
+
+function unknownKeysOf(
+  value: unknown,
+  known: Record<string, unknown>,
+  prefix: string
+): string[] {
+  const parsed = looseObjectSchema.safeParse(value);
+  if (!parsed.success) {
+    return [];
+  }
+  return Object.keys(parsed.data)
+    .filter((key) => !Object.hasOwn(known, key))
+    .map((key) => `${prefix}${key}`);
 }

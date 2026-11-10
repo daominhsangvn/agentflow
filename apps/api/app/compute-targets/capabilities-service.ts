@@ -4,6 +4,7 @@ import {
   type ComputeTargetCapabilities,
   parseRunnerCapabilitiesMarkdown,
   RUNNER_CAPABILITIES_MAX_WARNINGS,
+  type RunnerCapabilitiesParseResult,
   RunnerCapabilitiesSource,
   runnerCapabilitiesSchema,
   type UploadRunnerCapabilitiesInput,
@@ -20,7 +21,8 @@ import { resolveProjectId } from "@/lib/identifier-utils";
  * uploads its file with its owner's API key; the API parses the front matter
  * itself (the runner's parse only decides its local warnings) and keeps one
  * file per runner and project. The API adds its own warnings (secret-looking
- * lines, read commands with push).
+ * lines, read commands with push). A personal Agent's own role replaces the
+ * file's `runner:` in the stored capabilities.
  */
 
 const WITH_RUNNER = {
@@ -57,9 +59,7 @@ export const computeTargetCapabilitiesService = {
       organizationId,
       source: input.source,
       content: input.content,
-      capabilities: parsed.ok
-        ? (parsed.value as Prisma.InputJsonValue)
-        : Prisma.DbNull,
+      capabilities: storedCapabilities(parsed, input),
       problems: parsed.ok ? [] : parsed.problems,
       warnings: [
         ...new Set([
@@ -176,4 +176,20 @@ function toCapabilities(row: CapabilitiesRow): ComputeTargetCapabilities {
     contentHash: row.contentHash,
     uploadedAt: row.uploadedAt.toISOString(),
   };
+}
+
+/**
+ * What the `capabilities` column keeps: the parsed file, with a personal
+ * Agent's own role in place of the shared file's `runner:`.
+ */
+function storedCapabilities(
+  parsed: RunnerCapabilitiesParseResult,
+  input: UploadRunnerCapabilitiesInput
+): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  if (!parsed.ok) {
+    return Prisma.DbNull;
+  }
+  const role =
+    input.source === RunnerCapabilitiesSource.Personal ? input.role : undefined;
+  return { ...parsed.value, runner: role ?? parsed.value.runner };
 }

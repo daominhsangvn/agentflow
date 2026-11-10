@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { runnerRoleSchema } from "@repo/api/src/types/runner-capabilities";
 import { z } from "zod";
 import { normalizeAndValidateOrigin } from "../main/settings/origin-policy.js";
 import {
@@ -47,6 +48,8 @@ export type PersonalRunnerSettings = {
   parallel: boolean;
   /** The agent uses any tool without a permission prompt. */
   skipPermissions: boolean;
+  /** This computer's role; null: the file's runner: */
+  role: string | null;
 };
 
 export type HeadlessConfigResult =
@@ -125,6 +128,7 @@ const envSchema = z.object({
   [HeadlessRunnerEnv.ProjectDir]: z.string().trim().min(1).optional(),
   [HeadlessRunnerEnv.Parallel]: booleanFlagSchema.optional(),
   [HeadlessRunnerEnv.SkipPermissions]: booleanFlagSchema.optional(),
+  [HeadlessRunnerEnv.RunnerRole]: runnerRoleSchema.optional(),
 });
 
 type EnvValues = z.infer<typeof envSchema>;
@@ -240,6 +244,7 @@ function readPersonalSettings(
       projectDir: path.resolve(projectDir),
       parallel: values[HeadlessRunnerEnv.Parallel] ?? false,
       skipPermissions: values[HeadlessRunnerEnv.SkipPermissions] ?? false,
+      role: values[HeadlessRunnerEnv.RunnerRole] ?? null,
     },
   };
 }

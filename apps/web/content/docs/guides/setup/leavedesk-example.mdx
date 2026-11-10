@@ -179,9 +179,11 @@ and stops with one `BLOCKED: missing … (needs …: produced by …)` reply lin
 
 ### Dev: `~/work/leavedesk/AGENTFLOW.md` on the developer's machine
 
+The file is shared by every developer's machine, so `runner:` holds the shared role. An's computer sets its own role, `Dev (LeaveDesk, An)`, with the role question of `setup` or with `node runner.mjs --project PRO-1 --role "Dev (LeaveDesk, An)"`; it replaces the file's `runner:` for that Agent.
+
 ````markdown
 ---
-runner: Dev (LeaveDesk, An)
+runner: Dev (LeaveDesk)
 commands:
   - name: /writing-plans
     args: <ticket-key>

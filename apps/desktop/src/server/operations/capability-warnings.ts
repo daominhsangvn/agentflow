@@ -1,6 +1,7 @@
 import {
   parseRunnerCapabilitiesMarkdown,
   RUNNER_CAPABILITIES_MAX_WARNINGS,
+  unknownRunnerCapabilitiesKeys,
 } from "@repo/api/src/types/runner-capabilities";
 
 /**
@@ -19,6 +20,14 @@ export function collectCapabilityWarningsIn(
     return parsed.problems.slice(0, RUNNER_CAPABILITIES_MAX_WARNINGS);
   }
   const warnings: string[] = [];
+  if (parsed.value.commands.length === 0) {
+    warnings.push(NO_COMMANDS_WARNING);
+  }
+  for (const key of unknownRunnerCapabilitiesKeys(content)) {
+    warnings.push(
+      `${key} is not a field AgentFlow reads; it is ignored (check its spelling)`
+    );
+  }
   for (const command of parsed.value.commands) {
     const name = command.name.slice(1);
     const commandFile = `.claude/commands/${name.split(":").join("/")}.md`;
@@ -41,3 +50,6 @@ export function collectCapabilityWarningsIn(
 function skillFile(name: string): string {
   return `.claude/skills/${name}/SKILL.md`;
 }
+
+export const NO_COMMANDS_WARNING =
+  "no commands declared: the orchestrator gives this Agent no tasks; skills alone are not offered as tasks";

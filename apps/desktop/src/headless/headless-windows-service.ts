@@ -102,6 +102,8 @@ export function winswSourcePath(programDir: string): string {
 
 export function renderServiceXml(spec: ServiceSpec): string {
   const files = serviceFiles(spec);
+  // No --role: the service reads the role (and the rest) from runner.env in
+  // the instance data dir, which setup wrote.
   const runnerArgs = [`"${path.win32.join(spec.programDir, "runner.mjs")}"`];
   if (spec.projectKey) {
     runnerArgs.push("--project", spec.projectKey);

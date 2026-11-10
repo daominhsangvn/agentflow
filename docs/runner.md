@@ -420,6 +420,7 @@ setup questions first.
 | `AGENTFLOW_RUNNER_MODE` | `auto` | `personal`: one project, in a folder of this computer, with its credentials (see "Personal runner"). |
 | `AGENTFLOW_RUNNER_PROJECT_KEY` | — | Personal: the AgentFlow project key (slug) whose steps the runner runs. |
 | `AGENTFLOW_RUNNER_PROJECT_DIR` | — | Personal: the project folder loops run in; replaces the workspace. |
+| `AGENTFLOW_RUNNER_ROLE` | — | Personal: this computer's role, e.g. `Dev (LeaveDesk, An)` (at most 120 characters). Replaces the `runner:` of the shared AGENTFLOW.md; `--role` wins. Auto runners ignore it. |
 | `AGENTFLOW_RUNNER_PARALLEL` | `false` | Personal: `true` lets several loops run in the folder at once (the project's commands make their own worktrees); `false` runs them in turn. |
 | `AGENTFLOW_RUNNER_SKIP_PERMISSIONS` | `false` | Personal: `true` lets the agent use any tool without a permission prompt (`--permission-mode bypassPermissions`). |
 | `AGENTFLOW_RUNNER_MAX_CONCURRENT` | `2` | Commands executed at the same time. |
@@ -638,13 +639,17 @@ mode first; Enter keeps `auto`. Personal asks for the API URL and key, the
 project key, the project folder (it must exist), whether the project's
 commands can run several tasks at once in that folder (default no), whether
 the agent may use any tool without a permission prompt (default no), the
-runner name (default `<user name>-<project key>`) and the local gateway port
+runner name (default `<user name>-<project key>`), an optional role for this
+computer (replaces `runner:` of the shared AGENTFLOW.md; `none` clears it) and
+the local gateway port
 (Enter: any free port). The answers go to
 `<data dir>/personal/<project key>/runner.env`; start it with
 
 ```bash
 node runner.mjs --project PRO-1          # Windows: start-runner.cmd --project PRO-1
+node runner.mjs --project PRO-1 --role "Dev (LeaveDesk, An)"   # role for this start
 node runner.mjs setup --project PRO-1    # asks that runner's questions again
+node runner.mjs check --project PRO-1    # validates AGENTFLOW.md and exits
 ```
 
 On Windows each personal Agent can be its own service, and
@@ -780,7 +785,7 @@ describes them in detail for the orchestrator.
 
 ```markdown
 ---
-runner: Dev (LeaveDesk)          # a display name for the runner's role
+runner: Dev (LeaveDesk)          # the shared role; a personal Agent's own role replaces it
 commands:
   - name: /plan-ticket           # the slash command as typed in Claude Code
     args: <ticket-key>
@@ -809,6 +814,20 @@ an approved PRD; to answer questions about a plan, resume its session.
   (`src/headless/headless-capabilities-reporter.ts`, `PUT
   /compute-targets/{id}/capabilities` with the owner's API key). No file: the
   runner logs it once and uploads nothing.
+- The personal runner parses the file locally first
+  (`src/headless/headless-capabilities-check.ts`, shared
+  `parseRunnerCapabilitiesMarkdown`). A file that does not parse refuses the
+  start (exit 2, each problem with its field path). While running, an invalid
+  edit (also on a reconnect) is not uploaded: the last valid file stays on the
+  server and the problems are logged once per invalid version; it uploads again
+  once valid. A file over 100000 characters or one that cannot be read counts as
+  invalid; only a missing file is not.
+- Non-blocking warnings: front matter keys the schema does not read (such as
+  `comands`) and a file with no commands (the orchestrator gives the runner no
+  tasks).
+- `node runner.mjs check --project <key>` validates the file without starting
+  (no API key, lock or network): exit 0 valid or missing, 2 invalid or no
+  project folder configured.
 - Before uploading, the runner checks that each declared command is in
   `.claude/commands` (`/ns:cmd` is `ns/cmd.md`) or `.claude/skills` of the
   project folder or `~/.claude`, and each skill in `.claude/skills`; what it

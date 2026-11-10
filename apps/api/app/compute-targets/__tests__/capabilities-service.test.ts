@@ -213,6 +213,61 @@ describe("computeTargetCapabilitiesService.upload", () => {
     expect(result.ok && result.value.problems).toHaveLength(1);
   });
 
+  describe("role", () => {
+    const ROLE_FILE = FILE.replace("---\n", "---\nrunner: Dev (LeaveDesk)\n");
+    const upload = (
+      source: RunnerCapabilitiesSource,
+      content: string,
+      role?: string
+    ) =>
+      computeTargetCapabilitiesService.upload(IDS.org, IDS.owner, IDS.target, {
+        project: "PRO-1",
+        source,
+        content,
+        warnings: [],
+        ...(role ? { role } : {}),
+      });
+
+    it("stores a personal Agent's role in place of the file's runner", async () => {
+      const result = await upload(
+        RunnerCapabilitiesSource.Personal,
+        ROLE_FILE,
+        "Dev (LeaveDesk, An)"
+      );
+      expect(result.ok && result.value.capabilities?.runner).toBe(
+        "Dev (LeaveDesk, An)"
+      );
+    });
+
+    it("keeps the file's runner without a role", async () => {
+      const result = await upload(RunnerCapabilitiesSource.Personal, ROLE_FILE);
+      expect(result.ok && result.value.capabilities?.runner).toBe(
+        "Dev (LeaveDesk)"
+      );
+    });
+
+    it("ignores the role of a toolkit upload", async () => {
+      const result = await upload(
+        RunnerCapabilitiesSource.Toolkit,
+        ROLE_FILE,
+        "Dev (LeaveDesk, An)"
+      );
+      expect(result.ok && result.value.capabilities?.runner).toBe(
+        "Dev (LeaveDesk)"
+      );
+    });
+
+    it("stores no capabilities for an unparsable file", async () => {
+      const result = await upload(
+        RunnerCapabilitiesSource.Personal,
+        "# no front matter",
+        "Dev (LeaveDesk, An)"
+      );
+      expect(result.ok && result.value.capabilities).toBeNull();
+      expect(result.ok && result.value.problems).toHaveLength(1);
+    });
+  });
+
   it("refuses a runner the caller does not own", async () => {
     mocks.targetOwner = IDS.other;
     const result = await computeTargetCapabilitiesService.upload(
