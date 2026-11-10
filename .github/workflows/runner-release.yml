@@ -100,6 +100,8 @@ jobs:
           }
           node --check out/agentflow-runner/runner.mjs
           if ($LASTEXITCODE -ne 0) { throw "runner.mjs does not parse" }
+          # WinSW v2 loads WinSW.xml next to the exe before any command, even `version`.
+          Set-Content out/agentflow-runner/winsw/WinSW.xml '<service><id>smoke</id><name>smoke</name><description>smoke</description><executable>cmd.exe</executable></service>'
           & out/agentflow-runner/winsw/WinSW.exe version
           if ($LASTEXITCODE -ne 0) { throw "WinSW.exe does not run" }
 
