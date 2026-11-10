@@ -29,6 +29,7 @@ import {
   loadOrgCaseRows,
   toCaseListItem,
 } from "@/app/orchestrator/cases/service/org-case-list";
+import { readCaseTaskFile } from "@/app/orchestrator/cases/service/task-file";
 import { dispatchOrchestratorTurnCancel } from "@/lib/loops/loop-desktop";
 import { listCaseDocuments } from "@/lib/orchestrator/case-documents";
 import { readTurnTimeoutMs } from "@/lib/orchestrator/turn-usage";
@@ -52,6 +53,9 @@ export const orchestratorCaseService = {
   agentMapForWorkflow: loadWorkflowAgentMap,
 
   postMessage: postCaseMessage,
+
+  /** Null when the file is not a stored file of a task of this organization's case. */
+  readTaskFile: readCaseTaskFile,
 
   /** Null when the organization has no such workflow. */
   async listForWorkflow(
@@ -256,6 +260,50 @@ export const orchestratorCaseService = {
       return Result.err(Status.NotFound);
     }
     return Result.ok({ status: input.status });
+  },
+
+  /**
+   * Deletes a case and, by cascade, its conversations, messages, turns, tasks,
+   * waits and decisions. Refused (Conflict) while a turn runs or a task is
+   * queued or running; NotFound when the org has no such case.
+   */
+  async remove(
+    organizationId: string,
+    caseId: string
+  ): Promise<Result<{ caseId: string }, StatusCode>> {
+    const deleted = await withDb((db) =>
+      db.orchestratorCase.deleteMany({
+        where: {
+          id: caseId,
+          organizationId,
+          tasks: {
+            none: {
+              status: {
+                in: [
+                  OrchestratorTaskStatus.Queued,
+                  OrchestratorTaskStatus.Running,
+                ],
+              },
+            },
+          },
+          conversations: {
+            none: {
+              turns: { some: { status: OrchestratorTurnStatus.Running } },
+            },
+          },
+        },
+      })
+    );
+    if (deleted.count > 0) {
+      return Result.ok({ caseId });
+    }
+    const exists = await withDb((db) =>
+      db.orchestratorCase.findFirst({
+        where: { id: caseId, organizationId },
+        select: { id: true },
+      })
+    );
+    return Result.err(exists ? Status.Conflict : Status.NotFound);
   },
 
   /**

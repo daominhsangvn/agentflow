@@ -27,11 +27,13 @@ import {
 import { EmptyState } from "@repo/design-system/components/ui/empty-state";
 import { Skeleton } from "@repo/design-system/components/ui/skeleton";
 import { Link } from "@repo/navigation/link";
+import { useNavigation } from "@repo/navigation/use-navigation";
 import { useOrgPath } from "@repo/navigation/use-org-path";
 import { InboxIcon } from "lucide-react";
 import { useState } from "react";
 import {
   isCaseActive,
+  useDeleteOrchestratorCase,
   useOrchestratorCase,
   useSetOrchestratorCaseStatus,
 } from "../hooks/use-orchestrator-cases";
@@ -122,8 +124,6 @@ function CaseHeader({
   isAdmin,
 }: Readonly<{ detail: OrchestratorCaseDetail; isAdmin: boolean }>) {
   const buildOrgPath = useOrgPath();
-  const setStatus = useSetOrchestratorCaseStatus(detail.id);
-  const [confirmClose, setConfirmClose] = useState(false);
   const isOpen = detail.status === OrchestratorCaseStatus.Open;
   const provider = caseSourceProvider(detail.sourceKey);
   const cost =
@@ -165,7 +165,26 @@ function CaseHeader({
           {isOpen ? " (open)" : ""}
         </p>
       </div>
-      {isAdmin ? (
+      {isAdmin ? <CaseAdminActions detail={detail} /> : null}
+    </div>
+  );
+}
+
+function CaseAdminActions({
+  detail,
+}: Readonly<{ detail: OrchestratorCaseDetail }>) {
+  const buildOrgPath = useOrgPath();
+  const navigation = useNavigation();
+  const setStatus = useSetOrchestratorCaseStatus(detail.id);
+  const remove = useDeleteOrchestratorCase(detail.id);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const isOpen = detail.status === OrchestratorCaseStatus.Open;
+  const active = isCaseActive(detail);
+
+  return (
+    <>
+      <div className="flex gap-2">
         <Button
           disabled={setStatus.isPending}
           onClick={() => {
@@ -180,7 +199,16 @@ function CaseHeader({
         >
           {isOpen ? "Close case" : "Reopen case"}
         </Button>
-      ) : null}
+        <Button
+          disabled={active || remove.isPending}
+          onClick={() => setConfirmDelete(true)}
+          title={active ? "Stop its running turn and tasks first" : undefined}
+          type="button"
+          variant="destructive"
+        >
+          Delete case
+        </Button>
+      </div>
       <ConfirmationDialog
         confirmLabel="Close case"
         description="Running turns and tasks keep going. A new message in the thread reopens the case."
@@ -194,7 +222,22 @@ function CaseHeader({
         open={confirmClose}
         title="Close this case?"
       />
-    </div>
+      <ConfirmationDialog
+        confirmLabel="Delete case"
+        description="Deletes the case with its conversations, turns, tasks, waits and decisions. Its loops, sessions and pull requests are kept. This cannot be undone."
+        isPending={remove.isPending}
+        onConfirm={async () => {
+          await remove.mutateAsync();
+          navigation.replace(
+            buildOrgPath(`/workflows/${detail.workflow.id}?tab=cases`)
+          );
+        }}
+        onOpenChange={setConfirmDelete}
+        open={confirmDelete}
+        title="Delete this case?"
+        variant="destructive"
+      />
+    </>
   );
 }
 

@@ -6,10 +6,10 @@
  * shuts down cleanly on SIGTERM/SIGINT. See docs/runner.md.
  *
  *   node runner.mjs                       the auto runner (one per computer)
- *   node runner.mjs --project <key> [--role "<role>"]   the personal runner of a project
- *   node runner.mjs setup [--project <key>]   asks the setup questions
- *   node runner.mjs uninstall [--project <key>]   removes the Windows service, optionally the data
- *   node runner.mjs check --project <key>   validates AGENTFLOW.md and exits
+ *   node runner.mjs --project <key> [--server <host>] [--role "<role>"]   the personal runner of a project
+ *   node runner.mjs setup [--project <key> [--server <host>]]   asks the setup questions
+ *   node runner.mjs uninstall [--project <key> [--server <host>]]   removes the Windows service, optionally the data
+ *   node runner.mjs check --project <key> [--server <host>]   validates AGENTFLOW.md and exits
  */
 
 import fs from "node:fs";
@@ -25,11 +25,7 @@ import { configurePersonalRunnerProject } from "../server/operations/personal-ru
 import { isWindows } from "../server/platform-shell.js";
 import { createClaudeCodeVersionCheck } from "./claude-code-version-check.js";
 import { createClaudeCodeVersions } from "./claude-code-versions.js";
-import {
-  PROJECT_OPTION,
-  parseRunnerArgs,
-  SETUP_COMMAND,
-} from "./headless-args.js";
+import { parseRunnerArgs, SETUP_COMMAND } from "./headless-args.js";
 import {
   capabilitiesFileAllowsStart,
   runCapabilitiesCheck,
@@ -42,9 +38,16 @@ import {
   HeadlessRunnerEnv,
   RUNNER_DATA_DIR_ENV,
   RunnerMode,
-  resolvePersonalRunnerDataDir,
   resolveRunnerDataDir,
 } from "./headless-env.js";
+import {
+  defaultInstanceDirFs,
+  personalAgentOptions,
+  personalInstanceDir,
+  personalSetupTarget,
+  resolvePersonalInstance,
+  SERVER_OPTION,
+} from "./headless-instance-dir.js";
 import { acquireInstanceLock } from "./headless-instance-lock.js";
 import {
   defaultPreflightDeps,
@@ -99,18 +102,27 @@ async function main(): Promise<void> {
     return;
   }
   if (args.value.uninstall) {
-    await runUninstallCommand(args.value.projectKey);
+    await runUninstallCommand(args.value.projectKey, args.value.server);
     return;
   }
   if (args.value.check) {
-    runCheckCommand(args.value.projectKey);
+    runCheckCommand(args.value.projectKey, args.value.server);
     return;
   }
-  let dataDir = instanceDataDir(args.value.projectKey);
   if (args.value.setup) {
-    await runInteractiveSetup(dataDir, args.value.projectKey);
+    await runInteractiveSetup(
+      setupPrefillDir(args.value.projectKey, args.value.server),
+      args.value.projectKey
+    );
     return;
   }
+  const instance = resolveInstance(args.value.projectKey, args.value.server);
+  if (!instance.ok) {
+    gatewayLog.error(LOG_TAG, instance.error);
+    process.exitCode = EXIT_CONFIG_ERROR;
+    return;
+  }
+  let { dataDir, server } = instance;
   if (args.value.role) {
     // The flag wins over the environment and runner.env.
     process.env[HeadlessRunnerEnv.RunnerRole] = args.value.role;
@@ -123,6 +135,7 @@ async function main(): Promise<void> {
   if (needsSetup(process.env) && process.stdin.isTTY) {
     const setup = await runInteractiveSetup(dataDir, args.value.projectKey);
     dataDir = setup.dataDir;
+    server = setup.server;
     if (setup.serviceStarted) {
       const files = serviceFiles({
         id: setup.serviceId,
@@ -141,7 +154,7 @@ async function main(): Promise<void> {
   // The data directory of this instance: its config, identity and jobs.
   process.env[RUNNER_DATA_DIR_ENV] = dataDir;
 
-  const config = loadInstanceConfig(dataDir, args.value.projectKey);
+  const config = loadInstanceConfig(dataDir, args.value.projectKey, server);
   if (!config) {
     process.exitCode = EXIT_CONFIG_ERROR;
     return;
@@ -185,27 +198,22 @@ async function main(): Promise<void> {
   installShutdownHandlers(runner);
 }
 
-/** The default data directory, or the personal one of the project. */
-function instanceDataDir(projectKey: string | null): string {
-  return projectKey
-    ? resolvePersonalRunnerDataDir(projectKey)
-    : resolveRunnerDataDir();
-}
-
 /** `--project` starts the personal runner of that project, and nothing else. */
 function checkInstanceMode(
   config: HeadlessRunnerConfig,
-  projectKey: string | null
+  projectKey: string | null,
+  server: string | null
 ): string | null {
   if (!projectKey) {
     return null;
   }
   if (!config.personal) {
-    return `${PROJECT_OPTION} ${projectKey} starts a personal runner, but its configuration is not personal: run "node runner.mjs ${SETUP_COMMAND} ${PROJECT_OPTION} ${projectKey}"`;
+    const options = personalAgentOptions(projectKey, server);
+    return `${options} starts a personal runner, but its configuration is not personal: run "node runner.mjs ${SETUP_COMMAND} ${options}"`;
   }
   return config.personal.projectKey === projectKey
     ? null
-    : `${PROJECT_OPTION} ${projectKey} does not match the configured project key ${config.personal.projectKey}`;
+    : `${personalAgentOptions(projectKey, server)} does not match the configured project key ${config.personal.projectKey}`;
 }
 
 /**
@@ -215,7 +223,8 @@ function checkInstanceMode(
  */
 function loadInstanceConfig(
   dataDir: string,
-  projectKey: string | null
+  projectKey: string | null,
+  server: string | null
 ): HeadlessRunnerConfig | null {
   const loaded = loadHeadlessConfig();
   if (!loaded.ok) {
@@ -223,7 +232,7 @@ function loadInstanceConfig(
       gatewayLog.error(LOG_TAG, `Invalid configuration: ${error}`);
     }
     const setup = projectKey
-      ? `${SETUP_COMMAND} ${PROJECT_OPTION} ${projectKey}`
+      ? `${SETUP_COMMAND} ${personalAgentOptions(projectKey, server)}`
       : SETUP_COMMAND;
     gatewayLog.error(
       LOG_TAG,
@@ -232,7 +241,7 @@ function loadInstanceConfig(
     return null;
   }
   const { config } = loaded;
-  const modeError = checkInstanceMode(config, projectKey);
+  const modeError = checkInstanceMode(config, projectKey, server);
   if (modeError) {
     gatewayLog.error(LOG_TAG, modeError);
     return null;
@@ -242,7 +251,9 @@ function loadInstanceConfig(
     gatewayLog.error(LOG_TAG, `Cannot start: ${instance.error}`);
     const installed = installedServiceId(config.dataDir);
     if (installed) {
-      const keyOption = projectKey ? ` ${PROJECT_OPTION} ${projectKey}` : "";
+      const keyOption = projectKey
+        ? ` ${personalAgentOptions(projectKey, server)}`
+        : "";
       gatewayLog.error(
         LOG_TAG,
         `This Agent is installed as the Windows service ${installed}. Stop it in services.msc, or remove it with uninstall-runner.cmd${keyOption}.`
@@ -253,9 +264,10 @@ function loadInstanceConfig(
   process.on("exit", () => instance.lock.release());
   if (config.personal) {
     configurePersonalRunnerProject(config.personal);
+    const onServer = server ? ` on ${server}` : "";
     gatewayLog.info(
       LOG_TAG,
-      `Personal runner of project ${config.personal.projectKey}: loops run in ${config.personal.projectDir} with this computer's credentials, ${config.personal.parallel ? "several at once" : "one at a time"}${config.personal.role ? `, role ${config.personal.role}` : ""}`
+      `Personal runner of project ${config.personal.projectKey}${onServer}: loops run in ${config.personal.projectDir} with this computer's credentials, ${config.personal.parallel ? "several at once" : "one at a time"}${config.personal.role ? `, role ${config.personal.role}` : ""}`
     );
   } else {
     fs.mkdirSync(config.workspaceDir, { recursive: true });
@@ -308,7 +320,12 @@ async function setUpClaudeCode(
 async function runInteractiveSetup(
   dataDir: string,
   projectKey: string | null
-): Promise<{ dataDir: string; serviceId: string; serviceStarted: boolean }> {
+): Promise<{
+  dataDir: string;
+  server: string | null;
+  serviceId: string;
+  serviceStarted: boolean;
+}> {
   const { ask, say, close } = openPrompt();
   try {
     const fromFile = readRunnerConfigFile(runnerConfigFile(dataDir));
@@ -329,26 +346,41 @@ async function runInteractiveSetup(
       : await askRunnerMode(context);
     const answers = await askRunnerSettings(context, mode);
     const answeredKey = answers[HeadlessRunnerEnv.ProjectKey];
-    const targetDir =
+    const target =
       mode === RunnerMode.Personal && answeredKey
-        ? resolvePersonalRunnerDataDir(answeredKey)
-        : resolveRunnerDataDir();
+        ? personalSetupTarget(
+            {
+              baseDataDir: resolveRunnerDataDir(),
+              projectKey: answeredKey,
+              apiUrl: answers[HeadlessRunnerEnv.ApiUrl] ?? "",
+            },
+            defaultInstanceDirFs()
+          )
+        : { dataDir: resolveRunnerDataDir(), projectKey: null, server: null };
+    const targetDir = target.dataDir;
     const configFile = runnerConfigFile(targetDir);
     writeRunnerConfigFile(configFile, answers);
     say(`Saved to ${configFile}`);
     if (mode === RunnerMode.Personal && answeredKey) {
+      const options = personalAgentOptions(answeredKey, target.server);
       say(
-        `Start this personal runner with: start-runner ${PROJECT_OPTION} ${answeredKey} (node runner.mjs ${PROJECT_OPTION} ${answeredKey})`
+        `Start this personal runner with: start-runner ${options} (node runner.mjs ${options})`
       );
+      if (target.server) {
+        say(
+          `${answeredKey} already has a personal Agent for another AgentFlow server here; this one is kept in ${targetDir} and needs ${SERVER_OPTION} ${target.server}.`
+        );
+      }
     }
     const serviceKey =
       mode === RunnerMode.Personal ? (answeredKey ?? null) : null;
     const serviceStarted = isWindows()
-      ? await offerWindowsService(context, targetDir, serviceKey)
+      ? await offerWindowsService(context, targetDir, serviceKey, target.server)
       : false;
     return {
       dataDir: targetDir,
-      serviceId: serviceId(serviceKey),
+      server: target.server,
+      serviceId: serviceId(serviceKey, target.server),
       serviceStarted,
     };
   } finally {
@@ -399,13 +431,15 @@ function openPrompt(): {
 async function offerWindowsService(
   context: SetupContext,
   instanceDir: string,
-  projectKey: string | null
+  projectKey: string | null,
+  server: string | null
 ): Promise<boolean> {
   const programDir = path.dirname(fileURLToPath(import.meta.url));
   const spec = {
-    id: serviceId(projectKey),
+    id: serviceId(projectKey, server),
     instanceDataDir: instanceDir,
     projectKey,
+    server,
     nodePath: process.execPath,
     programDir,
     baseDataDir: resolveRunnerDataDir(),
@@ -432,14 +466,17 @@ async function offerWindowsService(
     outcome === ServiceOutcome.Installed || outcome === ServiceOutcome.Updated;
   if (running) {
     context.say(
-      `The Agent runs as the Windows service ${spec.id} (${serviceDisplayName(projectKey)}) and starts with Windows. Logs: ${serviceFiles(spec).logDir}`
+      `The Agent runs as the Windows service ${spec.id} (${serviceDisplayName(projectKey, server)}) and starts with Windows. Logs: ${serviceFiles(spec).logDir}`
     );
   }
   return running;
 }
 
 /** `uninstall`: removes the Windows service and, when asked, the data. */
-async function runUninstallCommand(projectKey: string | null): Promise<void> {
+async function runUninstallCommand(
+  projectKey: string | null,
+  server: string | null
+): Promise<void> {
   const { ask, say, close } = openPrompt();
   try {
     const context: SetupContext = {
@@ -450,7 +487,7 @@ async function runUninstallCommand(projectKey: string | null): Promise<void> {
       homeDir: os.homedir(),
     };
     process.exitCode = await runUninstall(
-      { baseDataDir: resolveRunnerDataDir(), projectKey },
+      { baseDataDir: resolveRunnerDataDir(), projectKey, server },
       defaultUninstallDeps(say, (question) =>
         askYesNo(context, question, false)
       )
@@ -461,19 +498,28 @@ async function runUninstallCommand(projectKey: string | null): Promise<void> {
 }
 
 /** `check --project <key>`: validates the project folder's AGENTFLOW.md, no network. */
-function runCheckCommand(projectKey: string | null): void {
+function runCheckCommand(
+  projectKey: string | null,
+  server: string | null
+): void {
   if (!projectKey) {
     process.exitCode = EXIT_CONFIG_ERROR;
     return;
   }
-  const dataDir = resolvePersonalRunnerDataDir(projectKey);
+  const instance = resolveInstance(projectKey, server);
+  if (!instance.ok) {
+    gatewayLog.error(LOG_TAG, instance.error);
+    process.exitCode = EXIT_CONFIG_ERROR;
+    return;
+  }
+  const { dataDir } = instance;
   const env = { ...process.env };
   applyRunnerConfig(env, readRunnerConfigFile(runnerConfigFile(dataDir)));
   const projectDir = env[HeadlessRunnerEnv.ProjectDir]?.trim();
   if (!projectDir) {
     gatewayLog.error(
       LOG_TAG,
-      `No project folder configured for ${projectKey}: run node runner.mjs ${SETUP_COMMAND} ${PROJECT_OPTION} ${projectKey}`
+      `No project folder configured for ${projectKey}: run node runner.mjs ${SETUP_COMMAND} ${personalAgentOptions(projectKey, server)}`
     );
     process.exitCode = EXIT_CONFIG_ERROR;
     return;
@@ -484,6 +530,45 @@ function runCheckCommand(projectKey: string | null): void {
     homeDir: os.homedir(),
     write: (line) => process.stdout.write(`${line}\n`),
   });
+}
+
+/** The data directory (and server) of the auto runner or of a personal Agent. */
+function resolveInstance(
+  projectKey: string | null,
+  server: string | null
+):
+  | { ok: true; dataDir: string; server: string | null }
+  | { ok: false; error: string } {
+  if (!projectKey) {
+    return { ok: true, dataDir: resolveRunnerDataDir(), server: null };
+  }
+  const resolved = resolvePersonalInstance(
+    { baseDataDir: resolveRunnerDataDir(), projectKey, server },
+    defaultInstanceDirFs()
+  );
+  if (!resolved.ok) {
+    return resolved;
+  }
+  return {
+    ok: true,
+    dataDir: resolved.instance.dataDir,
+    server: resolved.instance.server,
+  };
+}
+
+/** The directory whose config the setup questions start from. */
+function setupPrefillDir(
+  projectKey: string | null,
+  server: string | null
+): string {
+  if (!projectKey) {
+    return resolveRunnerDataDir();
+  }
+  const instance = resolveInstance(projectKey, server);
+  if (instance.ok) {
+    return instance.dataDir;
+  }
+  return personalInstanceDir(resolveRunnerDataDir(), projectKey, server);
 }
 
 /** Notes in the log that this process is the Windows service. */

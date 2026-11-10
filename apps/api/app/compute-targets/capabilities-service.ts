@@ -63,7 +63,7 @@ export const computeTargetCapabilitiesService = {
       problems: parsed.ok ? [] : parsed.problems,
       warnings: [
         ...new Set([
-          ...serverCapabilityWarnings(input.content, parsed),
+          ...serverCapabilityWarnings(input.content, parsed, input.source),
           ...input.warnings,
         ]),
       ].slice(0, RUNNER_CAPABILITIES_MAX_WARNINGS),

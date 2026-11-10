@@ -7,7 +7,28 @@ Tasks work on files. A task leaves files, the orchestrator hands them to the nex
 
 ## Files a task leaves
 
-A command declares `attach` globs in its `AGENTFLOW.md` (for example `PRD-*.md`). When the task ends the Agent collects the matches (at most 20 files, 4 MB each, 5 MB together) and they come back with the result. `produces` and `needs` tags tell the orchestrator which command makes what another command needs ([Agent capabilities](/docs/guides/setup/agent-capabilities)).
+A command declares `attach` globs in its `AGENTFLOW.md` (for example `PRD-*.md`). When the task ends the Agent collects the matches (at most 20 files, 4 MB each, 5 MB together) and they come back with the result. `produces` and `needs` tags tell the orchestrator which command makes what another command needs ([Agent capabilities](/docs/guides/setup/agent-capabilities)). Each stored file shows on the case page with View and Download.
+
+A personal Agent can also collect files from other folders. Declare them in `AGENTFLOW.md` and prefix the glob with the name:
+
+```markdown
+---
+attachRoots:
+  features: ../shared/features   # absolute, relative to AGENTFLOW.md, or ~/...
+commands:
+  - name: /write-prd
+    mode: write
+    attach: ["features:PRD-*.md"]
+    attachChanged: true
+---
+```
+
+- A name is lowercase letters, digits and `-`. The built-in `project` is the Agent's project folder (without `.agentflow-ai/`).
+- The file is reported as `features:PRD-1.md`. The folder comes from the Agent's own `AGENTFLOW.md`, and a file that resolves outside it is skipped.
+- A glob that cannot be collected is listed as skipped with the reason (unknown name, folder not found, outside the folder).
+- `attachChanged: true` collects only files changed since the task started (default off).
+- An auto Agent skips named globs, and the upload shows a warning.
+- Two tasks running at once in the same folders can collect each other's changed files.
 
 The task's answer is a file, `.agentflow-ai/work/orchestrator-reply.md` (up to 30,000 characters). It says what was done, in a few lines.
 

@@ -40,6 +40,7 @@ export const taskMocks = {
   settled: true,
   baToolkit: null as null | { repository: string; mounts: string[] },
   baAttach: undefined as string[] | undefined,
+  baAttachChanged: undefined as boolean | undefined,
   /** The BA command produces prd (PRD-*.md) and the dev command needs it. */
   needsPrd: false,
   stored: new Map<string, Uint8Array>(),
@@ -165,6 +166,7 @@ export function capabilitiesModule() {
                       attach: taskMocks.needsPrd
                         ? ["PRD-*.md"]
                         : taskMocks.baAttach,
+                      attachChanged: taskMocks.baAttachChanged,
                       ...(taskMocks.needsPrd ? { produces: "prd" } : {}),
                     },
                   ],
@@ -300,6 +302,7 @@ export function resetTaskMocks() {
   taskMocks.settled = true;
   taskMocks.baToolkit = null;
   taskMocks.baAttach = undefined;
+  taskMocks.baAttachChanged = undefined;
   taskMocks.needsPrd = false;
   taskMocks.stored = new Map();
   taskMocks.runnerCapabilities = { loopStepForkSession: true };

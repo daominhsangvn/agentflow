@@ -66,6 +66,7 @@ TESTCASES-<KEY>.md. Asks when an acceptance criterion cannot be decided.
 | `toolkit` | mapping | automatic Agents | Where an automatic Agent's commands and skills come from (below). A personal Agent ignores it. |
 | `commands` | list, up to 100 | no | The commands the Agent offers (below). An Agent without commands gets no tasks. |
 | `skills` | list, up to 100 | no | Skill names (`tdd`), or `{ name, description }`. Shown to the orchestrator; AgentFlow warns when a skill is not found. |
+| `attachRoots` | mapping of name to folder | personal Agents | Extra folders a personal Agent may collect task files from, e.g. `features: ../project/features`. The path is absolute, relative to the folder of `AGENTFLOW.md`, or starts with `~/`. A name is lowercase letters, digits and `-`; `project` is built in (the Agent's project folder, without `.agentflow-ai/`) and cannot be declared. The Agent reads the folders from its own `AGENTFLOW.md`, never from AgentFlow. An automatic Agent skips named globs, and the upload shows a warning. |
 
 ### `toolkit` (automatic Agents)
 
@@ -87,7 +88,8 @@ TESTCASES-<KEY>.md. Asks when an acceptance criterion cannot be decided.
 | `needs` | list of tags, up to 10 | no | What must exist before it runs, e.g. `[prd]`, `[approved-plan]`. Checked by AgentFlow before the task starts (below) and by the command itself. |
 | `asks` | `true` or `false` | no | It may stop with questions for people (`questions.json`). Its task comes back with the questions; the orchestrator posts them and resumes the task with the answers. |
 | `push` | `true` or `false` | no | It commits and pushes. On an **automatic** Agent, AgentFlow pushes the task's branches when a write task of a `push: true` command succeeds; the orchestrator then opens the pull request (`pull_request_open`). On a **personal** Agent the command pushes and opens its pull request itself. A `read` command that declares `push` gets a warning. |
-| `attach` | list of globs, up to 10 | no | Files it writes for the ticket, relative to the task's work directory (`.agentflow-ai/work/` on an automatic Agent, `$AGENTFLOW_WORKDIR` on a personal one), e.g. `PRD-*.md`, `evidence-*/*.png`. They are collected when the task ends (at most 20 files, 4 MB each, 5 MB together) and come back with the result. The orchestrator attaches them to a reply, publishes them to Confluence or hands them to the next task. Only orchestrator tasks use `attach`; process steps use `artifacts`. |
+| `attach` | list of globs, up to 10 | no | Files it writes for the ticket, relative to the task's work directory (`.agentflow-ai/work/` on an automatic Agent, `$AGENTFLOW_WORKDIR` on a personal one), e.g. `PRD-*.md`, `evidence-*/*.png`. They are collected when the task ends (at most 20 files, 4 MB each, 5 MB together) and come back with the result. The orchestrator attaches them to a reply, publishes them to Confluence or hands them to the next task. On a personal Agent a glob prefixed with a root name collects from that folder instead: `project:docs/*.md`, `features:**/*.md` (reported as `features:<path>`); files that resolve outside the folder, through `..` or a symlink, are skipped. Only orchestrator tasks use `attach`; process steps use `artifacts`. |
+| `attachChanged` | `true` or `false` | no | Collect only the files of `attach` created or changed while the task ran (default `false`). Use it when a folder keeps older files, e.g. a toolkit's output folder. Two tasks running at once in the same folder can still collect each other's files. |
 
 Tags (`produces`, `needs`) are free words (lowercase letters, digits and `-`, up to 40 characters): agree on them across the project's Agents.
 
@@ -116,7 +118,7 @@ A command an Agent offers runs without a person at the terminal, from files, and
 3. **Use fixed output names** that match the `attach` globs: `<KIND>-<KEY>.md` (`PRD-LD-6.md`, `PLAN-LD-6.md`, `TESTCASES-LD-6.md`, `RESULTS-LD-6.md`). Name them in the command's body text.
 4. **Write the answer** to `.agentflow-ai/work/orchestrator-reply.md` (`$AGENTFLOW_WORKDIR/orchestrator-reply.md` on a personal Agent): what was done, in a few lines. The orchestrator reads it as the task's answer (up to 30,000 characters).
 5. **Ask through the file**, when the command declares `asks: true`: write the questions to `questions.json` in the work directory and stop. The answers come back as the next prompt of the same session.
-6. **Leave ticket files in the work directory**. Do not attach them to the ticket or post comments yourself; the orchestrator does that.
+6. **Leave ticket files in the work directory** (or, on a personal Agent, in a folder of `attachRoots`). Do not attach them to the ticket or post comments yourself; the orchestrator does that.
 7. **Never merge.** An automatic Agent's `push: true` command lets AgentFlow push and the orchestrator open the pull request; a personal Agent's command pushes and opens it with the person's credentials. People merge.
 8. **A run never redesigns.** A command that executes an approved artifact (test cases, a plan) uses it as is and reports doubts in its answer.
 9. **Split commands whose modes differ.** `push` is per command: design and run, analyse and archive are separate commands, so only the one that changes the repository pushes.

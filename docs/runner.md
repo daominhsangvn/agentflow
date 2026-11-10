@@ -340,22 +340,24 @@ ConnectionStrings__DefaultConnection=Server=localhost;Database=App_Agent;Trusted
 **Start with Windows.** The last setup question offers to install the Agent
 as a Windows service ([WinSW](https://github.com/winsw/winsw), shipped in
 `winsw/`) that starts before anyone signs in. There is one service per Agent:
-`agentflow-agent`, or `agentflow-agent-pro-1` for the personal Agent of PRO-1.
+`agentflow-agent`, or `agentflow-agent-pro-1` for the personal Agent of PRO-1
+(`agentflow-agent-pro-1-<server>` for a second server's Agent of PRO-1).
 It runs under your Windows account: WinSW asks for that account's password
 (not a Windows Hello PIN; Microsoft accounts use the online password) and
 offers the "log on as a service" right. Windows asks for administrator
 approval once per action. Mapped network drives are not visible to services;
 use UNC paths. Logs are in `<data dir>\service\logs`
 (`%USERPROFILE%\.agentflow-runner\service\logs`, or
-`...\personal\PRO-1\service\logs`). Keep the unzipped folder in a permanent
+`...\personal\PRO-1\service\logs`, or
+`...\personal\PRO-1@<server>\service\logs`). Keep the unzipped folder in a permanent
 place, not Downloads or temp: the service runs `runner.mjs` from it.
 Answering no to the question removes an installed service.
 
-**Upgrade.** Unzip the new release, run `setup-runner.cmd [--project KEY]`
+**Upgrade.** Unzip the new release, run `setup-runner.cmd [--project KEY [--server HOST]]`
 from it and press Enter to every question; the service is re-pointed to the
 new folder and restarted.
 
-**Uninstall.** `uninstall-runner.cmd [--project KEY]` (`node runner.mjs
+**Uninstall.** `uninstall-runner.cmd [--project KEY [--server HOST]]` (`node runner.mjs
 uninstall`) removes the service and asks whether to delete the Agent's local
 data (default no). The Agent stays in AgentFlow as an offline computer;
 remove it there if you no longer need it. A service left behind by a deleted
@@ -631,22 +633,26 @@ migration aid, not a replacement for the auto runner.
 | Loops | PLAN, EXECUTE, STEP, ... | process steps (STEP loops) only |
 | At once | `AGENTFLOW_RUNNER_MAX_CONCURRENT` | one, the other runs waiting their turn, or several when the project's commands make their own worktrees (`AGENTFLOW_RUNNER_PARALLEL=true`) |
 | Permission prompts | the loop's allowed tools | the loop's allowed tools and the person's `permissions.allow`, or none at all (`AGENTFLOW_RUNNER_SKIP_PERMISSIONS=true`) |
-| Per computer | any number, each with its own `AGENTFLOW_RUNNER_DATA_DIR` | any number, one per project key |
+| Per computer | any number, each with its own `AGENTFLOW_RUNNER_DATA_DIR` | any number, one per project key and AgentFlow server |
 | Claude Code | the version set in AgentFlow | the `claude` on PATH (no pinning; a loop fails when the provider pins another version) |
 
 **Set up.** `node runner.mjs setup` (Windows: `setup-runner.cmd`) asks for the
 mode first; Enter keeps `auto`. Personal asks for the API URL and key, the
 project key, the project folder (it must exist), whether the project's
 commands can run several tasks at once in that folder (default no), whether
-the agent may use any tool without a permission prompt (default no), the
+to allow every tool (default no: tools not in the commands' `allowed-tools`
+or the person's `permissions.allow` are refused, nobody can approve them), the
 runner name (default `<user name>-<project key>`), an optional role for this
 computer (replaces `runner:` of the shared AGENTFLOW.md; `none` clears it) and
 the local gateway port
 (Enter: any free port). The answers go to
-`<data dir>/personal/<project key>/runner.env`; start it with
+`<data dir>/personal/<project key>/runner.env`, or
+`<data dir>/personal/<project key>@<server>/runner.env` when that key already
+has an Agent for another AgentFlow server; start it with
 
 ```bash
 node runner.mjs --project PRO-1          # Windows: start-runner.cmd --project PRO-1
+node runner.mjs --project PRO-1 --server agentflow.example.com   # the Agent of PRO-1 for that server
 node runner.mjs --project PRO-1 --role "Dev (LeaveDesk, An)"   # role for this start
 node runner.mjs setup --project PRO-1    # asks that runner's questions again
 node runner.mjs check --project PRO-1    # validates AGENTFLOW.md and exits
@@ -655,11 +661,30 @@ node runner.mjs check --project PRO-1    # validates AGENTFLOW.md and exits
 On Windows each personal Agent can be its own service, and
 `uninstall-runner.cmd --project PRO-1` removes it.
 
+**Two AgentFlow servers on one computer.** One personal Agent exists per
+project key and AgentFlow server. The server name (slug) is the host of the
+API URL in lower case, with `-<port>` appended for an explicit port and no
+`:` (`http://agentflow.example.com:3002` gives `agentflow.example.com-3002`).
+The first Agent of a key keeps `personal/<KEY>` and its service name; existing
+directories are not migrated. When setup finds that `personal/<KEY>` belongs to
+another server, it stores the new Agent in `personal/<KEY>@<slug>` and prints
+the start command with `--server`.
+
+`--server <host|URL>` is accepted only together with `--project`, for run,
+setup, uninstall and check. With `--server`, the Agent of that server is used:
+`personal/<KEY>@<slug>`, or `personal/<KEY>` when its API URL is that server;
+if neither exists the command fails and names the setup command to run.
+Without `--server`, `personal/<KEY>` is used; if it does not exist and exactly
+one `<KEY>@<slug>` does, that one is used; if several do, the command fails
+and lists the `--server` values to choose from.
+
 Each personal runner has its own data directory (identity, job store, loop
 tokens, status, Windows shims), so any number of them, for different
 projects, run side by side with auto runners. Runners are not limited; a
 lock file (`runner.lock`) only keeps a second process off a data directory
-already in use, since both would be the same computer in AgentFlow.
+already in use, since both would be the same computer in AgentFlow. Two
+Agents pointed at the same project folder can still edit it at the same time;
+give each its own folder.
 
 **How a step runs** (`apps/desktop/src/server/operations/personal-runner.ts`):
 
@@ -795,11 +820,14 @@ commands:
     needs: [prd]                 # what must exist before it runs
     asks: true                   # may stop with questions
     push: false                  # commits and pushes
-    attach: ["PLAN-*.md"]        # files it writes for the ticket (in its work dir)
+    attach: ["PLAN-*.md", "features:PRD-*.md"]  # files it writes for the ticket
+    attachChanged: true          # only files changed during the task
   - name: /explain-code
     mode: read
     produces: answer
 skills: [tdd, systematic-debugging]
+attachRoots:                     # extra folders for `<name>:` attach globs
+  features: ../shared/features   # absolute, relative to this file, or ~/...
 ---
 
 # Dev runner (LeaveDesk)
@@ -839,7 +867,34 @@ an approved PRD; to answer questions about a plan, resume its session.
   runner collects the matches as bytes (at most 20 files, 4 MB each, 5 MB in
   total), and the orchestrator can attach them to the ticket. Only
   orchestrator tasks use it (process steps use `artifacts` and
-  `$AGENTFLOW_ATTACH`). Name the files in the command's body text.
+  `$AGENTFLOW_ATTACH`). Name the files in the command's body text. The case
+  page shows each stored file with View and Download.
+- `attachRoots` (front matter, personal Agents) maps a name to a folder, so
+  `attach` can reach files outside the work directory. A name is lowercase
+  letters, digits and `-`, starting with a letter (at most 40 characters). The
+  path is absolute, relative to the folder of the `AGENTFLOW.md`, or starts
+  with `~/`; declare as many as needed. `project` is built in (the Agent's
+  project folder, without `.agentflow-ai/`) and cannot be declared. A glob
+  `<name>:<pattern>` (for example `features:**/*.md`) is matched in that
+  folder; the pattern is relative (no leading `/` or `~`, no `..`). The file
+  is reported as `<name>:<relative path>`.
+  - The name is resolved at collection time from the Agent's own
+    `AGENTFLOW.md`, never from the step request. Every match is checked with
+    its real path to lie inside the root, so a symlink cannot escape it.
+  - A glob that cannot be collected is listed as skipped with a reason: the
+    name is not in `attachRoots`, the folder is not found, the match is outside
+    the root, or `AGENTFLOW.md` is missing or does not parse. A file over a
+    limit is skipped like any other.
+  - An auto Agent never collects `<name>:` globs (it skips them with a
+    reason), and the upload of its toolkit `AGENTFLOW.md` carries a warning.
+  - `attachChanged: true` (per command, default off) keeps only files modified
+    since the task started, for all the command's globs (plain and named). The
+    start time is `step-started.json` in the step's work directory, with 2
+    seconds of clock slack. Without it, every match is collected, old files
+    too.
+  - Two tasks running at once in the same folders (for example two cases on one
+    Agent) can collect each other's changed files; `attachChanged` does not
+    tell them apart.
 - On upload the API adds warnings (stored with the file, never blocking): a
   line that looks like a secret (line number and kind, never the value) and a
   `mode: read` command that declares `push`.

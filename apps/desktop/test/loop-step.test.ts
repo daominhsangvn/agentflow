@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -62,6 +63,8 @@ before(() => {
 after(() => {
   rmSync(root, { recursive: true, force: true });
 });
+
+const PERSONAL_ONLY_RE = /personal Agent only/;
 
 function step(overrides: Partial<LoopStepConfig> = {}): LoopStepConfig {
   return {
@@ -620,6 +623,52 @@ describe("step attachments", () => {
       "# PRD"
     );
     assert.equal("attachmentsOmitted" in result, false);
+  });
+
+  test("an auto Agent skips a named glob with a reason", async () => {
+    const ws = workspace("attach-named-auto");
+    await prepareLoopStep({
+      workspaceRoot: ws.rootDir,
+      claudeWorkDir: ws.workDir,
+      artifacts: [],
+      repos: [],
+      log: () => undefined,
+      step: step({ artifacts: [], attach: ["features:**/*.md"] }),
+    });
+    const result = readStepOutputs(ws.workDir)[
+      LOOP_STEP_ARTIFACT_KEY
+    ] as LoopStepResult;
+    assert.equal(result.attachments?.length, 1);
+    assert.equal(result.attachments?.[0].path, "features:**/*.md");
+    assert.equal(result.attachments?.[0].data, undefined);
+    assert.match(result.attachments?.[0].skipped ?? "", PERSONAL_ONLY_RE);
+  });
+
+  test("attachChanged keeps files touched since the step started", async () => {
+    const ws = workspace("attach-changed");
+    await prepareLoopStep({
+      workspaceRoot: ws.rootDir,
+      claudeWorkDir: ws.workDir,
+      artifacts: [],
+      repos: [],
+      log: () => undefined,
+      step: step({
+        artifacts: [],
+        attach: [".agentflow-ai/work/PRD-*.md"],
+        attachChanged: true,
+      }),
+    });
+    writeFileSync(path.join(ws.workDir, "PRD-new.md"), "new");
+    writeFileSync(path.join(ws.workDir, "PRD-old.md"), "old");
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    utimesSync(path.join(ws.workDir, "PRD-old.md"), hourAgo, hourAgo);
+    const result = readStepOutputs(ws.workDir)[
+      LOOP_STEP_ARTIFACT_KEY
+    ] as LoopStepResult;
+    assert.deepEqual(
+      result.attachments?.map((a) => a.path),
+      [".agentflow-ai/work/PRD-new.md"]
+    );
   });
 });
 

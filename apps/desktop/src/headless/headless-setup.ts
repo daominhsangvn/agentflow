@@ -231,7 +231,7 @@ async function askPersonalRunnerSettings(
   });
   const skipPermissions = await askUntilValid(context, {
     question:
-      "Let the agent use any tool without a permission prompt (nobody is at the terminal to approve one)? yes/no",
+      "Allow every tool? With no, tools not in your commands' allowed-tools or your permissions.allow are refused (nobody can approve them in the background). yes/no",
     currentValue:
       current[HeadlessRunnerEnv.SkipPermissions] === "true" ? "yes" : "no",
     check: checkYesNo,

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { splitAttachGlob } from "@agentflow-ai/loops-api/loop-step";
 import { Result } from "@repo/api/src/types/result";
 import {
   type ComputeTargetCapabilities,
@@ -126,7 +127,7 @@ function gapFor(
     names.some((name) =>
       path.posix.matchesGlob(
         path.posix.basename(name),
-        path.posix.basename(pattern)
+        path.posix.basename(splitAttachGlob(pattern).pattern)
       )
     )
   );

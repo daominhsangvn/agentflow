@@ -80,8 +80,8 @@ export const RunnerMode = {
 export type RunnerMode = (typeof RunnerMode)[keyof typeof RunnerMode];
 
 const DEFAULT_DATA_DIR_NAME = ".agentflow-runner";
-/** Personal runners keep their data in `<data dir>/personal/<project key>`. */
-const PERSONAL_DATA_DIR_NAME = "personal";
+/** Personal runners keep their data in `<data dir>/personal/<project key>` (or `<KEY>@<server>`). */
+export const PERSONAL_DATA_DIR_NAME = "personal";
 const PROJECT_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** The runner data directory: AGENTFLOW_RUNNER_DATA_DIR or ~/.agentflow-runner. */
@@ -102,7 +102,7 @@ export function normalizeProjectKey(value: string): string | null {
 
 /**
  * The data directory of the personal runner of a project: one per project
- * key, so several personal runners on one computer never share their
+ * key (or `<KEY>@<server>` for a second server), so several personal runners on one computer never share their
  * identity, job store, loop tokens, status or config file.
  */
 export function resolvePersonalRunnerDataDir(

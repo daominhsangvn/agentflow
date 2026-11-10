@@ -152,6 +152,8 @@ export const LoopStepConfigSchema = z.object({
    * within the attach limits.
    */
   attach: z.array(relativePathSchema).max(LOOP_STEP_PATHS_MAX).optional(),
+  /** Only files modified since the step started are collected; applies to every `attach` glob. */
+  attachChanged: z.boolean().optional(),
   /**
    * Text files written to `<work dir>/inputs/` before the agent starts (an
    * orchestrator task's files from earlier tasks).
@@ -218,3 +220,46 @@ export const LoopStepResultSchema = z.object({
   attachmentsOmitted: z.number().int().nonnegative().optional(),
 });
 export type LoopStepResult = z.infer<typeof LoopStepResultSchema>;
+
+/** A named attach root: lowercase name, e.g. `features`. */
+export const ATTACH_ROOT_NAME_RE = /^[a-z][a-z0-9-]{0,39}$/;
+
+/** Built-in attach root: the personal Agent's project folder. */
+export const PROJECT_ATTACH_ROOT = "project";
+
+/** Splits `<name>:<pattern>`; a glob without a named prefix has a null root. */
+export function splitAttachGlob(glob: string): {
+  root: string | null;
+  pattern: string;
+} {
+  const colon = glob.indexOf(":");
+  if (colon > 0) {
+    const root = glob.slice(0, colon);
+    if (ATTACH_ROOT_NAME_RE.test(root)) {
+      return { root, pattern: glob.slice(colon + 1) };
+    }
+  }
+  return { root: null, pattern: glob };
+}
+
+/** True for a relative glob without `..`, `.` or empty segments, backslashes, NUL or a leading `~`. */
+export function isSafeAttachPattern(pattern: string): boolean {
+  if (
+    pattern.length === 0 ||
+    pattern.startsWith("/") ||
+    pattern.startsWith("~")
+  ) {
+    return false;
+  }
+  if (pattern.includes("\\") || pattern.includes("\0")) {
+    return false;
+  }
+  return !pattern
+    .split("/")
+    .some((segment) => segment === "" || segment === "." || segment === "..");
+}
+
+/** The reported path of a named-root file. */
+export function attachRootPath(root: string, relative: string): string {
+  return `${root}:${relative}`;
+}

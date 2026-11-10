@@ -6,6 +6,8 @@ rem credentials and, when the Agent is already set up, its runner.env and API.
 rem
 rem   doctor.bat                    the automatic Agent
 rem   doctor.bat --project PRO-1    the personal Agent of a project
+rem   doctor.bat --project PRO-1 --server agentflow.example.com
+rem                                 its Agent for one AgentFlow server
 rem
 rem Exit code 1 when a required check fails.
 setlocal

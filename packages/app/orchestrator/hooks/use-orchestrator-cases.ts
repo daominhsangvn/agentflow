@@ -17,6 +17,7 @@ import { isLiveDisplayedSessionStatus } from "@repo/api/src/types/session-status
 // Cross-slice: same server-message toasts as the integrations mutations.
 import { mutationErrorOptions } from "@repo/app/integrations/lib/mutation-error";
 import { useApiClient } from "@repo/app/shared/api/use-api-client";
+import { downloadBlob } from "@repo/app/shared/lib/download-utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 /**
@@ -39,6 +40,8 @@ export const orchestratorCaseKeys = {
     [...orchestratorCaseKeys.all, "detail", caseId] as const,
   loops: (caseId: string) =>
     [...orchestratorCaseKeys.all, "loops", caseId] as const,
+  taskFile: (caseId: string, taskId: string, name: string) =>
+    [...orchestratorCaseKeys.all, "task-file", caseId, taskId, name] as const,
 };
 
 export function useWorkflowOrchestratorCases(
@@ -169,6 +172,54 @@ export function isCaseActive(
   return detail.turnRunning || detail.activeTaskCount > 0;
 }
 
+/** One stored task file; fetched only while `enabled` (the viewer is open). */
+export function useOrchestratorTaskFile({
+  caseId,
+  taskId,
+  name,
+  enabled,
+}: {
+  caseId: string;
+  taskId: string;
+  name: string;
+  enabled: boolean;
+}) {
+  const apiClient = useApiClient();
+
+  return useQuery({
+    queryKey: orchestratorCaseKeys.taskFile(caseId, taskId, name),
+    queryFn: () =>
+      apiClient.getBlob(orchestratorTaskFilePath(caseId, taskId, name)),
+    enabled: enabled && !!caseId && !!taskId && !!name,
+  });
+}
+
+export function useDownloadOrchestratorTaskFile() {
+  const apiClient = useApiClient();
+
+  return useMutation({
+    mutationFn: async (input: {
+      caseId: string;
+      taskId: string;
+      name: string;
+    }) => {
+      const blob = await apiClient.getBlob(
+        orchestratorTaskFilePath(input.caseId, input.taskId, input.name)
+      );
+      downloadBlob(blob, input.name.split("/").pop() ?? input.name);
+    },
+    ...mutationErrorOptions("Couldn't download the file"),
+  });
+}
+
+export function orchestratorTaskFilePath(
+  caseId: string,
+  taskId: string,
+  name: string
+): string {
+  return `${casePath(caseId)}/tasks/${encodeURIComponent(taskId)}/file?name=${encodeURIComponent(name)}`;
+}
+
 function casePath(caseId: string): string {
   return `/orchestrator/cases/${encodeURIComponent(caseId)}`;
 }
@@ -268,4 +319,26 @@ export function workflowCasesPollInterval(
       isCaseActive(item) || item.waitingFor === OrchestratorCaseWaitingFor.Turn
   );
   return live ? CASE_POLL_INTERVAL_MS : CASE_BACKGROUND_POLL_MS;
+}
+
+/** Deletes a case (org admins); drops its cached reads, refreshes the lists. */
+export function useDeleteOrchestratorCase(caseId: string) {
+  const queryClient = useQueryClient();
+  const apiClient = useApiClient();
+
+  return useMutation({
+    mutationFn: () => apiClient.delete<{ deleted: true }>(casePath(caseId)),
+    onSuccess: () => {
+      queryClient.removeQueries({
+        queryKey: orchestratorCaseKeys.detail(caseId),
+      });
+      queryClient.removeQueries({
+        queryKey: orchestratorCaseKeys.loops(caseId),
+      });
+      return queryClient.invalidateQueries({
+        queryKey: orchestratorCaseKeys.all,
+      });
+    },
+    ...mutationErrorOptions("Couldn't delete the case"),
+  });
 }

@@ -25,7 +25,10 @@ import { Link } from "@repo/navigation/link";
 import { useOrgPath } from "@repo/navigation/use-org-path";
 import { type ReactNode, useState } from "react";
 import remarkBreaks from "remark-breaks";
-import { useCancelOrchestratorTurn } from "../hooks/use-orchestrator-cases";
+import {
+  useCancelOrchestratorTurn,
+  useDownloadOrchestratorTaskFile,
+} from "../hooks/use-orchestrator-cases";
 import {
   agentName,
   buildConversationTimeline,
@@ -38,6 +41,7 @@ import {
   TurnOutcome,
   turnOutcome,
 } from "../lib/case-timeline";
+import { TaskFileDialog } from "./task-file-dialog";
 import { TaskQuestionsForm } from "./task-questions-form";
 
 type BadgeVariant = "default" | "secondary" | "success" | "error" | "outline";
@@ -635,7 +639,7 @@ function TaskOutcome({
   return (
     <>
       {task.reply ? <ClampedText text={task.reply} /> : null}
-      <TaskFiles task={task} />
+      <TaskFiles caseId={caseId} task={task} />
       {isPending ? (
         <TaskQuestionsForm caseId={caseId} key={task.id} task={task} />
       ) : null}
@@ -757,7 +761,10 @@ function usageText(turn: OrchestratorCaseTurn): string {
   return parts.length > 0 ? parts.join(" · ") : EMPTY_VALUE;
 }
 
-function TaskFiles({ task }: Readonly<{ task: OrchestratorCaseTask }>) {
+function TaskFiles({
+  task,
+  caseId,
+}: Readonly<{ task: OrchestratorCaseTask; caseId: string }>) {
   if (task.files.length === 0 && task.filesOmitted === 0) {
     return null;
   }
@@ -765,7 +772,11 @@ function TaskFiles({ task }: Readonly<{ task: OrchestratorCaseTask }>) {
     <ul className="space-y-0.5" data-testid="orchestrator-task-files">
       {task.files.map((file) => (
         <li className="flex flex-wrap items-center gap-2" key={file.name}>
-          <span className="font-mono text-xs">{file.name}</span>
+          {file.stored ? (
+            <StoredTaskFile caseId={caseId} name={file.name} taskId={task.id} />
+          ) : (
+            <span className="font-mono text-xs">{file.name}</span>
+          )}
           <span className="text-muted-foreground text-xs">
             {formatFileSize(file.size)}
           </span>
@@ -782,6 +793,45 @@ function TaskFiles({ task }: Readonly<{ task: OrchestratorCaseTask }>) {
         </li>
       ) : null}
     </ul>
+  );
+}
+
+function StoredTaskFile({
+  caseId,
+  taskId,
+  name,
+}: Readonly<{ caseId: string; taskId: string; name: string }>) {
+  const [open, setOpen] = useState(false);
+  const download = useDownloadOrchestratorTaskFile();
+
+  return (
+    <>
+      <Button
+        className="h-auto p-0 font-mono text-xs"
+        onClick={() => setOpen(true)}
+        size="sm"
+        type="button"
+        variant="link"
+      >
+        {name}
+      </Button>
+      <Button
+        disabled={download.isPending}
+        onClick={() => download.mutate({ caseId, taskId, name })}
+        size="sm"
+        type="button"
+        variant="link"
+      >
+        Download
+      </Button>
+      <TaskFileDialog
+        caseId={caseId}
+        name={name}
+        onOpenChange={setOpen}
+        open={open}
+        taskId={taskId}
+      />
+    </>
   );
 }
 

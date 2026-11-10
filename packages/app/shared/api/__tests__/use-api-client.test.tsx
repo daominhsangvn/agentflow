@@ -216,6 +216,24 @@ describe("useApiClient (port)", () => {
     });
   });
 
+  it("returns a Blob from getBlob and throws ApiError on an error status", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("hello", { status: 200 }));
+    const { result } = renderHook(() => useApiClient(), {
+      wrapper: createWrapper(),
+    });
+
+    const blob = await result.current.getBlob("/file");
+    expect(blob).toBeInstanceOf(Blob);
+    expect(await blob.text()).toBe("hello");
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: "File not found" }, { status: 404 })
+    );
+    const failure = await result.current.getBlob("/file").catch((e) => e);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure).toMatchObject({ status: 404 });
+  });
+
   // ISS-5013 (split from ISS-5002). Before the deadline existed, a request that
   // never settled never rejected: the caller's promise stayed pending forever,
   // TanStack Query stayed `isLoading`, and no error state was reachable at all.

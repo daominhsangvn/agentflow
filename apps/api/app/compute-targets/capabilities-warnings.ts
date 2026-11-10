@@ -1,5 +1,7 @@
+import { splitAttachGlob } from "@agentflow-ai/loops-api/loop-step";
 import {
   type RunnerCapabilitiesParseResult,
+  RunnerCapabilitiesSource,
   RunnerCommandMode,
 } from "@repo/api/src/types/runner-capabilities";
 import { redactSecrets } from "@repo/lib/security/redact-secrets";
@@ -11,9 +13,14 @@ import { redactSecrets } from "@repo/lib/security/redact-secrets";
  */
 export function serverCapabilityWarnings(
   content: string,
-  parsed: RunnerCapabilitiesParseResult
+  parsed: RunnerCapabilitiesParseResult,
+  source: RunnerCapabilitiesSource
 ): string[] {
-  return [...secretLineWarnings(content), ...readPushWarnings(parsed)];
+  return [
+    ...secretLineWarnings(content),
+    ...readPushWarnings(parsed),
+    ...namedAttachWarnings(parsed, source),
+  ];
 }
 
 const SECRET_WARNINGS_MAX = 10;
@@ -78,4 +85,30 @@ function readPushWarnings(parsed: RunnerCapabilitiesParseResult): string[] {
       (command) =>
         `${command.name}: push is ignored for a read command (mode: read changes nothing).`
     );
+}
+
+/** An auto Agent never collects `<name>:` globs; say so when it is uploaded. */
+function namedAttachWarnings(
+  parsed: RunnerCapabilitiesParseResult,
+  source: RunnerCapabilitiesSource
+): string[] {
+  if (source !== RunnerCapabilitiesSource.Toolkit || !parsed.ok) {
+    return [];
+  }
+  const warnings: string[] = [];
+  for (const command of parsed.value.commands) {
+    const roots = new Set<string>();
+    for (const glob of command.attach ?? []) {
+      const root = splitAttachGlob(glob).root;
+      if (root) {
+        roots.add(`${root}:`);
+      }
+    }
+    if (roots.size > 0) {
+      warnings.push(
+        `${command.name} attaches from named folders (${[...roots].join(", ")}): only a personal Agent collects those; an auto Agent skips them`
+      );
+    }
+  }
+  return warnings;
 }

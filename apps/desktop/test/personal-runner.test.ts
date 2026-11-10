@@ -14,14 +14,18 @@ import { after, afterEach, describe, test } from "node:test";
 import { LoopCommand } from "@agentflow-ai/loops-api/commands";
 import { LoopHarness } from "@agentflow-ai/loops-api/desktop-request";
 import {
+  LOOP_STEP_ARTIFACT_KEY,
   type LoopStepConfig,
   LoopStepFinish,
+  type LoopStepResult,
 } from "@agentflow-ai/loops-api/loop-step";
 import { acquireInstanceLock } from "../src/headless/headless-instance-lock.js";
 import type { SupportedRuntimeSelection } from "../src/server/operations/harness-pipeline.js";
 import {
   buildStepLaunch,
   matchStepFiles,
+  prepareLoopStep,
+  readStepOutputs,
 } from "../src/server/operations/loop-step.js";
 import {
   COMMAND_DECIDES_LINE,
@@ -407,5 +411,40 @@ describe("collectPersonalStepFiles", () => {
       },
       { path: "other.md", file: path.join(projectDir, "other.md") },
     ]);
+  });
+});
+
+describe("named attach roots in a personal step", () => {
+  test("collects features:<file> from a root named in AGENTFLOW.md", async () => {
+    const dir = path.join(root, "named-roots", "proj");
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(path.join(root, "named-roots", "shared"), { recursive: true });
+    writeFileSync(path.join(root, "named-roots", "shared", "x.md"), "hello");
+    writeFileSync(
+      path.join(dir, "AGENTFLOW.md"),
+      '---\nattachRoots:\n  features: ../shared\ncommands:\n  - name: /c\n    mode: write\n    attach: ["features:**/*.md"]\n---\nbody\n'
+    );
+    configurePersonalRunnerProject(project({ projectDir: dir }));
+    const workDir = await preparePersonalRunWorkDir({
+      projectDir: dir,
+      runId: "run-named",
+      fresh: true,
+    });
+    await prepareLoopStep({
+      workspaceRoot: dir,
+      claudeWorkDir: workDir,
+      artifacts: [],
+      repos: [],
+      log: () => undefined,
+      step: step({ artifacts: [], attach: ["features:**/*.md"] }),
+    });
+    const result = readStepOutputs(workDir)[
+      LOOP_STEP_ARTIFACT_KEY
+    ] as LoopStepResult;
+    assert.equal(result.attachments?.[0].path, "features:x.md");
+    assert.equal(
+      Buffer.from(result.attachments?.[0].data ?? "", "base64").toString(),
+      "hello"
+    );
   });
 });

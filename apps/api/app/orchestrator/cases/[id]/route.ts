@@ -3,10 +3,13 @@ import {
   type UpdateOrchestratorCaseInput,
   updateOrchestratorCaseInputSchema,
 } from "@repo/api/src/types/orchestrator";
+import { Status } from "@repo/api/src/types/result";
 import { orchestratorCaseService } from "@/app/orchestrator/cases/service";
 import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import {
+  conflictResponse,
+  deleteResponse,
   errorResponse,
   notFoundResponse,
   parseBody,
@@ -15,6 +18,8 @@ import {
 
 const ROUTE = "/orchestrator/cases/[id]";
 const BODY_MAX_BYTES = 4096;
+const CASE_ACTIVE_MESSAGE =
+  "The case has a running turn or task. Stop it before deleting the case.";
 
 /**
  * GET /orchestrator/cases/{id}
@@ -71,5 +76,40 @@ export const PATCH = withAnyAuth<
     return notFoundResponse("Case");
   } catch (error) {
     return errorResponse("Failed to update the orchestrator case", error);
+  }
+});
+
+/**
+ * DELETE /orchestrator/cases/{id}
+ * Deletes a case with its conversations, tasks, waits and decisions. Org
+ * admins only; 409 while a turn runs or a task is queued or running.
+ */
+export const DELETE = withAnyAuth<
+  { deleted: true },
+  "/orchestrator/cases/[id]"
+>(async (auth, request, params) => {
+  try {
+    const denied = await denyUnlessOrgAdmin(
+      auth,
+      { method: request.method, route: ROUTE },
+      "orchestrator cases"
+    );
+    if (denied) {
+      return denied;
+    }
+    const { id } = await params;
+    const result = await orchestratorCaseService.remove(
+      auth.user.organizationId,
+      id
+    );
+    if (result.ok) {
+      return deleteResponse();
+    }
+    if (result.error === Status.Conflict) {
+      return conflictResponse(CASE_ACTIVE_MESSAGE);
+    }
+    return notFoundResponse("Case");
+  } catch (error) {
+    return errorResponse("Failed to delete the orchestrator case", error);
   }
 });
