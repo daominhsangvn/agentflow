@@ -638,7 +638,8 @@ migration aid, not a replacement for the auto runner.
 mode first; Enter keeps `auto`. Personal asks for the API URL and key, the
 project key, the project folder (it must exist), whether the project's
 commands can run several tasks at once in that folder (default no), whether
-the agent may use any tool without a permission prompt (default no), the
+to allow every tool (default no: tools not in the commands' `allowed-tools`
+or the person's `permissions.allow` are refused, nobody can approve them), the
 runner name (default `<user name>-<project key>`), an optional role for this
 computer (replaces `runner:` of the shared AGENTFLOW.md; `none` clears it) and
 the local gateway port

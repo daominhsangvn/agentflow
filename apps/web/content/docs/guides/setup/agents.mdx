@@ -67,7 +67,7 @@ node runner.mjs --project PRO-1          # start it (Windows: start-runner.cmd -
 node runner.mjs setup --project PRO-1    # ask that Agent's questions again
 ```
 
-Setup asks for the API URL and key, the project key, the project folder (it must exist), whether several tasks may run in the folder at once (default no), whether the agent may use any tool without a permission prompt (default no), the Agent's name (default `<user name>-<project key>`) and the local gateway port. The answers go to `<data dir>/personal/<project key>/runner.env`.
+Setup asks for the API URL and key, the project key, the project folder (it must exist), whether several tasks may run in the folder at once (default no), whether to allow every tool (default no: tools not in the commands' `allowed-tools` or the person's `permissions.allow` are refused, since nobody can approve them), the Agent's name (default `<user name>-<project key>`) and the local gateway port. The answers go to `<data dir>/personal/<project key>/runner.env`.
 
 A personal Agent:
 
