@@ -106,6 +106,7 @@ const DETAIL_ROW = {
           actor: "An",
           text: "first",
           turnId: null,
+          externalRef: "c-1",
           createdAt: D("2026-10-23T08:01:00.000Z"),
           payload: {
             toAgent: { computeTargetId: "r1", name: "runner-1" },
@@ -190,6 +191,26 @@ const DETAIL_ROW = {
           },
         ],
         filesOmitted: 2,
+        inputs: [
+          {
+            taskId: "task-0",
+            name: "PRD.md",
+            storageKey: "k/PRD.md",
+            size: 10,
+          },
+        ],
+        pageInputs: [
+          {
+            pageId: "p1",
+            title: "Spec",
+            url: "https://x/wiki/p1",
+            version: 2,
+            name: "Spec.md",
+            content: "# big",
+            size: 5,
+          },
+        ],
+        replyTo: "c-1",
       },
       createdAt: D("2026-10-23T08:03:30.000Z"),
       finishedAt: null,
@@ -357,8 +378,57 @@ describe("orchestratorCaseService.get", () => {
       { name: "PRD.md", size: 1200, stored: true, skipped: null },
       { name: "big.bin", size: 9_000_000, stored: false, skipped: "too large" },
     ]);
+    expect(detail?.tasks[0]?.inputs).toEqual([
+      { name: "PRD.md", size: 10, fromTaskId: "task-0", page: null },
+      {
+        name: "Spec.md",
+        size: 5,
+        fromTaskId: null,
+        page: { title: "Spec", url: "https://x/wiki/p1", version: 2 },
+      },
+    ]);
+    expect(detail?.tasks[0]).toMatchObject({
+      replyTo: "c-1",
+      replyToMessageId: "m1",
+    });
     expect(detail?.workflow).toEqual({ id: "workflow-1", name: "Questions" });
     expect(detail?.waits[0]?.taskIds).toEqual(["task-1"]);
+  });
+});
+
+describe("orchestratorCaseService.get task inputs", () => {
+  function withResult(result: unknown) {
+    const [first] = DETAIL_ROW.tasks;
+    return { ...DETAIL_ROW, tasks: [{ ...first, result }] };
+  }
+
+  it("has no message id when replyTo matches no message", async () => {
+    mocks.caseFindFirst.mockResolvedValue(
+      withResult({ reply: null, questions: [], error: null, replyTo: "nope" })
+    );
+    mocks.listCaseDocuments.mockResolvedValue([]);
+
+    const detail = await orchestratorCaseService.get(ORG, CASE_ID);
+
+    expect(detail?.tasks[0]).toMatchObject({
+      replyTo: "nope",
+      replyToMessageId: null,
+    });
+  });
+
+  it("has no inputs or replyTo when the result has none", async () => {
+    mocks.caseFindFirst.mockResolvedValue(
+      withResult({ reply: null, questions: [], error: null })
+    );
+    mocks.listCaseDocuments.mockResolvedValue([]);
+
+    const detail = await orchestratorCaseService.get(ORG, CASE_ID);
+
+    expect(detail?.tasks[0]).toMatchObject({
+      inputs: [],
+      replyTo: null,
+      replyToMessageId: null,
+    });
   });
 });
 

@@ -88,6 +88,9 @@ function CaseContent({
   detail,
   isAdmin,
 }: Readonly<{ detail: OrchestratorCaseDetail; isAdmin: boolean }>) {
+  const caseMessages = detail.conversations.flatMap(
+    (conversation) => conversation.messages
+  );
   return (
     <div className="space-y-6" data-testid="orchestrator-case-detail">
       <CaseHeader detail={detail} isAdmin={isAdmin} />
@@ -102,6 +105,7 @@ function CaseContent({
       {detail.conversations.map((conversation) => (
         <OrchestratorCaseConversationCard
           caseId={detail.id}
+          caseMessages={caseMessages}
           conversation={conversation}
           isAdmin={isAdmin}
           key={conversation.id}

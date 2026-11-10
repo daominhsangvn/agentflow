@@ -1,11 +1,14 @@
 import {
   type OrchestratorCaseDetail,
+  type OrchestratorCaseMessage,
   OrchestratorCaseStatus,
+  type OrchestratorCaseTask,
   OrchestratorConversationStatus,
   OrchestratorDecisionStatus,
   OrchestratorDocumentKind,
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
+  OrchestratorMessageVia,
   OrchestratorTaskStatus,
   OrchestratorTurnStatus,
 } from "@repo/api/src/types/orchestrator";
@@ -157,6 +160,9 @@ function makeDetail(): OrchestratorCaseDetail {
         ],
         filesOmitted: 0,
         openQuestionCount: 0,
+        inputs: [],
+        replyTo: null,
+        replyToMessageId: null,
         questions: [],
         error: null,
         waiting: null,
@@ -201,6 +207,32 @@ function makeDetail(): OrchestratorCaseDetail {
       },
     ],
   };
+}
+
+function withTask(patch: Partial<OrchestratorCaseTask>) {
+  const detail = makeDetail();
+  mocks.query.data = {
+    ...detail,
+    tasks: detail.tasks.map((task) => ({ ...task, ...patch })),
+  };
+}
+
+function addMessages(
+  patch: Pick<
+    OrchestratorCaseMessage,
+    "id" | "origin" | "kind" | "actor" | "text"
+  > &
+    Partial<OrchestratorCaseMessage>
+) {
+  const detail = mocks.query.data ?? makeDetail();
+  const conversation = detail.conversations[0];
+  conversation?.messages.push({
+    conversationId: CONV,
+    turnId: TURN,
+    createdAt: "2026-10-26T08:01:30.000Z",
+    ...patch,
+  });
+  mocks.query.data = detail;
 }
 
 const ELAPSED_OPEN_RE = /^Elapsed .*\(open\)$/;
@@ -254,6 +286,10 @@ describe("OrchestratorCaseDetailView", () => {
   });
 
   it("lists task files with size and skipped reason", () => {
+    withTask({
+      status: OrchestratorTaskStatus.Succeeded,
+      finishedAt: "2026-10-26T08:04:00.000Z",
+    });
     render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
 
     const list = screen.getByTestId("orchestrator-task-files");
@@ -315,5 +351,162 @@ describe("OrchestratorCaseDetailView", () => {
 
     expect(screen.queryByText("$0.00")).toBeNull();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("labels the actors and never says Turn", () => {
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    expect(screen.getByTestId("case-timeline-person")).toHaveTextContent("Ann");
+    expect(screen.getByTestId("case-timeline-orchestrator")).toHaveTextContent(
+      "Orchestrator"
+    );
+    expect(screen.queryByText("Turn")).toBeNull();
+  });
+
+  it("shows what was sent to the agent", () => {
+    withTask({ prompt: "Plan the fix", mode: "write" });
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    const sent = screen.getByTestId("case-timeline-sent");
+    expect(sent).toHaveTextContent("Sent to");
+    expect(sent).toHaveTextContent("/plan PROJ-7");
+    expect(sent).toHaveTextContent("Modewrite");
+    expect(sent).toHaveTextContent("Plan the fix");
+  });
+
+  it("shows inputs and the answered message of a failed task", () => {
+    mocks.query.data = {
+      ...makeDetail(),
+      tasks: [
+        { ...makeDetail().tasks[0], id: "task-0", runnerName: "dev-agent" },
+        {
+          ...makeDetail().tasks[0],
+          id: "task-2",
+          status: OrchestratorTaskStatus.Failed,
+          inputs: [
+            { name: "PRD.md", size: 1200, fromTaskId: "task-0", page: null },
+            {
+              name: "Spec.md",
+              size: 5,
+              fromTaskId: null,
+              page: { title: "Spec", url: "https://x/wiki/p1", version: 2 },
+            },
+          ],
+          replyTo: "c-1",
+          replyToMessageId: "m1",
+        },
+      ],
+    };
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    const sent = screen.getAllByTestId("case-timeline-sent")[1] as HTMLElement;
+    expect(sent).toHaveTextContent("PRD.md");
+    expect(sent).toHaveTextContent("dev-agent");
+    expect(within(sent).getByRole("link", { name: "Spec" })).toHaveAttribute(
+      "href",
+      "https://x/wiki/p1"
+    );
+    expect(sent).toHaveTextContent("Ann:");
+  });
+
+  it("shows a non-http Confluence page url as plain text", () => {
+    withTask({
+      inputs: [
+        {
+          name: "Spec.md",
+          size: 5,
+          fromTaskId: null,
+          page: { title: "Spec", url: "javascript:alert(1)", version: 2 },
+        },
+      ],
+    });
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    const sent = screen.getByTestId("case-timeline-sent");
+    expect(sent).toHaveTextContent("Confluence page Spec v2");
+    expect(within(sent).queryByRole("link", { name: "Spec" })).toBeNull();
+  });
+
+  it("cuts a long prompt and expands it on demand", async () => {
+    const prompt = `${"a".repeat(600)}END`;
+    withTask({ prompt });
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    const sent = screen.getByTestId("case-timeline-sent");
+    expect(sent).not.toHaveTextContent("END");
+    await userEvent.click(
+      within(sent).getByRole("button", { name: "Show more" })
+    );
+    expect(sent).toHaveTextContent("END");
+  });
+
+  it("shows an agent's answer once, in its own entry", () => {
+    withTask({
+      status: OrchestratorTaskStatus.Succeeded,
+      finishedAt: "2026-10-26T08:04:00.000Z",
+      reply: "The answer",
+    });
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    const found = screen.getAllByText("The answer");
+    expect(found).toHaveLength(1);
+    expect(
+      found[0]?.closest('[data-testid="case-timeline-agent"]')
+    ).not.toBeNull();
+  });
+
+  it("keeps internal inputs in the details, not as rows", () => {
+    addMessages({
+      id: "m2",
+      origin: OrchestratorMessageOrigin.Internal,
+      kind: OrchestratorMessageKind.TaskResults,
+      actor: null,
+      text: "Results for the model",
+    });
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    const text = screen.getByText("Results for the model");
+    expect(text.closest("details")).not.toBeNull();
+    expect(
+      screen
+        .getAllByTestId("case-timeline-person")
+        .some((row) => row.textContent?.includes("Results for the model"))
+    ).toBe(false);
+  });
+
+  it("puts the summary in the details when the turn replied", () => {
+    const detail = makeDetail();
+    const conversation = detail.conversations[0];
+    if (conversation?.turns[0]) {
+      conversation.turns[0].summary = "Turn summary";
+    }
+    mocks.query.data = detail;
+    addMessages({
+      id: "m3",
+      origin: OrchestratorMessageOrigin.Internal,
+      kind: OrchestratorMessageKind.Reply,
+      actor: "AgentFlow",
+      text: "Reply text",
+      via: OrchestratorMessageVia.AgentFlow,
+    });
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    expect(screen.getByText("Reply text").closest("details")).toBeNull();
+    expect(screen.getByText("Turn summary").closest("details")).not.toBeNull();
+  });
+
+  it("shows a refused tool call in the orchestrator block", () => {
+    addMessages({
+      id: "m4",
+      origin: OrchestratorMessageOrigin.Internal,
+      kind: OrchestratorMessageKind.ToolRefused,
+      actor: null,
+      text: "task_run refused: nope",
+    });
+    render(<OrchestratorCaseDetailView caseId={CASE_ID} isAdmin />);
+
+    expect(screen.getByTestId("case-timeline-orchestrator")).toHaveTextContent(
+      "Refused:"
+    );
   });
 });

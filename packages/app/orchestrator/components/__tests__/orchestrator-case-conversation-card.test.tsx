@@ -160,17 +160,33 @@ describe("OrchestratorCaseConversationCard", () => {
     });
   });
 
-  it("badges a message written on the case page", () => {
+  it("says a message was written on the case page", () => {
     renderCard([], OrchestratorMessageVia.AgentFlow);
 
-    expect(screen.getByText("AgentFlow (case page)")).toBeInTheDocument();
+    expect(screen.getByText("Message on the case page")).toBeInTheDocument();
+  });
+
+  it("renders message text as markdown", () => {
+    renderCard([], null, [], "## Plan\n\n- **first** step\n- `code` step");
+
+    expect(screen.getByRole("heading", { name: "Plan" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByText("first").tagName).toBe("STRONG");
+    expect(screen.getByText("code").tagName).toBe("CODE");
+  });
+
+  it("drops raw HTML in message text", () => {
+    renderCard([], null, [], "<b>bold</b> plain");
+
+    expect(screen.queryByText("bold")).not.toBeInTheDocument();
   });
 });
 
 function renderCard(
   tasks: OrchestratorCaseTask[],
   via: OrchestratorMessageVia | null = null,
-  answeredTaskIds: string[] = []
+  answeredTaskIds: string[] = [],
+  text = "hello there"
 ) {
   const message: OrchestratorCaseMessage = {
     id: "m1",
@@ -178,7 +194,7 @@ function renderCard(
     origin: OrchestratorMessageOrigin.External,
     kind: OrchestratorMessageKind.Message,
     actor: "Ann",
-    text: "hello there",
+    text,
     turnId: null,
     createdAt: "2026-10-26T08:00:00.000Z",
     via,
@@ -223,6 +239,9 @@ function makeTask(
     files: [],
     filesOmitted: 0,
     openQuestionCount: 1,
+    inputs: [],
+    replyTo: null,
+    replyToMessageId: null,
     questions: [
       { id: QUESTION_ID, question: QUESTION, options: ["MySQL", "Postgres"] },
     ],

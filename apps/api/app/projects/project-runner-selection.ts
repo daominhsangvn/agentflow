@@ -178,7 +178,7 @@ export async function countActiveLoopsByTarget(
 }
 
 /** Loops a runner runs at once; 1 when it did not report it. */
-function capacityOf(capabilities: unknown): number {
+export function capacityOf(capabilities: unknown): number {
   const parsed = capacitySchema.safeParse(capabilities);
   return parsed.success ? parsed.data.maxInFlightCommands : 1;
 }

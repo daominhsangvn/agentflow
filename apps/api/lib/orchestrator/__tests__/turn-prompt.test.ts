@@ -92,6 +92,7 @@ describe("buildTurnPrompt", () => {
     expect(prompt).toContain("# LD-7: Half-day leave");
     expect(prompt).toContain("- an-PRO-1 [online]: /writing-plans (write)");
     expect(prompt).toContain("Why does the plan migrate before the API?");
+    expect(prompt).toContain("same Agent");
   });
 
   it("tells the turn how to pass task files on", () => {

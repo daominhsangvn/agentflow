@@ -415,6 +415,12 @@ export type OrchestratorCaseTask = {
   error: string | null;
   /** Why a queued task has not started (a busy runner). */
   waiting: string | null;
+  /** Files handed to the task (earlier task files, then Confluence pages). */
+  inputs: OrchestratorCaseTaskInput[];
+  /** Ref of the message the task answers (task_run replyTo); null when none. */
+  replyTo: string | null;
+  /** That message's id when it is among the case's loaded messages. */
+  replyToMessageId: string | null;
   /** Questions no answer covers yet (server-owned). */
   openQuestionCount: number;
   createdAt: string;
@@ -696,4 +702,14 @@ export type WorkflowAgentMapAgent = WorkflowAgentMapNode & {
 export type WorkflowAgentMap = {
   orchestrator: WorkflowAgentMapNode | null;
   agents: WorkflowAgentMapAgent[];
+};
+
+/** A file handed to a task in its `inputs/`: an earlier task's file or a Confluence page. */
+export type OrchestratorCaseTaskInput = {
+  name: string;
+  size: number;
+  /** The earlier task the file came from; null for a Confluence page. */
+  fromTaskId: string | null;
+  /** The Confluence page it was read from; null for an earlier task's file. */
+  page: { title: string; url: string; version: number } | null;
 };

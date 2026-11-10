@@ -98,6 +98,90 @@ beforeEach(() => {
 });
 
 describe("startTask", () => {
+  describe("case affinity", () => {
+    const seeded = () =>
+      mocks.tasks.push({
+        id: "task-0",
+        organizationId: IDS.org,
+        caseId: IDS.case,
+        computeTargetId: IDS.dev,
+        loopId: "loop-0",
+        status: OrchestratorTaskStatus.Succeeded,
+        createdAt: new Date(2026, 9, 23, 8, 0, 0),
+      });
+
+    it("sends a role shared by two Agents to the case's Agent", async () => {
+      mocks.baRole = "Dev";
+      seeded();
+      const started = await startTask({
+        ...BASE,
+        runner: "Dev",
+        command: "/executing-plans",
+      });
+
+      expect(started.ok && started.value.runner).toBe("an-PRO-1");
+      expect(mocks.createLoop).toHaveBeenCalledWith(
+        IDS.org,
+        IDS.owner,
+        expect.objectContaining({ computeTargetId: IDS.dev })
+      );
+    });
+
+    it("refuses another Agent of the role the case works on", async () => {
+      mocks.baRole = "Dev";
+      seeded();
+      const started = await startTask({
+        ...BASE,
+        runner: "runner-1",
+        command: "/ba-requirement",
+      });
+
+      expect(!started.ok && started.error).toContain("an-PRO-1");
+      expect(!started.ok && started.error).toContain(IDS.dev);
+      expect(mocks.tasks).toHaveLength(1);
+    });
+
+    it("picks an Agent for the role when the case has none yet", async () => {
+      mocks.baRole = "Dev";
+      const started = await startTask({
+        ...BASE,
+        runner: "Dev",
+        command: "/executing-plans",
+      });
+
+      expect(started.ok).toBe(true);
+    });
+
+    it("keeps the task queued while the Agent holding the workspace is offline", async () => {
+      mocks.tasks.push({
+        id: "task-0",
+        organizationId: IDS.org,
+        caseId: IDS.case,
+        computeTargetId: IDS.ba,
+        loopId: "loop-0",
+        status: OrchestratorTaskStatus.Succeeded,
+        createdAt: new Date(2026, 9, 23, 8, 0, 0),
+      });
+      mocks.online = false;
+      const started = await startTask({
+        ...BASE,
+        runner: "runner-1",
+        command: "/ba-requirement",
+      });
+
+      expect(started.ok && started.value.status).toBe(
+        OrchestratorTaskStatus.Queued
+      );
+      expect(started.ok && started.value.waiting).toContain("offline");
+      expect(mocks.createLoop).not.toHaveBeenCalled();
+
+      mocks.online = true;
+      await advanceTasks(new Date());
+      expect(mocks.createLoop).toHaveBeenCalledTimes(1);
+      expect(mocks.tasks.at(-1)?.loopId).toBe("loop-1");
+    });
+  });
+
   it("runs the command as a STEP loop on the case's Issue for that runner", async () => {
     const started = await startTask({
       ...BASE,

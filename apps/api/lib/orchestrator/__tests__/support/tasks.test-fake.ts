@@ -32,6 +32,7 @@ export const taskMocks = {
   dropBaCommand: false,
   onBusyCheck: null as (() => void) | null,
   online: true,
+  baRole: "BA",
   createLoop: vi.fn() as Mock,
   createDocument: vi.fn() as Mock,
   dispatch: vi.fn() as Mock,
@@ -46,8 +47,11 @@ export const taskMocks = {
 };
 
 export function databaseModule() {
-  const match = (row: Row, where: Row) =>
+  const match = (row: Row, where: Row): boolean =>
     Object.entries(where).every(([key, value]) => {
+      if (key === "OR") {
+        return (value as Row[]).some((branch) => match(row, branch));
+      }
       if (value && typeof value === "object") {
         const filter = value as Row;
         if ("not" in filter) {
@@ -100,6 +104,7 @@ export function databaseModule() {
         Promise.resolve(
           taskMocks.tasks.filter((task) => match(task, args.where))
         ),
+      groupBy: () => Promise.resolve([]),
       count: (args: { where: Row }) =>
         Promise.resolve(
           taskMocks.tasks.filter((task) => match(task, args.where)).length
@@ -120,7 +125,16 @@ export function databaseModule() {
     user: {
       findFirst: () => Promise.resolve({ id: IDS.owner, clerkId: "clerk-1" }),
     },
+    computeTarget: {
+      findMany: (args: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(
+          [IDS.ba, IDS.dev]
+            .filter((id) => args.where.id.in.includes(id))
+            .map((id) => ({ id, capabilities: {} }))
+        ),
+    },
     loop: {
+      groupBy: () => Promise.resolve([]),
       findUnique: (args: { where: { id: string } }) =>
         Promise.resolve(taskMocks.loops.get(args.where.id) ?? null),
     },
@@ -136,9 +150,10 @@ export function capabilitiesModule() {
           {
             computeTargetId: IDS.ba,
             runnerName: "runner-1",
+            isOnline: taskMocks.online,
             source: RunnerCapabilitiesSource.Toolkit,
             capabilities: {
-              runner: "BA",
+              runner: taskMocks.baRole,
               toolkit: taskMocks.baToolkit,
               commands: taskMocks.dropBaCommand
                 ? []
@@ -159,6 +174,7 @@ export function capabilitiesModule() {
           {
             computeTargetId: IDS.dev,
             runnerName: "an-PRO-1",
+            isOnline: taskMocks.online,
             source: RunnerCapabilitiesSource.Personal,
             capabilities: {
               runner: "Dev",
@@ -280,6 +296,7 @@ export function resetTaskMocks() {
   taskMocks.dropBaCommand = false;
   taskMocks.onBusyCheck = null;
   taskMocks.online = true;
+  taskMocks.baRole = "BA";
   taskMocks.settled = true;
   taskMocks.baToolkit = null;
   taskMocks.baAttach = undefined;
