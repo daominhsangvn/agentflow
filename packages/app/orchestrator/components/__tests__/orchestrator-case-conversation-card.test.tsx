@@ -165,12 +165,28 @@ describe("OrchestratorCaseConversationCard", () => {
 
     expect(screen.getByText("AgentFlow (case page)")).toBeInTheDocument();
   });
+
+  it("renders message text as markdown", () => {
+    renderCard([], null, [], "## Plan\n\n- **first** step\n- `code` step");
+
+    expect(screen.getByRole("heading", { name: "Plan" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByText("first").tagName).toBe("STRONG");
+    expect(screen.getByText("code").tagName).toBe("CODE");
+  });
+
+  it("drops raw HTML in message text", () => {
+    renderCard([], null, [], "<b>bold</b> plain");
+
+    expect(screen.queryByText("bold")).not.toBeInTheDocument();
+  });
 });
 
 function renderCard(
   tasks: OrchestratorCaseTask[],
   via: OrchestratorMessageVia | null = null,
-  answeredTaskIds: string[] = []
+  answeredTaskIds: string[] = [],
+  text = "hello there"
 ) {
   const message: OrchestratorCaseMessage = {
     id: "m1",
@@ -178,7 +194,7 @@ function renderCard(
     origin: OrchestratorMessageOrigin.External,
     kind: OrchestratorMessageKind.Message,
     actor: "Ann",
-    text: "hello there",
+    text,
     turnId: null,
     createdAt: "2026-10-26T08:00:00.000Z",
     via,

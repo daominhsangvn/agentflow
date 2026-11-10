@@ -20,9 +20,11 @@ import {
 } from "@repo/app/shared/lib/format-utils";
 import { Badge } from "@repo/design-system/components/ui/badge";
 import { Button } from "@repo/design-system/components/ui/button";
+import { MarkdownContent } from "@repo/design-system/components/ui/primitives/markdown-content";
 import { Link } from "@repo/navigation/link";
 import { useOrgPath } from "@repo/navigation/use-org-path";
 import { useState } from "react";
+import remarkBreaks from "remark-breaks";
 import { useCancelOrchestratorTurn } from "../hooks/use-orchestrator-cases";
 import {
   buildConversationTimeline,
@@ -83,6 +85,8 @@ const CLAMP_CHARS = 600;
 const SHORT_ID_CHARS = 8;
 const EMPTY_VALUE = "—";
 const BYTES_PER_KB = 1024;
+/** A single newline in a message is a line break, as in Jira or Slack. */
+const REMARK_PLUGINS = [remarkBreaks];
 
 export function OrchestratorConversationTimeline({
   caseId,
@@ -309,7 +313,12 @@ export function ClampedText({ text }: Readonly<{ text: string }>) {
 
   return (
     <div>
-      <p className="whitespace-pre-wrap text-sm">{shown}</p>
+      <MarkdownContent
+        className="break-words"
+        remarkPlugins={REMARK_PLUGINS}
+        skipHtml
+        text={shown}
+      />
       {isLong ? (
         <Button
           onClick={() => setExpanded(!expanded)}
