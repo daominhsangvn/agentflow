@@ -43,7 +43,7 @@ A **task** is one run of one declared command. The agent cannot talk to the orch
 |---|---|---|
 | **The answer** | `$AGENTFLOW_WORKDIR/orchestrator-reply.md` | Read when the run ends, up to 30,000 characters |
 | **Questions for people** | `$AGENTFLOW_WORKDIR/questions.json` | Only for a command with `asks: true`. At most 30 questions of 2,000 characters, 10 options of 500 characters each. A question may carry an optional `commentId` |
-| **Files for the ticket** | Files in `$AGENTFLOW_WORKDIR` that match the command's `attach` globs | Collected when the run ends (20 files, 4 MB each, 5 MB in total). The orchestrator attaches them, publishes them to Confluence or hands them to later tasks |
+| **Files for the ticket** | Files in `$AGENTFLOW_WORKDIR` that match the command's `attach` globs, or, when the toolkit writes elsewhere, files of a folder named in `attachRoots` (`features:**/*.md`, with `attachChanged: true` to take only what this run changed) | Collected when the run ends (20 files, 4 MB each, 5 MB in total). The orchestrator attaches them, publishes them to Confluence or hands them to later tasks; people view and download them on the case page |
 | **Cannot start** | First line of the answer: `BLOCKED: <what is missing>` | The orchestrator tells people what is missing and who produces it |
 | **Code** | The person's own branch, push and pull request | With the computer's credentials. Nobody merges but people |
 

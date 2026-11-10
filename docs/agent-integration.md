@@ -54,7 +54,7 @@ not set, the command was typed by hand.
 |---|---|---|
 | **The answer** | `$AGENTFLOW_WORKDIR/orchestrator-reply.md` | When the run ends; the orchestrator sees it in the task result |
 | **Questions for people** | `$AGENTFLOW_WORKDIR/questions.json` | Only when the command declares `asks: true`. Max 30 questions, 2,000 chars each, 10 options of 500 chars |
-| **Files for the ticket** | Files in `$AGENTFLOW_WORKDIR` matching the command's `attach` globs | Collected at the end (20 files, 4 MB each, 5 MB total); the orchestrator attaches them to Jira, publishes them to Confluence, or hands them to later tasks |
+| **Files for the ticket** | Files in `$AGENTFLOW_WORKDIR` matching the command's `attach` globs, or files of a folder named in `attachRoots` (`features:**/*.md`; `attachChanged: true` keeps only what the run changed) | Collected at the end (20 files, 4 MB each, 5 MB total); the orchestrator attaches them to Jira, publishes them to Confluence, or hands them to later tasks; people view and download them on the case page |
 | **"Cannot start"** | First line of the reply: `BLOCKED: <what is missing>` | The orchestrator tells people what is missing and who produces it |
 | **Code** | Your own branch, push and pull request (personal agent, your credentials) | AgentFlow never merges; neither does the agent |
 | **Capabilities** | `AGENTFLOW.md` in the project folder | Uploaded when the agent starts and whenever the file changes |
@@ -162,6 +162,10 @@ the orchestrator decides where it goes.
 - Screenshots and evidence also go under `$AGENTFLOW_WORKDIR`
   (`evidence-<KEY>/*.png`) and are declared in `attach`.
 - Keep text files under 200 KB if a later task needs them as input.
+- A toolkit that already writes its files elsewhere (another folder of the
+  computer, many runs side by side) does not have to move them: name the
+  folder in `attachRoots`, glob it as `<name>:**/*.md` and set
+  `attachChanged: true` (docs/runner.md, "Capabilities").
 
 ### 3.6 The reply
 
