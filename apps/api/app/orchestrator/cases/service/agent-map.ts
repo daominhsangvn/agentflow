@@ -11,13 +11,31 @@ import {
 import { withDb } from "@repo/database";
 import { computeTargetCapabilitiesService } from "@/app/compute-targets/capabilities-service";
 import { agentKind } from "@/app/compute-targets/fleet-service";
+import { loadProjectRunnerIds } from "@/app/projects/project-runner-selection";
 import { loadOrchestratorWorkflows } from "@/lib/orchestrator/workflow-settings";
 
 /**
  * The Agents tab's diagram (GET /workflows/{id}/agents): the workflow's
- * orchestrator and every agent of its project: the ones that declared an
- * AGENTFLOW.md, and the ones that only ran a task of the workflow's cases.
+ * orchestrator and every agent of its project. A project with Agents lists
+ * exactly those (online or not, declared or not); one that was removed from
+ * the project is gone even if it ran a task. A project without Agents lists
+ * the ones that declared an AGENTFLOW.md and the ones that ran a task of the
+ * workflow's cases.
  */
+
+type AgentTarget = {
+  id: string;
+  machineName: string;
+  isOnline: boolean;
+  capabilities: unknown;
+};
+
+const AGENT_TARGET_SELECT = {
+  id: true,
+  machineName: true,
+  isOnline: true,
+  capabilities: true,
+} as const;
 
 export async function loadWorkflowAgentMap(
   organizationId: string,
@@ -32,42 +50,31 @@ export async function loadWorkflowAgentMap(
   if (!workflow) {
     return null;
   }
-  const [settings, files, taskRows] = await Promise.all([
+  const projectId = workflow.projectId;
+  const [settings, files, projectRunnerIds] = await Promise.all([
     loadOrchestratorWorkflows(organizationId, [workflowId]),
-    workflow.projectId
+    projectId
       ? computeTargetCapabilitiesService.listForProject(
           organizationId,
-          workflow.projectId
+          projectId
         )
       : Promise.resolve([]),
-    withDb((db) =>
-      db.orchestratorTask.findMany({
-        where: {
-          organizationId,
-          case: { workflowId },
-          computeTargetId: { not: null },
-        },
-        distinct: ["computeTargetId"],
-        select: {
-          computeTarget: {
-            select: {
-              id: true,
-              machineName: true,
-              isOnline: true,
-              capabilities: true,
-            },
-          },
-        },
-      })
-    ),
+    projectId
+      ? loadProjectRunnerIds(organizationId, { projectId })
+      : Promise.resolve([]),
   ]);
   const orchestratorId = settings.get(workflowId)?.computeTargetId ?? null;
   const orchestrator = orchestratorId
     ? await loadNode(organizationId, orchestratorId)
     : null;
-  const declared = declaredAgents(files);
-  const undeclared = taskRows
-    .flatMap((row) => (row.computeTarget ? [row.computeTarget] : []))
+  const declared = declaredAgents(files).filter(
+    (agent) => agent.computeTargetId !== orchestratorId
+  );
+  const targets =
+    projectRunnerIds.length > 0
+      ? await loadProjectTargets(organizationId, projectRunnerIds)
+      : await loadTaskTargets(organizationId, workflowId);
+  const undeclared = targets
     .filter(
       (target) =>
         target.id !== orchestratorId &&
@@ -121,12 +128,7 @@ function declaredAgents(
   return agents;
 }
 
-function undeclaredAgent(target: {
-  id: string;
-  machineName: string;
-  isOnline: boolean;
-  capabilities: unknown;
-}): WorkflowAgentMapAgent {
+function undeclaredAgent(target: AgentTarget): WorkflowAgentMapAgent {
   return {
     computeTargetId: target.id,
     name: target.machineName,
@@ -153,4 +155,36 @@ function compareAgents(
     return a.declared ? -1 : 1;
   }
   return a.name.localeCompare(b.name);
+}
+
+/** The project's Agents, whether or not they are online. */
+function loadProjectTargets(
+  organizationId: string,
+  computeTargetIds: string[]
+): Promise<AgentTarget[]> {
+  return withDb((db) =>
+    db.computeTarget.findMany({
+      where: { id: { in: computeTargetIds }, organizationId },
+      select: AGENT_TARGET_SELECT,
+    })
+  );
+}
+
+/** The Agents that ran a task of the workflow's cases. */
+async function loadTaskTargets(
+  organizationId: string,
+  workflowId: string
+): Promise<AgentTarget[]> {
+  const rows = await withDb((db) =>
+    db.orchestratorTask.findMany({
+      where: {
+        organizationId,
+        case: { workflowId },
+        computeTargetId: { not: null },
+      },
+      distinct: ["computeTargetId"],
+      select: { computeTarget: { select: AGENT_TARGET_SELECT } },
+    })
+  );
+  return rows.flatMap((row) => (row.computeTarget ? [row.computeTarget] : []));
 }

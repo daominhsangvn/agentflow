@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   workflowFindFirst: vi.fn(),
   taskFindMany: vi.fn(),
   targetFindFirst: vi.fn(),
+  targetFindMany: vi.fn(),
+  loadProjectRunnerIds: vi.fn(),
   loadOrchestratorWorkflows: vi.fn(),
   listForProject: vi.fn(),
   agentKind: vi.fn(),
@@ -21,7 +23,10 @@ vi.mock("@repo/database", () => ({
     fn({
       workflow: { findFirst: mocks.workflowFindFirst },
       orchestratorTask: { findMany: mocks.taskFindMany },
-      computeTarget: { findFirst: mocks.targetFindFirst },
+      computeTarget: {
+        findFirst: mocks.targetFindFirst,
+        findMany: mocks.targetFindMany,
+      },
     }),
 }));
 vi.mock("@/lib/orchestrator/workflow-settings", () => ({
@@ -32,6 +37,9 @@ vi.mock("@/app/compute-targets/capabilities-service", () => ({
 }));
 vi.mock("@/app/compute-targets/fleet-service", () => ({
   agentKind: mocks.agentKind,
+}));
+vi.mock("@/app/projects/project-runner-selection", () => ({
+  loadProjectRunnerIds: mocks.loadProjectRunnerIds,
 }));
 
 function file(
@@ -58,6 +66,8 @@ describe("loadWorkflowAgentMap", () => {
     );
     mocks.listForProject.mockResolvedValue([]);
     mocks.taskFindMany.mockResolvedValue([]);
+    mocks.loadProjectRunnerIds.mockResolvedValue([]);
+    mocks.targetFindMany.mockResolvedValue([]);
     mocks.targetFindFirst.mockResolvedValue({
       id: "orch",
       machineName: "orchestrator-1",
@@ -72,7 +82,7 @@ describe("loadWorkflowAgentMap", () => {
     expect(mocks.listForProject).not.toHaveBeenCalled();
   });
 
-  it("lists declared agents then undeclared task targets", async () => {
+  it("lists declared agents then undeclared task targets for a project without Agents", async () => {
     mocks.listForProject.mockResolvedValue([
       file("qc", "qc-runner", RunnerCapabilitiesSource.Toolkit, "QC"),
       file("ba", "ba-runner", RunnerCapabilitiesSource.Personal, "BA"),
@@ -136,6 +146,54 @@ describe("loadWorkflowAgentMap", () => {
         isOnline: false,
         role: null,
         kind: AgentKind.Personal,
+        declared: false,
+      },
+    ]);
+  });
+
+  it("lists exactly the project's Agents, offline or undeclared ones too", async () => {
+    mocks.loadProjectRunnerIds.mockResolvedValue(["qc", "dev", "orch"]);
+    mocks.listForProject.mockResolvedValue([
+      file("qc", "qc-runner", RunnerCapabilitiesSource.Toolkit, "QC"),
+    ]);
+    mocks.agentKind.mockReturnValue(AgentKind.Automatic);
+    mocks.targetFindMany.mockResolvedValue([
+      { id: "qc", machineName: "qc-runner", isOnline: true, capabilities: {} },
+      { id: "dev", machineName: "dev-box", isOnline: false, capabilities: {} },
+      {
+        id: "orch",
+        machineName: "orchestrator-1",
+        isOnline: true,
+        capabilities: {},
+      },
+    ]);
+
+    const map = await loadWorkflowAgentMap(ORG, WF);
+
+    expect(mocks.loadProjectRunnerIds).toHaveBeenCalledWith(ORG, {
+      projectId: PROJECT,
+    });
+    expect(mocks.targetFindMany.mock.calls[0][0].where).toEqual({
+      id: { in: ["qc", "dev", "orch"] },
+      organizationId: ORG,
+    });
+    // A removed Agent that ran a task is not looked up.
+    expect(mocks.taskFindMany).not.toHaveBeenCalled();
+    expect(map?.agents).toEqual([
+      {
+        computeTargetId: "qc",
+        name: "qc-runner",
+        isOnline: true,
+        role: "QC",
+        kind: AgentKind.Automatic,
+        declared: true,
+      },
+      {
+        computeTargetId: "dev",
+        name: "dev-box",
+        isOnline: false,
+        role: null,
+        kind: AgentKind.Automatic,
         declared: false,
       },
     ]);
