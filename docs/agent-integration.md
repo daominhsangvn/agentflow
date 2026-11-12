@@ -104,7 +104,16 @@ Good questions (people read them in a Jira comment, out of context):
   again.
 - Batch them: one task stop costs a round trip with people.
 
+Where the questions go is up to the orchestrator's rules: on the ticket, on the
+case page, or, when the workflow grants `teams: [ask]`, in a Teams channel
+that @mentions the people who should answer (`teams_ask`). The agent does
+not choose: it writes the same `questions.json`. Only a reply that mentions the
+bot and comes from a mentioned person is taken as the answer.
+
 ### 3.2 The answers come back (resume)
+
+Answers from Teams arrive the same way as answers on the ticket (with the
+question ids); one reply to a multi-question ask answers all of its questions.
 
 ```markdown
 ## Resuming with answers
