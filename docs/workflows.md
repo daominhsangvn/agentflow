@@ -1948,8 +1948,16 @@ One connection, two independent parts (at least one set):
   The Teams app manifest (template in the setup instructions) grants the RSC
   permission `ChannelMessage.Read.Group`.
 
-Project settings: `channels` (links or ids, stored lower-cased); scope
-`microsoft_teams:{tenantId}:{channelId}`. No channels: post-only.
+Local end-to-end testing without Azure: see "Microsoft Teams emulator (manual e2e)" in
+[e2e.md](e2e.md).
+
+Project settings: `channels` (links or ids, stored lower-cased) and
+`askChannels` (`name = <channel link or id>`, name optional for a link, unique
+per connection); scope `microsoft_teams:{tenantId}:{channelId}`, ask channels
+are claimed too. No channels: post-only. `askChannels` are the channels the
+orchestrator's `teams_ask` may post in (grant `[ask]`, see
+[orchestrator.md](orchestrator.md)); do not use them in a non-orchestrated
+`bot_mentioned` trigger with an empty channel filter, which fires there too.
 
 Trigger `microsoft_teams.bot_mentioned` — a `message` activity in a channel
 of the bot's tenant that @mentions the bot (new post or thread reply; group

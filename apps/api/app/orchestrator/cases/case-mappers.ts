@@ -25,6 +25,8 @@ import {
   orchestratorDecisionDraftResultSchema,
   orchestratorDecisionDraftSchema,
   readOrchestratorMessageAnsweredTaskIds,
+  readOrchestratorMessageAttachments,
+  readOrchestratorMessageTeamsAskPeople,
   readOrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
 import { z } from "zod";
@@ -252,6 +254,7 @@ function toConversation(
 function toMessage(
   row: CaseDetailRow["conversations"][number]["messages"][number]
 ): OrchestratorCaseMessage {
+  const people = readOrchestratorMessageTeamsAskPeople(row.payload);
   return {
     id: row.id,
     conversationId: row.conversationId,
@@ -264,6 +267,8 @@ function toMessage(
     via: readOrchestratorMessageVia(row.payload),
     answeredTaskIds: readOrchestratorMessageAnsweredTaskIds(row.payload),
     toAgentId: readMessageToAgent(row.payload)?.computeTargetId ?? null,
+    attachments: readOrchestratorMessageAttachments(row.payload),
+    teamsAsk: people ? { people } : null,
   };
 }
 

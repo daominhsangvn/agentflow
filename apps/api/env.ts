@@ -50,6 +50,11 @@ export const env = createEnv({
     RELAY_API_URL: z.url().optional(),
     SLACK_BOT_TOKEN: z.string().optional(),
     SLACK_SIGNING_SECRET: z.string().optional(),
+    /**
+     * Dev only: local Teams emulator (scripts/dev/teams-emulator.mjs). Ignored in
+     * production. Never set in prod.
+     */
+    TEAMS_EMULATOR_URL: z.url().optional(),
   },
   client: {},
   runtimeEnv: {
@@ -59,5 +64,6 @@ export const env = createEnv({
     RELAY_API_URL: process.env.RELAY_API_URL,
     SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN,
     SLACK_SIGNING_SECRET: process.env.SLACK_SIGNING_SECRET,
+    TEAMS_EMULATOR_URL: process.env.TEAMS_EMULATOR_URL,
   },
 });

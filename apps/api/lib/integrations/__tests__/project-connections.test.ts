@@ -145,7 +145,7 @@ describe("project settings and scopes", () => {
 
     expect(settings).toEqual({
       ok: true,
-      value: { channels: ["19:abc@thread.tacv2"] },
+      value: { channels: ["19:abc@thread.tacv2"], askChannels: [] },
     });
     expect(
       projectScopeKeys(

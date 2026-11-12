@@ -1,6 +1,7 @@
 import {
   OrchestratorPageOperation,
   OrchestratorSourceOperation,
+  OrchestratorTeamsOperation,
 } from "@repo/api/src/types/orchestrator-grants";
 import {
   type SaveWorkflowInput,
@@ -60,6 +61,28 @@ vi.mock("@repo/database", () => {
             connectionId: "conn-wiki",
             credentialsEncrypted: null,
             connection: { provider: "confluence" },
+          },
+          {
+            id: "pc-teams",
+            projectId: IDS.project,
+            key: "teams",
+            name: "teams",
+            provider: "microsoft_teams",
+            settings: { askChannels: ["qa-backend = 19:a@thread.tacv2"] },
+            connectionId: "conn-teams",
+            credentialsEncrypted: null,
+            connection: { provider: "microsoft_teams" },
+          },
+          {
+            id: "pc-teams-bare",
+            projectId: IDS.project,
+            key: "teams-bare",
+            name: "teams-bare",
+            provider: "microsoft_teams",
+            settings: {},
+            connectionId: "conn-teams-bare",
+            credentialsEncrypted: null,
+            connection: { provider: "microsoft_teams" },
           },
         ]),
     },
@@ -136,6 +159,31 @@ describe("validateWorkflowInput — orchestrated", () => {
     });
     expect(result.ok ? "" : result.error).toContain(
       "writes only Confluence pages"
+    );
+  });
+
+  it("accepts a Teams connection with ask channels granted ask", async () => {
+    const result = await validate(WorkflowAgentMode.Orchestrated, null, [], {
+      teams: [OrchestratorTeamsOperation.Ask],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses ask on a connection that is not Microsoft Teams", async () => {
+    const result = await validate(WorkflowAgentMode.Orchestrated, null, [], {
+      wiki: [OrchestratorTeamsOperation.Ask],
+    });
+    expect(result.ok ? "" : result.error).toContain(
+      "ask is for a Microsoft Teams connection"
+    );
+  });
+
+  it("refuses ask when the Teams connection has no Ask channels", async () => {
+    const result = await validate(WorkflowAgentMode.Orchestrated, null, [], {
+      "teams-bare": [OrchestratorTeamsOperation.Ask],
+    });
+    expect(result.ok ? "" : result.error).toContain(
+      "needs at least one Ask channel"
     );
   });
 

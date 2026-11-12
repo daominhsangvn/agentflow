@@ -12,7 +12,11 @@ import { log } from "@repo/observability/log";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import { createProviderContext } from "@/lib/integrations/connection-service";
 import type { SourceItemFile } from "@/lib/integrations/types";
-import type { TaskFileRef } from "@/lib/orchestrator/task-files";
+import {
+  findCaseTaskFiles,
+  type TaskFileRef,
+} from "@/lib/orchestrator/task-files";
+import { TEAMS_ASK_ANCHOR_ARTIFACT } from "@/lib/orchestrator/teams-ask";
 import { scrubProviderError } from "@/lib/workflows/engine/errors";
 import { uploadReplyFiles } from "./attachments";
 import { latestMessageRef, replyTargetOf, replyThread } from "./threads";
@@ -111,7 +115,8 @@ export async function reply(
     context,
     text,
     posted.externalRef,
-    connection.record.id
+    connection.record.id,
+    attachments
   );
   return {
     ok: true,
@@ -140,9 +145,14 @@ export async function editReply(
         conversationId: context.conversationId,
         externalRef: input.reference,
       },
-      select: { id: true },
+      select: { id: true, artifact: true },
     })
   );
+  if (anchor?.artifact === TEAMS_ASK_ANCHOR_ARTIFACT) {
+    return refused(
+      "A teams_ask post cannot be edited: ask again with teams_ask."
+    );
+  }
   if (!(anchor && channel)) {
     return refused(
       "Edit only a message this conversation posted (the reference reply returned)."
@@ -184,10 +194,11 @@ async function recordReplySafely(
   context: TurnContext,
   text: string,
   externalRef: string | null,
-  connectionId: string
+  connectionId: string,
+  attachments: TaskFileRef[]
 ): Promise<boolean> {
   try {
-    await recordReply(context, text, externalRef, connectionId);
+    await recordReply(context, text, externalRef, connectionId, attachments);
     return true;
   } catch (error) {
     log.error(`${LOG_PREFIX} reply posted but not recorded in the history`, {
@@ -202,7 +213,8 @@ async function recordReply(
   context: TurnContext,
   text: string,
   externalRef: string | null,
-  connectionId: string
+  connectionId: string,
+  attachments: TaskFileRef[]
 ): Promise<void> {
   const provider = context.channel?.item.provider ?? "agentflow";
   await withDb((db) =>
@@ -217,6 +229,7 @@ async function recordReply(
         externalRef,
         dedupKey: `reply:${context.turnId}:${externalRef ?? Date.now()}`,
         turnId: context.turnId,
+        ...(attachments.length > 0 ? { payload: { attachments } } : {}),
       },
     })
   );
@@ -262,10 +275,13 @@ async function replyOnCasePage(
   attachments: TaskFileRef[],
   replyTo: string | undefined
 ): Promise<ToolOutcome> {
+  let names: string[] = [];
   if (attachments.length > 0) {
-    return refused(
-      "A reply on the case page takes no files: the task's files are listed there."
-    );
+    const found = await findCaseTaskFiles(context.caseId, attachments);
+    if (!found.ok) {
+      return refused(found.error);
+    }
+    names = found.value.map((file) => file.name);
   }
   await withDb((db) =>
     db.orchestratorMessage.create({
@@ -280,6 +296,7 @@ async function replyOnCasePage(
         payload: {
           via: OrchestratorMessageVia.AgentFlow,
           replyTo: replyTo ?? null,
+          ...(attachments.length > 0 ? { attachments } : {}),
         },
         dedupKey: `reply:${context.turnId}:${randomUUID()}`,
         turnId: context.turnId,
@@ -288,6 +305,10 @@ async function replyOnCasePage(
   );
   return {
     ok: true,
-    output: { posted: true, where: OrchestratorReplyTarget.CasePage },
+    output: {
+      posted: true,
+      where: OrchestratorReplyTarget.CasePage,
+      ...(names.length > 0 ? { attached: names } : {}),
+    },
   };
 }

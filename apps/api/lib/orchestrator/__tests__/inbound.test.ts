@@ -2,6 +2,7 @@ import { IntegrationProviderKey } from "@repo/api/src/types/integration";
 import {
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
+  OrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -13,8 +14,10 @@ import {
   PROJECT_ID,
 } from "@/__tests__/support/orchestrator/orchestrator-db.test-fake";
 import type { LoadedConnection } from "@/lib/integrations/connection-service";
+import { TeamsTriggerType } from "@/lib/integrations/providers/microsoft-teams/constants";
 import type { InboundEvent } from "@/lib/integrations/types";
 import { routeToOrchestrator } from "@/lib/orchestrator/inbound";
+import { TEAMS_ASK_ANCHOR_ARTIFACT } from "@/lib/orchestrator/teams-ask";
 
 /**
  * External requests reach an orchestrated workflow's orchestrator by a matching trigger of
@@ -736,6 +739,200 @@ describe("routeToOrchestrator", () => {
       );
 
       expect(fake.cases).toHaveLength(2);
+    });
+  });
+
+  describe("teams_ask threads", () => {
+    const ASK_ROOT = "1700000000000";
+
+    async function setUpAsk(questionIds: string[]) {
+      const [first] = await routeToOrchestrator({
+        connection: connection(),
+        event: mention(),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: WORKFLOWS,
+      });
+      const conversationId = first?.conversationId ?? "";
+      fake.addTask("task-1", questionIds.length);
+      fake.addAnchor(
+        conversationId,
+        IntegrationProviderKey.MicrosoftTeams,
+        ASK_ROOT,
+        {
+          artifact: TEAMS_ASK_ANCHOR_ARTIFACT,
+          taskId: "task-1",
+          ...(questionIds.length === 1 ? { questionId: questionIds[0] } : {}),
+        }
+      );
+      fake.messages.push({
+        id: "ask-message",
+        conversationId,
+        organizationId: ORG_ID,
+        origin: OrchestratorMessageOrigin.Internal,
+        externalRef: ASK_ROOT,
+        dedupKey: "teams_ask:turn:root",
+        createdAt: new Date(),
+        payload: {
+          teamsAsk: {
+            channelId: "19:qa@thread.tacv2",
+            mentions: [
+              {
+                email: "an@x.test",
+                id: "29:an",
+                aadObjectId: "aad-an",
+                name: "An",
+              },
+            ],
+            questions: questionIds.map((questionId) => ({
+              taskId: "task-1",
+              questionId,
+            })),
+          },
+        },
+      });
+      return conversationId;
+    }
+
+    function teamsReply(
+      actorId: string,
+      triggerType: string,
+      id = "t-1"
+    ): InboundEvent {
+      return mention({
+        triggerType,
+        dedupKey: `teams:${id}`,
+        actor: { id: actorId, displayName: "Someone" },
+        message: { id, parentId: ASK_ROOT, text: "Use 4 hours" },
+      });
+    }
+
+    function route(event: InboundEvent, workflows = WORKFLOWS) {
+      return routeToOrchestrator({
+        connection: connection(),
+        event,
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows,
+      });
+    }
+
+    it("ignores a bot mention in a thread without an ask anchor", async () => {
+      const routed = await route(
+        mention({
+          triggerType: TeamsTriggerType.BotMentioned,
+          message: { id: "t-0", parentId: "random-root", text: "hi" },
+        }),
+        []
+      );
+      expect(routed).toEqual([]);
+      expect(fake.messages).toHaveLength(0);
+      expect(fake.cases).toHaveLength(0);
+      expect(fake.conversations).toHaveLength(0);
+    });
+
+    it("ignores a bot mention that starts a new Teams thread when no trigger matches", async () => {
+      const routed = await route(
+        mention({
+          triggerType: TeamsTriggerType.BotMentioned,
+          message: { id: "t-0", parentId: null, text: "hi" },
+        }),
+        []
+      );
+      expect(routed).toEqual([]);
+      expect(fake.messages).toHaveLength(0);
+      expect(fake.cases).toHaveLength(0);
+      expect(fake.conversations).toHaveLength(0);
+    });
+
+    it("names the reason when a reply in an ask thread is dropped", async () => {
+      await setUpAsk(["q1"]);
+      const reasons: string[] = [];
+      const routed = await routeToOrchestrator({
+        connection: connection(),
+        event: teamsReply("aad-other", TeamsTriggerType.BotMentioned, "t-9"),
+        projectConnectionId: PROJECT_CONNECTION_ID,
+        workflows: [],
+        onIgnored: (detail) => reasons.push(detail),
+      });
+      expect(routed).toEqual([]);
+      expect(reasons).toEqual([
+        "Teams ask thread: the reply is not from a person the question was asked to",
+      ]);
+    });
+
+    it("routes a bot-mentioning reply from the asked person to the asking conversation", async () => {
+      const conversationId = await setUpAsk(["q1"]);
+
+      const [routed] = await route(
+        teamsReply("aad-an", TeamsTriggerType.BotMentioned),
+        []
+      );
+
+      expect(routed?.conversationId).toBe(conversationId);
+      expect(fake.messages.at(-1)?.payload).toMatchObject({
+        via: OrchestratorMessageVia.Teams,
+        taskId: "task-1",
+        questionId: "q1",
+      });
+      expect(fake.tasks[0]?.openQuestionCount).toBe(0);
+    });
+
+    it("accepts the asked person by their Teams id", async () => {
+      await setUpAsk(["q1"]);
+      const routed = await route(
+        teamsReply("29:AN", TeamsTriggerType.BotMentioned),
+        []
+      );
+      expect(routed).toHaveLength(1);
+    });
+
+    it("covers every relayed question with the first accepted reply", async () => {
+      await setUpAsk(["q1", "q2"]);
+      await route(teamsReply("aad-an", TeamsTriggerType.BotMentioned), []);
+      expect(fake.tasks[0]?.openQuestionCount).toBe(0);
+      expect(fake.messages.at(-1)?.payload).toMatchObject({
+        questionIds: ["q1", "q2"],
+      });
+    });
+
+    it("does not subtract a question that was already answered elsewhere", async () => {
+      const conversationId = await setUpAsk(["q1", "q2"]);
+      const task = fake.tasks[0];
+      if (task) {
+        task.openQuestionCount = 3;
+      }
+      fake.messages.push({
+        id: "ticket-answer",
+        conversationId,
+        organizationId: ORG_ID,
+        origin: OrchestratorMessageOrigin.External,
+        dedupKey: "ticket-answer",
+        createdAt: new Date(),
+        payload: { taskId: "task-1", questionId: "q1" },
+      });
+      await route(teamsReply("aad-an", TeamsTriggerType.BotMentioned), []);
+      expect(fake.tasks[0]?.openQuestionCount).toBe(2);
+    });
+
+    it("drops a thread reply that does not mention the bot", async () => {
+      await setUpAsk(["q1"]);
+      const before = fake.messages.length;
+      const routed = await route(
+        teamsReply("aad-an", "microsoft_teams.thread_reply"),
+        []
+      );
+      expect(routed).toEqual([]);
+      expect(fake.messages).toHaveLength(before);
+      expect(fake.tasks[0]?.openQuestionCount).toBe(1);
+    });
+
+    it("drops a bot mention from someone who was not asked, whatever workflow matched", async () => {
+      await setUpAsk(["q1"]);
+      const before = fake.messages.length;
+      const routed = await route(
+        teamsReply("aad-binh", TeamsTriggerType.BotMentioned)
+      );
+      expect(routed).toEqual([]);
+      expect(fake.messages).toHaveLength(before);
     });
   });
 });

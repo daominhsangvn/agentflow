@@ -52,6 +52,14 @@ export function buildTeamsSetupInstructions(
     "1. Add this connection to a project and list the **channels** (links or ids) whose mentions start the project's workflows.",
     "2. In a workflow add the trigger **Bot mentioned in a channel** on that project connection.",
     "3. Answer in the thread with the action `microsoft_teams.reply` (e.g. `on: workflow.triggered` to say the bot is on it, `on: workflow.completed` with the result). Agents can answer too when the workflow grants `source: [comment]`.",
+    "",
+    "### 4. Let the orchestrator ask people",
+    "",
+    "1. In the project connection add **Ask channels**, one per entry: `name = <channel link>` (Teams: channel **...** > **Get link to channel**). The name may be left out for a link; a bare channel id needs one.",
+    "2. In the orchestrated workflow grant `connections: { <this connection's key>: [ask] }`.",
+    "3. In the orchestrator rules write which channel each kind of question goes to (e.g. backend questions to `qa-backend`) and the email of each person to ask.",
+    "",
+    "The bot must be installed in the team of each ask channel; private channels are not supported. Only replies that mention the bot and come from a mentioned person reach the case.",
   ].join("\n");
 }
 

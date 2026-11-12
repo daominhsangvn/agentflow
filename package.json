@@ -40,7 +40,9 @@
     "start-apps": "turbo dev",
     "check-deps": "npx check-dependency-version-consistency",
     "storage:init": "node scripts/storage-init.mjs",
-    "local-git:init": "node scripts/local-git-init.mjs"
+    "local-git:init": "node scripts/local-git-init.mjs",
+    "teams:emulator": "node scripts/dev/teams-emulator.mjs",
+    "teams:send": "node scripts/dev/teams-send.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.2",

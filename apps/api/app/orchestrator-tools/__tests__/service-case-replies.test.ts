@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   connections: {} as Record<string, string[] | "read">,
   external: [] as Row[],
   replyOnItem: vi.fn(),
+  findCaseTaskFiles: vi.fn(),
+  anchor: null as Row | null,
 }));
 
 vi.mock("@repo/database", () => {
@@ -72,7 +74,10 @@ vi.mock("@repo/database", () => {
           ) ?? null
         ),
     },
-    orchestratorAnchor: { create: () => Promise.resolve({}) },
+    orchestratorAnchor: {
+      create: () => Promise.resolve({}),
+      findFirst: () => Promise.resolve(mocks.anchor),
+    },
     organization: { findUnique: () => Promise.resolve({ slug: "agentflow" }) },
   };
   return { withDb: (fn: (client: unknown) => unknown) => fn(db) };
@@ -87,6 +92,19 @@ vi.mock("@/lib/orchestrator/supersede", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/orchestrator/supersede")>()),
   turnSuperseded: () => Promise.resolve(false),
 }));
+vi.mock("@/lib/orchestrator/task-files", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/orchestrator/task-files")>()),
+  findCaseTaskFiles: mocks.findCaseTaskFiles,
+}));
+vi.mock(
+  "@/app/orchestrator-tools/service/attachments",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/app/orchestrator-tools/service/attachments")
+    >()),
+    uploadReplyFiles: () => Promise.resolve({ ok: true, value: [] }),
+  })
+);
 vi.mock("@/lib/orchestrator/case-render", () => ({
   renderCase: () => Promise.resolve("# LD-7"),
 }));
@@ -124,6 +142,11 @@ beforeEach(() => {
   mocks.messages = [];
   mocks.connections = {};
   mocks.external = [FROM_CASE_PAGE];
+  mocks.anchor = null;
+  mocks.findCaseTaskFiles.mockResolvedValue({
+    ok: true,
+    value: [{ name: "a.md" }],
+  });
   mocks.replyOnItem.mockResolvedValue({ ok: true, externalRef: "900" });
 });
 
@@ -184,15 +207,77 @@ describe("replies to case page messages", () => {
     );
   });
 
-  it("takes no files on the case page", async () => {
+  it("shows task files under a case page reply", async () => {
+    const attachments = [{ taskId: TASK_ID, name: "a.md" }];
     const outcome = await call(OrchestratorToolName.Reply, {
       text: "Done",
-      attachments: [{ taskId: TASK_ID, name: "a.md" }],
+      attachments,
+    });
+    expect(outcome).toMatchObject({ ok: true, output: { attached: ["a.md"] } });
+    expect(mocks.messages[0]).toMatchObject({
+      payload: expect.objectContaining({ attachments }),
+    });
+  });
+
+  it("refuses a file that is not the case's and stores nothing", async () => {
+    mocks.findCaseTaskFiles.mockResolvedValue({ ok: false, error: "no file" });
+    const outcome = await call(OrchestratorToolName.Reply, {
+      text: "Done",
+      attachments: [{ taskId: TASK_ID, name: "x.md" }],
     });
     expect(outcome.ok).toBe(false);
     expect(
       mocks.messages.every((m) => m.kind !== OrchestratorMessageKind.Reply)
     ).toBe(true);
+  });
+
+  it("records the attachments of a thread reply", async () => {
+    mocks.connections = {
+      source: [
+        OrchestratorSourceOperation.Comment,
+        OrchestratorSourceOperation.Attach,
+      ],
+    };
+    mocks.external = [FROM_JIRA];
+    const attachments = [{ taskId: TASK_ID, name: "a.md" }];
+    const outcome = await call(OrchestratorToolName.Reply, {
+      text: "Done",
+      attachments,
+    });
+    expect(outcome.ok).toBe(true);
+    expect(mocks.messages[0]).toMatchObject({ payload: { attachments } });
+  });
+
+  it("does not thread under a Teams answer", async () => {
+    mocks.connections = { source: [OrchestratorSourceOperation.Comment] };
+    mocks.external = [
+      {
+        externalRef: "teams-1",
+        payload: { via: OrchestratorMessageVia.Teams, parentId: "root" },
+      },
+      FROM_JIRA,
+    ];
+    await call(OrchestratorToolName.Reply, {
+      text: "Done",
+      where: OrchestratorReplyTarget.Thread,
+    });
+    expect(mocks.replyOnItem).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ parentId: "700" })
+    );
+  });
+
+  it("refuses to edit a teams_ask post", async () => {
+    mocks.connections = { source: [OrchestratorSourceOperation.Comment] };
+    mocks.anchor = { id: "a1", artifact: "teams_ask" };
+    const outcome = await call(OrchestratorToolName.EditReply, {
+      reference: "root",
+      text: "x",
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("teams_ask"),
+    });
   });
 });
 

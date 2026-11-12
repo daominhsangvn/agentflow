@@ -3,9 +3,11 @@ import {
   OrchestratorCaseStatus,
   OrchestratorMessageKind,
   OrchestratorMessageOrigin,
+  OrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
 import { type Prisma, type TransactionClient, withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
+import { z } from "zod";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import type { LoadedConnection } from "@/lib/integrations/connection-service";
 import type { InboundEvent } from "@/lib/integrations/types";
@@ -18,6 +20,13 @@ import {
   readChannel,
   withLatestExtras,
 } from "./channel";
+import {
+  checkTeamsAskReply,
+  describeTeamsAskIgnored,
+  readTeamsAsk,
+  TEAMS_ASK_ANCHOR_ARTIFACT,
+  type TeamsAskPayload,
+} from "./teams-ask";
 import { ticketChangeMessage } from "./ticket-change";
 import {
   loadOrchestratorWorkflows,
@@ -51,6 +60,8 @@ export type OrchestratorRouteInput = {
   projectConnectionId: string;
   /** Orchestrated workflows whose trigger matched the event. */
   workflows: ReadonlyArray<{ workflowId: string; projectId: string }>;
+  /** Called with the reason when the event is dropped on purpose. */
+  onIgnored?: (detail: string) => void;
 };
 
 export type OrchestratorRouteResult = {
@@ -71,7 +82,14 @@ type RouteTarget = {
   /** It only continues a channel conversation: no trigger, no anchor. */
   continued: boolean;
   /** The task question the anchor was made for: a reply answers it. */
-  answers: { taskId: string; questionId: string | null } | null;
+  answers: {
+    taskId: string;
+    questionId: string | null;
+    /** Every question a teams_ask relayed (more than one: one reply covers them all). */
+    questionIds?: string[];
+  } | null;
+  /** The reply answers a teams_ask post. */
+  teamsAsk?: boolean;
 };
 
 type KnownConversation = {
@@ -143,6 +161,7 @@ async function resolveTargets(
             },
           },
           select: {
+            artifact: true,
             taskId: true,
             questionId: true,
             conversation: {
@@ -156,6 +175,9 @@ async function resolveTargets(
         })
       )
     : null;
+  if (anchored?.artifact === TEAMS_ASK_ANCHOR_ARTIFACT && parentId) {
+    return await askTargets(input, anchored.conversation, parentId);
+  }
   const targets: RouteTarget[] = [];
   if (anchored) {
     targets.push(anchoredTarget(anchored));
@@ -238,6 +260,7 @@ async function deliver(args: {
     workflowNames: [workflow.name],
     debounceSeconds: workflow.debounceSeconds,
     answers: target.answers,
+    teamsAsk: target.teamsAsk === true,
   });
   if (created && workflow.debounceSeconds === 0) {
     waitUntil(advanceConversation(conversationId));
@@ -314,6 +337,7 @@ async function recordMessage(input: {
   workflowNames: string[];
   debounceSeconds: number;
   answers: RouteTarget["answers"];
+  teamsAsk: boolean;
 }): Promise<boolean> {
   const { event } = input;
   // One comment can raise several events (a reply that mentions the bot): it
@@ -347,8 +371,12 @@ async function recordMessage(input: {
               ? {
                   taskId: input.answers.taskId,
                   questionId: input.answers.questionId,
+                  ...((input.answers.questionIds?.length ?? 0) > 1
+                    ? { questionIds: input.answers.questionIds }
+                    : {}),
                 }
               : {}),
+            ...(input.teamsAsk ? { via: OrchestratorMessageVia.Teams } : {}),
           },
         },
         select: { id: true },
@@ -357,6 +385,7 @@ async function recordMessage(input: {
         organizationId: input.organizationId,
         conversationId: input.conversationId,
         messageId: created.id,
+        parentId: event.message?.parentId ?? null,
         answers: input.answers,
       });
       await tx.orchestratorConversation.updateMany({
@@ -388,10 +417,15 @@ async function coverAskedQuestion(
     organizationId: string;
     conversationId: string;
     messageId: string;
+    parentId: string | null;
     answers: RouteTarget["answers"];
   }
 ): Promise<void> {
   const { answers } = input;
+  if ((answers?.questionIds?.length ?? 0) > 1) {
+    await coverAskedQuestions(tx, input);
+    return;
+  }
   if (!answers?.questionId) {
     return;
   }
@@ -458,3 +492,115 @@ function anchoredTarget(anchored: {
   }
   return target;
 }
+
+/**
+ * A reply in a teams_ask thread: only the asked people who mention the bot
+ * count. A rejected reply is dropped for every workflow.
+ */
+async function askTargets(
+  input: OrchestratorRouteInput,
+  conversation: KnownConversation,
+  parentId: string
+): Promise<RouteTarget[]> {
+  const { event } = input;
+  const message = await withDb((db) =>
+    db.orchestratorMessage.findFirst({
+      where: {
+        conversationId: conversation.id,
+        externalRef: parentId,
+        origin: OrchestratorMessageOrigin.Internal,
+      },
+      select: { payload: true },
+    })
+  );
+  const ask = readTeamsAsk(message?.payload);
+  const checked = checkTeamsAskReply(event, ask);
+  if (!(checked.ok && ask)) {
+    log.info(`${LOG_PREFIX} teams_ask reply ignored`, {
+      reason: checked.ok ? undefined : checked.reason,
+      dedupKey: event.dedupKey,
+      conversationId: conversation.id,
+    });
+    if (!checked.ok) {
+      input.onIgnored?.(describeTeamsAskIgnored(checked.reason));
+    }
+    return [];
+  }
+  return [{ ...toKnownTarget(conversation, false), ...askAnswers(ask) }];
+}
+
+function askAnswers(
+  ask: TeamsAskPayload
+): Pick<RouteTarget, "answers" | "teamsAsk"> {
+  const first = ask.questions[0];
+  if (!first) {
+    return { answers: null, teamsAsk: true };
+  }
+  return {
+    answers: {
+      taskId: first.taskId,
+      questionId: ask.questions.length === 1 ? first.questionId : null,
+      questionIds: ask.questions.map((question) => question.questionId),
+    },
+    teamsAsk: true,
+  };
+}
+
+/** The first accepted reply to a multi-question ask covers all of its questions. */
+async function coverAskedQuestions(
+  tx: TransactionClient,
+  input: {
+    organizationId: string;
+    conversationId: string;
+    messageId: string;
+    parentId: string | null;
+    answers: RouteTarget["answers"];
+  }
+): Promise<void> {
+  const { answers } = input;
+  if (!(answers && input.parentId)) {
+    return;
+  }
+  const prior = await tx.orchestratorMessage.findMany({
+    where: {
+      conversationId: input.conversationId,
+      id: { not: input.messageId },
+      payload: { path: ["taskId"], equals: answers.taskId },
+    },
+    select: { payload: true },
+  });
+  const answered = new Set<string>();
+  for (const message of prior) {
+    const parsed = answeredPayloadSchema.safeParse(message.payload);
+    if (parsed.success) {
+      for (const id of [
+        ...(parsed.data.questionId ? [parsed.data.questionId] : []),
+        ...(parsed.data.questionIds ?? []),
+      ]) {
+        answered.add(id);
+      }
+    }
+  }
+  const count = (answers.questionIds ?? []).filter(
+    (id) => !answered.has(id)
+  ).length;
+  if (count === 0) {
+    return;
+  }
+  const where = { id: answers.taskId, organizationId: input.organizationId };
+  const full = await tx.orchestratorTask.updateMany({
+    where: { ...where, openQuestionCount: { gte: count } },
+    data: { openQuestionCount: { decrement: count } },
+  });
+  if (full.count === 0) {
+    await tx.orchestratorTask.updateMany({
+      where: { ...where, openQuestionCount: { gt: 0 } },
+      data: { openQuestionCount: 0 },
+    });
+  }
+}
+
+const answeredPayloadSchema = z.object({
+  questionId: z.string().optional(),
+  questionIds: z.array(z.string()).optional(),
+});

@@ -85,6 +85,82 @@ throwaway HTTP server the test starts on `127.0.0.1`: a pre action
 
 Everything it creates is deleted in `finally`.
 
+## Microsoft Teams emulator (manual e2e)
+
+A dev-only stand-in for Teams, to run the `teams_ask` flow end to end over
+HTTP without Azure. Not part of the Playwright suite.
+
+`TEAMS_EMULATOR_URL` (in `apps/api/.env.local`, e.g. `http://localhost:3990`)
+replaces, for every Teams connection of that API process: the Bot Framework
+OpenID metadata and keys, the Entra token URL, the Bot Connector host and
+global serviceUrl, and the Graph base URL. The JWT issuer
+(`https://api.botframework.com`) and audience (the bot App ID) are unchanged;
+the emulator signs with its own RSA key. It is ignored (with one warning) when
+`NODE_ENV=production`. Never set it in production or in
+`deploy/compose/docker-compose.prod.yml`.
+
+Start (restart the API after setting the variable):
+
+```bash
+node scripts/dev/teams-emulator.mjs --port 3990 --app-id <guid> --tenant-id <guid>
+# or: pnpm teams:emulator -- --port 3990 --app-id <guid> --tenant-id <guid>
+```
+
+Flags: `--port`, `--app-id`, `--tenant-id`, `--team-id`, `--users <json>`
+(default `scripts/dev/teams-emulator.users.json`: An `an@contoso.test`, Binh
+`binh@contoso.test`, Chi UPN `chi@contoso.test` / email `chi.nguyen@contoso.test`).
+State is in memory. Unit test: `node --test scripts/dev/teams-emulator.test.mjs`.
+
+Scenario:
+
+1. Teams connection: bot App ID and tenant ID = the emulator's, any client
+   secret, delivery Webhook; note its inbound URL. Project connection key
+   `teams`, Channels one request channel (`19:requests@thread.tacv2`), Ask channels two chips:
+   `qa-backend = 19:qabackend@thread.tacv2` and `ba = 19:ba@thread.tacv2`.
+   A bare `19:x@thread.tacv2` chip is refused (it needs a name).
+2. Orchestrated workflow with `agent.orchestrator.connections: { source: [comment], teams: [ask] }`
+   and rules with an email table (`| Jira user | email |`: An -> an@contoso.test,
+   Binh -> binh@contoso.test) and the channel rule "Backend/API questions: ask
+   An in qa-backend. Requirement questions: ask Binh in ba." Its trigger is
+   `microsoft_teams.bot_mentioned` with config `channels: [19:requests@thread.tacv2]`,
+   so a mention in an ask channel does not start a case. Do not use the HTTP
+   request trigger: its endpoints are webhook/run-mode only, an orchestrated
+   workflow has no project-connection route for it and the delivery is "No
+   enabled trigger matched".
+3. Start the case:
+   `node scripts/dev/teams-send.mjs --root new --channel 19:requests@thread.tacv2 --mention-bot --text "..." --as an@contoso.test --inbound <inboundUrl>`.
+   The agent command must return questions (e.g. a test command writing
+   questions.json without commentId), e.g. "Which timeout should the API use?".
+4. The orchestrator calls `teams_ask` with `channel: "qa-backend"`, mentioning
+   `an@contoso.test`, with `questions [{taskId, questionId}]`. Expect:
+   `curl localhost:3990/control/messages` shows a root post in
+   `19:qabackend@thread.tacv2` (not `19:ba...`) with `<at>An</at>` and the mention
+   entity; the case page shows "Asked in Teams: An" and the file chips. A
+   requirement question ("Should half days count?") goes to `ba` mentioning Binh.
+5. Fake answer (`<rootId>` is the `id` of that root post):
+
+   ```bash
+   node scripts/dev/teams-send.mjs --inbound <inboundUrl> --as an@contoso.test \
+     --reply-to <rootId> --mention-bot --text "Use 4 hours"
+   ```
+
+   Expect: delivery accepted, the message on the asking case with `via teams`,
+   the task's open questions at 0, the next turn resumes the task.
+6. Spam cases. Each: the delivery is recorded as ignored, no message on any
+   case, no bot post in `/control/messages`:
+   a. `--root new --mention-bot` (a random new thread with no anchor and no
+      matching trigger) as any user: ignored, no reply, no case;
+   b. `--reply-to <rootId>` without `--mention-bot` as an@contoso.test;
+   c. `--reply-to <rootId> --mention-bot` as binh@contoso.test (not tagged).
+
+   Case (a) is also an automated test: "ignores a bot mention that starts a new
+   Teams thread when no trigger matches" and "ignores a bot mention in a thread
+   without an ask anchor" in `apps/api/lib/orchestrator/__tests__/inbound.test.ts`.
+
+`teams-send.mjs` also takes `--channel <id>` (the channel of a new thread) and
+`--emulator <url>` (default `http://localhost:3990`); it prints
+`{ status, activityId, rootId }`.
+
 ## Unit tests for the helpers
 
 The helpers in `e2e/helpers/` have vitest tests in `e2e/helpers/__tests__/`

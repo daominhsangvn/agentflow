@@ -202,4 +202,27 @@ describe("orchestrator grants", () => {
     expect(text).not.toContain("Confluence publish: docs, notes");
     expect(text).not.toContain("read: docs");
   });
+
+  it("shows teams_ask only with an ask grant and mentions it in the instructions", async () => {
+    mocks.connections = { docs: [OrchestratorPageOperation.Publish] };
+    const without = await orchestratorToolService.describe(TOKEN);
+    if (!without.ok) {
+      throw new Error("unauthorized");
+    }
+    expect(without.value.tools.map((tool) => tool.name)).not.toContain(
+      OrchestratorToolName.TeamsAsk
+    );
+
+    mocks.connections = { teams: ["ask"] };
+    const granted = await orchestratorToolService.describe(TOKEN);
+    if (!granted.ok) {
+      throw new Error("unauthorized");
+    }
+    expect(granted.value.tools.map((tool) => tool.name)).toContain(
+      OrchestratorToolName.TeamsAsk
+    );
+    expect(granted.value.instructions).toContain(
+      "Teams ask: teams (teams_ask)"
+    );
+  });
 });

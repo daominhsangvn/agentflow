@@ -99,6 +99,12 @@ const DETAIL_ROW = {
           text: "second",
           turnId: null,
           createdAt: D("2026-10-23T08:02:00.000Z"),
+          payload: {
+            attachments: [{ taskId: "task-1", name: "PRD.md" }],
+            teamsAsk: {
+              mentions: [{ name: "An" }, { name: "Binh" }],
+            },
+          },
         },
         {
           id: "m1",
@@ -351,6 +357,14 @@ describe("orchestratorCaseService.get", () => {
     expect(conversation?.messages.map((m) => m.answeredTaskIds)).toEqual([
       ["task-1", "task-2"],
       [],
+    ]);
+    expect(conversation?.messages.map((m) => m.attachments)).toEqual([
+      [],
+      [{ taskId: "task-1", name: "PRD.md" }],
+    ]);
+    expect(conversation?.messages.map((m) => m.teamsAsk)).toEqual([
+      null,
+      { people: ["An", "Binh"] },
     ]);
     expect(conversation?.messages.map((m) => m.toAgentId)).toEqual([
       "r1",

@@ -5,6 +5,11 @@ import { vi } from "vitest";
 // If .env.local doesn't exist (e.g., in CI), this will silently fail
 config({ path: ".env.local" });
 
+// A developer's .env.local may point Teams at the local emulator
+// (scripts/dev/teams-emulator.mjs). Teams tests assert the real Microsoft
+// endpoints unless they set the variable themselves (endpoints/emulator tests).
+delete process.env.TEAMS_EMULATOR_URL;
+
 // DD_SERVICE identifies this process as the API service for telemetry/origin
 // resolution. Must be set before any test module imports
 // packages/observability/telemetry/origin.ts, which resolves ORIGIN once at

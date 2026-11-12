@@ -73,6 +73,7 @@ const BASE = {
     caseHandoff: false,
   },
   approvalsRequired: false,
+  teamsAskChannels: [],
 };
 
 describe("buildTurnPrompt", () => {
@@ -405,5 +406,77 @@ describe("buildTurnPrompt writes", () => {
 
   it("tells the orchestrator to set asked when it asked people", () => {
     expect(buildTurnPrompt(BASE)).toContain("set asked");
+  });
+
+  describe("teams_ask", () => {
+    const grants = resolveOrchestratorGrants({ teams: ["ask"] });
+    const channels = [
+      {
+        alias: "qa-backend",
+        channelId: "19:a@thread.tacv2",
+        connectionKey: "teams",
+        projectConnectionId: "pc-1",
+      },
+      {
+        alias: "ba",
+        channelId: "19:b@thread.tacv2",
+        connectionKey: "teams",
+        projectConnectionId: "pc-1",
+      },
+    ];
+
+    it("lists the tool and the allowed channels only with an ask grant", () => {
+      const withGrant = buildTurnPrompt({
+        ...BASE,
+        grants,
+        teamsAskChannels: channels,
+      });
+      expect(withGrant).toContain(OrchestratorToolName.TeamsAsk);
+      expect(withGrant).toContain("qa-backend (teams)");
+      expect(withGrant).toContain("ba (teams)");
+      expect(withGrant).toContain("never guess an address");
+      expect(buildTurnPrompt(BASE)).not.toContain(
+        OrchestratorToolName.TeamsAsk
+      );
+    });
+
+    it("tells not to call it when no ask channel is set", () => {
+      expect(buildTurnPrompt({ ...BASE, grants })).toContain("do not call it");
+    });
+
+    it("renders a Teams answer with its task and questions", () => {
+      const prompt = buildTurnPrompt({
+        ...BASE,
+        messages: [
+          {
+            origin: OrchestratorMessageOrigin.External,
+            kind: OrchestratorMessageKind.Message,
+            actor: "An",
+            text: "Use 4 hours",
+            createdAt: new Date("2026-10-23T08:00:00.000Z"),
+            payload: {
+              via: OrchestratorMessageVia.Teams,
+              taskId: "t1",
+              questionId: "q1",
+            },
+          },
+          {
+            origin: OrchestratorMessageOrigin.External,
+            kind: OrchestratorMessageKind.Message,
+            actor: "An",
+            text: "Both",
+            createdAt: new Date("2026-10-23T08:01:00.000Z"),
+            payload: {
+              via: OrchestratorMessageVia.Teams,
+              taskId: "t1",
+              questionIds: ["q1", "q2"],
+            },
+          },
+        ],
+      });
+      expect(prompt).toContain('via="teams"');
+      expect(prompt).toContain('task="t1" question="q1"');
+      expect(prompt).toContain('questions="q1,q2"');
+    });
   });
 });

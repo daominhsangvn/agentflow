@@ -29,9 +29,11 @@ export function askedQuestionsText(input: {
 }
 
 /** The task and question an inbound message payload answers, or null. */
-export function readAnsweredQuestion(
-  payload: unknown
-): { taskId: string; questionId: string | null } | null {
+export function readAnsweredQuestion(payload: unknown): {
+  taskId: string;
+  questionId: string | null;
+  questionIds: string[] | null;
+} | null {
   const parsed = answeredQuestionSchema.safeParse(payload);
   if (!parsed.success) {
     return null;
@@ -39,6 +41,7 @@ export function readAnsweredQuestion(
   return {
     taskId: parsed.data.taskId,
     questionId: parsed.data.questionId ?? null,
+    questionIds: parsed.data.questionIds ?? null,
   };
 }
 
@@ -53,4 +56,5 @@ export function askedQuestionNote(question: TaskQuestion): string {
 const answeredQuestionSchema = z.object({
   taskId: z.string().min(1),
   questionId: z.string().nullish(),
+  questionIds: z.array(z.string()).nullish(),
 });

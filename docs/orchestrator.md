@@ -109,6 +109,7 @@ asked where it belongs:
 | The event | Its conversation (`channelKey`) |
 |---|---|
 | A reply to an anchor (a message the orchestrator posted, or a comment an agent asked a question in) | the anchor's conversation |
+| A reply in a `teams_ask` thread (anchor `artifact = "teams_ask"`) | the asking conversation, only when it mentions the bot and comes from a mentioned person; otherwise dropped |
 | A Teams message (post or reply) | the Teams thread: `microsoft_teams:<thread key>` |
 | A Jira comment replying to another comment | that comment thread: `jira:<KEY>:comment:<parent id>` |
 | A Jira mention on the issue | the issue's top level: `jira:<KEY>:item` |
@@ -249,11 +250,14 @@ says what the orchestrator may write. Default `{}`.
 | `source` | `comment`, `attach` (needs `comment`), `transition`, `label`, `link` | `reply` / `edit_reply` / `request_decision` (`where: thread`) on the ticket; `reply attachments`; `source_item_transition`; `source_item_label`; `source_item_link`; the `draft` of `request_decision` (its comment needs `comment`, its files `attach`, its move `transition`) |
 | a Confluence key | `read` or `[publish]` | `page_get` and page files; `page_publish` (publish implies read). With several granted connections the call names `connection` |
 | `pull_requests` | `[open]` | `pull_request_open` |
+| a Teams key | `[ask]` | `teams_ask` (see "Asking people in Teams"). Not combined with `publish` on one key |
 
 A Teams thread takes only `comment`. Saving checks the grants
 (`workflow-validation.ts` `checkOrchestratorGrants`): every `source` operation
 must be offered by some trigger's connection, every other key must be a
-Confluence connection of the project. The turn prompt's "Your writes" section
+Confluence connection of the project (`publish` / `read`) or a Teams connection
+(`ask`); a workflow granting `[ask]` is refused at save when that Teams project
+connection has no Ask channel. The turn prompt's "Your writes" section
 (`turn-prompt.ts`) states what is granted and what is not.
 
 **Case-page messages.** `POST /orchestrator/cases/{id}/messages` (any org member;
@@ -261,7 +265,64 @@ Confluence connection of the project. The turn prompt's "Your writes" section
 AgentFlow) and wakes the conversation; `answers` answer the questions of the
 case's tasks. The orchestrator replies with `reply` on the case page, which needs
 no grant and posts nothing on the ticket; posting there too is up to the rules
-(`reply where: thread`).
+(`reply where: thread`). A case-page reply may list task files (`attachments`):
+nothing is uploaded, the files are kept on the message
+(`payload.attachments: [{taskId, name}]`) and the case timeline shows them under it.
+
+## Asking people in Teams (`teams_ask`)
+
+Granted with `agent.orchestrator.connections.<teams key>: [ask]`. The tool posts a
+NEW message in a Teams channel (not a reply in the ticket's thread) that
+@mentions people, and brings their answers back to the case that asked.
+
+```yaml
+connections:
+  teams: [ask]
+instructions: |
+  Backend questions: teams_ask in channel qa-backend; requirement questions: in ba.
+  Emails: Lan (QA) lan@example.com, Minh (BA) minh@example.com.
+```
+
+- **Channels.** The Teams project connection has an `askChannels` list, one entry
+  per channel: `name = <channel link or id>`. The name may be left out for a
+  channel link (it is taken from the channel's name); a bare id needs a name.
+  Names are unique per connection and a channel is listed once. Each ask channel
+  is claimed by the project connection like a mention channel, so a channel
+  another project claims is refused. There is no channel key in the workflow:
+  the rules choose by name (e.g. "backend questions → qa-backend, requirement
+  questions → ba"). The turn prompt lists the allowed channels (name and
+  connection key); any other channel is refused with the allowed names.
+  Keep ask channels out of non-orchestrated `bot_mentioned` triggers: an empty
+  channel filter on that project connection also fires in them.
+- **Call.** `mentions` (emails), `text`, `channel` (a name or id; optional only
+  when the granted connections have exactly one ask channel), `questions`
+  (`[{taskId, questionId}]`, one task per post, ids must exist in the task's
+  result), `attachments` (task files), `connection` (only when two connections
+  share a channel name). A message may reference files, but Teams takes no
+  uploads: the files are listed as links to the case page, with a link to the case.
+- **People.** The email is the person's UPN or mail. The bot looks each one up in
+  the channel's team (Bot Connector `GET /v3/conversations/{channel}/members/{upn}`,
+  falling back to `GET .../pagedmembers`) and posts with
+  `POST /v3/conversations` (private channels are not supported). A person not in
+  the team refuses the call. The emails come from the rules (e.g. a table of
+  Jira users or roles to emails); the turn prompt tells the model never to guess one.
+- **serviceUrl.** The newest one a verified Teams delivery of that connection
+  carried, else the global `https://smba.trafficmanager.net/teams/`.
+- **Record.** The post is stored as an internal `reply` message (payload
+  `teamsAsk`: channel, mentions, questions) and an anchor with
+  `artifact = "teams_ask"` (`TEAMS_ASK_ANCHOR_ARTIFACT`, `lib/orchestrator/teams-ask.ts`)
+  on the root message; with one question the anchor carries its task and question.
+- **Replies.** Teams sends the bot every channel message (RSC), so the thread is
+  filtered (`checkTeamsAskReply`): a reply counts only when it @mentions the bot
+  AND comes from a person the post mentioned. Others are dropped for every
+  workflow and logged with a reason (`ask_reply_without_bot_mention`,
+  `ask_reply_from_someone_not_asked`). An accepted reply becomes
+  a message `via="teams"` on the asking case, with the task and question; with
+  several questions the first accepted reply answers them all.
+- **Spam.** The bot mention alone opens nothing: a bot mention in a random Teams
+  thread (a new post or a reply) with no `teams_ask` anchor and no matching
+  trigger is ignored, with no reply and no case. Covered by the "teams_ask
+  threads" tests in `lib/orchestrator/__tests__/inbound.test.ts`.
 
 ## Tasks and waits
 

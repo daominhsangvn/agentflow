@@ -18,6 +18,10 @@ import { WORKFLOW_INSTRUCTIONS_MAX } from "@repo/api/src/types/workflow";
 import { readAnsweredQuestion } from "./asked-questions";
 import type { ConversationChannel } from "./channel";
 import { readMessageToAgent } from "./message-to-agent";
+import {
+  describeAskChannels,
+  type TeamsAskChannelOption,
+} from "./teams-ask-channels";
 import { isTicketChangeKind, readTicketChange } from "./ticket-change";
 
 /**
@@ -65,6 +69,8 @@ export type TurnPromptInput = {
   };
   /** agent.orchestrator.approvals is required. */
   approvalsRequired: boolean;
+  /** Allowed Teams ask channels of the connections granted [ask]. */
+  teamsAskChannels: TeamsAskChannelOption[];
 };
 
 export function buildTurnPrompt(input: TurnPromptInput): string {
@@ -83,7 +89,11 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     ),
     section(
       "Your writes",
-      describeWrites(input.grants, input.approvalsRequired)
+      describeWrites(
+        input.grants,
+        input.approvalsRequired,
+        input.teamsAskChannels
+      )
     ),
     section("This conversation", describeChannel(input.channel)),
     ...describeSideConversations(input.sideConversations),
@@ -212,7 +222,7 @@ function formatMessage(message: TurnPromptMessage): string {
     readOrchestratorMessageVia(message.payload) ===
     OrchestratorMessageVia.AgentFlow;
   const from = messageSender(message, viaAgentFlow);
-  const via = viaAgentFlow ? ` via="${OrchestratorMessageVia.AgentFlow}"` : "";
+  const via = viaLabel(message.payload);
   const ref = message.externalRef
     ? ` ref="${escapeAttribute(message.externalRef)}"`
     : "";
@@ -226,7 +236,10 @@ function formatMessage(message: TurnPromptMessage): string {
   const question = answered?.questionId
     ? ` question="${escapeAttribute(answered.questionId)}"`
     : "";
-  return `<message from="${escapeAttribute(from)}" kind="${message.kind}"${via}${to}${ref}${task}${question} at="${message.createdAt.toISOString()}">\n${message.text.slice(0, MESSAGE_MAX)}\n</message>`;
+  const questions = answered?.questionIds
+    ? ` questions="${escapeAttribute(answered.questionIds.join(","))}"`
+    : "";
+  return `<message from="${escapeAttribute(from)}" kind="${message.kind}"${via}${to}${ref}${task}${question}${questions} at="${message.createdAt.toISOString()}">\n${message.text.slice(0, MESSAGE_MAX)}\n</message>`;
 }
 
 function escapeAttribute(value: string): string {
@@ -246,11 +259,13 @@ function messageSender(
 
 function describeWrites(
   grants: OrchestratorGrantSet,
-  approvalsRequired: boolean
+  approvalsRequired: boolean,
+  teamsAskChannels: TeamsAskChannelOption[]
 ): string {
   const granted = [
     ...describeSourceWrites(grants),
     ...describePageWrites(grants),
+    ...describeTeamsAsk(grants, teamsAskChannels),
     ...(grants.pullRequestOpen
       ? [`- Open pull requests: ${OrchestratorToolName.PullRequestOpen}.`]
       : []),
@@ -430,4 +445,40 @@ function answeredQuestionOf(
     return null;
   }
   return readAnsweredQuestion(message.payload);
+}
+
+function viaLabel(payload: unknown): string {
+  const via = readOrchestratorMessageVia(payload);
+  if (
+    via === OrchestratorMessageVia.AgentFlow ||
+    via === OrchestratorMessageVia.Teams
+  ) {
+    return ` via="${via}"`;
+  }
+  return "";
+}
+
+function describeTeamsAsk(
+  grants: OrchestratorGrantSet,
+  channels: TeamsAskChannelOption[]
+): string[] {
+  if (grants.ask.size === 0) {
+    return [];
+  }
+  const tool = OrchestratorToolName.TeamsAsk;
+  if (channels.length === 0) {
+    return [
+      `- ${tool}: no ask channel is set on the Teams project connection; do not call it.`,
+    ];
+  }
+  const keys = [...grants.ask].join(", ");
+  const lines = channels.map(
+    (channel) => `  - ${describeAskChannels([channel])}`
+  );
+  return [
+    `- Ask people in Microsoft Teams (${keys}): ${tool} posts a new message in one of the allowed ask channels and @mentions people by email. Allowed ask channels (channel = name, connection key):`,
+    ...lines,
+    `  Pick the channel as your rules say (e.g. backend questions → qa-backend, requirement questions → ba) and pass it as channel; any other channel is refused. When your rules name no channel for this kind of question and there is more than one, ask on the ticket or the case page instead. Take each email from your rules (e.g. their table of Jira users or roles to emails); never guess an address — when your rules name no email for that person, ask on the ticket or the case page instead. Relay a task's questions with questions [{taskId, questionId}] (one task per post); attach task files with attachments (Teams shows them as links to the case page). The tool adds the @mentions itself: write the text without naming or @-ing the people.`,
+    `  Answers come back as messages with via="teams" task=… question=…; treat them like answers on the item (notes, resume the task once all its questions are answered).`,
+  ];
 }
