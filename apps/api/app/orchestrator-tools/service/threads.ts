@@ -21,7 +21,7 @@ export async function latestMessageRef(
 ): Promise<string | null> {
   // A message written on the case page has no thread in the item's comments.
   const latest = (await newestExternal(conversationId)).find(
-    (message) => !fromAgentFlow(message.payload)
+    (message) => !fromElsewhere(message.payload)
   );
   // A ticket change (a status or label change) is no comment: what answers
   // it is a new comment on the item, not a reply in an earlier thread.
@@ -99,7 +99,7 @@ export async function replyThread(
   if (!message?.externalRef) {
     return null;
   }
-  if (fromAgentFlow(message.payload)) {
+  if (fromElsewhere(message.payload)) {
     return undefined;
   }
   return threadOf(message.payload) ?? message.externalRef;
@@ -154,4 +154,12 @@ function targetOf(payload: unknown): OrchestratorReplyTarget {
 function threadOf(payload: unknown): string | null {
   const thread = messageThreadSchema.safeParse(payload);
   return thread.success ? thread.data.parentId : null;
+}
+
+/** A message not written in the item's thread: from the case page or a Teams answer. */
+function fromElsewhere(payload: unknown): boolean {
+  return (
+    fromAgentFlow(payload) ||
+    readOrchestratorMessageVia(payload) === OrchestratorMessageVia.Teams
+  );
 }

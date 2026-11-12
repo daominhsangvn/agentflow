@@ -82,6 +82,7 @@ import {
   sourceTransitionInputSchema,
   writeOnItem,
 } from "./service/source-writes";
+import { askInTeams, teamsAskInputSchema } from "./service/teams-ask";
 import { messageThread } from "./service/threads";
 import { buildInstructions, visibleTools } from "./service/tools";
 import {
@@ -540,6 +541,16 @@ const HANDLERS: Record<string, Handler> = {
     };
   },
 
+  [OrchestratorToolName.TeamsAsk]: async (context, input) => {
+    const parsed = teamsAskInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        "mentions (emails, 1-10), text (markdown), optional channel (an ask channel name), questions ([{taskId, questionId}] of one task), attachments ([{taskId, name}]), connection."
+      );
+    }
+    return await askInTeams(context, parsed.data);
+  },
+
   [OrchestratorToolName.PagePublish]: async (context, input) => {
     const parsed = pagePublishInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -878,6 +889,7 @@ const SUPERSEDABLE_TOOLS: ReadonlySet<string> = new Set<string>([
   OrchestratorToolName.SourceItemLink,
   OrchestratorToolName.CaseNotify,
   OrchestratorToolName.CaseHandoff,
+  OrchestratorToolName.TeamsAsk,
 ]);
 
 function decisionText(

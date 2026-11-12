@@ -5,6 +5,7 @@ import {
   OrchestratorPageOperation,
   OrchestratorPullRequestOperation,
   OrchestratorSourceOperation,
+  OrchestratorTeamsOperation,
   orchestratorConnectionGrantsSchema,
   pageKeysWith,
   resolveOrchestratorGrants,
@@ -60,5 +61,40 @@ describe("orchestrator connection grants", () => {
       true
     );
     expect(resolveOrchestratorGrants(grants).source.size).toBe(0);
+  });
+
+  it("resolves an ask grant on a Teams key", () => {
+    const grants = { teams: [OrchestratorTeamsOperation.Ask] };
+    expect(orchestratorConnectionGrantsSchema.safeParse(grants).success).toBe(
+      true
+    );
+    const set = resolveOrchestratorGrants(grants);
+    expect([...set.ask]).toEqual(["teams"]);
+    expect(set.pages.size).toBe(0);
+  });
+
+  it("refuses publish and ask on one key", () => {
+    const result = orchestratorConnectionGrantsSchema.safeParse({
+      teams: [
+        OrchestratorTeamsOperation.Ask,
+        OrchestratorPageOperation.Publish,
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses read and ask on one key", () => {
+    const result = orchestratorConnectionGrantsSchema.safeParse({
+      teams: ["read", OrchestratorTeamsOperation.Ask],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses an unknown operation naming the allowed ones", () => {
+    const result = orchestratorConnectionGrantsSchema.safeParse({
+      teams: ["post"],
+    });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain("publish, ask");
   });
 });

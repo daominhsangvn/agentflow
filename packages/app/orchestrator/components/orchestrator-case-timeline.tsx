@@ -234,7 +234,7 @@ function OrchestratorEntry({
         caseId={caseId}
         isAdmin={isAdmin}
       />
-      <OrchestratorBody block={block} />
+      <OrchestratorBody block={block} caseId={caseId} />
       {block.tasks.map((task) => (
         <SentToAgent
           key={task.id}
@@ -325,7 +325,10 @@ function StopTurnControl({
   );
 }
 
-function OrchestratorBody({ block }: Readonly<{ block: OrchestratorBlock }>) {
+function OrchestratorBody({
+  block,
+  caseId,
+}: Readonly<{ block: OrchestratorBlock; caseId: string }>) {
   const summary = block.turn?.summary;
 
   return (
@@ -334,6 +337,7 @@ function OrchestratorBody({ block }: Readonly<{ block: OrchestratorBlock }>) {
         <div className="space-y-1" key={reply.id}>
           <p className="text-muted-foreground text-xs">{replyLabel(reply)}</p>
           <ClampedText text={reply.text} />
+          <MessageFiles caseId={caseId} reply={reply} />
         </div>
       ))}
       {block.replies.length === 0 && summary ? (
@@ -697,6 +701,9 @@ export function ClampedText({ text }: Readonly<{ text: string }>) {
 }
 
 function replyLabel(reply: OrchestratorCaseMessage): string {
+  if (reply.teamsAsk) {
+    return `Asked in Teams: ${reply.teamsAsk.people.join(", ")}`;
+  }
   return reply.via === OrchestratorMessageVia.AgentFlow
     ? "Reply on the case page"
     : "Reply on the ticket thread";
@@ -792,6 +799,31 @@ function TaskFiles({
           +{task.filesOmitted} more not collected
         </li>
       ) : null}
+    </ul>
+  );
+}
+
+function MessageFiles({
+  reply,
+  caseId,
+}: Readonly<{ reply: OrchestratorCaseMessage; caseId: string }>) {
+  if (!reply.attachments?.length) {
+    return null;
+  }
+  return (
+    <ul className="space-y-0.5" data-testid="orchestrator-message-files">
+      {reply.attachments.map((file) => (
+        <li
+          className="flex flex-wrap items-center gap-2"
+          key={`${file.taskId}/${file.name}`}
+        >
+          <StoredTaskFile
+            caseId={caseId}
+            name={file.name}
+            taskId={file.taskId}
+          />
+        </li>
+      ))}
     </ul>
   );
 }

@@ -300,11 +300,7 @@ export function buildReplyActivity(
   if (!requester.id) {
     return { type: "message", textFormat: "markdown", text: body };
   }
-  const name =
-    (requester.name ?? "")
-      .replaceAll(ANGLE_BRACKETS_RE, "")
-      .trim()
-      .slice(0, MENTION_NAME_MAX_LENGTH) || "there";
+  const name = mentionDisplayName(requester.name);
   const mention = `<at>${name}</at>`;
   return {
     type: "message",
@@ -318,6 +314,16 @@ export function buildReplyActivity(
       },
     ],
   };
+}
+
+/** A name safe inside an <at> tag: no angle brackets, at most 100 characters, "there" when empty. */
+export function mentionDisplayName(name: string | null): string {
+  return (
+    (name ?? "")
+      .replaceAll(ANGLE_BRACKETS_RE, "")
+      .trim()
+      .slice(0, MENTION_NAME_MAX_LENGTH) || "there"
+  );
 }
 
 function skipped(reason: string): ActionResult {

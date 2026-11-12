@@ -1,6 +1,7 @@
 import { Result } from "@repo/api/src/types/result";
 import { z } from "zod";
 import { HttpMethod, type ProviderHttp } from "../../types";
+import { teamsEndpoints } from "./endpoints";
 import type { TeamsThreadRef } from "./thread-ref";
 
 /**
@@ -9,8 +10,6 @@ import type { TeamsThreadRef } from "./thread-ref";
  * ChannelMessage.Read.Group in each team it is installed in, so no tenant-
  * wide (protected) Graph permission is needed.
  */
-
-export const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 
 /** Replies read per thread (newest kept); Graph pages hold at most 50. */
 export const GRAPH_REPLIES_MAX = 500;
@@ -123,7 +122,7 @@ export async function listReplies(
 > {
   const replies: GraphMessage[] = [];
   let url: string | null =
-    `${GRAPH_BASE_URL}${messagePath(ref)}/replies?$top=${REPLIES_PAGE_SIZE}`;
+    `${teamsEndpoints().graphBaseUrl}${messagePath(ref)}/replies?$top=${REPLIES_PAGE_SIZE}`;
   while (url && replies.length < GRAPH_REPLIES_MAX) {
     const response = await http.request({
       method: HttpMethod.Get,
@@ -156,7 +155,7 @@ async function getMessage(
 ): Promise<Result<GraphMessage, GraphError>> {
   const response = await http.request({
     method: HttpMethod.Get,
-    url: `${GRAPH_BASE_URL}${path}`,
+    url: `${teamsEndpoints().graphBaseUrl}${path}`,
     headers: { authorization: `Bearer ${token}` },
     timeoutMs: GRAPH_TIMEOUT_MS,
   });
@@ -173,7 +172,7 @@ function messagePath(ref: TeamsThreadRef): string {
 
 /** Only Graph's own next links are followed (the token goes with them). */
 function nextPageUrl(link: string | null | undefined): string | null {
-  if (!link?.startsWith(`${GRAPH_BASE_URL}/`)) {
+  if (!link?.startsWith(`${teamsEndpoints().graphBaseUrl}/`)) {
     return null;
   }
   return link;

@@ -153,3 +153,16 @@ function safeDecode(segment: string): string {
     return segment;
   }
 }
+
+/** The channel name of a Teams channel link (/l/channel/{id}/{name}); null for ids and message links. */
+export function channelNameOfLink(input: string): string | null {
+  const url = URL.parse(input.trim());
+  if (!(url && TEAMS_LINK_HOSTS.has(url.hostname.toLowerCase()))) {
+    return null;
+  }
+  const [, prefix, kind, , name] = url.pathname.split("/");
+  if (!(prefix === "l" && kind === "channel" && name)) {
+    return null;
+  }
+  return safeDecode(name) || null;
+}

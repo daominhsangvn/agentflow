@@ -211,6 +211,9 @@ export function personLine(
   if (message.via === OrchestratorMessageVia.AgentFlow) {
     return "Message on the case page";
   }
+  if (message.via === OrchestratorMessageVia.Teams) {
+    return "Reply in Teams";
+  }
   return "Comment on the ticket";
 }
 

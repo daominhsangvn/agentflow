@@ -64,6 +64,9 @@ export function createOrchestratorDbFake() {
         if ("lt" in filter) {
           return row[key] instanceof Date && row[key] < (filter.lt as Date);
         }
+        if ("gte" in filter && typeof filter.gte === "number") {
+          return typeof row[key] === "number" && row[key] >= filter.gte;
+        }
         if ("gt" in filter) {
           if (typeof filter.gt === "number") {
             return typeof row[key] === "number" && row[key] > filter.gt;
@@ -107,6 +110,7 @@ export function createOrchestratorDbFake() {
           (row) => row.id === anchor.conversationId
         );
         return Promise.resolve({
+          artifact: anchor.artifact ?? null,
           taskId: anchor.taskId ?? null,
           questionId: anchor.questionId ?? null,
           conversation: {
@@ -357,6 +361,7 @@ export function createOrchestratorDbFake() {
         taskId?: string;
         questionId?: string;
         connectionId?: string;
+        artifact?: string;
       } = {}
     ) {
       anchors.push({

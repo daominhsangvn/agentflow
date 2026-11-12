@@ -43,6 +43,10 @@ import {
   sourceGrantDefinitions,
 } from "@/lib/integrations/connection-grants";
 import { triggerContainersOutside } from "@/lib/integrations/project-connections";
+import {
+  teamsAskChannels,
+  teamsProjectSettingsSchema,
+} from "@/lib/integrations/providers/microsoft-teams/project";
 import { WebhookTriggerType } from "@/lib/integrations/providers/webhook/inbound-event";
 import { WebhookActionType } from "@/lib/integrations/providers/webhook/post-action";
 import {
@@ -955,6 +959,12 @@ function checkOrchestratorGrants(
       return `${ORCHESTRATOR_GRANT_PREFIX}${pageError}`;
     }
   }
+  for (const key of set.ask) {
+    const askError = checkOrchestratorAskKey(key, checks);
+    if (askError) {
+      return `${ORCHESTRATOR_GRANT_PREFIX}${askError}`;
+    }
+  }
   return null;
 }
 
@@ -988,6 +998,27 @@ function checkOrchestratorPageKey(
   }
   if (resolved.value.provider !== IntegrationProviderKey.Confluence) {
     return `connections.${key}: the orchestrator writes only Confluence pages; ${key} is ${providerName(resolved.value.provider)}.`;
+  }
+  return null;
+}
+
+function checkOrchestratorAskKey(
+  key: string,
+  checks: ActionChecks
+): string | null {
+  const resolved = resolveKey(checks.catalog, checks.projectIds, key);
+  if (!resolved.ok) {
+    return `connections.${key}: ${resolved.error}`;
+  }
+  if (resolved.value.provider !== IntegrationProviderKey.MicrosoftTeams) {
+    return `connections.${key}: ask is for a Microsoft Teams connection; ${key} is ${providerName(resolved.value.provider)}.`;
+  }
+  const missingChannels = resolved.value.entries.some((entry) => {
+    const settings = teamsProjectSettingsSchema.safeParse(entry.settings);
+    return !settings.success || teamsAskChannels(settings.data).length === 0;
+  });
+  if (missingChannels) {
+    return `connections.${key}: ask needs at least one Ask channel on the Teams project connection (Project → Integrations → Ask channels).`;
   }
   return null;
 }

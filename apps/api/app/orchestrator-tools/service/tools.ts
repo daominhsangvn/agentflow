@@ -29,6 +29,7 @@ import {
   NOTES_MAX,
   REPLY_MAX,
   TASK_PROMPT_MAX,
+  TEAMS_ASK_MENTIONS_MAX,
   WAIT_TASKS_MAX,
   WAIT_TIMEOUT_MAX_MINUTES,
 } from "./limits";
@@ -125,7 +126,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.Reply,
     title: "Reply in the thread",
     description:
-      "Posts a markdown message in this conversation's thread (a comment on the ticket, a Teams reply), or on the case page with where: case_page (the default for a message written on the case page). A reply to it comes back to this conversation. replyTo: the ref of the <message> you answer, so the answer lands in that comment's thread (answer each comment in its own thread; omit it for a ticket change, which is answered with a new comment). attachments: files of this case's tasks (task_get, wait results) to attach to the item first and show under the message (Jira); refused where the thread takes no files (Teams).",
+      "Posts a markdown message in this conversation's thread (a comment on the ticket, a Teams reply), or on the case page with where: case_page (the default for a message written on the case page). A reply to it comes back to this conversation. replyTo: the ref of the <message> you answer, so the answer lands in that comment's thread (answer each comment in its own thread; omit it for a ticket change, which is answered with a new comment). attachments: files of this case's tasks (task_get, wait results): on the case page they are shown under the message (no upload); in the thread they are attached to the item first (Jira) and refused where the thread takes no files (Teams).",
     inputSchema: {
       type: "object",
       properties: {
@@ -135,7 +136,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
           type: "string",
           enum: Object.values(OrchestratorReplyTarget),
           description:
-            "thread (a comment on the item) or case_page (shown on the case page in AgentFlow only; no files). Default: where the message you answer came from (a message from AgentFlow is answered on the case page).",
+            "thread (a comment on the item) or case_page (shown on the case page in AgentFlow only). Default: where the message you answer came from (a message from AgentFlow is answered on the case page).",
         },
         attachments: {
           type: "array",
@@ -467,6 +468,51 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     annotations: READS,
   },
   {
+    name: OrchestratorToolName.TeamsAsk,
+    title: "Ask people in Teams",
+    description:
+      "Posts a new message in one of the allowed Teams ask channels (listed in your instructions; pick it as your rules say) and @mentions each email (take them from your rules; refused when someone is not in the team). The tool adds the @mentions itself: text must not name or @ the people. questions: the questions of one task it relays; only replies in that thread that @mention the bot and come from a mentioned person come back, as messages with task/question. attachments are listed as links to the case page (Teams takes no files). The post is recorded on the case. connection only when two Teams connections share a channel name.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mentions: {
+          type: "array",
+          items: { type: "string", format: "email" },
+          minItems: 1,
+          maxItems: TEAMS_ASK_MENTIONS_MAX,
+        },
+        text: { type: "string", minLength: 1, maxLength: REPLY_MAX },
+        channel: {
+          type: "string",
+          description:
+            "the ask channel's name (alias) from your rules, or its id; optional only when there is exactly one ask channel",
+        },
+        questions: {
+          type: "array",
+          maxItems: 20,
+          items: {
+            type: "object",
+            properties: {
+              taskId: { type: "string" },
+              questionId: { type: "string" },
+            },
+            required: ["taskId", "questionId"],
+            additionalProperties: false,
+          },
+        },
+        attachments: {
+          type: "array",
+          maxItems: REPLY_ATTACHMENTS_MAX,
+          items: TASK_FILE_REF,
+        },
+        connection: { type: "string" },
+      },
+      required: ["mentions", "text"],
+      additionalProperties: false,
+    },
+    annotations: POSTS,
+  },
+  {
     name: OrchestratorToolName.CaseHandoff,
     title: "Send an approved summary to another item's case",
     description:
@@ -521,6 +567,8 @@ export function visibleTools(
         return canPublish;
       case OrchestratorToolName.PullRequestOpen:
         return grants.pullRequestOpen;
+      case OrchestratorToolName.TeamsAsk:
+        return grants.ask.size > 0;
       case OrchestratorToolName.CaseLookup:
         return features.caseLookup;
       case OrchestratorToolName.CaseHandoff:
@@ -552,6 +600,11 @@ function describeGrants(grants: OrchestratorGrantSet): string {
   }
   if (grants.pullRequestOpen) {
     parts.push(`pull requests: open (${OrchestratorToolName.PullRequestOpen})`);
+  }
+  if (grants.ask.size > 0) {
+    parts.push(
+      `Teams ask: ${[...grants.ask].join(", ")} (${OrchestratorToolName.TeamsAsk})`
+    );
   }
   if (parts.length === 0) {
     return "Granted writes: none, you only read the ticket.";

@@ -244,6 +244,8 @@ type DecidedRuns = {
   unrouted: number;
   /** New messages handed to project orchestrators. */
   orchestrated: number;
+  /** Why orchestrators dropped events on purpose. */
+  ignoredReasons: string[];
 };
 
 async function decideRuns(
@@ -251,7 +253,13 @@ async function decideRuns(
   deliveryRowId: string
 ): Promise<DecidedRuns> {
   if (input.events.length === 0) {
-    return { decisions: [], drafts: [], unrouted: 0, orchestrated: 0 };
+    return {
+      decisions: [],
+      drafts: [],
+      unrouted: 0,
+      orchestrated: 0,
+      ignoredReasons: [],
+    };
   }
   const triggers = await loadTriggers(input);
   const routes = await routeEvents(input, triggers);
@@ -260,6 +268,7 @@ async function decideRuns(
     drafts: [],
     unrouted: 0,
     orchestrated: 0,
+    ignoredReasons: [],
   };
   for (const [index, event] of input.events.entries()) {
     const route = routes[index];
@@ -274,6 +283,7 @@ async function decideRuns(
     decided.decisions.push(...one.decisions);
     decided.drafts.push(...one.drafts);
     decided.orchestrated += one.orchestrated;
+    decided.ignoredReasons.push(...one.ignoredReasons);
   }
   return decided;
 }
@@ -288,6 +298,7 @@ async function decideEvent(
   decisions: IngestRunDecision[];
   drafts: WorkflowEventDraft[];
   orchestrated: number;
+  ignoredReasons: string[];
 }> {
   const facts: EventFacts = {
     triggerType: event.triggerType,
@@ -356,13 +367,15 @@ async function decideEvent(
     );
   }
   let orchestrated = 0;
+  const ignoredReasons: string[] = [];
   if (route) {
     const matchedOrchestrated = matched.filter(isOrchestratedTrigger);
     const routed = await routeOrchestrated(
       input,
       event,
       route,
-      matchedOrchestrated
+      matchedOrchestrated,
+      (detail) => ignoredReasons.push(detail)
     );
     orchestrated = routed.created;
     drafts.push(
@@ -376,7 +389,7 @@ async function decideEvent(
       handledWorkflowIds: new Set(drafts.map((draft) => draft.workflowId)),
     })
   );
-  return { decisions, drafts, orchestrated };
+  return { decisions, drafts, orchestrated, ignoredReasons };
 }
 
 /** A reply that resumed its run is `replied`; the other outcomes keep their name. */
@@ -396,12 +409,14 @@ async function routeOrchestrated(
   input: IngestEventsInput,
   event: InboundEvent,
   route: string,
-  matched: TriggerRow[]
+  matched: TriggerRow[],
+  onIgnored: (detail: string) => void
 ): Promise<{ created: number; results: OrchestratorRouteResult[] }> {
   const results = await routeToOrchestrator({
     connection: input.connection,
     event,
     projectConnectionId: route,
+    onIgnored,
     workflows: matched.map((trigger) => ({
       workflowId: trigger.workflowId,
       projectId: trigger.projectId,
@@ -713,7 +728,7 @@ async function discardDelivery(deliveryRowId: string): Promise<void> {
 
 function summarizeDecisions(
   input: IngestEventsInput,
-  { decisions, unrouted, orchestrated }: DecidedRuns
+  { decisions, unrouted, orchestrated, ignoredReasons }: DecidedRuns
 ): DecisionSummary {
   const created = countDecisions(decisions, IngestDecision.Created);
   const resumed =
@@ -728,7 +743,7 @@ function summarizeDecisions(
   }
   return {
     outcome: IntegrationDeliveryOutcome.Ignored,
-    detail: ignoredDetail(input, decisions, unrouted),
+    detail: ignoredDetail(input, decisions, unrouted, ignoredReasons),
     runCount: 0,
   };
 }
@@ -756,7 +771,8 @@ function acceptedDetail(
 function ignoredDetail(
   input: IngestEventsInput,
   decisions: IngestRunDecision[],
-  unrouted: number
+  unrouted: number,
+  ignoredReasons: string[]
 ): string {
   if (input.events.length === 0) {
     return input.ignoredReason ?? "The delivery contained no supported event";
@@ -765,6 +781,9 @@ function ignoredDetail(
     return "No project connection of this connection takes the item (its project is in no project's settings)";
   }
   if (decisions.length === 0) {
+    if (ignoredReasons.length > 0) {
+      return [...new Set(ignoredReasons)].join("; ");
+    }
     return "No enabled trigger matched";
   }
   if (decisions.some((entry) => entry.decision === IngestDecision.Active)) {

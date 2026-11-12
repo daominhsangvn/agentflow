@@ -4,11 +4,11 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { InboundRequest, ProviderHttpRequest } from "../../../types";
 import {
   BOT_FRAMEWORK_ISSUER,
-  BOT_FRAMEWORK_OPENID_URL,
   clearBotFrameworkKeyCache,
   TeamsAuthFailure,
   verifyTeamsRequest,
 } from "../bot-auth";
+import { BOT_FRAMEWORK_OPENID_URL } from "../endpoints";
 import {
   BOT_APP_ID,
   BOT_TENANT_ID,

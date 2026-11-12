@@ -13,6 +13,7 @@ import {
   type ProviderHttp,
 } from "../../types";
 import type { TeamsConnectionConfig } from "./connection";
+import { teamsEndpoints } from "./endpoints";
 
 /**
  * Authenticates requests the Bot Framework sends to the bot's messaging
@@ -26,8 +27,6 @@ import type { TeamsConnectionConfig } from "./connection";
  * day; an unknown key id refetches them (at most every few minutes).
  */
 
-export const BOT_FRAMEWORK_OPENID_URL =
-  "https://login.botframework.com/v1/.well-known/openidconfiguration";
 export const BOT_FRAMEWORK_ISSUER = "https://api.botframework.com";
 
 export const TeamsAuthFailure = {
@@ -50,7 +49,6 @@ const KEYS_TIMEOUT_MS = 10_000;
 const BEARER_RE = /^Bearer\s+(\S+)$/i;
 const TRAILING_SLASHES_RE = /\/+$/;
 const SIGNING_ALGORITHMS = ["RS256"];
-const BOT_FRAMEWORK_KEYS_HOST = "login.botframework.com";
 
 const openIdConfigurationSchema = z.object({ jwks_uri: z.url() });
 
@@ -163,9 +161,10 @@ async function findSigningKey(
 async function fetchSigningKeys(
   http: ProviderHttp
 ): Promise<SigningKey[] | null> {
+  const endpoints = teamsEndpoints();
   const metadata = await http.request({
     method: HttpMethod.Get,
-    url: BOT_FRAMEWORK_OPENID_URL,
+    url: endpoints.openIdUrl,
     timeoutMs: KEYS_TIMEOUT_MS,
   });
   const configuration = openIdConfigurationSchema.safeParse(metadata.json);
@@ -175,8 +174,8 @@ async function fetchSigningKeys(
   const jwksUri = new URL(configuration.data.jwks_uri);
   // The key set must come from the Bot Framework itself, over HTTPS.
   if (
-    jwksUri.protocol !== "https:" ||
-    jwksUri.hostname !== BOT_FRAMEWORK_KEYS_HOST
+    !endpoints.keysProtocols.has(jwksUri.protocol) ||
+    jwksUri.hostname !== endpoints.keysHost
   ) {
     return null;
   }

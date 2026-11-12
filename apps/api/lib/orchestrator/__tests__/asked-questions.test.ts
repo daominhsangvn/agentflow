@@ -34,10 +34,12 @@ describe("asked-questions", () => {
     expect(readAnsweredQuestion({ taskId: "t1", questionId: "q2" })).toEqual({
       taskId: "t1",
       questionId: "q2",
+      questionIds: null,
     });
     expect(readAnsweredQuestion({ taskId: "t1" })).toEqual({
       taskId: "t1",
       questionId: null,
+      questionIds: null,
     });
     expect(readAnsweredQuestion({ questionId: "q2" })).toBeNull();
     expect(readAnsweredQuestion(null)).toBeNull();

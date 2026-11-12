@@ -6,6 +6,8 @@ import {
   type ProviderHttp,
   type ProviderHttpResponse,
 } from "../../types";
+import { teamsEndpoints } from "./endpoints";
+import { rootMessageIdOf } from "./thread-ref";
 
 /**
  * Calls to the Bot Connector service of a Teams activity (its serviceUrl):
@@ -16,11 +18,6 @@ import {
 
 const CONNECTOR_TIMEOUT_MS = 15_000;
 const TRAILING_SLASHES_RE = /\/+$/;
-/** Commercial cloud (regional paths under one host). */
-const SERVICE_HOSTS = new Set(["smba.trafficmanager.net"]);
-/** GCC, GCC High and DoD: smba.infra.<cloud>.teams.microsoft.{com,us}. */
-const SERVICE_HOST_RE =
-  /^smba\.infra\.[a-z0-9-]+\.teams\.microsoft\.(com|us)$/i;
 
 const teamDetailsSchema = z.looseObject({
   aadGroupId: z.string().min(1),
@@ -33,11 +30,15 @@ export function checkServiceUrl(value: string | null | undefined): URL | null {
   const url = value
     ? URL.parse(value.trim().replace(TRAILING_SLASHES_RE, ""))
     : null;
-  if (url?.protocol !== "https:" || url.username || url.password) {
+  const endpoints = teamsEndpoints();
+  // Emulated (dev only): the emulator's own origin may be plain http.
+  const protocolOk =
+    url?.protocol === "https:" ||
+    (endpoints.emulated && url?.protocol === "http:");
+  if (!(url && protocolOk) || url.username || url.password) {
     return null;
   }
-  const host = url.hostname.toLowerCase();
-  return SERVICE_HOSTS.has(host) || SERVICE_HOST_RE.test(host) ? url : null;
+  return endpoints.isServiceHost(url) ? url : null;
 }
 
 export async function sendToConversation(
@@ -127,4 +128,140 @@ export function describeConnectorFailure(
 
 function connectorBase(serviceUrl: URL): string {
   return serviceUrl.toString().replace(TRAILING_SLASHES_RE, "");
+}
+
+/** The global Bot Connector URL for a proactive message when no activity gave a serviceUrl. */
+export function teamsGlobalServiceUrl(): string {
+  return teamsEndpoints().globalServiceUrl;
+}
+
+const MEMBERS_PAGE_SIZE = 500;
+
+const createdConversationSchema = z.looseObject({
+  id: z.string().min(1),
+  activityId: z.string().nullish(),
+});
+
+const teamsMemberSchema = z.looseObject({
+  id: z.string().min(1),
+  objectId: z.string().nullish(),
+  aadObjectId: z.string().nullish(),
+  name: z.string().nullish(),
+  givenName: z.string().nullish(),
+  surname: z.string().nullish(),
+  email: z.string().nullish(),
+  userPrincipalName: z.string().nullish(),
+});
+export type TeamsMember = z.infer<typeof teamsMemberSchema>;
+
+const pagedMembersSchema = z.looseObject({
+  members: z.array(teamsMemberSchema).default([]),
+  continuationToken: z.string().nullish(),
+});
+
+/** Starts a new thread in a channel with the given activity. */
+export async function createChannelThread(
+  http: ProviderHttp,
+  input: {
+    serviceUrl: URL;
+    token: string;
+    tenantId: string;
+    channelId: string;
+    activity: JsonObject;
+  }
+): Promise<
+  Result<
+    { conversationId: string; rootMessageId: string },
+    ProviderHttpResponse
+  >
+> {
+  const response = await http.request({
+    method: HttpMethod.Post,
+    url: `${connectorBase(input.serviceUrl)}/v3/conversations`,
+    headers: { authorization: `Bearer ${input.token}` },
+    body: {
+      isGroup: true,
+      channelData: {
+        channel: { id: input.channelId },
+        tenant: { id: input.tenantId },
+      },
+      activity: input.activity,
+      tenantId: input.tenantId,
+    },
+    timeoutMs: CONNECTOR_TIMEOUT_MS,
+  });
+  if (!response.ok) {
+    return Result.err(response);
+  }
+  const created = createdConversationSchema.safeParse(response.json);
+  const rootMessageId = created.success
+    ? (rootMessageIdOf(created.data.id) ?? created.data.activityId)
+    : null;
+  if (!(created.success && rootMessageId)) {
+    return Result.err(response);
+  }
+  return Result.ok({ conversationId: created.data.id, rootMessageId });
+}
+
+/** One member of a conversation by Teams id, UPN or Entra object id; null when not a member. */
+export async function getConversationMember(
+  http: ProviderHttp,
+  input: {
+    serviceUrl: URL;
+    token: string;
+    conversationId: string;
+    userId: string;
+  }
+): Promise<Result<TeamsMember | null, ProviderHttpResponse>> {
+  const response = await http.request({
+    method: HttpMethod.Get,
+    url: `${connectorBase(input.serviceUrl)}/v3/conversations/${encodeURIComponent(input.conversationId)}/members/${encodeURIComponent(input.userId)}`,
+    headers: { authorization: `Bearer ${input.token}` },
+    timeoutMs: CONNECTOR_TIMEOUT_MS,
+  });
+  if (response.status === 404) {
+    return Result.ok(null);
+  }
+  if (!response.ok) {
+    return Result.err(response);
+  }
+  const member = teamsMemberSchema.safeParse(response.json);
+  return Result.ok(member.success ? member.data : null);
+}
+
+/** One page of a conversation's roster. */
+export async function listConversationMembers(
+  http: ProviderHttp,
+  input: {
+    serviceUrl: URL;
+    token: string;
+    conversationId: string;
+    continuationToken?: string | null;
+  }
+): Promise<
+  Result<
+    { members: TeamsMember[]; continuationToken: string | null },
+    ProviderHttpResponse
+  >
+> {
+  const query = new URLSearchParams({ pageSize: String(MEMBERS_PAGE_SIZE) });
+  if (input.continuationToken) {
+    query.set("continuationToken", input.continuationToken);
+  }
+  const response = await http.request({
+    method: HttpMethod.Get,
+    url: `${connectorBase(input.serviceUrl)}/v3/conversations/${encodeURIComponent(input.conversationId)}/pagedmembers?${query.toString()}`,
+    headers: { authorization: `Bearer ${input.token}` },
+    timeoutMs: CONNECTOR_TIMEOUT_MS,
+  });
+  if (!response.ok) {
+    return Result.err(response);
+  }
+  const page = pagedMembersSchema.safeParse(response.json);
+  return Result.ok({
+    members: page.success ? page.data.members : [],
+    continuationToken: page.success
+      ? (page.data.continuationToken ?? null)
+      : null,
+  });
 }

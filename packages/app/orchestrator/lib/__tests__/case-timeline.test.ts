@@ -283,4 +283,14 @@ describe("personLine", () => {
     );
     expect(line).toBe("Message on the case page");
   });
+
+  it("describes a Teams answer", () => {
+    const line = personLine(
+      message("m", "2026-01-01T00:00:00.000Z", {
+        via: OrchestratorMessageVia.Teams,
+      }),
+      []
+    );
+    expect(line).toBe("Reply in Teams");
+  });
 });

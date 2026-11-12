@@ -26,6 +26,7 @@ import { renderCase } from "./case-render";
 import { readChannel } from "./channel";
 import { newerMessageWaiting, supersedeRequested } from "./supersede";
 import { advanceTasks } from "./tasks";
+import { loadTeamsAskChannels } from "./teams-ask-channels";
 import { buildTurnPrompt } from "./turn-prompt";
 import { readTurnTimeoutMs } from "./turn-usage";
 import { evaluateWaits, fireDueDeadlines } from "./waits";
@@ -586,12 +587,18 @@ async function startTurnIfDue(
   ) {
     return;
   }
+  const grants = resolveOrchestratorGrants(settings.connections);
   const prompt = buildTurnPrompt({
     projectName: conversation.case.project.name,
     workflowName: settings.name,
     workflowDescription: settings.description,
     rules: settings.rules,
-    grants: resolveOrchestratorGrants(settings.connections),
+    grants,
+    teamsAskChannels: await loadTeamsAskChannels(
+      conversation.organizationId,
+      conversation.projectId,
+      grants.ask
+    ),
     channel: readChannel(conversation.channel),
     caseMarkdown: await renderCase(conversation.caseId),
     messages,

@@ -17,6 +17,7 @@ import {
  * connections:
  *   source: [comment, attach, transition, label, link]
  *   confluence: [publish]     # or read
+ *   teams: [ask]              # teams_ask posts in an Ask channel
  *   pull_requests: [open]
  * ```
  */
@@ -83,6 +84,8 @@ export type OrchestratorConnectionGrants = z.infer<
 export type OrchestratorGrantSet = {
   source: ReadonlySet<OrchestratorSourceOperation>;
   pages: ReadonlyMap<string, OrchestratorPageAccess>;
+  /** Connection keys granted `ask` (Teams). */
+  ask: ReadonlySet<string>;
   pullRequestOpen: boolean;
 };
 
@@ -91,24 +94,24 @@ export function resolveOrchestratorGrants(
 ): OrchestratorGrantSet {
   const source = new Set<OrchestratorSourceOperation>();
   const pages = new Map<string, OrchestratorPageAccess>();
+  const ask = new Set<string>();
   let pullRequestOpen = false;
   for (const [key, grant] of Object.entries(grants ?? {})) {
     const ops = Array.isArray(grant) ? grant : [];
     if (key === SOURCE_CONNECTION_KEY) {
-      for (const op of ops) {
-        if (isSourceOperation(op)) {
-          source.add(op);
-        }
-      }
+      addSourceOperations(source, ops);
     } else if (key === PULL_REQUESTS_CONNECTION_KEY) {
       pullRequestOpen = ops.includes(OrchestratorPullRequestOperation.Open);
-    } else if (ops.includes(OrchestratorPageOperation.Publish)) {
-      pages.set(key, OrchestratorPageAccess.Publish);
-    } else if (grant === ConnectionAccess.Read) {
-      pages.set(key, OrchestratorPageAccess.Read);
+    } else if (ops.includes(OrchestratorTeamsOperation.Ask)) {
+      ask.add(key);
+    } else {
+      const access = pageAccessOf(grant, ops);
+      if (access) {
+        pages.set(key, access);
+      }
     }
   }
-  return { source, pages, pullRequestOpen };
+  return { source, pages, ask, pullRequestOpen };
 }
 
 /** Keys granted `access` or higher (publish implies read). */
@@ -140,10 +143,20 @@ function grantProblem(key: string, grant: "read" | string[]): string | null {
       false
     );
   }
+  if (
+    Array.isArray(grant) &&
+    grant.includes(OrchestratorTeamsOperation.Ask) &&
+    grant.some((op) => op !== OrchestratorTeamsOperation.Ask)
+  ) {
+    return `connections.${key}: ask (Teams) cannot be combined with page operations (read, publish); use a different connection.`;
+  }
   return listProblem(
     `connections.${key}`,
     grant,
-    Object.values(OrchestratorPageOperation),
+    [
+      ...Object.values(OrchestratorPageOperation),
+      ...Object.values(OrchestratorTeamsOperation),
+    ],
     true
   );
 }
@@ -182,4 +195,30 @@ function listProblem(
   return bad === undefined
     ? null
     : `${label} allows ${expected}, not "${bad}".`;
+}
+
+/** Operations on a Teams connection. */
+export const OrchestratorTeamsOperation = { Ask: "ask" } as const;
+export type OrchestratorTeamsOperation =
+  (typeof OrchestratorTeamsOperation)[keyof typeof OrchestratorTeamsOperation];
+
+function pageAccessOf(
+  grant: "read" | string[],
+  ops: string[]
+): OrchestratorPageAccess | null {
+  if (ops.includes(OrchestratorPageOperation.Publish)) {
+    return OrchestratorPageAccess.Publish;
+  }
+  return grant === ConnectionAccess.Read ? OrchestratorPageAccess.Read : null;
+}
+
+function addSourceOperations(
+  source: Set<OrchestratorSourceOperation>,
+  ops: string[]
+): void {
+  for (const op of ops) {
+    if (isSourceOperation(op)) {
+      source.add(op);
+    }
+  }
 }

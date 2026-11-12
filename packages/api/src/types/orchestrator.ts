@@ -259,6 +259,7 @@ export const OrchestratorToolName = {
   CaseNotify: "case_notify",
   CaseLookup: "case_lookup",
   CaseHandoff: "case_handoff",
+  TeamsAsk: "teams_ask",
 } as const;
 export type OrchestratorToolName =
   (typeof OrchestratorToolName)[keyof typeof OrchestratorToolName];
@@ -366,6 +367,10 @@ export type OrchestratorCaseMessage = {
   answeredTaskIds?: string[];
   /** The agent (compute target) a case-page message is addressed to. */
   toAgentId?: string | null;
+  /** Task files the message references; open with GET …/tasks/{taskId}/file. */
+  attachments?: OrchestratorCaseMessageAttachment[];
+  /** A teams_ask post: the names it mentioned. */
+  teamsAsk?: { people: string[] } | null;
 };
 
 export type OrchestratorCaseTurn = {
@@ -616,6 +621,8 @@ export type OrchestratorCaseListQuery = z.infer<
 /** A message written on the case page in AgentFlow, or a reply shown there. */
 export const OrchestratorMessageVia = {
   AgentFlow: "agentflow",
+  /** An answer given in a teams_ask thread. */
+  Teams: "teams",
 } as const;
 export type OrchestratorMessageVia =
   (typeof OrchestratorMessageVia)[keyof typeof OrchestratorMessageVia];
@@ -713,3 +720,39 @@ export type OrchestratorCaseTaskInput = {
   /** The Confluence page it was read from; null for an earlier task's file. */
   page: { title: string; url: string; version: number } | null;
 };
+
+export type OrchestratorCaseMessageAttachment = {
+  taskId: string;
+  name: string;
+};
+
+const orchestratorMessageAttachmentsPayloadSchema = z.looseObject({
+  attachments: z.array(z.looseObject({ taskId: z.string(), name: z.string() })),
+});
+
+const orchestratorMessageTeamsAskPayloadSchema = z.looseObject({
+  teamsAsk: z.looseObject({
+    mentions: z.array(z.looseObject({ name: z.string() })),
+  }),
+});
+
+/** The task files a message references (empty when none or malformed). */
+export function readOrchestratorMessageAttachments(
+  payload: unknown
+): OrchestratorCaseMessageAttachment[] {
+  const parsed = orchestratorMessageAttachmentsPayloadSchema.safeParse(payload);
+  if (!parsed.success) {
+    return [];
+  }
+  return parsed.data.attachments.map(({ taskId, name }) => ({ taskId, name }));
+}
+
+/** The names a teams_ask post mentioned; null when it is not one. */
+export function readOrchestratorMessageTeamsAskPeople(
+  payload: unknown
+): string[] | null {
+  const parsed = orchestratorMessageTeamsAskPayloadSchema.safeParse(payload);
+  return parsed.success
+    ? parsed.data.teamsAsk.mentions.map((mention) => mention.name)
+    : null;
+}

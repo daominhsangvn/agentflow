@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Result } from "@repo/api/src/types/result";
 import { z } from "zod";
 import { HttpMethod, type ProviderHttp } from "../../types";
+import { teamsEndpoints } from "./endpoints";
 
 /**
  * App-only tokens of the bot's Microsoft Entra app registration (client
@@ -57,7 +58,7 @@ export async function acquireEntraToken(
   }
   const response = await http.request({
     method: HttpMethod.Post,
-    url: `https://login.microsoftonline.com/${encodeURIComponent(credentials.tenantId)}/oauth2/v2.0/token`,
+    url: teamsEndpoints().tokenUrl(credentials.tenantId),
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: credentials.appId,

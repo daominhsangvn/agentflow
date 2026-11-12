@@ -1,0 +1,23 @@
+[
+  {
+    "name": "An",
+    "email": "an@contoso.test",
+    "upn": "an@contoso.test",
+    "id": "29:an-0001",
+    "objectId": "11111111-1111-4111-8111-111111111111"
+  },
+  {
+    "name": "Binh",
+    "email": "binh@contoso.test",
+    "upn": "binh@contoso.test",
+    "id": "29:binh-0002",
+    "objectId": "22222222-2222-4222-8222-222222222222"
+  },
+  {
+    "name": "Chi",
+    "email": "chi.nguyen@contoso.test",
+    "upn": "chi@contoso.test",
+    "id": "29:chi-0003",
+    "objectId": "33333333-3333-4333-8333-333333333333"
+  }
+]
