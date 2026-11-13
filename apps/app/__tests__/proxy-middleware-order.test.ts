@@ -671,6 +671,24 @@ describe("proxy.ts config.matcher still routes gateway requests (ISS-4530)", () 
     ).toBe(true);
   });
 
+  it("does not match a self-hosted file-viewer asset", () => {
+    expect(
+      unstable_doesMiddlewareMatch({
+        config: { matcher: proxyConfig.matcher },
+        url: "http://evil.example.com/file-viewer/vendor/pdf/pdf.worker.mjs",
+      })
+    ).toBe(false);
+  });
+
+  it("still matches an app route that contains file-viewer", () => {
+    expect(
+      unstable_doesMiddlewareMatch({
+        config: { matcher: proxyConfig.matcher },
+        url: "http://evil.example.com/acme/file-viewer",
+      })
+    ).toBe(true);
+  });
+
   it("does not match a static asset excluded by the matcher", () => {
     expect(
       unstable_doesMiddlewareMatch({

@@ -137,6 +137,7 @@ AgentFlow: human-governed, AI-centric software delivery platform. AI produces ar
 - **[insight]**: @repo/* imports are internal monorepo dependencies, not cross-repo needs.
 - **[insight]**: `@repo/observability/log` exports `console` directly, no `server-only` — safe in client components.
 - **[pattern]**: Shared mappings for both server packages and frontend → `packages/api/src/types/` (server packages can't import from `apps/app/lib/`).
+- **[pattern]**: The task file viewer (@file-viewer/*, preset-office + preset-lite, pinned to one exact version with file-viewer-copy-assets) needs Worker/WASM/font assets at /file-viewer/: apps/app/scripts/copy-file-viewer-assets.mjs copies the office renderer groups into apps/app/public/file-viewer (gitignored) from the dev script and scripts/build.mjs; turbo app#build caches it. Never add *-full, preset-all, preset-engineering or the cad group (AGPL); never use @file-viewer/cli (it only delegates). Set the base with setDefaultFileViewerAssetBaseUrl — auto-detection picks /_next/.
 
 ## Harness: AgentFlow delivery
 

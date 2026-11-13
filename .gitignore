@@ -360,3 +360,6 @@ apps/desktop/.iss5375-fixture-*
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Copied by apps/app/scripts/copy-file-viewer-assets.mjs
+apps/app/public/file-viewer/

@@ -21,6 +21,10 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "app#build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "public/file-viewer/**"]
+    },
     "mcp#build": {
       "dependsOn": ["^build", "@agentflow-ai/loops-api#build"],
       "inputs": ["$TURBO_DEFAULT$", "!**/*.md"],

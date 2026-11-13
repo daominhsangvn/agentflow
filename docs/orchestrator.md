@@ -365,7 +365,11 @@ The loop:
   prompt says where the files go; see "Capabilities" in `docs/runner.md`),
   and `inputs` from `task_run files` (written to `inputs/` before the agent
   starts). The case page lists each stored task file with View and
-  Download.
+  Download. View opens a near-full-screen dialog (file name, Download, Close
+  in the top bar). Markdown, PDF, Word, Excel, PowerPoint, OpenDocument,
+  Pages/Numbers/Keynote, text, images, audio and video render in the browser
+  with the self-hosted Flyfish file viewer; the file never leaves AgentFlow (no
+  Office Online or Google viewer). Other types offer Download only.
 - runs as the runner's owner. When the runner is offline the task fails with
   "Runner X is offline: the task was not started..." if the case has no work
   there yet; otherwise it stays `queued` with a waiting reason until the Agent

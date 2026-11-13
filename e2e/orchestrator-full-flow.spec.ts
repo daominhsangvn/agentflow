@@ -17,7 +17,7 @@
  * the case page's URL, to look at them in the UI (same org as the e2e user).
  */
 
-import type { Page } from "@playwright/test";
+import type { Page, Request } from "@playwright/test";
 import {
   OrchestratorCaseStatus,
   OrchestratorDecisionStatus,
@@ -41,6 +41,7 @@ import {
   FlowEnv,
   STEP_TIMEOUT_MS,
 } from "./helpers/orchestrator-flow-env";
+import { sampleDocx, samplePdf } from "./helpers/sample-office-files";
 import { E2ETag } from "./helpers/tags";
 import { expect, test } from "./test";
 
@@ -81,7 +82,12 @@ const SCREENSHOT_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
   "base64"
 );
+const HTTP_URL = /^https?:/;
 const BUNDLE_FILE = "bundle.zip";
+const PDF_FILE = "report.pdf";
+const PDF_TEXT = "Leave report PDF";
+const DOCX_FILE = "leave-policy.docx";
+const DOCX_TEXT = "Leave policy DOCX";
 const BIG_FILE = "recording.mp4";
 const BIG_FILE_SKIPPED = "larger than 4 MB";
 const FILES_REPLY = "The PRD is ready, see the file below.";
@@ -401,7 +407,7 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       env.expectNoAgentErrors();
     });
 
-    await test.step("7. task files: listed on the case page, previewed, downloaded and attached to a case-page reply", async () => {
+    await test.step("7. task files: listed on the case page, previewed, downloaded and attached to a case-page reply, rendered by the in-browser viewer", async () => {
       const turnsBefore = orch.turns().length;
       orch.onTurn(async (turn) => {
         ids.task5 = await runTask(turn, ba, { prompt: "Write the PRD." });
@@ -414,6 +420,11 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
             { path: `${WORK_DIR}/${PRD_FILE}`, content: PRD_CONTENT },
             { path: `${WORK_DIR}/${SCREENSHOT_FILE}`, content: SCREENSHOT_PNG },
             { path: `${WORK_DIR}/${BUNDLE_FILE}`, content: "PK fake zip" },
+            { path: `${WORK_DIR}/${PDF_FILE}`, content: samplePdf(PDF_TEXT) },
+            {
+              path: `${WORK_DIR}/${DOCX_FILE}`,
+              content: sampleDocx(DOCX_TEXT),
+            },
             {
               path: `${WORK_DIR}/${BIG_FILE}`,
               size: 5 * 1024 * 1024,
@@ -447,6 +458,8 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
         expect.objectContaining({ name: PRD_FILE, stored: true }),
         expect.objectContaining({ name: SCREENSHOT_FILE, stored: true }),
         expect.objectContaining({ name: BUNDLE_FILE, stored: true }),
+        expect.objectContaining({ name: PDF_FILE, stored: true }),
+        expect.objectContaining({ name: DOCX_FILE, stored: true }),
         expect.objectContaining({
           name: BIG_FILE,
           stored: false,
@@ -470,19 +483,57 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       const dialog = page.getByRole("dialog");
 
       await files.getByRole("button", { name: PRD_FILE }).click();
+      const viewer = dialog.getByTestId("task-file-viewer");
       await expect(
-        dialog.getByRole("heading", { name: PRD_HEADING })
-      ).toBeVisible();
+        viewer.getByRole("heading", { name: PRD_HEADING })
+      ).toBeVisible({ timeout: 30_000 });
+      const bar = dialog.getByTestId("task-file-dialog-bar");
+      await expect(bar.getByRole("button", { name: "Download" })).toBeVisible();
+      await expect(bar.getByRole("button", { name: "Close" })).toBeVisible();
+      const box = await dialog.boundingBox();
+      const viewport = page.viewportSize();
+      expect(box?.width).toBeGreaterThanOrEqual((viewport?.width ?? 0) * 0.85);
+      expect(box?.height).toBeGreaterThanOrEqual(
+        (viewport?.height ?? 0) * 0.85
+      );
       const downloaded = page.waitForEvent("download");
-      await dialog.getByRole("button", { name: "Download" }).click();
+      await bar.getByRole("button", { name: "Download" }).click();
       const download = await downloaded;
       expect(download.suggestedFilename()).toBe(PRD_FILE);
-      await page.keyboard.press("Escape");
+      await bar.getByRole("button", { name: "Close" }).click();
       await expect(dialog).toBeHidden();
 
       await files.getByRole("button", { name: SCREENSHOT_FILE }).click();
-      await expect(dialog.locator("img")).toBeVisible();
+      await expect(dialog.getByTestId("task-file-viewer")).toBeVisible({
+        timeout: 30_000,
+      });
       await page.keyboard.press("Escape");
+
+      const origin = new URL(page.url()).origin;
+      const foreign: string[] = [];
+      const onRequest = (request: Request) => {
+        const url = request.url();
+        if (
+          HTTP_URL.test(url) &&
+          !url.startsWith(origin) &&
+          !url.includes("localhost")
+        ) {
+          foreign.push(url);
+        }
+      };
+      page.on("request", onRequest);
+      await files.getByRole("button", { name: PDF_FILE }).click();
+      await expect(
+        dialog.getByTestId("task-file-viewer").locator("canvas").first()
+      ).toBeVisible({ timeout: 30_000 });
+      await page.keyboard.press("Escape");
+      await files.getByRole("button", { name: DOCX_FILE }).click();
+      await expect(dialog.getByText(DOCX_TEXT)).toBeVisible({
+        timeout: 30_000,
+      });
+      await page.keyboard.press("Escape");
+      page.off("request", onRequest);
+      expect(foreign).toEqual([]);
 
       await files.getByRole("button", { name: BUNDLE_FILE }).click();
       await expect(dialog).toContainText("No preview for this file type");
@@ -494,8 +545,10 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
         .getByRole("button", { name: PRD_FILE })
         .click();
       await expect(
-        dialog.getByRole("heading", { name: PRD_HEADING })
-      ).toBeVisible();
+        dialog
+          .getByTestId("task-file-viewer")
+          .getByRole("heading", { name: PRD_HEADING })
+      ).toBeVisible({ timeout: 30_000 });
       await page.keyboard.press("Escape");
       env.expectNoAgentErrors();
     });

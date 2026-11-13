@@ -31,6 +31,9 @@ export const RESERVED_ORG_SLUGS = [
   "connect",
   "sso-callback",
 
+  // Static viewer assets served from apps/app/public/file-viewer.
+  "file-viewer",
+
   // Next.js / infrastructure
   "_next",
 ] as const;
