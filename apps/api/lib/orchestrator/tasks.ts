@@ -44,6 +44,7 @@ import {
   forkUnsupportedMessage,
   runnerForksSession,
 } from "@/lib/runner-fork-session";
+import { waitUntil } from "@/lib/wait-until";
 import {
   cancelBlockedLoop,
   checkCommandSigning,
@@ -52,6 +53,7 @@ import {
 import { personalRunnerBusy } from "@/lib/workflows/engine/personal-runner-queue";
 import { isLoopSettled } from "@/lib/workflows/engine/run-loops";
 import { renderCase } from "./case-render";
+import { mailTaskQuestions } from "./needs-person-mail";
 import { recordAskedQuestions } from "./task-asked";
 import { taskCancelledMessage } from "./task-cancel";
 import {
@@ -692,6 +694,11 @@ async function settleTask(
   );
   if (updated.count === 1) {
     await recordAskedQuestions(taskId, result.questions);
+    if (result.questions.length > 0) {
+      waitUntil(
+        mailTaskQuestions({ taskId, questionCount: result.questions.length })
+      );
+    }
   }
   return updated.count === 1;
 }

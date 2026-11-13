@@ -74,6 +74,10 @@ vi.mock("@/lib/orchestrator/case-render", async () =>
   ).caseRenderModule()
 );
 
+vi.mock("@/lib/orchestrator/needs-person-mail", () => ({
+  mailTaskQuestions: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock("@/lib/orchestrator/task-asked", () => ({
   recordAskedQuestions: vi.fn(() => Promise.resolve()),
 }));

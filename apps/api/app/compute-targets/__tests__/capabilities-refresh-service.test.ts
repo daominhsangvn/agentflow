@@ -41,7 +41,7 @@ const mocks = vi.hoisted(() => ({
   targets: {} as Record<string, Row>,
   storedCapabilities: null as Row | null,
   storedRows: [] as Row[],
-  projectSettings: {} as Row,
+  projectAgents: [] as string[],
   command: null as Row | null,
   events: [] as Row[],
   processToolkit: null as string | null,
@@ -63,8 +63,8 @@ vi.mock("@repo/database", () => {
     project: {
       findFirst: vi.fn((args: { select: Row }) =>
         Promise.resolve(
-          args.select.settings
-            ? { settings: mocks.projectSettings }
+          args.select.agents
+            ? { agents: agentRows(mocks.projectAgents) }
             : { id: IDS.project }
         )
       ),
@@ -172,7 +172,7 @@ beforeEach(() => {
   mocks.targets = { [IDS.target]: target() };
   mocks.storedCapabilities = null;
   mocks.storedRows = [];
-  mocks.projectSettings = {};
+  mocks.projectAgents = [];
   mocks.command = null;
   mocks.events = [];
   mocks.processToolkit = null;
@@ -511,7 +511,7 @@ describe("refreshProject", () => {
       [IDS.target2]: target({ id: IDS.target2, capabilities: {} }),
     };
     mocks.storedRows = [{ computeTargetId: IDS.target }];
-    mocks.projectSettings = { runnerIds: [IDS.target, IDS.target2] };
+    mocks.projectAgents = [IDS.target, IDS.target2];
     mocks.storedCapabilities = null;
     mocks.processToolkit = CHECKOUT.fullName;
     const counts = await service.refreshProject(IDS.org, IDS.project);
@@ -526,7 +526,7 @@ describe("refreshProject with an unexpected failure", () => {
       [IDS.target]: target(),
       [IDS.target2]: target({ id: IDS.target2 }),
     };
-    mocks.projectSettings = { runnerIds: [IDS.target, IDS.target2] };
+    mocks.projectAgents = [IDS.target, IDS.target2];
     mocks.processToolkit = CHECKOUT.fullName;
     mocks.dispatch = vi
       .fn()
@@ -606,3 +606,7 @@ describe("processToolkitChanged", () => {
     ).toBe(false);
   });
 });
+
+function agentRows(ids: string[]) {
+  return ids.map((computeTargetId) => ({ computeTargetId }));
+}

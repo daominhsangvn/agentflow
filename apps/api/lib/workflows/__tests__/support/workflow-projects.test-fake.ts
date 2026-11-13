@@ -20,7 +20,11 @@ export function projectDelegates(source: {
       findMany: vi.fn((args: { where: { id: { in: string[] } } }) =>
         Promise.resolve(
           source.projectExists()
-            ? args.where.id.in.map((id) => ({ id, name: "Platform" }))
+            ? args.where.id.in.map((id) => ({
+                id,
+                name: "Platform",
+                agents: [],
+              }))
             : []
         )
       ),

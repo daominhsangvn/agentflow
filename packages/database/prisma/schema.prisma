@@ -426,6 +426,7 @@ model Organization {
   workflows                            Workflow[]
   workflowRuns                         WorkflowRun[]
   projectRepositories                  ProjectRepository[]
+  projectAgents                        ProjectAgent[]
   projectProcessVersions               ProjectProcessVersion[]
   projectConnections                   ProjectConnection[]
   projectConnectionScopes              ProjectConnectionScope[]
@@ -482,6 +483,7 @@ model User {
   workflowsCreated              Workflow[]                          @relation("WorkflowCreatedBy")
   workflowRunsRunAs             WorkflowRun[]                       @relation("WorkflowRunRunAsUser")
   projectRepositoriesAdded      ProjectRepository[]                 @relation("ProjectRepositoryCreatedBy")
+  projectAgentContacts          ProjectAgentContact[]
   projectConnectionsAdded       ProjectConnection[]                 @relation("ProjectConnectionCreatedBy")
   projectProcessVersionsCreated ProjectProcessVersion[]             @relation("ProjectProcessVersionCreatedBy")
   computeTargets                ComputeTarget[]
@@ -615,6 +617,7 @@ model ComputeTarget {
   // Also raw-migration-maintained for the same partial-index reason.
   // See migration: 20260802190000_iss4832_compute_target_heartbeat_group_index
   @@map("compute_targets")
+  projectAgents ProjectAgent[]
 }
 
 model ComputeTargetHealthCheck {
@@ -1519,6 +1522,7 @@ model Project {
   organization       Organization                @relation(fields: [organizationId], references: [id])
   workflows          Workflow[]
   repositories       ProjectRepository[]
+  agents             ProjectAgent[]
   processVersions    ProjectProcessVersion[]
   connections        ProjectConnection[]
   workflowTriggers   WorkflowTrigger[]
@@ -5548,6 +5552,45 @@ model ProjectRepository {
   @@index([organizationId, projectId])
   @@index([connectionId])
   @@map("project_repositories")
+}
+
+// An Agent of a project (Project → Agents): a computer its loops run on.
+model ProjectAgent {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  computeTargetId String   @map("compute_target_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  organization  Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project       Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  computeTarget ComputeTarget         @relation(fields: [computeTargetId], references: [id], onDelete: Cascade)
+  contacts      ProjectAgentContact[]
+
+  @@unique([projectId, computeTargetId])
+  // The cascade from compute_targets and the projects listing an Agent.
+  @@index([computeTargetId])
+  @@map("project_agents")
+}
+
+// Who is notified when the Agent's orchestrated case needs a person: an org member (userId,
+// email read from the user at send time) or an external address (email). Exactly one is set
+// (CHECK project_agent_contacts_one_recipient, in the baseline SQL).
+model ProjectAgentContact {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  projectAgentId String   @map("project_agent_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  email          String?  @db.VarChar(320)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  projectAgent ProjectAgent @relation(fields: [projectAgentId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectAgentId, userId])
+  @@unique([projectAgentId, email])
+  // Removing a member who leaves the organization.
+  @@index([userId])
+  @@map("project_agent_contacts")
 }
 
 // A project's use of an organization integration connection (Project

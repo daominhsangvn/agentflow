@@ -470,6 +470,30 @@ each question, goes to 0 when answers are sent on the case page, when the task
 is resumed without fork, and when it is cancelled. `askedHuman` is set by
 `wait_human asked` and cleared when the next turn starts.
 
+### Email to the Agent's contacts
+
+When a case needs a person, the API sends a notification by email:
+
+- a task settles with questions: to the contacts of (the case's project, the
+  task's Agent), once per task;
+- a decision is requested (`request_decision`): to the contacts of (the case's
+  project, the workflow's orchestrator Agent, `agent.computeTargetId`), once
+  per decision.
+
+Each recipient gets their own email (Message-IDs
+`<orchestrator-task-questions-<taskId>.<h>@agentflow>` and
+`<orchestrator-decision-<decisionId>.<h>@agentflow>`), sent through
+`SMTP_URL` / `EMAIL_FROM`; without `SMTP_URL` nothing is sent. With no contacts
+there is no mail and no fallback to the project owner. A failure is logged and
+not retried. Contacts are set per Agent on Project → Agents (org members or
+external emails).
+
+The email is a notification only: what waits, the project, the item, the Agent
+and a link (`?tab=agents&agent=...&case=...`; decisions have no `agent`). It
+carries no question or decision text. Answers and decisions are given on the
+case page (or the ticket); replies to the email are not read. The orchestrator
+model is not involved (`apps/api/lib/orchestrator/needs-person-mail.ts`).
+
 **Writing to an Agent.** A case-page message may carry `toAgentId` (the Agent
 picked in the composer; it must have a task in the case). The orchestrator gets
 it as a message with `to="<agent>"` and relays it: a `task_run` that resumes
@@ -594,7 +618,7 @@ existing, and a repository that fails does not stop the others.
 ## Decisions
 
 `request_decision` stores a pending decision on the case and posts its
-question. It is decided once (`lib/orchestrator/decisions.ts`), either way:
+question and emails the Agent's contacts (see "Email to the Agent's contacts"). It is decided once (`lib/orchestrator/decisions.ts`), either way:
 
 - **in AgentFlow**: `POST /orchestrator/decisions/{id}` (`{ approved,
   comment }`, org admins only) records it in the admin's name (`via:

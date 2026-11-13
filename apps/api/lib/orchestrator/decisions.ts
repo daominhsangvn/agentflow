@@ -13,6 +13,8 @@ import {
   readStoredDraft,
   type StoredDecisionDraft,
 } from "@/lib/orchestrator/decision-draft";
+import { mailDecisionRequested } from "@/lib/orchestrator/needs-person-mail";
+import { waitUntil } from "@/lib/wait-until";
 
 /**
  * Decisions the orchestrator asks people for (docs/orchestrator.md): an
@@ -44,6 +46,7 @@ export async function requestDecision(input: {
       select: { id: true },
     })
   );
+  waitUntil(mailDecisionRequested({ decisionId: decision.id }));
   return decision.id;
 }
 

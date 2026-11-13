@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DesktopCommandStatus } from "@repo/api/src/types/compute-target";
 import type { ProjectProcessState } from "@repo/api/src/types/project-process";
-import { readProjectRunnerIds } from "@repo/api/src/types/project-runners";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import {
   type RequestRunnerCapabilitiesRefreshInput,
@@ -20,6 +19,10 @@ import { log } from "@repo/observability/log";
 import { z } from "zod";
 import { resolveOrgProjectId } from "@/app/compute-targets/capabilities-service";
 import { computeTargetsService } from "@/app/compute-targets/service";
+import {
+  projectAgentIds,
+  projectAgentIdsSelect,
+} from "@/app/projects/project-agent-ids";
 import {
   type CurrentProcess,
   CurrentProcessKind,
@@ -205,12 +208,12 @@ export const computeTargetCapabilitiesRefreshService = {
       }),
       project: await db.project.findFirst({
         where: { id: projectId, organizationId },
-        select: { settings: true },
+        select: projectAgentIdsSelect,
       }),
     }));
     const targetIds = new Set([
       ...rows.map((row) => row.computeTargetId),
-      ...readProjectRunnerIds(project?.settings),
+      ...projectAgentIds(project),
     ]);
     const counts: RefreshCounts = { dispatched: 0, skipped: 0 };
     for (const targetId of targetIds) {

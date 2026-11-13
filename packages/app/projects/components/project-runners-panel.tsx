@@ -23,6 +23,7 @@ import {
   useProjectRunners,
   useSaveProjectRunners,
 } from "../hooks/use-project-runners";
+import { ProjectAgentContacts } from "./project-agent-contacts";
 
 export type ProjectRunnersPanelProps = {
   projectId: string;
@@ -57,7 +58,10 @@ export function ProjectRunnersPanel({
             Each one needs the toolchains of all the repositories (for example
             .NET, Rust and Node.js), so set them up alike; a new loop goes to
             the least busy one online. Without agents, loops run on the computer
-            each user picks.
+            each user picks. An Agent&apos;s contacts get an email (a
+            notification with a link) when its orchestrator task asks questions,
+            or, for the workflow&apos;s orchestrator Agent, when a decision is
+            requested.
             {isAdmin ? null : " Only organization admins can change them."}
           </p>
         </div>
@@ -88,6 +92,7 @@ export function ProjectRunnersPanel({
         />
       ) : (
         <RunnerList
+          isAdmin={isAdmin}
           isBusy={save.isPending}
           isLoading={runners.isLoading}
           onRemove={
@@ -100,6 +105,7 @@ export function ProjectRunnersPanel({
                   )
               : null
           }
+          projectId={projectId}
           runners={assigned}
         />
       )}
@@ -184,6 +190,8 @@ function WaitingList({
 }
 
 type RunnerListProps = {
+  projectId: string;
+  isAdmin: boolean;
   runners: ProjectRunner[];
   isLoading: boolean;
   isBusy: boolean;
@@ -192,6 +200,8 @@ type RunnerListProps = {
 };
 
 function RunnerList({
+  projectId,
+  isAdmin,
   runners,
   isLoading,
   isBusy,
@@ -233,6 +243,11 @@ function RunnerList({
               </span>
             )}
             <ToolList tools={runner.tools} />
+            <ProjectAgentContacts
+              isAdmin={isAdmin}
+              projectId={projectId}
+              runner={runner}
+            />
           </div>
           {onRemove ? (
             <Button

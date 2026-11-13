@@ -79,7 +79,7 @@ describe("agentDetailService.get", () => {
     mocks.targetFindFirst.mockResolvedValue(target);
     mocks.capabilityFindMany.mockResolvedValue([]);
     mocks.projectFindMany.mockResolvedValue([
-      { id: "p1", name: "Project", settings: { runnerIds: [TARGET] } },
+      { id: "p1", name: "Project", agents: [{ computeTargetId: TARGET }] },
     ]);
     mocks.workflowFindMany.mockResolvedValue([
       {

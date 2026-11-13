@@ -34,6 +34,24 @@ export function orchestratorCaseUrl(orgSlug: string, caseId: string): string {
   return `${orgPrefix(orgSlug)}/orchestrator/cases/${encodeURIComponent(caseId)}`;
 }
 
+/**
+ * A case on the workflow page's Agents tab. Without `computeTargetId` the tab
+ * selects the orchestrator, where decisions are shown.
+ */
+export function workflowAgentCaseUrl(
+  orgSlug: string,
+  workflowId: string,
+  caseId: string,
+  computeTargetId: string | null
+): string {
+  const params = new URLSearchParams({ tab: "agents" });
+  if (computeTargetId !== null) {
+    params.set("agent", computeTargetId);
+  }
+  params.set("case", caseId);
+  return `${orgPrefix(orgSlug)}/workflows/${encodeURIComponent(workflowId)}?${params.toString()}`;
+}
+
 export function issueUrl(orgSlug: string, slug: string): string {
   return `${orgPrefix(orgSlug)}/issues/${encodeURIComponent(slug)}`;
 }

@@ -7,6 +7,7 @@ import { orgSlugSchema } from "@repo/api/src/types/reserved-slugs";
 import { withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
 import { organizationsService } from "@/app/organizations/service";
+import { projectAgentContactsService } from "@/app/projects/project-agent-contacts-service";
 import { usersService } from "@/app/users/service";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import { splitDisplayName } from "./identity-service";
@@ -159,7 +160,14 @@ export async function syncMemberRemoved(
     return;
   }
   try {
-    await usersService.deactivateByClerkIdAndOrg(userId, localOrganization.id);
+    const user = await usersService.deactivateByClerkIdAndOrg(
+      userId,
+      localOrganization.id
+    );
+    await projectAgentContactsService.removeMember(
+      localOrganization.id,
+      user.id
+    );
   } catch (error) {
     if (getPrismaErrorCode(error) !== "P2025") {
       throw error;

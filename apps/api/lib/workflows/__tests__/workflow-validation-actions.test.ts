@@ -54,6 +54,7 @@ vi.mock("@repo/database", () => {
           args.where.id.in.map((id) => ({
             id,
             name: id === IDS.project ? "Billing" : "Payments",
+            agents: [],
           }))
         ),
     },

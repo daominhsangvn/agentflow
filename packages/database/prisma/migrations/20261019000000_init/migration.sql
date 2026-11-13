@@ -2507,6 +2507,27 @@ CREATE TABLE public.preview_schemas_observations (
 
 
 
+CREATE TABLE public.project_agent_contacts (
+    id uuid NOT NULL,
+    project_agent_id uuid NOT NULL,
+    user_id uuid,
+    email character varying(320),
+    created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT project_agent_contacts_one_recipient CHECK (((user_id IS NULL) <> (email IS NULL)))
+);
+
+
+
+CREATE TABLE public.project_agents (
+    id uuid NOT NULL,
+    organization_id uuid NOT NULL,
+    project_id uuid NOT NULL,
+    compute_target_id uuid NOT NULL,
+    created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+
 CREATE TABLE public.project_connection_scopes (
     id uuid NOT NULL,
     organization_id uuid NOT NULL,
@@ -3708,6 +3729,16 @@ ALTER TABLE ONLY public.preview_schemas_observations
 
 ALTER TABLE ONLY public.preview_schemas
     ADD CONSTRAINT preview_schemas_pkey PRIMARY KEY (schema_name);
+
+
+
+ALTER TABLE ONLY public.project_agent_contacts
+    ADD CONSTRAINT project_agent_contacts_pkey PRIMARY KEY (id);
+
+
+
+ALTER TABLE ONLY public.project_agents
+    ADD CONSTRAINT project_agents_pkey PRIMARY KEY (id);
 
 
 
@@ -5075,6 +5106,26 @@ CREATE UNIQUE INDEX organizations_slug_key ON public.organizations USING btree (
 
 
 
+CREATE UNIQUE INDEX project_agent_contacts_project_agent_id_email_key ON public.project_agent_contacts USING btree (project_agent_id, email);
+
+
+
+CREATE UNIQUE INDEX project_agent_contacts_project_agent_id_user_id_key ON public.project_agent_contacts USING btree (project_agent_id, user_id);
+
+
+
+CREATE INDEX project_agent_contacts_user_id_idx ON public.project_agent_contacts USING btree (user_id);
+
+
+
+CREATE INDEX project_agents_compute_target_id_idx ON public.project_agents USING btree (compute_target_id);
+
+
+
+CREATE UNIQUE INDEX project_agents_project_id_compute_target_id_key ON public.project_agents USING btree (project_id, compute_target_id);
+
+
+
 CREATE INDEX project_connection_scopes_organization_id_scope_key_idx ON public.project_connection_scopes USING btree (organization_id, scope_key);
 
 
@@ -6434,6 +6485,31 @@ ALTER TABLE ONLY public.orchestrator_waits
 
 ALTER TABLE ONLY public.orchestrator_waits
     ADD CONSTRAINT orchestrator_waits_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY public.project_agent_contacts
+    ADD CONSTRAINT project_agent_contacts_project_agent_id_fkey FOREIGN KEY (project_agent_id) REFERENCES public.project_agents(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY public.project_agent_contacts
+    ADD CONSTRAINT project_agent_contacts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY public.project_agents
+    ADD CONSTRAINT project_agents_compute_target_id_fkey FOREIGN KEY (compute_target_id) REFERENCES public.compute_targets(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY public.project_agents
+    ADD CONSTRAINT project_agents_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY public.project_agents
+    ADD CONSTRAINT project_agents_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 

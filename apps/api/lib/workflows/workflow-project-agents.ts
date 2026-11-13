@@ -1,6 +1,9 @@
-import { readProjectRunnerIds } from "@repo/api/src/types/project-runners";
 import type { SaveWorkflowInput } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
+import {
+  type ProjectAgentIdsRow,
+  projectAgentIds,
+} from "@/app/projects/project-agent-ids";
 
 export type WorkflowAgentRef = { label: string; computeTargetId: string };
 
@@ -10,12 +13,12 @@ export type WorkflowAgentRef = { label: string; computeTargetId: string };
  * Agents accepts any Agent.
  */
 export function projectAgentsError(input: {
-  projects: { id: string; name: string; settings: unknown }[];
+  projects: ({ id: string; name: string } & ProjectAgentIdsRow)[];
   agents: WorkflowAgentRef[];
   agentNames: Map<string, string>;
 }): string | null {
   for (const project of input.projects) {
-    const allowed = readProjectRunnerIds(project.settings);
+    const allowed = projectAgentIds(project);
     if (allowed.length === 0) {
       continue;
     }

@@ -3,19 +3,23 @@ import {
   type ProjectRunner,
   type ProjectRunners,
   readPersonalAgentProjectKey,
-  readProjectRunnerIds,
   type UpdateProjectRunnersInput,
 } from "@repo/api/src/types/project-runners";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { withDb } from "@repo/database";
 import { z } from "zod";
+import { projectAgentContactsService } from "./project-agent-contacts-service";
+import {
+  type ProjectAgentIdsRow,
+  projectAgentIds,
+  projectAgentIdsSelect,
+} from "./project-agent-ids";
 import { countActiveLoopsByTarget } from "./project-runner-selection";
 
 /**
  * Agents of a project (Project → Repositories → Agents): the compute targets
- * its agent loops run on, stored as `runnerIds` in the project's `settings`
- * and written with a single jsonb update, so the other settings keys are kept.
- * Loops pick one through project-runner-selection.ts.
+ * its agent loops run on, stored as `project_agents` rows (in the order they
+ * were added). Loops pick one through project-runner-selection.ts.
  */
 
 export type ProjectRunnersServiceError = {
@@ -48,7 +52,7 @@ export const projectRunnersService = {
     if (!project) {
       return null;
     }
-    return buildProjectRunners(organizationId, project);
+    return buildProjectRunners(organizationId, projectId, project);
   },
 
   /**
@@ -71,33 +75,42 @@ export const projectRunnersService = {
       organizationId,
       userId,
       runnerIds,
-      storedIds: readProjectRunnerIds(project.settings),
+      storedIds: projectAgentIds(project),
       projectKey: project.slug,
     });
     if (refusal) {
       return serviceError(Status.BadRequest, refusal);
     }
-    const updated = await withDb(
-      (db) =>
-        db.$executeRaw`
-        UPDATE projects
-        SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{runnerIds}', ${JSON.stringify(runnerIds)}::jsonb),
-            updated_at = NOW()
-        WHERE id = ${projectId}::uuid AND organization_id = ${organizationId}::uuid`
-    );
-    if (updated === 0) {
+    await withDb.tx(async (tx) => {
+      await tx.projectAgent.deleteMany({
+        where: {
+          organizationId,
+          projectId,
+          computeTargetId: { notIn: runnerIds },
+        },
+      });
+      if (runnerIds.length > 0) {
+        await tx.projectAgent.createMany({
+          data: runnerIds.map((computeTargetId) => ({
+            organizationId,
+            projectId,
+            computeTargetId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    });
+    const saved = await findProject(organizationId, projectId);
+    if (!saved) {
       return serviceError(Status.NotFound, "Project not found");
     }
     return Result.ok(
-      await buildProjectRunners(organizationId, {
-        slug: project.slug,
-        settings: { runnerIds },
-      })
+      await buildProjectRunners(organizationId, projectId, saved)
     );
   },
 };
 
-type ProjectRow = { slug: string | null; settings: unknown };
+type ProjectRow = { slug: string | null } & ProjectAgentIdsRow;
 
 type RequestedAgents = {
   organizationId: string;
@@ -123,21 +136,30 @@ function findProject(
   return withDb((db) =>
     db.project.findFirst({
       where: { id: projectId, organizationId },
-      select: { settings: true, slug: true },
+      select: { slug: true, ...projectAgentIdsSelect },
     })
   );
 }
 
 async function buildProjectRunners(
   organizationId: string,
+  projectId: string,
   project: ProjectRow
 ): Promise<ProjectRunners> {
-  const runnerIds = readProjectRunnerIds(project.settings);
-  const [runners, waiting] = await Promise.all([
+  const runnerIds = projectAgentIds(project);
+  const [runners, waiting, contacts] = await Promise.all([
     loadRunners(organizationId, runnerIds),
     loadWaiting(organizationId, project.slug, runnerIds),
+    projectAgentContactsService.listByProject(organizationId, projectId),
   ]);
-  return { runners, projectKey: project.slug, waiting };
+  return {
+    runners: runners.map((runner) => ({
+      ...runner,
+      contacts: contacts.get(runner.id) ?? [],
+    })),
+    projectKey: project.slug,
+    waiting,
+  };
 }
 
 /** The reason the requested Agents cannot be saved; null when they can. */
@@ -257,6 +279,7 @@ function toProjectRunner(
     tools: capabilities.success
       ? { ...capabilities.data.versions, ...capabilities.data.toolchains }
       : {},
+    contacts: [],
   };
 }
 

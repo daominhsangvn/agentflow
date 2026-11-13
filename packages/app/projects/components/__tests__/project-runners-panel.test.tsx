@@ -23,6 +23,12 @@ const mocks = vi.hoisted(() => ({
   saveMutate: vi.fn(),
 }));
 
+vi.mock("../project-agent-contacts", () => ({
+  ProjectAgentContacts: ({ runner }: { runner: { id: string } }) => (
+    <div data-testid="agent-contacts">{runner.id}</div>
+  ),
+}));
+
 vi.mock("../../hooks/use-project-runners", () => ({
   useProjectRunners: () => ({
     data: {
@@ -57,6 +63,7 @@ function runner(id: string, overrides: Partial<ProjectRunner> = {}) {
     capacity: 2,
     activeLoops: 1,
     tools: {},
+    contacts: [],
     ...overrides,
   } satisfies ProjectRunner;
 }
@@ -96,6 +103,15 @@ describe("ProjectRunnersPanel", () => {
       "Offline · Automatic · 0 loops running · Ops Team"
     );
     expect(node).toHaveTextContent("Not shared with the organization");
+  });
+
+  it("renders the contacts once per assigned agent, not for waiting ones", () => {
+    mocks.waiting = [runner(SPARE, { kind: AgentKind.Personal })];
+    render(<ProjectRunnersPanel isAdmin projectId={PROJECT_ID} />);
+
+    expect(
+      screen.getAllByTestId("agent-contacts").map((node) => node.textContent)
+    ).toEqual([DOTNET, NODE]);
   });
 
   it("removes an agent by saving the others", async () => {
