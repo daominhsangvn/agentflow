@@ -1,13 +1,11 @@
-import { log } from "@repo/observability/log";
-import { getOrgAdminStatus } from "@/lib/auth/org-admin";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAuth } from "@/lib/auth/with-auth";
 import {
   badRequestResponse,
   deleteResponse,
   errorResponse,
-  forbiddenResponse,
   parseBody,
-  scheduleLogFlush,
   successResponse,
 } from "@/lib/route-utils";
 import { apiKeyService } from "../../api-key-service";
@@ -27,17 +25,13 @@ type SetKeyResponse = {
 export const PUT = withAuth<SetKeyResponse, "/settings/api-keys/org">(
   async ({ user, clerkOrgId, clerkUserId }, request) => {
     try {
-      const adminStatus = await getOrgAdminStatus(clerkOrgId, clerkUserId);
-      if (!adminStatus.isAdmin) {
-        log.warn("Denied org API key write for non-admin user", {
-          clerkOrgId,
-          clerkUserId,
-          reason: adminStatus.reason,
-          method: "PUT",
-          route: "/settings/api-keys/org",
-        });
-        scheduleLogFlush();
-        return forbiddenResponse();
+      const denied = await denyUnlessPermitted(
+        { clerkOrgId, clerkUserId },
+        { method: "PUT", route: "/settings/api-keys/org" },
+        OrgPermission.OrgApiKeyManage
+      );
+      if (denied) {
+        return denied;
       }
 
       const { body, errorResponse: parseError } = await parseBody(
@@ -74,17 +68,13 @@ export const PUT = withAuth<SetKeyResponse, "/settings/api-keys/org">(
 export const DELETE = withAuth<{ deleted: true }, "/settings/api-keys/org">(
   async ({ user, clerkOrgId, clerkUserId }) => {
     try {
-      const adminStatus = await getOrgAdminStatus(clerkOrgId, clerkUserId);
-      if (!adminStatus.isAdmin) {
-        log.warn("Denied org API key delete for non-admin user", {
-          clerkOrgId,
-          clerkUserId,
-          reason: adminStatus.reason,
-          method: "DELETE",
-          route: "/settings/api-keys/org",
-        });
-        scheduleLogFlush();
-        return forbiddenResponse();
+      const denied = await denyUnlessPermitted(
+        { clerkOrgId, clerkUserId },
+        { method: "DELETE", route: "/settings/api-keys/org" },
+        OrgPermission.OrgApiKeyManage
+      );
+      if (denied) {
+        return denied;
       }
 
       await apiKeyService.removeOrgKey(user.organizationId);

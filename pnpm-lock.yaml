@@ -1496,6 +1496,9 @@ importers:
 
   packages/auth:
     dependencies:
+      '@repo/api':
+        specifier: workspace:*
+        version: link:../api
       '@repo/design-system':
         specifier: workspace:@agentflow-ai/design-system@*
         version: link:../design-system

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/orchestrator/decisions/[id]/route";
 import { orchestratorDecisionService } from "@/app/orchestrator/decisions/service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import type { AuthContext } from "@/lib/auth/with-auth";
 import {
   createMockRequest,
@@ -17,7 +17,7 @@ vi.mock("@/lib/auth/with-any-auth", () => ({
   withAnyAuth: (handler: any) => async (request: any, context: any) =>
     handler(mockAuthContext, request, context?.params),
 }));
-vi.mock("@/lib/auth/deny-unless-org-admin");
+vi.mock("@/lib/auth/deny-unless-permitted");
 vi.mock("@/app/orchestrator/decisions/service");
 
 const DECISION_ID = "11111111-1111-7111-8111-111111111111";
@@ -39,7 +39,7 @@ describe("POST /orchestrator/decisions/[id]", () => {
     mockAuthContext = createTestAuthContext({
       user: { id: "user-1", organizationId: "org-1" } as any,
     });
-    vi.mocked(denyUnlessOrgAdmin).mockResolvedValue(null);
+    vi.mocked(denyUnlessPermitted).mockResolvedValue(null);
     vi.mocked(orchestratorDecisionService.decideByButton).mockResolvedValue(
       Result.ok({ conversationId: "conv-1" })
     );
@@ -66,7 +66,7 @@ describe("POST /orchestrator/decisions/[id]", () => {
   });
 
   it("returns 403 for a non-admin", async () => {
-    vi.mocked(denyUnlessOrgAdmin).mockResolvedValue(
+    vi.mocked(denyUnlessPermitted).mockResolvedValue(
       NextResponse.json({ error: "forbidden" }, { status: 403 }) as any
     );
     const response = await call({ approved: true });

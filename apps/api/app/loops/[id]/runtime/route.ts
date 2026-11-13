@@ -1,10 +1,9 @@
-import { log } from "@repo/observability/log";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import type { LoopRuntimeState } from "@/app/loops/types";
-import { getOrgAdminStatus } from "@/lib/auth/org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAuth } from "@/lib/auth/with-auth";
 import {
   errorResponse,
-  forbiddenResponse,
   notFoundResponse,
   scheduleLogFlush,
   successResponse,
@@ -14,17 +13,13 @@ import { loopsService } from "../../service";
 export const GET = withAuth<LoopRuntimeState, "/loops/[id]/runtime">(
   async ({ user, clerkOrgId, clerkUserId }, _, params) => {
     try {
-      const adminStatus = await getOrgAdminStatus(clerkOrgId, clerkUserId);
-      if (!adminStatus.isAdmin) {
-        log.warn("Denied loop runtime read for non-admin user", {
-          clerkOrgId,
-          clerkUserId,
-          reason: adminStatus.reason,
-          method: "GET",
-          route: "/loops/[id]/runtime",
-        });
-        scheduleLogFlush();
-        return forbiddenResponse();
+      const denied = await denyUnlessPermitted(
+        { clerkOrgId, clerkUserId },
+        { method: "GET", route: "/loops/[id]/runtime" },
+        OrgPermission.UsageReadAll
+      );
+      if (denied) {
+        return denied;
       }
 
       const { id } = await params;

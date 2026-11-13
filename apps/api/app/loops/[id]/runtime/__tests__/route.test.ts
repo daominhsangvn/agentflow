@@ -9,6 +9,7 @@
  * - Response shape validation
  */
 
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // --- Hoisted mocks ---
@@ -37,8 +38,8 @@ vi.mock("@/lib/auth/with-auth", () => ({
     },
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  getOrgAdminStatus: vi.fn(),
+vi.mock("@/lib/auth/deny-unless-permitted", () => ({
+  denyUnlessPermitted: vi.fn(),
 }));
 
 vi.mock("../../../service", () => ({
@@ -70,7 +71,7 @@ import {
   createMockRouteContext,
   createTestAuthContext,
 } from "@/__tests__/utils/auth-helpers";
-import { getOrgAdminStatus } from "@/lib/auth/org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import type { AuthContext } from "@/lib/auth/with-auth";
 import { loopsService } from "../../../service";
 import { GET } from "../route";
@@ -135,10 +136,7 @@ describe("GET /api/loops/:id/runtime", () => {
   // AC-001: Admin success — returns 200 with correct LoopRuntimeState shape
   // -------------------------------------------------------------------------
   it("returns 200 with LoopRuntimeState shape when called by an admin (AC-001)", async () => {
-    vi.mocked(getOrgAdminStatus).mockResolvedValue({
-      isAdmin: true,
-      reason: "admin",
-    });
+    vi.mocked(denyUnlessPermitted).mockResolvedValue(null);
     vi.mocked(loopsService.getLoopRuntime).mockResolvedValue(RUNTIME_STATE);
 
     const response = await GET(buildRequest(), routeContext());
@@ -164,10 +162,7 @@ describe("GET /api/loops/:id/runtime", () => {
   });
 
   it("calls getLoopRuntime with loopId and user.organizationId (AC-001)", async () => {
-    vi.mocked(getOrgAdminStatus).mockResolvedValue({
-      isAdmin: true,
-      reason: "admin",
-    });
+    vi.mocked(denyUnlessPermitted).mockResolvedValue(null);
     vi.mocked(loopsService.getLoopRuntime).mockResolvedValue(RUNTIME_STATE);
 
     await GET(buildRequest(), routeContext());
@@ -179,10 +174,9 @@ describe("GET /api/loops/:id/runtime", () => {
   // AC-002: Non-admin returns 403 and does not invoke the service
   // -------------------------------------------------------------------------
   it("returns 403 and does not call getLoopRuntime when the user is not an admin (AC-002)", async () => {
-    vi.mocked(getOrgAdminStatus).mockResolvedValue({
-      isAdmin: false,
-      reason: "not_admin",
-    });
+    vi.mocked(denyUnlessPermitted).mockResolvedValue(
+      NextResponse.json({ error: "forbidden" }, { status: 403 }) as never
+    );
 
     const response = await GET(buildRequest(), routeContext());
 
@@ -231,10 +225,7 @@ describe("GET /api/loops/:id/runtime", () => {
       } as never,
     });
 
-    vi.mocked(getOrgAdminStatus).mockResolvedValue({
-      isAdmin: true,
-      reason: "admin",
-    });
+    vi.mocked(denyUnlessPermitted).mockResolvedValue(null);
     // Service returns null because the loop belongs to a different org
     vi.mocked(loopsService.getLoopRuntime).mockResolvedValue(null);
 
@@ -252,10 +243,7 @@ describe("GET /api/loops/:id/runtime", () => {
       } as never,
     });
 
-    vi.mocked(getOrgAdminStatus).mockResolvedValue({
-      isAdmin: true,
-      reason: "admin",
-    });
+    vi.mocked(denyUnlessPermitted).mockResolvedValue(null);
     vi.mocked(loopsService.getLoopRuntime).mockResolvedValue(null);
 
     await GET(buildRequest(), routeContext());
@@ -289,10 +277,7 @@ describe("GET /api/loops/:id/runtime", () => {
       runtimeState: RUNTIME_STATE,
     },
   ])("response shape is valid when $name", async ({ runtimeState }) => {
-    vi.mocked(getOrgAdminStatus).mockResolvedValue({
-      isAdmin: true,
-      reason: "admin",
-    });
+    vi.mocked(denyUnlessPermitted).mockResolvedValue(null);
     vi.mocked(loopsService.getLoopRuntime).mockResolvedValue(runtimeState);
 
     const response = await GET(buildRequest(), routeContext());
@@ -323,10 +308,7 @@ describe("GET /api/loops/:id/runtime", () => {
   });
 
   it("returns 500 when the service throws unexpectedly", async () => {
-    vi.mocked(getOrgAdminStatus).mockResolvedValue({
-      isAdmin: true,
-      reason: "admin",
-    });
+    vi.mocked(denyUnlessPermitted).mockResolvedValue(null);
     vi.mocked(loopsService.getLoopRuntime).mockRejectedValue(
       new Error("database unreachable")
     );

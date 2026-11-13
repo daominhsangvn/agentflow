@@ -6,6 +6,7 @@ const { db, withDbMock } = vi.hoisted(() => {
     authMember: { create: vi.fn(), findFirst: vi.fn() },
     authOrganization: { findFirst: vi.fn(), create: vi.fn() },
     authSession: { updateMany: vi.fn() },
+    authUser: { updateMany: vi.fn() },
   };
   const run = (fn: (client: typeof fakeDb) => unknown) => fn(fakeDb);
   return {
@@ -22,11 +23,15 @@ vi.mock("@/lib/db-utils", () => ({
   getPrismaErrorCode: (error: { code?: string }) => error?.code,
 }));
 
+import { BuiltInOrgRole } from "@repo/api/src/types/org-permissions";
+import { orgSlugSchema } from "@repo/api/src/types/reserved-slugs";
 import {
   hasPendingInvitation,
+  markEmailVerified,
   provisionNewUser,
 } from "@/lib/auth/identity-provisioning";
 
+const PERSONAL_SLUG = /^ada-[a-z0-9]{4}$/;
 const USER = { id: "user-1", email: "Ada@Example.test", name: "Ada" };
 
 describe("provisionNewUser", () => {
@@ -55,12 +60,12 @@ describe("provisionNewUser", () => {
       data: expect.objectContaining({
         organizationId: "org-new",
         userId: "user-1",
-        role: "owner",
+        role: BuiltInOrgRole.Owner,
       }),
     });
   });
 
-  it("names the default organization from the environment", async () => {
+  it("names the first organization from the environment", async () => {
     vi.stubEnv("AUTH_DEFAULT_ORGANIZATION_NAME", "Acme");
     vi.stubEnv("AUTH_DEFAULT_ORGANIZATION_SLUG", "acme");
 
@@ -73,59 +78,54 @@ describe("provisionNewUser", () => {
     );
   });
 
-  it("adds later accounts to the existing organization as members", async () => {
+  it("gives later accounts their own organization as owner", async () => {
     db.authOrganization.findFirst.mockResolvedValue({ id: "org-1" });
 
     await provisionNewUser(USER);
 
-    expect(db.authOrganization.create).not.toHaveBeenCalled();
-    expect(db.authMember.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        organizationId: "org-1",
-        role: "member",
-      }),
-    });
-  });
-
-  it("leaves the account without a membership when auto-join is off", async () => {
-    vi.stubEnv("AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION", "false");
-    db.authOrganization.findFirst.mockResolvedValue({ id: "org-1" });
-    db.authMember.findFirst.mockResolvedValue(null);
-
-    await provisionNewUser(USER);
-
-    expect(db.authMember.create).not.toHaveBeenCalled();
-    expect(db.authSession.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("joins invited organizations with the invited role instead of the default", async () => {
-    db.authInvitation.findMany.mockResolvedValue([
-      { id: "inv-1", organizationId: "org-9", role: "admin" },
-    ]);
-    db.authMember.findFirst.mockResolvedValue({ organizationId: "org-9" });
-
-    await provisionNewUser(USER);
-
-    expect(db.authInvitation.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          email: "ada@example.test",
-          status: "pending",
-        }),
-      })
-    );
+    const data = db.authOrganization.create.mock.calls[0]?.[0].data;
+    expect(data.name).toBe("Ada's organization");
+    expect(data.slug).toMatch(PERSONAL_SLUG);
+    expect(orgSlugSchema.safeParse(data.slug).success).toBe(true);
     expect(db.authMember.create).toHaveBeenCalledTimes(1);
     expect(db.authMember.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ organizationId: "org-9", role: "admin" }),
+      data: expect.objectContaining({
+        organizationId: "org-new",
+        role: BuiltInOrgRole.Owner,
+      }),
     });
-    expect(db.authInvitation.update).toHaveBeenCalledWith({
-      where: { id: "inv-1" },
-      data: { status: "accepted" },
+    expect(db.authMember.create).not.toHaveBeenCalledWith({
+      data: expect.objectContaining({ organizationId: "org-1" }),
     });
-    expect(db.authOrganization.findFirst).not.toHaveBeenCalled();
   });
 
-  it("activates the joined organization on sessions created before the hook ran", async () => {
+  it("falls back to the email local part when the name is blank", async () => {
+    db.authOrganization.findFirst.mockResolvedValue({ id: "org-1" });
+
+    await provisionNewUser({
+      ...USER,
+      name: " ",
+      email: "j.doe+x@example.test",
+    });
+
+    const data = db.authOrganization.create.mock.calls[0]?.[0].data;
+    expect(data.name).toBe("j.doe+x's organization");
+    expect(orgSlugSchema.safeParse(data.slug).success).toBe(true);
+  });
+
+  it("does not accept pending invitations or join the inviting organization", async () => {
+    db.authOrganization.findFirst.mockResolvedValue({ id: "org-9" });
+
+    await provisionNewUser(USER);
+
+    expect(db.authInvitation.update).not.toHaveBeenCalled();
+    expect(db.authMember.create).toHaveBeenCalledTimes(1);
+    expect(db.authMember.create).not.toHaveBeenCalledWith({
+      data: expect.objectContaining({ organizationId: "org-9" }),
+    });
+  });
+
+  it("activates the new organization on sessions created before the hook ran", async () => {
     await provisionNewUser(USER);
 
     expect(db.authSession.updateMany).toHaveBeenCalledWith({
@@ -134,7 +134,20 @@ describe("provisionNewUser", () => {
     });
   });
 
-  it("joins the winner's organization when two first sign-ups race", async () => {
+  it("retries in a fresh transaction on a slug collision", async () => {
+    db.authOrganization.findFirst.mockResolvedValue({ id: "org-1" });
+    db.authOrganization.create
+      .mockRejectedValueOnce({ code: "P2002" })
+      .mockResolvedValueOnce({ id: "org-retry" });
+
+    await provisionNewUser(USER);
+
+    expect(withDbMock.tx).toHaveBeenCalledTimes(2);
+    expect(db.authOrganization.create).toHaveBeenCalledTimes(2);
+    expect(db.authMember.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes the personal branch when it loses the empty-install race", async () => {
     db.authOrganization.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id: "org-winner" });
@@ -142,11 +155,26 @@ describe("provisionNewUser", () => {
 
     await provisionNewUser(USER);
 
-    expect(db.authMember.create).toHaveBeenLastCalledWith({
-      data: expect.objectContaining({
-        organizationId: "org-winner",
-        role: "member",
-      }),
+    const data = db.authOrganization.create.mock.calls[1]?.[0].data;
+    expect(data.slug).not.toBe("agentflow");
+    expect(db.authMember.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after three collisions", async () => {
+    db.authOrganization.create.mockRejectedValue({ code: "P2002" });
+
+    await expect(provisionNewUser(USER)).rejects.toEqual({ code: "P2002" });
+    expect(db.authOrganization.create).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("markEmailVerified", () => {
+  it("only updates unverified accounts", async () => {
+    db.authUser.updateMany.mockResolvedValue({ count: 1 });
+    await markEmailVerified("user-1");
+    expect(db.authUser.updateMany).toHaveBeenCalledWith({
+      where: { id: "user-1", emailVerified: false },
+      data: { emailVerified: true },
     });
   });
 });

@@ -11,3 +11,12 @@ import "server-only";
 export function isSignUpAllowed(): boolean {
   return process.env.AUTH_ALLOW_SIGN_UP !== "false";
 }
+
+/**
+ * Whether signed-in users may create additional organizations. Gates only
+ * those: every sign-up gets its own default organization regardless. Mirrors
+ * the api's `AUTH_ALLOW_CREATE_ORGANIZATION`.
+ */
+export function isOrganizationCreationAllowed(): boolean {
+  return process.env.AUTH_ALLOW_CREATE_ORGANIZATION === "true";
+}

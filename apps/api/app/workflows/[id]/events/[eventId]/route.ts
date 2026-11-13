@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import type { WorkflowEventPayload } from "@repo/api/src/types/workflow-event";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import {
@@ -5,7 +6,7 @@ import {
   notFoundResponse,
   successResponse,
 } from "@/lib/route-utils";
-import { denyUnlessOrgAdmin } from "../../../route-helpers";
+import { denyUnlessWorkflowPermission } from "../../../route-helpers";
 import { workflowEventService } from "../../../workflow-event-service";
 
 const ROUTE = "/workflows/[id]/events/[eventId]";
@@ -20,10 +21,14 @@ export const GET = withAnyAuth<
   "/workflows/[id]/events/[eventId]"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
-      method: request.method,
-      route: ROUTE,
-    });
+    const denied = await denyUnlessWorkflowPermission(
+      auth,
+      {
+        method: request.method,
+        route: ROUTE,
+      },
+      OrgPermission.WorkflowManage
+    );
     if (denied) {
       return denied;
     }

@@ -18,7 +18,7 @@ import {
 } from "@/lib/route-utils";
 import {
   connectionErrorResponse,
-  denyUnlessOrgAdmin,
+  denyUnlessIntegrationManager,
 } from "../../route-helpers";
 
 const ROUTE = "/integrations/connections/[id]/repositories";
@@ -33,7 +33,7 @@ export const GET = withAnyAuth<
   "/integrations/connections/[id]/repositories"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
+    const denied = await denyUnlessIntegrationManager(auth, {
       method: request.method,
       route: ROUTE,
     });
@@ -79,7 +79,7 @@ export const POST = withAnyAuth<
   "/integrations/connections/[id]/repositories"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
+    const denied = await denyUnlessIntegrationManager(auth, {
       method: request.method,
       route: ROUTE,
     });

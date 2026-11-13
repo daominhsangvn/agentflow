@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveRedirectSearchParams } from "@/lib/app-route-redirects";
@@ -27,10 +28,20 @@ type Params = {
   linear?: string | string[];
 };
 
+const ALL_ADMIN_PERMISSIONS: string[] = [
+  OrgPermission.OrganizationUpdate,
+  OrgPermission.CustomFieldManage,
+  OrgPermission.CatalogManage,
+];
+
 function renderPage(params: Params, isAdmin: boolean) {
+  return renderPageWith(params, isAdmin ? ALL_ADMIN_PERMISSIONS : []);
+}
+
+function renderPageWith(params: Params, permissions: string[]) {
   authMock.mockResolvedValue({
-    has: ({ role }: { role: string }) =>
-      isAdmin && (role === "org:admin" || role === "org:owner"),
+    has: ({ permission }: { permission: string }) =>
+      permissions.includes(permission),
   });
   return SettingsRoutePage({ searchParams: Promise.resolve(params) });
 }
@@ -79,6 +90,30 @@ describe("Settings route page — initial tab resolution", () => {
     expect(screen.getByTestId("settings-page")).toHaveAttribute(
       "data-initial-tab",
       SettingsTab.CustomFields
+    );
+  });
+
+  it("opens custom-fields for a custom role holding only customField:manage", async () => {
+    render(
+      await renderPageWith({ tab: SettingsTab.CustomFields }, [
+        OrgPermission.CustomFieldManage,
+      ])
+    );
+    expect(screen.getByTestId("settings-page")).toHaveAttribute(
+      "data-initial-tab",
+      SettingsTab.CustomFields
+    );
+  });
+
+  it("bounces compliance for a role without catalog:manage", async () => {
+    render(
+      await renderPageWith({ tab: SettingsTab.Compliance }, [
+        OrgPermission.CustomFieldManage,
+      ])
+    );
+    expect(screen.getByTestId("settings-page")).toHaveAttribute(
+      "data-initial-tab",
+      SettingsTab.Profile
     );
   });
 

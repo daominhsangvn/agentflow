@@ -11,7 +11,7 @@ const LOCAL_ENV: NodeJS.ProcessEnv = { BASE_URL: "http://localhost:3100" };
 
 const RE_PASSWORD_REQUIRED = /E2E_USER_PASSWORD is required/;
 const RE_NOT_A_JWT = /not a JWT/;
-const RE_AUTO_JOIN_HINT = /AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION/;
+const RE_AUTO_JOIN_HINT = /has no organization/;
 
 describe("getE2ECredentials", () => {
   it("uses the defaults against localhost", () => {

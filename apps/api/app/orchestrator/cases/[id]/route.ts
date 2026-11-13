@@ -3,9 +3,10 @@ import {
   type UpdateOrchestratorCaseInput,
   updateOrchestratorCaseInputSchema,
 } from "@repo/api/src/types/orchestrator";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { Status } from "@repo/api/src/types/result";
 import { orchestratorCaseService } from "@/app/orchestrator/cases/service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import {
   conflictResponse,
@@ -48,10 +49,10 @@ export const PATCH = withAnyAuth<
   "/orchestrator/cases/[id]"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      "orchestrator cases"
+      OrgPermission.OrchestratorOperate
     );
     if (denied) {
       return denied;
@@ -89,10 +90,10 @@ export const DELETE = withAnyAuth<
   "/orchestrator/cases/[id]"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      "orchestrator cases"
+      OrgPermission.OrchestratorOperate
     );
     if (denied) {
       return denied;

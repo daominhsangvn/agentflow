@@ -1,24 +1,25 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import { orgSlugSchema } from "@repo/api/src/types/reserved-slugs";
 import { getPrismaClient, withDb } from "@repo/database";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { APIError } from "better-auth/api";
 import { jwt } from "better-auth/plugins/jwt";
 import { organization } from "better-auth/plugins/organization";
+import { ac, orgRoles } from "./access-control";
+import { agentflowAuthPlugin } from "./agentflow-auth-plugin";
 import {
   appBaseUrl,
+  sendEmailVerificationEmail,
   sendInvitationEmail,
   sendPasswordResetEmail,
 } from "./auth-email";
-import {
-  isFirstAdminSignUp,
-  runAsFirstAdminSignUp,
-} from "./first-admin-sign-up";
+import { runAsFirstAdminSignUp } from "./first-admin-sign-up";
 import {
   defaultActiveOrganizationId,
-  hasPendingInvitation,
+  markEmailVerified,
   provisionNewUser,
   syncMemberAdded,
   syncMemberRemoved,
@@ -27,6 +28,9 @@ import {
   syncUserProfile,
 } from "./identity-provisioning";
 import { toOrgRole } from "./identity-service";
+import { resolveMemberPermissions } from "./org-permissions";
+import { buildSocialProviders } from "./sso-providers";
+import { beforeUserCreate } from "./user-create-guard";
 
 /**
  * The identity provider: email/password accounts, organizations, and the
@@ -59,28 +63,43 @@ const betterAuthServer = betterAuth({
     // Ids are generated here: the auth_* tables have no column defaults.
     database: { generateId: () => randomUUID() },
   },
+  // Listing invitations by session email would expose another person's
+  // invitations to whoever signs up with their address (A8).
+  disabledPaths: ["/organization/list-user-invitations"],
   user: { modelName: "authUser" },
   session: { modelName: "authSession" },
-  account: { modelName: "authAccount" },
+  socialProviders: buildSocialProviders(),
+  // A21: accounts join by email only when both sides proved the mailbox. No
+  // `trustedProviders`; a provider email counts only as the registry's
+  // `mapProfileToUser` says (Microsoft: `isMicrosoftEmailVerified`).
+  account: {
+    modelName: "authAccount",
+    accountLinking: {
+      enabled: true,
+      disableImplicitLinking: false,
+      requireLocalEmailVerified: true,
+      trustedProviders: [],
+      allowDifferentEmails: false,
+    },
+  },
   verification: { modelName: "authVerification" },
+  emailVerification: {
+    sendVerificationEmail: ({ user, url }) =>
+      sendEmailVerificationEmail({ email: user.email, url }),
+    sendOnSignUp: false,
+    autoSignInAfterVerification: true,
+  },
   emailAndPassword: {
     enabled: true,
     minPasswordLength: MIN_PASSWORD_LENGTH,
     sendResetPassword: ({ user, url }) =>
       sendPasswordResetEmail({ email: user.email, url }),
+    onPasswordReset: ({ user }) => markEmailVerified(user.id),
   },
   databaseHooks: {
     user: {
       create: {
-        // `AUTH_ALLOW_SIGN_UP=false` makes the deployment invite-only: an
-        // account can still be created for an email with a pending invitation.
-        before: async (user) => {
-          if (await isSignUpBlocked(user.email)) {
-            throw new APIError("FORBIDDEN", {
-              message: "Sign-up is by invitation only",
-            });
-          }
-        },
+        before: beforeUserCreate,
         after: (user) => provisionNewUser(user),
       },
       update: { after: (user) => syncUserProfile(user) },
@@ -100,6 +119,9 @@ const betterAuthServer = betterAuth({
   },
   plugins: [
     organization({
+      ac,
+      roles: orgRoles,
+      dynamicAccessControl: { enabled: true },
       invitationExpiresIn: INVITATION_LIFETIME_SECONDS,
       allowUserToCreateOrganization:
         process.env.AUTH_ALLOW_CREATE_ORGANIZATION === "true",
@@ -107,24 +129,50 @@ const betterAuthServer = betterAuth({
         organization: { modelName: "authOrganization" },
         member: { modelName: "authMember" },
         invitation: { modelName: "authInvitation" },
+        organizationRole: { modelName: "authOrganizationRole" },
       },
-      sendInvitationEmail: ({ email, organization: invitedTo, inviter }) =>
+      // Ids are visible to org members, so the signed link token proves the
+      // mailbox (A25, see auth-endpoint-guards.ts). Better Auth's verified-email
+      // rule for custom `generateId` would strand freshly signed-up invitees.
+      requireEmailVerificationOnInvitation: false,
+      sendInvitationEmail: ({
+        id,
+        role,
+        email,
+        organization: invitedTo,
+        inviter,
+      }) =>
         sendInvitationEmail({
+          invitationId: id,
+          role,
           email,
           organizationName: invitedTo.name,
           inviterName: inviter.user.name || inviter.user.email,
         }),
       organizationHooks: {
+        beforeCreateOrganization: ({ organization: draft }) => {
+          if (!orgSlugSchema.safeParse(draft.slug).success) {
+            throw new APIError("BAD_REQUEST", {
+              message: "Organization slug is invalid or reserved",
+            });
+          }
+          return Promise.resolve();
+        },
         afterUpdateOrganization: ({ organization: updated }) =>
           syncOrganizationUpdate(updated),
         afterDeleteOrganization: ({ organization: deleted }) =>
           syncOrganizationDeleted(deleted.id),
+        // A re-invited, deactivated user is reactivated. Email verification on
+        // accept is done by the token guard (A25).
+        afterAcceptInvitation: ({ user, organization: joined }) =>
+          syncMemberAdded(user, joined),
         afterAddMember: ({ user, organization: joined }) =>
           syncMemberAdded(user, joined),
         afterRemoveMember: ({ user, organization: left }) =>
           syncMemberRemoved(user.id, left.id),
       },
     }),
+    agentflowAuthPlugin(),
     jwt({
       schema: { jwks: { modelName: "authJwks" } },
       jwt: {
@@ -177,6 +225,10 @@ async function buildTokenClaims(
     org_name: member.organization.name,
     org_logo: member.organization.logo,
     org_role: toOrgRole(member.role),
+    org_permissions: await resolveMemberPermissions(
+      member.role,
+      activeOrganizationId
+    ),
   };
 }
 
@@ -186,16 +238,6 @@ function trustedOrigins(): string[] {
     .map((origin) => origin.trim())
     .filter(Boolean);
   return [new URL(appBaseUrl()).origin, ...extra];
-}
-
-async function isSignUpBlocked(email: string): Promise<boolean> {
-  if (process.env.AUTH_ALLOW_SIGN_UP !== "false") {
-    return false;
-  }
-  if (isFirstAdminSignUp()) {
-    return false;
-  }
-  return !(await hasPendingInvitation(email));
 }
 
 /**

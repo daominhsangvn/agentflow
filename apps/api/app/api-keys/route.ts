@@ -1,21 +1,28 @@
 import type { ApiKey, CreateApiKeyResponse } from "@repo/api/src/types/api-key";
 import { AuditAction, AuditObjectType } from "@repo/api/src/types/audit";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   dispatchAuditEvent,
   userAuditActor,
 } from "@/app/audit/audit-emit-service";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import { withAuth } from "@/lib/auth/with-auth";
 import { errorResponse, parseBody, successResponse } from "@/lib/route-utils";
 import { apiKeysService } from "./service";
 import { createApiKeyValidator } from "./validators";
 
 export const GET = withAuth<ApiKey[], "/api-keys">(
-  async ({ user, orgRole }) => {
+  async ({ user, clerkOrgId, clerkUserId }) => {
     try {
+      const canManageAll = await hasOrgPermission(
+        clerkOrgId,
+        clerkUserId,
+        OrgPermission.OrgApiKeyManage
+      );
       const keys = await apiKeysService.list(
         user.organizationId,
         user.id,
-        orgRole ?? undefined
+        canManageAll
       );
       return successResponse(keys);
     } catch (error) {

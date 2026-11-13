@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -29,8 +29,13 @@ vi.mock("@/lib/auth/with-auth", () => ({
       handler(mocks.authContext, request, context?.params),
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  getOrgAdminStatus: mocks.getOrgAdminStatus,
+vi.mock("@/lib/auth/deny-unless-permitted", () => ({
+  denyUnlessPermitted: async () => {
+    const status = await mocks.getOrgAdminStatus();
+    return status?.isAdmin
+      ? null
+      : NextResponse.json({ success: false }, { status: 403 });
+  },
 }));
 
 vi.mock("@repo/observability/log", () => ({

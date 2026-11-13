@@ -4,7 +4,7 @@ const { db, sendInvitationEmailMock } = vi.hoisted(() => ({
   db: {
     authMember: { findFirst: vi.fn() },
     authUser: { findUnique: vi.fn() },
-    authInvitation: { create: vi.fn() },
+    authInvitation: { create: vi.fn(), findFirst: vi.fn() },
   },
   sendInvitationEmailMock: vi.fn(),
 }));
@@ -17,6 +17,7 @@ vi.mock("@/lib/auth/auth-email", () => ({
 }));
 
 import {
+  DuplicateInvitationError,
   identityService,
   splitDisplayName,
   toAuthRole,
@@ -86,9 +87,12 @@ describe("identityService", () => {
   });
 
   it("records a pending invitation with a bare role and emails the invitee", async () => {
+    db.authMember.findFirst.mockResolvedValue(null);
+    db.authInvitation.findFirst.mockResolvedValue(null);
     db.authInvitation.create.mockResolvedValue({
       id: "inv-1",
       email: "new@example.test",
+      role: "member",
       organization: { name: "Acme" },
       inviter: { name: "Ada", email: "ada@example.test" },
     });
@@ -112,9 +116,27 @@ describe("identityService", () => {
       })
     );
     expect(sendInvitationEmailMock).toHaveBeenCalledWith({
+      invitationId: "inv-1",
+      role: "member",
       email: "new@example.test",
       organizationName: "Acme",
       inviterName: "Ada",
     });
+  });
+
+  it("refuses an invitation for an existing member or pending invitation", async () => {
+    db.authMember.findFirst.mockResolvedValue({ id: "m-1" });
+    db.authInvitation.findFirst.mockResolvedValue(null);
+    db.authInvitation.create.mockClear();
+
+    await expect(
+      identityService.createOrganizationInvitation({
+        organizationId: "org-1",
+        emailAddress: "new@example.test",
+        role: "org:member",
+        inviterUserId: "user-1",
+      })
+    ).rejects.toBeInstanceOf(DuplicateInvitationError);
+    expect(db.authInvitation.create).not.toHaveBeenCalled();
   });
 });

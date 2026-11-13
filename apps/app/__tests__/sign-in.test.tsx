@@ -13,18 +13,32 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-test("Sign In Page", () => {
-  const { container } = render(<Page />);
+test("Sign In Page", async () => {
+  const { container } = render(
+    await Page({ searchParams: Promise.resolve({}) })
+  );
   expect(container).toBeDefined();
 });
 
 test("hides the sign-up link when sign-up is disabled", async () => {
   vi.stubEnv("AUTH_ALLOW_SIGN_UP", "false");
 
-  const { findByText, queryByText } = render(<Page />);
+  const { findByText, queryByText } = render(
+    await Page({ searchParams: Promise.resolve({}) })
+  );
 
   await findByText("Welcome to AgentFlow");
   expect(queryByText("Create one")).toBeNull();
+});
+
+test("shows the sign-up link on invite-only installs when an invited email is present", async () => {
+  vi.stubEnv("AUTH_ALLOW_SIGN_UP", "false");
+
+  const { findByText } = render(
+    await Page({ searchParams: Promise.resolve({ email: "a@b.c" }) })
+  );
+
+  await findByText("Create one");
 });
 
 test("generateMetadata resolves document metadata from redirect_url", async () => {

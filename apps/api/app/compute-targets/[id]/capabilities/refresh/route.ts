@@ -1,11 +1,12 @@
 import { failure } from "@repo/api/src/types/common";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   type RunnerCapabilitiesRefresh,
   requestRunnerCapabilitiesRefreshInputSchema,
 } from "@repo/api/src/types/runner-capabilities";
 import { NextResponse } from "next/server";
 import { computeTargetCapabilitiesRefreshService } from "@/app/compute-targets/capabilities-refresh-service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { errorResponse, parseBody, successResponse } from "@/lib/route-utils";
 
@@ -22,10 +23,10 @@ export const POST = withAnyAuth<
   "/compute-targets/[id]/capabilities/refresh"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      "the runner capabilities refresh"
+      OrgPermission.ComputeTargetManage
     );
     if (denied) {
       return denied;

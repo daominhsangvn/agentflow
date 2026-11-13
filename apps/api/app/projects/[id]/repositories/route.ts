@@ -1,10 +1,11 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   addProjectRepositoryInputSchema,
   type ProjectRepositoriesResponse,
   type ProjectRepository,
 } from "@repo/api/src/types/project-repository";
 import { projectRepositoryService } from "@/app/projects/project-repository-service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { resolveProjectId } from "@/lib/identifier-utils";
 import {
@@ -15,7 +16,6 @@ import {
 } from "@/lib/route-utils";
 import {
   PROJECT_REPOSITORY_BODY_MAX_BYTES,
-  PROJECT_REPOSITORY_SUBJECT,
   projectRepositoryErrorResponse,
 } from "./route-helpers";
 
@@ -58,10 +58,10 @@ export const POST = withAnyAuth<
   "/projects/[id]/repositories"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      PROJECT_REPOSITORY_SUBJECT
+      OrgPermission.ProjectManage
     );
     if (denied) {
       return denied;

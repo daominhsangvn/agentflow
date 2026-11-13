@@ -20,7 +20,7 @@ import {
 } from "../utils/auth-helpers";
 
 const mocks = vi.hoisted(() => ({
-  isOrgAdmin: vi.fn(),
+  hasOrgPermission: vi.fn(),
   getCatalogItemDetail: vi.fn(),
   updateCatalogItem: vi.fn(),
   archiveCatalogItem: vi.fn(),
@@ -35,8 +35,8 @@ vi.mock("@/lib/auth/with-any-auth", () => ({
       handler(mockAuthContext, request, context.params),
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  isOrgAdmin: mocks.isOrgAdmin,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  hasOrgPermission: mocks.hasOrgPermission,
 }));
 
 vi.mock("@/app/catalog/service", () => ({
@@ -98,7 +98,7 @@ describe("GET /catalog/{id}", () => {
     const json = await response.json();
     expect(json.success).toBe(true);
     expect(json.data.id).toBe("item-1");
-    expect(mocks.isOrgAdmin).not.toHaveBeenCalled();
+    expect(mocks.hasOrgPermission).not.toHaveBeenCalled();
     expect(mocks.getCatalogItemDetail).toHaveBeenCalledWith({
       id: "item-1",
       organizationId: "org-1",
@@ -108,7 +108,7 @@ describe("GET /catalog/{id}", () => {
 
 describe("PATCH /catalog/{id}", () => {
   it("passes admin capability for an admin update", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     mocks.updateCatalogItem.mockResolvedValue(Result.ok(mockItem));
 
     const response = await PATCH(
@@ -134,7 +134,7 @@ describe("PATCH /catalog/{id}", () => {
   });
 
   it("allows a non-admin update to reach service owner authorization", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(false);
+    mocks.hasOrgPermission.mockResolvedValue(false);
     mocks.updateCatalogItem.mockResolvedValue(Result.ok(mockItem));
 
     const response = await PATCH(
@@ -159,7 +159,7 @@ describe("PATCH /catalog/{id}", () => {
   });
 
   it("returns 403 when service rejects a visible unauthorized update", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(false);
+    mocks.hasOrgPermission.mockResolvedValue(false);
     mocks.updateCatalogItem.mockResolvedValue(Result.err(403));
 
     const response = await PATCH(
@@ -175,7 +175,7 @@ describe("PATCH /catalog/{id}", () => {
   });
 
   it("returns 404 when service reports the item is not visible", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(false);
+    mocks.hasOrgPermission.mockResolvedValue(false);
     mocks.updateCatalogItem.mockResolvedValue(Result.err(404));
 
     const response = await PATCH(
@@ -207,7 +207,7 @@ describe("PATCH /catalog/{id}", () => {
 
 describe("DELETE /catalog/{id}", () => {
   it("still blocks non-admin archive requests before service work", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(false);
+    mocks.hasOrgPermission.mockResolvedValue(false);
 
     const response = await DELETE(
       createMockRequest({
@@ -222,7 +222,7 @@ describe("DELETE /catalog/{id}", () => {
   });
 
   it("archives catalog items for admins", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     mocks.archiveCatalogItem.mockResolvedValue(Result.ok({ archived: true }));
 
     const response = await DELETE(

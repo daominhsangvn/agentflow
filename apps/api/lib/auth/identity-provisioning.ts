@@ -1,6 +1,9 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
+import { InvitationStatus } from "@repo/api/src/types/auth-account";
+import { BuiltInOrgRole } from "@repo/api/src/types/org-permissions";
+import { orgSlugSchema } from "@repo/api/src/types/reserved-slugs";
 import { withDb } from "@repo/database";
 import { log } from "@repo/observability/log";
 import { organizationsService } from "@/app/organizations/service";
@@ -11,14 +14,12 @@ import { splitDisplayName } from "./identity-service";
 /**
  * Membership provisioning and application-table sync for Better Auth.
  *
- * Self-hosted deployments are single-tenant by default: every account lands in
- * one organization. A new account joins, in order of preference:
- *   1. every organization with a pending, unexpired invitation for its email
- *      (with the invited role);
- *   2. otherwise the oldest organization, as a member
- *      (`AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION=false` turns this off);
- *   3. otherwise a new default organization, as its owner — the first account
- *      on a fresh install.
+ * Every new account (password or SSO) becomes the owner of its own default
+ * organization and goes through onboarding for it. The first account on an
+ * empty install keeps the deployment's organization name/slug
+ * (`AUTH_DEFAULT_ORGANIZATION_NAME`/`_SLUG`); later accounts get
+ * "<first name>'s organization". Pending invitations are never auto-accepted:
+ * the person joins the inviting organization by accepting the invitation.
  *
  * The application's own `users`/`organizations` rows are still created lazily
  * on first API request (`findOrCreateUser`); the hooks below only propagate
@@ -27,12 +28,10 @@ import { splitDisplayName } from "./identity-service";
 
 const DEFAULT_ORGANIZATION_NAME = "AgentFlow";
 const DEFAULT_ORGANIZATION_SLUG = "agentflow";
-const OwnerRole = "owner";
-const MemberRole = "member";
-const InvitationStatus = {
-  Pending: "pending",
-  Accepted: "accepted",
-} as const;
+const MAX_DEFAULT_ORGANIZATION_ATTEMPTS = 3;
+const SLUG_SUFFIX_LENGTH = 4;
+const SLUG_SUFFIX_RADIX = 36;
+const FALLBACK_SLUG_LENGTH = 8;
 
 type IdentityUserRecord = {
   id: string;
@@ -45,19 +44,7 @@ type IdentityOrganizationRecord = { id: string; name: string; slug: string };
 export async function provisionNewUser(
   user: IdentityUserRecord
 ): Promise<void> {
-  const joinedFromInvitations = await acceptPendingInvitations(user);
-  if (joinedFromInvitations === 0) {
-    try {
-      await joinDefaultOrganization(user);
-    } catch (error) {
-      // Two first sign-ups racing on an empty install can both try to create
-      // the default organization; the loser joins the winner's.
-      if (getPrismaErrorCode(error) !== "P2002") {
-        throw error;
-      }
-      await joinDefaultOrganization(user);
-    }
-  }
+  await createDefaultOrganizationWithRetry(user);
   await activateDefaultOrganization(user.id);
 }
 
@@ -184,76 +171,42 @@ export async function syncMemberRemoved(
   }
 }
 
-async function acceptPendingInvitations(
+/**
+ * Retries in a fresh transaction on a unique-constraint failure (slug
+ * collision, or the empty-install race where the loser takes the personal
+ * branch on the next attempt). Never keeps querying in a failed transaction.
+ */
+async function createDefaultOrganizationWithRetry(
   user: IdentityUserRecord
-): Promise<number> {
-  const now = new Date();
-  return await withDb.tx(async (tx) => {
-    const invitations = await tx.authInvitation.findMany({
-      where: {
-        email: user.email.toLowerCase(),
-        status: InvitationStatus.Pending,
-        expiresAt: { gt: now },
-      },
-      select: { id: true, organizationId: true, role: true },
-    });
-    for (const invitation of invitations) {
-      await tx.authMember.create({
-        data: {
-          id: randomUUID(),
-          organizationId: invitation.organizationId,
-          userId: user.id,
-          role: invitation.role ?? MemberRole,
-          createdAt: now,
-        },
-      });
-      await tx.authInvitation.update({
-        where: { id: invitation.id },
-        data: { status: InvitationStatus.Accepted },
-      });
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await createDefaultOrganization(user);
+      return;
+    } catch (error) {
+      if (
+        getPrismaErrorCode(error) !== "P2002" ||
+        attempt >= MAX_DEFAULT_ORGANIZATION_ATTEMPTS
+      ) {
+        throw error;
+      }
     }
-    return invitations.length;
-  });
+  }
 }
 
-async function joinDefaultOrganization(
+async function createDefaultOrganization(
   user: IdentityUserRecord
 ): Promise<void> {
   const now = new Date();
   await withDb.tx(async (tx) => {
     const existing = await tx.authOrganization.findFirst({
-      orderBy: { createdAt: "asc" },
       select: { id: true },
     });
-    if (existing) {
-      if (process.env.AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION === "false") {
-        log.info("[identity] new account left without an organization", {
-          userId: user.id,
-        });
-        return;
-      }
-      await tx.authMember.create({
-        data: {
-          id: randomUUID(),
-          organizationId: existing.id,
-          userId: user.id,
-          role: MemberRole,
-          createdAt: now,
-        },
-      });
-      return;
-    }
+    const details = existing
+      ? personalOrganizationDetails(user)
+      : installOrganizationDetails();
     const organization = await tx.authOrganization.create({
-      data: {
-        id: randomUUID(),
-        name:
-          process.env.AUTH_DEFAULT_ORGANIZATION_NAME ||
-          DEFAULT_ORGANIZATION_NAME,
-        slug:
-          process.env.AUTH_DEFAULT_ORGANIZATION_SLUG ||
-          DEFAULT_ORGANIZATION_SLUG,
-        createdAt: now,
-      },
+      data: { id: randomUUID(), ...details, createdAt: now },
       select: { id: true },
     });
     await tx.authMember.create({
@@ -261,7 +214,7 @@ async function joinDefaultOrganization(
         id: randomUUID(),
         organizationId: organization.id,
         userId: user.id,
-        role: OwnerRole,
+        role: BuiltInOrgRole.Owner,
         createdAt: now,
       },
     });
@@ -270,4 +223,55 @@ async function joinDefaultOrganization(
       ownerUserId: user.id,
     });
   });
+}
+
+/** Marks an account email as verified (the user proved control of the mailbox). */
+export async function markEmailVerified(userId: string): Promise<void> {
+  await withDb((db) =>
+    db.authUser.updateMany({
+      where: { id: userId, emailVerified: false },
+      data: { emailVerified: true },
+    })
+  );
+}
+
+function installOrganizationDetails(): { name: string; slug: string } {
+  return {
+    name:
+      process.env.AUTH_DEFAULT_ORGANIZATION_NAME || DEFAULT_ORGANIZATION_NAME,
+    slug:
+      process.env.AUTH_DEFAULT_ORGANIZATION_SLUG || DEFAULT_ORGANIZATION_SLUG,
+  };
+}
+
+function personalOrganizationDetails(user: IdentityUserRecord): {
+  name: string;
+  slug: string;
+} {
+  const localPart = user.email.split("@")[0] ?? "";
+  const firstName = splitDisplayName(user.name).firstName || localPart;
+  return {
+    name: `${firstName}'s organization`,
+    slug: defaultOrganizationSlug(user.email),
+  };
+}
+
+function defaultOrganizationSlug(email: string): string {
+  const localPart = (email.split("@")[0] ?? "").toLowerCase();
+  const base = localPart
+    .replaceAll(/[^a-z0-9-]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "")
+    .padEnd(2, "x");
+  const suffix = Array.from({ length: SLUG_SUFFIX_LENGTH }, () =>
+    randomInt(SLUG_SUFFIX_RADIX).toString(SLUG_SUFFIX_RADIX)
+  ).join("");
+  const slug = `${base}-${suffix}`;
+  return orgSlugSchema.safeParse(slug).success ? slug : fallbackSlug();
+}
+
+function fallbackSlug(): string {
+  const suffix = Array.from({ length: FALLBACK_SLUG_LENGTH }, () =>
+    randomInt(SLUG_SUFFIX_RADIX).toString(SLUG_SUFFIX_RADIX)
+  ).join("");
+  return `org-${suffix}`;
 }

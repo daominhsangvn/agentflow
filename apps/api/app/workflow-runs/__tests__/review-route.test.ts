@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
     clerkUserId: "auth-user-1",
     user: { id: "user-1", organizationId: "org-1" },
   },
-  getOrgAdminStatus: vi.fn(),
+  getOrgPermissionStatus: vi.fn(),
   decideReview: vi.fn(),
 }));
 
@@ -24,8 +24,8 @@ vi.mock("@/lib/auth/with-any-auth", () => ({
     (request: NextRequest, context: { params: Promise<unknown> }) =>
       handler(mocks.authContext, request, context?.params),
 }));
-vi.mock("@/lib/auth/org-admin", () => ({
-  getOrgAdminStatus: mocks.getOrgAdminStatus,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  getOrgPermissionStatus: mocks.getOrgPermissionStatus,
 }));
 vi.mock("@/lib/workflows/run-step-input-service", () => ({
   workflowRunStepInputService: { decideReview: mocks.decideReview },
@@ -57,9 +57,10 @@ function post(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getOrgAdminStatus.mockResolvedValue({
-    isAdmin: false,
-    reason: "not_admin",
+  mocks.getOrgPermissionStatus.mockResolvedValue({
+    kind: "member",
+    isOwner: false,
+    permissions: new Set(),
   });
   mocks.decideReview.mockResolvedValue(Result.ok({ id: RUN_ID }));
 });
@@ -86,9 +87,10 @@ describe("POST /workflow-runs/{id}/review", () => {
     expect(denied.status).toBe(403);
     expect(mocks.decideReview).not.toHaveBeenCalled();
 
-    mocks.getOrgAdminStatus.mockResolvedValue({
-      isAdmin: true,
-      reason: "admin",
+    mocks.getOrgPermissionStatus.mockResolvedValue({
+      kind: "member",
+      isOwner: true,
+      permissions: new Set(),
     });
     const allowed = await post({ decision });
     expect(allowed.status).toBe(200);

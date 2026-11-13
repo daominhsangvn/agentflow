@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   saveWorkflowInputSchema,
   type Workflow,
@@ -8,7 +9,7 @@ import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { errorResponse, parseBody, successResponse } from "@/lib/route-utils";
 import { workflowService } from "@/lib/workflows/workflow-service";
 import {
-  denyUnlessOrgAdmin,
+  denyUnlessWorkflowPermission,
   serviceErrorResponse,
   WORKFLOW_BODY_MAX_BYTES,
 } from "./route-helpers";
@@ -43,10 +44,14 @@ export const GET = withAnyAuth<WorkflowsResponse, "/workflows">(
 export const POST = withAnyAuth<Workflow, "/workflows">(
   async (auth, request) => {
     try {
-      const denied = await denyUnlessOrgAdmin(auth, {
-        method: request.method,
-        route: ROUTE,
-      });
+      const denied = await denyUnlessWorkflowPermission(
+        auth,
+        {
+          method: request.method,
+          route: ROUTE,
+        },
+        OrgPermission.WorkflowManage
+      );
       if (denied) {
         return denied;
       }

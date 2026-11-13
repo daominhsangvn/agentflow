@@ -1,11 +1,12 @@
 import { failure } from "@repo/api/src/types/common";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   type ProjectRunners,
   updateProjectRunnersInputSchema,
 } from "@repo/api/src/types/project-runners";
 import { NextResponse } from "next/server";
 import { projectRunnersService } from "@/app/projects/project-runners-service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { resolveProjectId } from "@/lib/identifier-utils";
 import {
@@ -46,10 +47,10 @@ export const GET = withAnyAuth<ProjectRunners, "/projects/[id]/runners">(
 export const PUT = withAnyAuth<ProjectRunners, "/projects/[id]/runners">(
   async (auth, request, params) => {
     try {
-      const denied = await denyUnlessOrgAdmin(
+      const denied = await denyUnlessPermitted(
         auth,
         { method: request.method, route: ROUTE },
-        "project runners"
+        OrgPermission.ProjectManage
       );
       if (denied) {
         return denied;

@@ -10,7 +10,7 @@ import { errorResponse, parseBody, successResponse } from "@/lib/route-utils";
 import {
   CONNECTION_BODY_MAX_BYTES,
   connectionErrorResponse,
-  denyUnlessOrgAdmin,
+  denyUnlessIntegrationManager,
 } from "./route-helpers";
 
 const ROUTE = "/integrations/connections";
@@ -25,7 +25,7 @@ export const GET = withAnyAuth<
   "/integrations/connections"
 >(async (auth, request) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
+    const denied = await denyUnlessIntegrationManager(auth, {
       method: request.method,
       route: ROUTE,
     });
@@ -52,7 +52,7 @@ export const POST = withAnyAuth<
   "/integrations/connections"
 >(async (auth, request) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
+    const denied = await denyUnlessIntegrationManager(auth, {
       method: request.method,
       route: ROUTE,
     });

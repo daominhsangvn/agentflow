@@ -7,7 +7,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   user: { id: "user-1", organizationId: "org-1" },
-  isOrgAdmin: vi.fn(),
+  hasOrgPermission: vi.fn(),
   importPackRepoComponents: vi.fn(),
 }));
 
@@ -26,8 +26,8 @@ vi.mock("@/lib/auth/with-any-auth", () => ({
       ),
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  isOrgAdmin: mocks.isOrgAdmin,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  hasOrgPermission: mocks.hasOrgPermission,
 }));
 
 vi.mock("../../service", () => ({
@@ -61,7 +61,7 @@ const validBody = { repoFullName: "acme/shared-assets" };
 describe("POST /catalog/[id]/import-repo", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
   });
 
   it("returns 200 with the import result on success", async () => {
@@ -133,7 +133,7 @@ describe("POST /catalog/[id]/import-repo", () => {
   });
 
   it("returns 403 when the caller is not an org admin", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(false);
+    mocks.hasOrgPermission.mockResolvedValue(false);
 
     const response = await invoke(validBody);
 

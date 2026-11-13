@@ -1,6 +1,15 @@
 "use client";
 
 import {
+  BUILT_IN_ROLE_PERMISSIONS,
+  BuiltInOrgRole,
+  canAssignOrgRole,
+  isBuiltInOrgRole,
+  OrgPermission,
+  parseOrgPermission,
+  splitOrgRoleNames,
+} from "@repo/api/src/types/org-permissions";
+import {
   Alert,
   AlertDescription,
 } from "@repo/design-system/components/ui/alert";
@@ -22,18 +31,13 @@ import {
   type AuthRoleName,
   authApi,
   type FullOrganization,
+  type OrgRoleRecord,
   refreshSession,
   useSessionSnapshot,
 } from "../auth-client";
 import { errorMessage } from "./auth-card";
 
-const AuthRole = {
-  Owner: "owner",
-  Admin: "admin",
-  Member: "member",
-} as const satisfies Record<string, AuthRoleName>;
-type AuthRole = AuthRoleName;
-const MANAGER_ROLES = new Set(["org:owner", "org:admin"]);
+const OWNER_ORG_ROLE = `org:${BuiltInOrgRole.Owner}`;
 
 type MemberRow = FullOrganization["members"][number];
 type InvitationRow = FullOrganization["invitations"][number];
@@ -44,13 +48,28 @@ type InvitationRow = FullOrganization["invitations"][number];
  */
 export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
   const session = useSessionSnapshot();
-  const canManage = MANAGER_ROLES.has(session.claims?.org_role ?? "");
+  const callerIsOwner = session.claims?.org_role === OWNER_ORG_ROLE;
+  const permissions = new Set(session.claims?.org_permissions ?? []);
+  const callerPermissions = parseCallerPermissions(
+    session.claims?.org_permissions
+  );
+  const can = (permission: OrgPermission) =>
+    callerIsOwner || permissions.has(permission);
+  const canInvite = can(OrgPermission.InvitationCreate);
+  const canRevoke = can(OrgPermission.InvitationCancel);
+  const canChangeRoles = can(OrgPermission.MemberUpdate);
+  const canRemove = can(OrgPermission.MemberDelete);
+  const canRename = can(OrgPermission.OrganizationUpdate);
+  const needsRoles = canChangeRoles || canInvite;
   const currentUserId = session.claims?.sub ?? null;
   const [name, setName] = useState("");
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [invitations, setInvitations] = useState<InvitationRow[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<AuthRole>(AuthRole.Member);
+  const [inviteRole, setInviteRole] = useState<AuthRoleName>(
+    BuiltInOrgRole.Member
+  );
+  const [customRoles, setCustomRoles] = useState<OrgRoleRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -72,6 +91,22 @@ export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
       load().catch(() => undefined);
     }
   }, [session.status, load]);
+
+  useEffect(() => {
+    if (session.status !== "signed-in" || !needsRoles) {
+      return;
+    }
+    authApi
+      .listRoles()
+      .then((result) => setCustomRoles(result.data ?? []))
+      .catch(() => undefined);
+  }, [session.status, needsRoles]);
+
+  const roles = roleOptions({
+    callerIsOwner,
+    callerPermissions,
+    customRoles,
+  });
 
   const run = async (action: () => Promise<AuthResult>) => {
     setBusy(true);
@@ -120,13 +155,13 @@ export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
         <div className="flex-1 space-y-2">
           <Label htmlFor="org-profile-name">Organization name</Label>
           <Input
-            disabled={!canManage}
+            disabled={!canRename}
             id="org-profile-name"
             onChange={(event) => setName(event.target.value)}
             value={name}
           />
         </div>
-        {canManage ? (
+        {canRename ? (
           <Button
             disabled={busy || !name.trim()}
             type="submit"
@@ -145,7 +180,7 @@ export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
-              {canManage ? <TableHead /> : null}
+              {canRemove ? <TableHead /> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -154,7 +189,14 @@ export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
                 <TableCell>{member.user.name}</TableCell>
                 <TableCell>{member.user.email}</TableCell>
                 <TableCell>
-                  {canManage && member.user.id !== currentUserId ? (
+                  {canChangeRoles &&
+                  canEditMemberRole({
+                    callerIsOwner,
+                    callerPermissions,
+                    customRoles,
+                    memberRole: member.role,
+                    isSelf: member.user.id === currentUserId,
+                  }) ? (
                     <select
                       aria-label={`Role for ${member.user.email}`}
                       className="rounded border bg-background px-2 py-1 text-sm"
@@ -163,13 +205,13 @@ export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
                         run(() =>
                           authApi.updateMemberRole({
                             memberId: member.id,
-                            role: event.target.value as AuthRole,
+                            role: event.target.value,
                           })
                         )
                       }
                       value={member.role}
                     >
-                      {Object.values(AuthRole).map((role) => (
+                      {withCurrentRole(roles, member.role).map((role) => (
                         <option key={role} value={role}>
                           {role}
                         </option>
@@ -179,9 +221,11 @@ export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
                     <Badge variant="secondary">{member.role}</Badge>
                   )}
                 </TableCell>
-                {canManage ? (
+                {canRemove ? (
                   <TableCell className="text-right">
-                    {member.user.id === currentUserId ? null : (
+                    {member.user.id === currentUserId ||
+                    (member.role === BuiltInOrgRole.Owner &&
+                      !callerIsOwner) ? null : (
                       <Button
                         disabled={busy}
                         onClick={() =>
@@ -201,34 +245,39 @@ export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
         </Table>
       </section>
 
-      {canManage ? (
+      {canInvite || (canRevoke && invitations.length > 0) ? (
         <section className="space-y-2">
-          <h3 className="font-medium">Invite a member</h3>
-          <form className="flex items-end gap-2" onSubmit={invite}>
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="org-invite-email">Email</Label>
-              <Input
-                id="org-invite-email"
-                onChange={(event) => setInviteEmail(event.target.value)}
-                type="email"
-                value={inviteEmail}
-              />
-            </div>
-            <select
-              aria-label="Invited role"
-              className="h-9 rounded border bg-background px-2 text-sm"
-              onChange={(event) =>
-                setInviteRole(event.target.value as AuthRole)
-              }
-              value={inviteRole}
-            >
-              <option value={AuthRole.Member}>member</option>
-              <option value={AuthRole.Admin}>admin</option>
-            </select>
-            <Button disabled={busy || !inviteEmail.trim()} type="submit">
-              Invite
-            </Button>
-          </form>
+          <h3 className="font-medium">
+            {canInvite ? "Invite a member" : "Pending invitations"}
+          </h3>
+          {canInvite ? (
+            <form className="flex items-end gap-2" onSubmit={invite}>
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="org-invite-email">Email</Label>
+                <Input
+                  id="org-invite-email"
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                  type="email"
+                  value={inviteEmail}
+                />
+              </div>
+              <select
+                aria-label="Invited role"
+                className="h-9 rounded border bg-background px-2 text-sm"
+                onChange={(event) => setInviteRole(event.target.value)}
+                value={inviteRole}
+              >
+                {roles.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+              <Button disabled={busy || !inviteEmail.trim()} type="submit">
+                Invite
+              </Button>
+            </form>
+          ) : null}
           {invitations.length > 0 ? (
             <ul className="space-y-1 text-muted-foreground text-sm">
               {invitations.map((invitation) => (
@@ -237,19 +286,21 @@ export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
                   key={invitation.id}
                 >
                   <span>
-                    {invitation.email} · {invitation.role ?? AuthRole.Member} ·
-                    pending
+                    {invitation.email} ·{" "}
+                    {invitation.role ?? BuiltInOrgRole.Member} · pending
                   </span>
-                  <Button
-                    disabled={busy}
-                    onClick={() =>
-                      run(() => authApi.cancelInvitation(invitation.id))
-                    }
-                    size="sm"
-                    variant="ghost"
-                  >
-                    Revoke
-                  </Button>
+                  {canRevoke ? (
+                    <Button
+                      disabled={busy}
+                      onClick={() =>
+                        run(() => authApi.cancelInvitation(invitation.id))
+                      }
+                      size="sm"
+                      variant="ghost"
+                    >
+                      Revoke
+                    </Button>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -258,4 +309,102 @@ export function OrganizationProfile(_props: Readonly<Record<string, unknown>>) {
       ) : null}
     </div>
   );
+}
+
+/**
+ * Roles offered in the role pickers: only roles the caller may assign (owner
+ * only for the owner; otherwise roles whose permissions the caller all holds).
+ */
+export function roleOptions(input: {
+  callerIsOwner: boolean;
+  callerPermissions: ReadonlySet<OrgPermission>;
+  customRoles: readonly OrgRoleRecord[];
+}): string[] {
+  const { callerIsOwner, callerPermissions, customRoles } = input;
+  const options: string[] = [];
+  if (callerIsOwner) {
+    options.push(BuiltInOrgRole.Owner);
+  }
+  const adminAllowed = canAssignOrgRole({
+    callerIsOwner,
+    callerPermissions,
+    targetRoleNames: [BuiltInOrgRole.Admin],
+    targetPermissions: BUILT_IN_ROLE_PERMISSIONS[BuiltInOrgRole.Admin],
+  });
+  if (adminAllowed) {
+    options.push(BuiltInOrgRole.Admin);
+  }
+  options.push(BuiltInOrgRole.Member);
+  for (const custom of customRoles) {
+    if (isBuiltInOrgRole(custom.role) || options.includes(custom.role)) {
+      continue;
+    }
+    const allowed = canAssignOrgRole({
+      callerIsOwner,
+      callerPermissions,
+      targetRoleNames: [custom.role],
+      targetPermissions: custom.permissions,
+    });
+    if (allowed) {
+      options.push(custom.role);
+    }
+  }
+  return options;
+}
+
+/** Whether the caller may change this member's role (never their own). */
+export function canEditMemberRole(input: {
+  callerIsOwner: boolean;
+  callerPermissions: ReadonlySet<OrgPermission>;
+  customRoles: readonly OrgRoleRecord[];
+  memberRole: string;
+  isSelf: boolean;
+}): boolean {
+  if (input.isSelf) {
+    return false;
+  }
+  if (input.callerIsOwner) {
+    return true;
+  }
+  const names = splitOrgRoleNames(input.memberRole);
+  const targetPermissions: OrgPermission[] = [];
+  for (const name of names) {
+    const builtIn = Object.values(BuiltInOrgRole).find((r) => r === name);
+    if (builtIn) {
+      targetPermissions.push(...BUILT_IN_ROLE_PERMISSIONS[builtIn]);
+      continue;
+    }
+    const custom = input.customRoles.find((r) => r.role === name);
+    if (!custom) {
+      return false;
+    }
+    targetPermissions.push(...custom.permissions);
+  }
+  return canAssignOrgRole({
+    callerIsOwner: false,
+    callerPermissions: input.callerPermissions,
+    targetRoleNames: names,
+    targetPermissions,
+  });
+}
+
+/** Keeps a member's current role selectable even if it is not in the list. */
+function withCurrentRole(
+  options: readonly string[],
+  current: string
+): string[] {
+  return options.includes(current) ? [...options] : [...options, current];
+}
+
+function parseCallerPermissions(
+  values: readonly string[] | undefined
+): Set<OrgPermission> {
+  const result = new Set<OrgPermission>();
+  for (const value of values ?? []) {
+    const parsed = parseOrgPermission(value);
+    if (parsed) {
+      result.add(parsed);
+    }
+  }
+  return result;
 }

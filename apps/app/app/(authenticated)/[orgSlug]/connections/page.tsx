@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { auth } from "@repo/auth/server";
 import type { Metadata } from "next";
 import { Header } from "../../components/header";
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
 
 export default async function ConnectionsPage() {
   const { has } = await auth();
-  const isAdmin = has({ role: "org:admin" }) || has({ role: "org:owner" });
+  const isAdmin = has({ permission: OrgPermission.IntegrationManage });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

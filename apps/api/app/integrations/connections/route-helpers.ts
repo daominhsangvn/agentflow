@@ -1,8 +1,9 @@
 import type { ApiResult } from "@repo/api/src/types/common";
 import { failure } from "@repo/api/src/types/common";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { NextResponse } from "next/server";
-import { denyUnlessOrgAdmin as denyUnlessOrgAdminFor } from "@/lib/auth/deny-unless-org-admin";
-import { getOrgAdminStatus } from "@/lib/auth/org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import type { AuthContext } from "@/lib/auth/with-auth";
 import type { ConfigViewer } from "@/lib/integrations/connection/url-redaction";
 import type { ConnectionServiceError } from "@/lib/integrations/connection-service";
@@ -17,12 +18,12 @@ import { parseJsonObject } from "@/lib/json-schema";
 /** Upper bound for connection create/update bodies (secrets are ≤ 8 KiB each). */
 export const CONNECTION_BODY_MAX_BYTES = 256 * 1024;
 
-/** Returns a 403 response for non-admins, or null when the caller is an org admin/owner. */
-export function denyUnlessOrgAdmin(
+/** Returns a 403 response unless the caller may manage integrations. */
+export function denyUnlessIntegrationManager(
   auth: Pick<AuthContext, "clerkOrgId" | "clerkUserId">,
   request: { method: string; route: string }
 ): Promise<NextResponse<ApiResult<never>> | null> {
-  return denyUnlessOrgAdminFor(auth, request, "integration connection");
+  return denyUnlessPermitted(auth, request, OrgPermission.IntegrationManage);
 }
 
 /**
@@ -33,11 +34,12 @@ export function denyUnlessOrgAdmin(
 export async function resolveConfigViewer(
   auth: Pick<AuthContext, "clerkOrgId" | "clerkUserId">
 ): Promise<ConfigViewer> {
-  const adminStatus = await getOrgAdminStatus(
+  const isAdmin = await hasOrgPermission(
     auth.clerkOrgId,
-    auth.clerkUserId
+    auth.clerkUserId,
+    OrgPermission.IntegrationManage
   );
-  return { isAdmin: adminStatus.isAdmin };
+  return { isAdmin };
 }
 
 /** Maps a connection service error to its HTTP status with the service message. */

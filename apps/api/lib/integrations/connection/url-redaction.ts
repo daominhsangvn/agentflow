@@ -12,7 +12,7 @@ import {
  * them in full. Used by the connection and workflow read endpoints.
  */
 
-/** Who reads a DTO; decided by the route with getOrgAdminStatus. */
+/** Who reads a DTO; decided by the route from the caller permissions. */
 export type ConfigViewer = { isAdmin: boolean };
 
 /** Admin-only paths (create/update responses) read as an admin. */

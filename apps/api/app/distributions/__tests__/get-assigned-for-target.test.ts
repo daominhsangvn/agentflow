@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   withDb: Object.assign(vi.fn(), { tx: vi.fn() }),
-  isOrgAdmin: vi.fn(),
+  hasOrgPermission: vi.fn(),
   computeTargetsService: {
     findOwnedById: vi.fn(),
   },
@@ -42,8 +42,8 @@ vi.mock("@repo/storage/keys", () => ({
   keys: mocks.awsKeys,
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  isOrgAdmin: mocks.isOrgAdmin,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  hasOrgPermission: mocks.hasOrgPermission,
 }));
 
 vi.mock("@/app/compute-targets/service", () => ({

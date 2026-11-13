@@ -124,7 +124,16 @@ vi.mock("../sidebar-projects", () => ({
 }));
 
 vi.mock("../account-menu", () => ({
-  AccountMenu: () => <div data-testid="account-menu">Account Menu</div>,
+  AccountMenu: ({
+    allowCreateOrganization,
+  }: {
+    allowCreateOrganization?: boolean;
+  }) => (
+    <div data-testid="account-menu">
+      Account Menu
+      {allowCreateOrganization && <span>Create Org</span>}
+    </div>
+  ),
 }));
 
 // Mock organization object matching Clerk's OrganizationResource shape
@@ -239,6 +248,29 @@ describe("GlobalSidebar - Account Menu", () => {
 
     expect(queryByRole("button", { name: COMPUTE_PICKER_NAME })).toBeNull();
     expect(queryByText(COMPUTE_PICKER_NAME)).toBeNull();
+  });
+});
+
+describe("GlobalSidebar - Create Org", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  test("passes allowCreateOrganization through to the account menu", () => {
+    const hidden = render(
+      <GlobalSidebar allowCreateOrganization={false}>
+        <div>c</div>
+      </GlobalSidebar>
+    );
+    expect(hidden.queryByText("Create Org")).toBeNull();
+    hidden.unmount();
+
+    const shown = render(
+      <GlobalSidebar allowCreateOrganization>
+        <div>c</div>
+      </GlobalSidebar>
+    );
+    expect(shown.queryByText("Create Org")).not.toBeNull();
   });
 });
 

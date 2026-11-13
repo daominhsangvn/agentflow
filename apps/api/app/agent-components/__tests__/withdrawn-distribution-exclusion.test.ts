@@ -22,7 +22,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   withDb: Object.assign(vi.fn(), { tx: vi.fn() }),
-  isOrgAdmin: vi.fn(),
+  hasOrgPermission: vi.fn(),
 }));
 
 vi.mock("@repo/database", () => ({
@@ -30,8 +30,8 @@ vi.mock("@repo/database", () => ({
   Prisma: { QueryMode: { insensitive: "insensitive" } },
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  isOrgAdmin: mocks.isOrgAdmin,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  hasOrgPermission: mocks.hasOrgPermission,
 }));
 
 import { complianceService } from "../compliance/service";

@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +21,8 @@ const mocks = vi.hoisted(() => ({
     inviteMembers: vi.fn(),
   },
   isOrgAdmin: vi.fn(),
+  callerRole: "owner",
+  customRoles: {} as Record<string, string>,
 }));
 
 vi.mock("@/lib/auth/with-any-auth", () => ({
@@ -29,8 +32,20 @@ vi.mock("@/lib/auth/with-any-auth", () => ({
       handler(mocks.authContext, request, context?.params),
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  isOrgAdmin: mocks.isOrgAdmin,
+// Only the data source is replaced; the real checkRoleAssignment runs on it.
+vi.mock("@/lib/auth/org-permissions", () => ({
+  hasOrgPermission: mocks.isOrgAdmin,
+  prismaRoleReader: {
+    findMemberRole: () =>
+      Promise.resolve({ id: "m-1", role: mocks.callerRole }),
+    findMember: () => Promise.resolve(null),
+    loadCustomRolePermissionJson: (_org: string, names: string[]) =>
+      Promise.resolve(
+        names.flatMap((name) =>
+          mocks.customRoles[name] ? [mocks.customRoles[name]] : []
+        )
+      ),
+  },
 }));
 
 vi.mock("@repo/observability/error", () => ({
@@ -87,6 +102,8 @@ describe("POST /organizations/invitations", () => {
     vi.clearAllMocks();
     mocks.organizationsService.findById.mockResolvedValue(BASE_ORGANIZATION);
     mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.callerRole = "owner";
+    mocks.customRoles = {};
     mocks.invitationsService.inviteMembers.mockResolvedValue({
       invited: 1,
       results: [
@@ -108,7 +125,11 @@ describe("POST /organizations/invitations", () => {
     expect(body.success).toBe(true);
     expect(body.data.invited).toBe(1);
     // Org scoping: authorization is checked against the caller's own org.
-    expect(mocks.isOrgAdmin).toHaveBeenCalledWith(CLERK_ORG_ID, "clerk-user-1");
+    expect(mocks.isOrgAdmin).toHaveBeenCalledWith(
+      CLERK_ORG_ID,
+      "clerk-user-1",
+      OrgPermission.InvitationCreate
+    );
     expect(mocks.invitationsService.inviteMembers).toHaveBeenCalledWith(
       expect.objectContaining({
         clerkOrgId: CLERK_ORG_ID,
@@ -175,5 +196,40 @@ describe("POST /organizations/invitations", () => {
     expect(mocks.invitationsService.inviteMembers).toHaveBeenCalledWith(
       expect.objectContaining({ emailAddresses: ["a@example.com"] })
     );
+  });
+
+  describe("role assignment (A26)", () => {
+    beforeEach(() => {
+      mocks.callerRole = "inviter";
+      mocks.customRoles = {
+        inviter: JSON.stringify({ invitation: ["create"] }),
+      };
+    });
+
+    it("refuses a custom-role caller inviting org:admin", async () => {
+      const response = await POST(
+        makeRequest({ emailAddresses: ["a@example.com"], role: "org:admin" }),
+        { params: Promise.resolve({}) }
+      );
+      expect(response.status).toBe(403);
+      expect(mocks.invitationsService.inviteMembers).not.toHaveBeenCalled();
+    });
+
+    it("lets the same caller invite org:member", async () => {
+      const response = await POST(
+        makeRequest({ emailAddresses: ["a@example.com"], role: "org:member" }),
+        { params: Promise.resolve({}) }
+      );
+      expect(response.status).toBe(200);
+    });
+
+    it("lets an owner invite org:admin", async () => {
+      mocks.callerRole = "owner";
+      const response = await POST(
+        makeRequest({ emailAddresses: ["a@example.com"], role: "org:admin" }),
+        { params: Promise.resolve({}) }
+      );
+      expect(response.status).toBe(200);
+    });
   });
 });

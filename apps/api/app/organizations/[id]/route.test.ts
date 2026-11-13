@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,8 +36,8 @@ vi.mock("@/lib/auth/identity-service", () => ({
   },
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  isOrgAdmin: mocks.isOrgAdmin,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  hasOrgPermission: mocks.isOrgAdmin,
 }));
 
 vi.mock("@repo/observability/error", () => ({
@@ -426,7 +427,8 @@ describe("PUT /organizations/[id]", () => {
     expect(body.success).toBe(true);
     expect(mocks.isOrgAdmin).toHaveBeenCalledWith(
       "clerk-org-1",
-      "clerk-user-1"
+      "clerk-user-1",
+      OrgPermission.OrganizationUpdate
     );
     expect(mocks.organizationsService.update).toHaveBeenCalledWith(ORG_ID, {
       searchIncludeTranscripts: true,

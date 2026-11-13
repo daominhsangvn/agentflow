@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authApi, refreshSession } from "../auth-client";
 import {
   AuthCard,
   AuthField,
   errorMessage,
   readRedirectTarget,
+  SsoButtons,
+  withCurrentQuery,
 } from "./auth-card";
+import { readCallbackError, signInErrorMessage } from "./auth-error-messages";
 
 type SignInProps = {
   /** Show the "Create one" link; false on invite-only deployments. */
@@ -17,11 +20,21 @@ type SignInProps = {
 /** Email/password sign-in, with an inline "forgot password" request. */
 export const SignIn = ({ allowSignUp = true }: SignInProps) => {
   const [mode, setMode] = useState<"sign-in" | "forgot">("sign-in");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(
+    () =>
+      new URLSearchParams(globalThis.location?.search ?? "").get("email") ?? ""
+  );
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const code = readCallbackError(globalThis.location?.search);
+    if (code) {
+      setError(signInErrorMessage(code));
+    }
+  }, []);
 
   const signIn = async () => {
     setSubmitting(true);
@@ -93,7 +106,7 @@ export const SignIn = ({ allowSignUp = true }: SignInProps) => {
         allowSignUp ? (
           <span>
             No account?{" "}
-            <a className="underline" href="/sign-up">
+            <a className="underline" href={withCurrentQuery("/sign-up")}>
               Create one
             </a>
           </span>
@@ -127,6 +140,7 @@ export const SignIn = ({ allowSignUp = true }: SignInProps) => {
       >
         Forgot password?
       </button>
+      <SsoButtons onError={setError} />
     </AuthCard>
   );
 };

@@ -1,9 +1,10 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   type ProjectConnection,
   updateProjectConnectionInputSchema,
 } from "@repo/api/src/types/project-connection";
 import { projectConnectionService } from "@/app/projects/project-connection-service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { resolveProjectId } from "@/lib/identifier-utils";
 import {
@@ -15,7 +16,6 @@ import {
 } from "@/lib/route-utils";
 import {
   PROJECT_CONNECTION_BODY_MAX_BYTES,
-  PROJECT_CONNECTION_SUBJECT,
   projectConnectionErrorResponse,
 } from "../route-helpers";
 
@@ -31,10 +31,10 @@ export const PATCH = withAnyAuth<
   "/projects/[id]/connections/[projectConnectionId]"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      PROJECT_CONNECTION_SUBJECT
+      OrgPermission.ProjectManage
     );
     if (denied) {
       return denied;
@@ -77,10 +77,10 @@ export const DELETE = withAnyAuth<
   "/projects/[id]/connections/[projectConnectionId]"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      PROJECT_CONNECTION_SUBJECT
+      OrgPermission.ProjectManage
     );
     if (denied) {
       return denied;

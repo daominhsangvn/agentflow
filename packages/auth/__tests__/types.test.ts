@@ -52,12 +52,32 @@ describe("claims mapping", () => {
     expect(organizationFromClaims({ sub: "user-1" })).toBeNull();
   });
 
-  it("matches roles exactly and never grants permissions", () => {
-    expect(hasAccess("org:admin", { role: "org:admin" })).toBe(true);
-    expect(hasAccess("org:member", { role: "org:admin" })).toBe(false);
-    expect(hasAccess(null, { role: "org:admin" })).toBe(false);
+  it("matches roles exactly", () => {
+    const state = (orgRole: string | null, orgPermissions: string[] = []) => ({
+      orgRole,
+      orgPermissions,
+    });
+    expect(hasAccess(state("org:admin"), { role: "org:admin" })).toBe(true);
+    expect(hasAccess(state("org:member"), { role: "org:admin" })).toBe(false);
+    expect(hasAccess(state(null), { role: "org:admin" })).toBe(false);
+  });
+
+  it("grants permissions to owners, listed permissions and nobody else", () => {
+    const params = { permission: "member:update" };
     expect(
-      hasAccess("org:admin", { permission: "org:sys_memberships:manage" })
+      hasAccess({ orgRole: "org:owner", orgPermissions: [] }, params)
+    ).toBe(true);
+    expect(
+      hasAccess(
+        { orgRole: "org:release", orgPermissions: ["member:update"] },
+        params
+      )
+    ).toBe(true);
+    expect(
+      hasAccess({ orgRole: "org:admin", orgPermissions: [] }, params)
     ).toBe(false);
+    expect(hasAccess({ orgRole: null, orgPermissions: [] }, params)).toBe(
+      false
+    );
   });
 });

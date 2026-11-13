@@ -1,5 +1,6 @@
 import type { CustomFieldWithOptions } from "@repo/api/src/types/custom-field";
-import { isOrgAdmin } from "@/lib/auth/org-admin";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import {
   conflictResponse,
@@ -40,7 +41,11 @@ export const GET = withAnyAuth<CustomFieldWithOptions, "/custom-fields/[id]">(
 export const PUT = withAnyAuth<CustomFieldWithOptions, "/custom-fields/[id]">(
   async ({ user, clerkOrgId, clerkUserId }, request, params) => {
     try {
-      const adminCheck = await isOrgAdmin(clerkOrgId, clerkUserId);
+      const adminCheck = await hasOrgPermission(
+        clerkOrgId,
+        clerkUserId,
+        OrgPermission.CustomFieldManage
+      );
       if (!adminCheck) {
         return forbiddenResponse();
       }
@@ -85,7 +90,11 @@ export const PUT = withAnyAuth<CustomFieldWithOptions, "/custom-fields/[id]">(
 export const DELETE = withAnyAuth<{ deleted: true }, "/custom-fields/[id]">(
   async ({ user, clerkOrgId, clerkUserId }, _, params) => {
     try {
-      const adminCheck = await isOrgAdmin(clerkOrgId, clerkUserId);
+      const adminCheck = await hasOrgPermission(
+        clerkOrgId,
+        clerkUserId,
+        OrgPermission.CustomFieldManage
+      );
       if (!adminCheck) {
         return forbiddenResponse();
       }

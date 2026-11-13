@@ -1,6 +1,7 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import type { WorkflowRunDetail } from "@repo/api/src/types/workflow";
 import {
-  denyUnlessOrgAdmin,
+  denyUnlessWorkflowPermission,
   serviceErrorResponse,
 } from "@/app/workflows/route-helpers";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
@@ -20,10 +21,14 @@ export const POST = withAnyAuth<
   "/workflow-runs/[runId]/action-runs/[actionRunId]/retry"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
-      method: request.method,
-      route: ROUTE,
-    });
+    const denied = await denyUnlessWorkflowPermission(
+      auth,
+      {
+        method: request.method,
+        route: ROUTE,
+      },
+      OrgPermission.WorkflowRunOperate
+    );
     if (denied) {
       return denied;
     }

@@ -4,39 +4,15 @@ import {
   OrgInviteRole,
 } from "@repo/api/src/types/onboarding";
 import { log } from "@repo/observability/log";
-import { identityService } from "@/lib/auth/identity-service";
-
-/**
- * Clerk returns HTTP 400 with this error code when the email already belongs to
- * the organization (member or pending invite). Treated as a non-fatal, per-email
- * "already_member" outcome rather than failing the whole batch.
- */
-const CLERK_DUPLICATE_INVITE_CODES = new Set([
-  "duplicate_record",
-  "organization_membership_exists",
-  "already_a_member_in_organization",
-]);
-
-type ClerkErrorLike = {
-  errors?: Array<{ code?: string; message?: string; longMessage?: string }>;
-};
-
-function extractClerkErrorCode(error: unknown): string | undefined {
-  const clerkError = error as ClerkErrorLike;
-  return clerkError?.errors?.[0]?.code;
-}
-
-function extractClerkErrorMessage(error: unknown): string | undefined {
-  const clerkError = error as ClerkErrorLike;
-  const first = clerkError?.errors?.[0];
-  return first?.longMessage ?? first?.message;
-}
+import {
+  DuplicateInvitationError,
+  identityService,
+} from "@/lib/auth/identity-service";
 
 export const invitationsService = {
   /**
-   * Mint real Clerk org invitations for each email into the given Clerk org.
-   * Clerk's `createOrganizationInvitation` is singular, so we invite per-email
-   * and aggregate per-email outcomes — one bad address does not abort the rest.
+   * Create an organization invitation for each email. Invitations are made
+   * per-email and aggregated per-email outcomes — one bad address does not abort the rest.
    * De-duplication is handled upstream by the Zod validator.
    */
   async inviteMembers(params: {
@@ -62,26 +38,23 @@ export const invitationsService = {
           status: "invited",
         });
       } catch (error) {
-        const code = extractClerkErrorCode(error);
-        if (code && CLERK_DUPLICATE_INVITE_CODES.has(code)) {
+        if (error instanceof DuplicateInvitationError) {
           results.push({
             email,
             status: "already_member",
-            reason: "Email is already a member or has a pending invitation",
+            reason: error.message,
           });
           continue;
         }
-        log.error("Failed to create Clerk organization invitation", {
+        log.error("Failed to create organization invitation", {
           clerkOrgId: params.clerkOrgId,
           email,
-          code,
           error,
         });
         results.push({
           email,
           status: "failed",
-          reason:
-            extractClerkErrorMessage(error) ?? "Failed to send invitation",
+          reason: "Failed to send invitation",
         });
       }
     }

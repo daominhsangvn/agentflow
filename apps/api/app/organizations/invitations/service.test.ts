@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/auth/identity-service", () => ({
+  DuplicateInvitationError: class DuplicateInvitationError extends Error {},
   identityService: {
     createOrganizationInvitation: mocks.createOrganizationInvitation,
   },
@@ -15,6 +16,7 @@ vi.mock("@repo/observability/log", () => ({
   log: { error: mocks.logError, info: vi.fn() },
 }));
 
+import { DuplicateInvitationError } from "@/lib/auth/identity-service";
 import { invitationsService } from "./service";
 
 const CLERK_ORG_ID = "clerk-org-1";
@@ -25,7 +27,7 @@ describe("invitationsService.inviteMembers", () => {
     vi.clearAllMocks();
   });
 
-  it("mints one Clerk invitation per email with the inviter and org scope", async () => {
+  it("creates one invitation per email with the inviter and org scope", async () => {
     mocks.createOrganizationInvitation.mockImplementation(
       ({ emailAddress }: { emailAddress: string }) =>
         Promise.resolve({ id: `inv_${emailAddress}` })
@@ -65,9 +67,9 @@ describe("invitationsService.inviteMembers", () => {
     );
   });
 
-  it("treats a Clerk duplicate error as already_member without aborting the batch", async () => {
+  it("treats a duplicate invitation as already_member without aborting the batch", async () => {
     mocks.createOrganizationInvitation
-      .mockRejectedValueOnce({ errors: [{ code: "duplicate_record" }] })
+      .mockRejectedValueOnce(new DuplicateInvitationError())
       .mockResolvedValueOnce({ id: "inv_2" });
 
     const result = await invitationsService.inviteMembers({
@@ -81,10 +83,10 @@ describe("invitationsService.inviteMembers", () => {
     expect(result.results[1].status).toBe("invited");
   });
 
-  it("records a failed result and logs when Clerk errors unexpectedly", async () => {
-    mocks.createOrganizationInvitation.mockRejectedValue({
-      errors: [{ code: "internal_error", message: "Clerk is down" }],
-    });
+  it("records a failed result and logs when creation fails unexpectedly", async () => {
+    mocks.createOrganizationInvitation.mockRejectedValue(
+      new Error("mail relay is down")
+    );
 
     const result = await invitationsService.inviteMembers({
       clerkOrgId: CLERK_ORG_ID,
@@ -94,7 +96,7 @@ describe("invitationsService.inviteMembers", () => {
 
     expect(result.invited).toBe(0);
     expect(result.results[0].status).toBe("failed");
-    expect(result.results[0].reason).toBe("Clerk is down");
+    expect(result.results[0].reason).toBe("Failed to send invitation");
     expect(mocks.logError).toHaveBeenCalled();
   });
 });

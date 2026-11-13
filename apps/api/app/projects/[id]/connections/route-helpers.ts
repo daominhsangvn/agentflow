@@ -9,8 +9,6 @@ import type { ProjectConnectionServiceError } from "@/app/projects/project-conne
  * org admins/owners only.
  */
 
-export const PROJECT_CONNECTION_SUBJECT = "project connection";
-
 /** Upper bound for create/update bodies. */
 export const PROJECT_CONNECTION_BODY_MAX_BYTES = 64 * 1024;
 

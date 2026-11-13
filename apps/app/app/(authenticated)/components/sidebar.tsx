@@ -3,6 +3,7 @@
 import { useFeatureFlag } from "@repo/analytics/client";
 import { FeatureFlagged } from "@repo/analytics/components/feature-flagged";
 import { INSIGHTS_FEATURE_FLAG_KEY } from "@repo/api/src/types/insights";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { ROUTINES_FEATURE_FLAG_KEY } from "@repo/api/src/types/routines";
 import { useScrollFade } from "@repo/app/shared/hooks/use-scroll-fade";
 import {
@@ -15,7 +16,7 @@ import {
   PrimaryNavGroup,
   SKILLS_CATALOG_NAV_PATH,
 } from "@repo/app/shared/lib/primary-nav-destinations";
-import { isAdminRole } from "@repo/app/shared/lib/role-utils";
+import { hasOrgPermission } from "@repo/app/shared/lib/role-utils";
 import { useOrganization } from "@repo/auth/client";
 import {
   Sidebar,
@@ -47,6 +48,7 @@ import { Search } from "./search";
 import { SidebarProjects } from "./sidebar-projects";
 
 type GlobalSidebarProperties = {
+  readonly allowCreateOrganization?: boolean;
   readonly children: ReactNode;
   readonly envBadge?: string | null;
 };
@@ -157,13 +159,17 @@ function isNavItemActive(pathname: string, url: string): boolean {
 }
 
 export function GlobalSidebar({
+  allowCreateOrganization = false,
   children,
   envBadge = null,
 }: GlobalSidebarProperties) {
   const pathname = usePath();
   const orgSlug = useOrgSlug();
   const { organization, membership } = useOrganization();
-  const isAdmin = isAdminRole(membership?.role);
+  const isAdmin = hasOrgPermission(
+    membership,
+    OrgPermission.OrganizationUpdate
+  );
   const queryClient = useQueryClient();
   const prevOrgIdRef = useRef<string | undefined>(undefined);
   const data = buildNavData(orgSlug);
@@ -273,7 +279,7 @@ export function GlobalSidebar({
               </SidebarMenuItem>
             )}
             <SidebarMenuItem>
-              <AccountMenu />
+              <AccountMenu allowCreateOrganization={allowCreateOrganization} />
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarFooter>

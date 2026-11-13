@@ -1,19 +1,34 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { describe, expect, it } from "vitest";
-import { isAdminRole } from "../role-utils";
+import { hasOrgPermission } from "../role-utils";
 
-describe("isAdminRole", () => {
-  it("accepts admin and owner roles", () => {
-    expect(isAdminRole("org:admin")).toBe(true);
-    expect(isAdminRole("org:owner")).toBe(true);
+describe("hasOrgPermission", () => {
+  it("treats the owner as holding every permission", () => {
+    expect(
+      hasOrgPermission({ role: "org:owner" }, OrgPermission.CatalogManage)
+    ).toBe(true);
   });
 
-  it("rejects member and unknown roles", () => {
-    expect(isAdminRole("org:member")).toBe(false);
-    expect(isAdminRole("org:billing")).toBe(false);
+  it("grants only the listed permissions to other roles", () => {
+    const membership = {
+      role: "org:qa",
+      permissions: [OrgPermission.CatalogManage],
+    };
+    expect(hasOrgPermission(membership, OrgPermission.CatalogManage)).toBe(
+      true
+    );
+    expect(hasOrgPermission(membership, OrgPermission.ProjectManage)).toBe(
+      false
+    );
   });
 
-  it("rejects empty and undefined roles", () => {
-    expect(isAdminRole("")).toBe(false);
-    expect(isAdminRole(undefined)).toBe(false);
+  it("denies a missing membership or missing permissions", () => {
+    expect(hasOrgPermission(undefined, OrgPermission.CatalogManage)).toBe(
+      false
+    );
+    expect(hasOrgPermission(null, OrgPermission.CatalogManage)).toBe(false);
+    expect(
+      hasOrgPermission({ role: "org:member" }, OrgPermission.CatalogManage)
+    ).toBe(false);
   });
 });

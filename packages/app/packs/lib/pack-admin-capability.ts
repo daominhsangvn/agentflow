@@ -3,8 +3,8 @@
  *
  * Makes the member-vs-admin pack-management boundary legible: which pack
  * capabilities an org role holds. This is NOT a new permissions system — it
- * reads the SAME role model the rest of the app already uses (`isAdminRole`,
- * mirroring the backend `ADMIN_ROLES`), so the boundary the UI shows is exactly
+ * reads the SAME role model the rest of the app already uses (`hasOrgPermission`,
+ * mirroring the backend permission checks), so the boundary the UI shows is exactly
  * the boundary the API enforces. Pack admin capability is derived from the org
  * role, not stored or edited independently.
  *

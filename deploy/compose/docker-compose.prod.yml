@@ -282,6 +282,8 @@ services:
       SERVER_API_URL: http://api:3002
       # Same value as the api: "false" hides sign-up and defaults to sign-in.
       AUTH_ALLOW_SIGN_UP: ${AUTH_ALLOW_SIGN_UP:-true}
+      # Same value as the api: "true" lets signed-in users create additional orgs.
+      AUTH_ALLOW_CREATE_ORGANIZATION: ${AUTH_ALLOW_CREATE_ORGANIZATION:-}
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?set INTERNAL_API_SECRET in deploy/compose/.env}
     ports:
       - "127.0.0.1:${APP_PORT:-3000}:3000"

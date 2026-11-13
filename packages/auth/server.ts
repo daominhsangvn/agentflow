@@ -75,7 +75,7 @@ export function buildAuthObject(
   return {
     ...state,
     getToken: () => Promise.resolve(token),
-    has: (params) => hasAccess(state.orgRole, params),
+    has: (params) => hasAccess(state, params),
     redirectToSignIn: (options) =>
       redirect(withReturnUrl(SIGN_IN_PATH, options?.returnBackUrl)),
     // Invite-only deployments have no open sign-up: land on sign-in instead.

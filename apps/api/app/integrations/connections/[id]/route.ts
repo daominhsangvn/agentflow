@@ -14,7 +14,7 @@ import {
 import {
   CONNECTION_BODY_MAX_BYTES,
   connectionErrorResponse,
-  denyUnlessOrgAdmin,
+  denyUnlessIntegrationManager,
   keepSubmittedFields,
 } from "../route-helpers";
 
@@ -29,7 +29,7 @@ export const GET = withAnyAuth<
   "/integrations/connections/[id]"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
+    const denied = await denyUnlessIntegrationManager(auth, {
       method: request.method,
       route: ROUTE,
     });
@@ -61,7 +61,7 @@ export const PATCH = withAnyAuth<
   "/integrations/connections/[id]"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
+    const denied = await denyUnlessIntegrationManager(auth, {
       method: request.method,
       route: ROUTE,
     });
@@ -105,7 +105,7 @@ export const DELETE = withAnyAuth<
 >(
   async (auth, request, params) => {
     try {
-      const denied = await denyUnlessOrgAdmin(auth, {
+      const denied = await denyUnlessIntegrationManager(auth, {
         method: request.method,
         route: ROUTE,
       });

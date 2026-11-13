@@ -18,6 +18,14 @@ const DEFAULT_METADATA = createMetadata({
 export const generateMetadata =
   createAuthPageMetadataGenerator(DEFAULT_METADATA);
 
-const SignInPage = () => <SignIn allowSignUp={isSignUpAllowed()} />;
+type SignInPageProps = {
+  readonly searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+// An invited person (`?email=`) can reach sign-up even on invite-only installs.
+const SignInPage = async ({ searchParams }: SignInPageProps) => {
+  const params = await searchParams;
+  return <SignIn allowSignUp={isSignUpAllowed() || Boolean(params.email)} />;
+};
 
 export default SignInPage;

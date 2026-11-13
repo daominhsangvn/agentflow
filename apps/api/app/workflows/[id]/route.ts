@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   saveWorkflowInputSchema,
   setWorkflowEnabledInputSchema,
@@ -13,7 +14,7 @@ import {
 } from "@/lib/route-utils";
 import { workflowService } from "@/lib/workflows/workflow-service";
 import {
-  denyUnlessOrgAdmin,
+  denyUnlessWorkflowPermission,
   serviceErrorResponse,
   WORKFLOW_BODY_MAX_BYTES,
 } from "../route-helpers";
@@ -53,10 +54,14 @@ export const GET = withAnyAuth<Workflow, "/workflows/[id]">(
 export const PUT = withAnyAuth<Workflow, "/workflows/[id]">(
   async (auth, request, params) => {
     try {
-      const denied = await denyUnlessOrgAdmin(auth, {
-        method: request.method,
-        route: ROUTE,
-      });
+      const denied = await denyUnlessWorkflowPermission(
+        auth,
+        {
+          method: request.method,
+          route: ROUTE,
+        },
+        OrgPermission.WorkflowManage
+      );
       if (denied) {
         return denied;
       }
@@ -94,10 +99,14 @@ export const PUT = withAnyAuth<Workflow, "/workflows/[id]">(
 export const PATCH = withAnyAuth<Workflow, "/workflows/[id]">(
   async (auth, request, params) => {
     try {
-      const denied = await denyUnlessOrgAdmin(auth, {
-        method: request.method,
-        route: ROUTE,
-      });
+      const denied = await denyUnlessWorkflowPermission(
+        auth,
+        {
+          method: request.method,
+          route: ROUTE,
+        },
+        OrgPermission.WorkflowManage
+      );
       if (denied) {
         return denied;
       }
@@ -133,10 +142,14 @@ export const PATCH = withAnyAuth<Workflow, "/workflows/[id]">(
 export const DELETE = withAnyAuth<{ deleted: true }, "/workflows/[id]">(
   async (auth, request, params) => {
     try {
-      const denied = await denyUnlessOrgAdmin(auth, {
-        method: request.method,
-        route: ROUTE,
-      });
+      const denied = await denyUnlessWorkflowPermission(
+        auth,
+        {
+          method: request.method,
+          route: ROUTE,
+        },
+        OrgPermission.WorkflowManage
+      );
       if (denied) {
         return denied;
       }

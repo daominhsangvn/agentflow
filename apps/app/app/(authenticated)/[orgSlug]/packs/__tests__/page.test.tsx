@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { LABS_NAV_SECTION_FEATURE_FLAG_KEY } from "@repo/app/shared/lib/feature-flags";
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -73,7 +74,8 @@ describe("PacksRoutePage", () => {
   // defeat the gate.
   it("wraps the page in the Labs container route gate", async () => {
     authMock.mockResolvedValue({
-      has: ({ role }: { role: string }) => role === "org:admin",
+      has: ({ permission }: { permission: string }) =>
+        permission === OrgPermission.CatalogManage,
     });
 
     await renderPage();
@@ -85,7 +87,8 @@ describe("PacksRoutePage", () => {
 
   it("renders the manage-first admin treatment for an org admin", async () => {
     authMock.mockResolvedValue({
-      has: ({ role }: { role: string }) => role === "org:admin",
+      has: ({ permission }: { permission: string }) =>
+        permission === OrgPermission.CatalogManage,
     });
 
     await renderPage();
@@ -98,7 +101,19 @@ describe("PacksRoutePage", () => {
 
   it("renders the manage-first admin treatment for an org owner", async () => {
     authMock.mockResolvedValue({
-      has: ({ role }: { role: string }) => role === "org:owner",
+      has: ({ permission }: { permission: string }) =>
+        permission === OrgPermission.CatalogManage,
+    });
+
+    await renderPage();
+
+    expect(screen.getByTestId("admin-packs-view")).toBeInTheDocument();
+  });
+
+  it("renders the admin treatment for a custom role holding only catalog:manage", async () => {
+    authMock.mockResolvedValue({
+      has: ({ permission }: { permission?: string }) =>
+        permission === OrgPermission.CatalogManage,
     });
 
     await renderPage();
@@ -108,7 +123,7 @@ describe("PacksRoutePage", () => {
 
   it("renders the by-source member treatment for a non-admin member", async () => {
     authMock.mockResolvedValue({
-      has: ({ role }: { role: string }) => role === "org:member",
+      has: () => false,
     });
 
     await renderPage();
@@ -121,7 +136,7 @@ describe("PacksRoutePage", () => {
 
   it("renders one page header (single main landmark owner)", async () => {
     authMock.mockResolvedValue({
-      has: ({ role }: { role: string }) => role === "org:member",
+      has: () => false,
     });
 
     await renderPage();

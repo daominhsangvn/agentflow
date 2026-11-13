@@ -43,7 +43,7 @@ export function useAuth() {
     isLoaded,
     isSignedIn: isLoaded ? session.status === "signed-in" : undefined,
     getToken: getSessionToken,
-    has: (params: HasParams) => hasAccess(state.orgRole, params),
+    has: (params: HasParams) => hasAccess(state, params),
     signOut,
   };
 }
@@ -69,12 +69,13 @@ export function useOrganization() {
   }
   const organization = organizationFromClaims(session.claims);
   const role = session.claims?.org_role ?? null;
+  const permissions = session.claims?.org_permissions ?? [];
   return {
     isLoaded: true,
     organization: organization
       ? { ...organization, reload: refreshSession }
       : null,
-    membership: role ? { role } : null,
+    membership: role ? { role, permissions } : null,
   };
 }
 
@@ -173,14 +174,14 @@ export function Show({
     return null;
   }
   const signedIn = session.status === "signed-in";
-  const role = session.claims?.org_role ?? null;
+  const state = authStateFromClaims(session.claims);
   let visible: boolean;
   if (when === "signed-in") {
     visible = signedIn;
   } else if (when === "signed-out") {
     visible = !signedIn;
   } else {
-    visible = signedIn && when((params) => hasAccess(role, params));
+    visible = signedIn && when((params) => hasAccess(state, params));
   }
   return createElement(Fragment, null, visible ? children : fallback);
 }
