@@ -9,71 +9,48 @@
  * person and answers it; the BA task resumes; a question to the BA from the
  * Agents tab is relayed as a fork; wait_human asked; a question the BA asked
  * on the ticket under its own account (commentId) and the reply to that
- * comment without a mention; and a removed Agent getting no more tasks.
+ * comment without a mention; the files a task leaves, listed, previewed and
+ * downloaded on the case page and attached to a case-page reply; and a removed
+ * Agent getting no more tasks.
+ *
+ * E2E_KEEP_DATA=1 keeps the project, workflow and case afterwards and prints
+ * the case page's URL, to look at them in the UI (same org as the e2e user).
  */
 
-import { randomInt } from "node:crypto";
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import {
-  IntegrationDeliveryMode,
-  IntegrationProviderKey,
-} from "@repo/api/src/types/integration";
-import {
-  type OrchestratorCaseDetail,
-  type OrchestratorCaseListItem,
   OrchestratorCaseStatus,
-  OrchestratorConcurrency,
   OrchestratorDecisionStatus,
   OrchestratorDraftOutcome,
   OrchestratorMessageKind,
   OrchestratorReplyTarget,
   OrchestratorToolName,
-  type WorkflowAgentMap,
 } from "@repo/api/src/types/orchestrator";
-import { OrchestratorSourceOperation } from "@repo/api/src/types/orchestrator-grants";
-import { RunnerCapabilitiesSource } from "@repo/api/src/types/runner-capabilities";
-import type { Workflow } from "@repo/api/src/types/workflow";
-import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
-import { bearer, readApiResult } from "./helpers/api-result";
-import { getApiBaseUrl } from "./helpers/api-url";
+import { bearer } from "./helpers/api-result";
+import { getApiBaseUrl, getAppBaseUrl } from "./helpers/api-url";
 import { isOrgAdminRole, requireOrgClaims } from "./helpers/better-auth";
-import { createProject, deleteProject } from "./helpers/create-project";
-import { FakeAgent, type TurnContext } from "./helpers/fake-agent";
+import { readEnv } from "./helpers/env";
+import type { FakeAgent, TurnContext } from "./helpers/fake-agent";
 import {
   assignedToBotWebhook,
   commentCreatedWebhook,
-  FAKE_JIRA_BOT,
   FAKE_JIRA_PERSON,
-  FAKE_JIRA_PROJECT_KEY,
-  type FakeJira,
-  jiraWebhookHeaders,
-  startFakeJira,
 } from "./helpers/fake-jira";
 import {
-  createIntegrationConnection,
-  createProjectConnection,
-  deleteIntegrationConnection,
-  deleteProjectConnection,
-  getIntegrationInboundDetails,
-  toLocalInboundUrl,
-} from "./helpers/integrations";
+  COMMAND,
+  FlowEnv,
+  STEP_TIMEOUT_MS,
+} from "./helpers/orchestrator-flow-env";
 import { E2ETag } from "./helpers/tags";
-import { createUniqueName } from "./helpers/utils";
-import { deleteWorkflow } from "./helpers/workflows";
 import { expect, test } from "./test";
 
 const ADMIN_REQUIRED_MESSAGE =
   "The e2e user must be an org admin to set up connections and workflows";
 const FLOW_TIMEOUT_MS = 10 * 60_000;
-/** A turn or task waits for the engine tick (seconds) and the debounce. */
-const STEP_TIMEOUT_MS = 90_000;
 const QUIET_MS = 8000;
-const JIRA_KEY = "jira-e2e";
 const AGENTS_TAB_RE = /Agents/;
 const CASE_PARAM_RE = /case=/;
 const UI_TIMEOUT_MS = 30_000;
-const COMMAND = "/ba-clarify";
-const AGENTFLOW_MD = `---\nrunner: BA\ncommands:\n  - { name: ${COMMAND}, mode: read, asks: true }\n---\n# BA\n`;
 
 const ENV_QUESTION = "Which environment should the export run in?";
 const ENV_ANSWER = "staging";
@@ -93,10 +70,32 @@ const DELIM_COMMENT_ID = "7000002";
 const DELIM_REPLY_ID = "7000003";
 const DELIM_ANSWER = "Semicolon";
 
+/** Files of a task are named relative to its work directory (`.agentflow-ai/work`). */
+const WORK_DIR = ".agentflow-ai/work";
+const PRD_FILE = "PRD-export.md";
+const PRD_HEADING = "Leave report CSV export";
+const PRD_CONTENT = `# ${PRD_HEADING}\n\nExport the leave report as **CSV** on staging.\n`;
+const SCREENSHOT_FILE = "screens/export.png";
+/** A 1x1 transparent PNG. */
+const SCREENSHOT_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+  "base64"
+);
+const BUNDLE_FILE = "bundle.zip";
+const BIG_FILE = "recording.mp4";
+const BIG_FILE_SKIPPED = "larger than 4 MB";
+const FILES_REPLY = "The PRD is ready, see the file below.";
+
 // A UI action that cannot happen fails the step instead of the whole flow.
 test.use({ actionTimeout: UI_TIMEOUT_MS });
 
-type Ids = { task1: string; task2: string; task3: string; task4: string };
+type Ids = {
+  task1: string;
+  task2: string;
+  task3: string;
+  task4: string;
+  task5: string;
+};
 
 test("orchestrator full flow: Jira event, agents, questions, answers and project scope", {
   tag: E2ETag.Smoke,
@@ -105,7 +104,7 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
   const { orgRole, orgSlug } = requireOrgClaims(token);
   expect(isOrgAdminRole(orgRole), ADMIN_REQUIRED_MESSAGE).toBe(true);
   const env = new FlowEnv(request, token);
-  const ids: Ids = { task1: "", task2: "", task3: "", task4: "" };
+  const ids: Ids = { task1: "", task2: "", task3: "", task4: "", task5: "" };
   try {
     const flow = await env.setUp();
     const { orch, ba, outside, jira, issue } = flow;
@@ -402,7 +401,106 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       env.expectNoAgentErrors();
     });
 
-    await test.step("7. a decision with a draft: the admin sees it in full; Approve posts it on Jira once", async () => {
+    await test.step("7. task files: listed on the case page, previewed, downloaded and attached to a case-page reply", async () => {
+      const turnsBefore = orch.turns().length;
+      orch.onTurn(async (turn) => {
+        ids.task5 = await runTask(turn, ba, { prompt: "Write the PRD." });
+        return { answer: "Asked the BA for the PRD." };
+      });
+      ba.onTask(() =>
+        Promise.resolve({
+          reply: "PRD written.",
+          attachments: [
+            { path: `${WORK_DIR}/${PRD_FILE}`, content: PRD_CONTENT },
+            { path: `${WORK_DIR}/${SCREENSHOT_FILE}`, content: SCREENSHOT_PNG },
+            { path: `${WORK_DIR}/${BUNDLE_FILE}`, content: "PK fake zip" },
+            {
+              path: `${WORK_DIR}/${BIG_FILE}`,
+              size: 5 * 1024 * 1024,
+              skipped: BIG_FILE_SKIPPED,
+            },
+          ],
+        })
+      );
+      orch.onTurn(async (turn) => {
+        expect(turn.request.prompt).toContain(PRD_FILE);
+        await turn.tool(OrchestratorToolName.Reply, {
+          text: FILES_REPLY,
+          where: OrchestratorReplyTarget.CasePage,
+          attachments: [{ taskId: ids.task5, name: PRD_FILE }],
+        });
+        await turn.tool(OrchestratorToolName.WaitHuman, {});
+        return { answer: "Shared the PRD." };
+      });
+      await env.postCaseMessage({ text: "Write the PRD." });
+      const item = await env.waitForCase(
+        (c) =>
+          !(c.turnRunning || c.needsPerson) &&
+          c.activeTaskCount === 0 &&
+          orch.turns().length === turnsBefore + 2
+      );
+
+      const task = (await env.caseDetail()).tasks.find(
+        (t) => t.id === ids.task5
+      );
+      expect(task?.files).toEqual([
+        expect.objectContaining({ name: PRD_FILE, stored: true }),
+        expect.objectContaining({ name: SCREENSHOT_FILE, stored: true }),
+        expect.objectContaining({ name: BUNDLE_FILE, stored: true }),
+        expect.objectContaining({
+          name: BIG_FILE,
+          stored: false,
+          skipped: BIG_FILE_SKIPPED,
+        }),
+      ]);
+      const file = await env.taskFile(ids.task5, PRD_FILE);
+      expect(file.status()).toBe(200);
+      expect(file.headers()["content-type"]).toContain("text/markdown");
+      expect(await file.text()).toBe(PRD_CONTENT);
+      expect((await env.taskFile(ids.task5, BIG_FILE)).status()).toBe(404);
+
+      await page.goto(`/${orgSlug}/orchestrator/cases/${item.id}`);
+      const files = page.getByTestId("orchestrator-task-files");
+      await expect(files).toContainText(BIG_FILE_SKIPPED, {
+        timeout: UI_TIMEOUT_MS,
+      });
+      await expect(files.getByRole("button", { name: BIG_FILE })).toHaveCount(
+        0
+      );
+      const dialog = page.getByRole("dialog");
+
+      await files.getByRole("button", { name: PRD_FILE }).click();
+      await expect(
+        dialog.getByRole("heading", { name: PRD_HEADING })
+      ).toBeVisible();
+      const downloaded = page.waitForEvent("download");
+      await dialog.getByRole("button", { name: "Download" }).click();
+      const download = await downloaded;
+      expect(download.suggestedFilename()).toBe(PRD_FILE);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+
+      await files.getByRole("button", { name: SCREENSHOT_FILE }).click();
+      await expect(dialog.locator("img")).toBeVisible();
+      await page.keyboard.press("Escape");
+
+      await files.getByRole("button", { name: BUNDLE_FILE }).click();
+      await expect(dialog).toContainText("No preview for this file type");
+      await page.keyboard.press("Escape");
+
+      await expect(page.getByText(FILES_REPLY)).toBeVisible();
+      await page
+        .getByTestId("orchestrator-message-files")
+        .getByRole("button", { name: PRD_FILE })
+        .click();
+      await expect(
+        dialog.getByRole("heading", { name: PRD_HEADING })
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+      env.expectNoAgentErrors();
+    });
+
+    await test.step("8. a decision with a draft: the admin sees it in full; Approve posts it on Jira once", async () => {
       const posted = () =>
         jira
           .postedComments(issue.key)
@@ -472,7 +570,7 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       env.expectNoAgentErrors();
     });
 
-    await test.step("8. an Agent removed from the project gets no more tasks; an Agent outside it never does", async () => {
+    await test.step("9. an Agent removed from the project gets no more tasks; an Agent outside it never does", async () => {
       await env.setProjectAgents([orch.id]);
       const baLoops = ba.loops().length;
       let listed = "";
@@ -508,7 +606,7 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       env.expectNoAgentErrors();
     });
 
-    await test.step("9. only the orchestrator ran turns and only the BA ran tasks", () => {
+    await test.step("10. only the orchestrator ran turns and only the BA ran tasks", () => {
       expect(outside.operations()).toEqual([]);
       expect(orch.loops()).toEqual([]);
       expect(ba.turns()).toEqual([]);
@@ -516,7 +614,12 @@ test("orchestrator full flow: Jira event, agents, questions, answers and project
       return Promise.resolve();
     });
   } finally {
-    await env.cleanUp();
+    const keep = readEnv("E2E_KEEP_DATA") === "1";
+    await env.cleanUp(keep);
+    const casePath = env.casePath(orgSlug);
+    if (keep && casePath) {
+      console.log(`E2E_KEEP_DATA: case page ${getAppBaseUrl()}${casePath}`);
+    }
   }
 });
 
@@ -582,384 +685,4 @@ async function openAgentsTab(page: Page, orgSlug: string, workflowId: string) {
       .getByTestId("agent-case-list")
       .or(page.getByTestId("agent-case-row").first())
   ).toBeVisible({ timeout: 30_000 });
-}
-
-type Flow = {
-  orch: FakeAgent;
-  ba: FakeAgent;
-  outside: FakeAgent;
-  jira: FakeJira;
-  issue: { key: string; summary: string };
-  workflow: Workflow;
-};
-
-/** Everything one run creates, and its cleanup. */
-class FlowEnv {
-  private readonly api = getApiBaseUrl();
-  private projectId: string | null = null;
-  private connectionId: string | null = null;
-  private projectConnectionId: string | null = null;
-  private workflowId: string | null = null;
-  private inbound: { url: string; secret: string } | null = null;
-  private caseId: string | null = null;
-  private readonly agents: FakeAgent[] = [];
-  private jira: FakeJira | null = null;
-
-  private readonly request: APIRequestContext;
-  private readonly token: string;
-
-  constructor(request: APIRequestContext, token: string) {
-    this.request = request;
-    this.token = token;
-  }
-
-  async setUp(): Promise<Flow> {
-    const jira = await startFakeJira();
-    this.jira = jira;
-    const issue = {
-      key: `${FAKE_JIRA_PROJECT_KEY}-${randomInt(100_000, 999_999)}`,
-      summary: `Export the leave report as CSV ${createUniqueName("e2e")}`,
-    };
-    jira.addIssue(issue);
-
-    const project = await createProject(this.request, {
-      name: createUniqueName("e2e-flow-project"),
-      token: this.token,
-    });
-    this.projectId = project.id;
-    await this.addRepository(project.id);
-
-    const orch = await this.agent("e2e-orch");
-    const ba = await this.agent("e2e-ba");
-    const outside = await this.agent("e2e-outside");
-    await this.uploadAgentflowMd(ba.id, project.id);
-    await this.uploadAgentflowMd(outside.id, project.id);
-    await this.setProjectAgents([orch.id, ba.id]);
-
-    const connection = await createIntegrationConnection(this.request, {
-      input: {
-        provider: IntegrationProviderKey.Jira,
-        name: createUniqueName("e2e-fake-jira"),
-        deliveryMode: IntegrationDeliveryMode.Webhook,
-        config: {
-          deployment: "cloud",
-          siteUrl: jira.url,
-          email: FAKE_JIRA_BOT.emailAddress,
-        },
-        secrets: { apiToken: "fake-token" },
-      },
-      token: this.token,
-    });
-    this.connectionId = connection.id;
-    const projectConnection = await createProjectConnection(this.request, {
-      projectId: project.id,
-      input: {
-        connectionId: connection.id,
-        key: JIRA_KEY,
-        name: connection.name,
-        settings: { projectKeys: [FAKE_JIRA_PROJECT_KEY] },
-      },
-      token: this.token,
-    });
-    this.projectConnectionId = projectConnection.id;
-    const inbound = await getIntegrationInboundDetails(
-      this.request,
-      connection.id,
-      this.token
-    );
-    this.inbound = {
-      url: toLocalInboundUrl(inbound.inboundUrl),
-      secret: inbound.inboundSecret,
-    };
-
-    const workflow = await readApiResult<Workflow>(
-      await this.request.post(`${this.api}/workflows`, {
-        data: {
-          name: createUniqueName("e2e-flow-workflow"),
-          projectId: project.id,
-          agent: {
-            mode: WorkflowAgentMode.Orchestrated,
-            computeTargetId: orch.id,
-            instructions: "Ask the BA first.",
-            orchestrator: {
-              concurrency: OrchestratorConcurrency.Queue,
-              debounceSeconds: 0,
-              turnTimeoutMinutes: 5,
-              mentionOnly: true,
-              connections: { source: [OrchestratorSourceOperation.Comment] },
-            },
-          },
-          triggers: [
-            {
-              connectionKey: JIRA_KEY,
-              type: "jira.issue_assigned",
-              config: {},
-            },
-          ],
-          actions: [],
-        },
-        headers: bearer(this.token),
-      }),
-      "Create the orchestrated workflow"
-    );
-    this.workflowId = workflow.id;
-    return { orch, ba, outside, jira, issue, workflow };
-  }
-
-  async webhook(body: unknown): Promise<void> {
-    if (!this.inbound) {
-      throw new Error("No inbound URL");
-    }
-    const response = await this.request.post(this.inbound.url, {
-      data: JSON.stringify(body),
-      headers: jiraWebhookHeaders(this.inbound.secret),
-    });
-    expect(response.status(), await response.text()).toBe(200);
-  }
-
-  /** Polls the workflow's case until `ready`; fails with the last state. */
-  async waitForCase(
-    ready: (item: OrchestratorCaseListItem) => boolean
-  ): Promise<OrchestratorCaseListItem> {
-    let last: OrchestratorCaseListItem | undefined;
-    await expect
-      .poll(
-        async () => {
-          last = await this.findCase();
-          this.expectNoAgentErrors();
-          return last ? ready(last) : false;
-        },
-        { timeout: STEP_TIMEOUT_MS, message: "case state" }
-      )
-      .toBe(true)
-      .catch(async (error: unknown) => {
-        throw new Error(`${String(error)}\n${await this.describe(last)}`);
-      });
-    if (!last) {
-      throw new Error("No case");
-    }
-    this.caseId = last.id;
-    return last;
-  }
-
-  /** The case, its turns, tasks and messages and the fake Agents, for a failure. */
-  async describe(item?: OrchestratorCaseListItem): Promise<string> {
-    const lines = [`Case: ${JSON.stringify(item ?? null)}`];
-    if (item) {
-      this.caseId = item.id;
-      const detail = await this.caseDetail().catch(() => null);
-      for (const conversation of detail?.conversations ?? []) {
-        for (const turn of conversation.turns) {
-          lines.push(
-            `turn ${turn.status} ended=${turn.ended} error=${turn.error ?? ""} summary=${turn.summary ?? ""}`
-          );
-        }
-        for (const message of conversation.messages) {
-          lines.push(
-            `message ${message.kind} ${message.origin}: ${message.text.slice(0, 80).replaceAll("\n", " ")}`
-          );
-        }
-      }
-      for (const task of detail?.tasks ?? []) {
-        lines.push(
-          `task ${task.id} ${task.status} fork=${task.fork} questions=${task.openQuestionCount} error=${task.error ?? ""} waiting=${task.waiting ?? ""}`
-        );
-      }
-    }
-    for (const agent of this.agents) {
-      lines.push(
-        `agent ${agent.name}: turns=${agent.turns().length} loops=${agent.loops().length} errors=${JSON.stringify(agent.errors())}`
-      );
-    }
-    lines.push(
-      `fake Jira unhandled: ${JSON.stringify(this.jira?.unhandled())}`
-    );
-    return lines.join("\n");
-  }
-
-  async caseItem(): Promise<OrchestratorCaseListItem> {
-    const item = await this.findCase();
-    if (!item) {
-      throw new Error("No case");
-    }
-    return item;
-  }
-
-  async caseDetail(): Promise<OrchestratorCaseDetail> {
-    return readApiResult<OrchestratorCaseDetail>(
-      await this.request.get(`${this.api}/orchestrator/cases/${this.caseId}`, {
-        headers: bearer(this.token),
-      }),
-      "Read the case"
-    );
-  }
-
-  async workflowRead(): Promise<Workflow> {
-    return readApiResult<Workflow>(
-      await this.request.get(`${this.api}/workflows/${this.workflowId}`, {
-        headers: bearer(this.token),
-      }),
-      "Read the workflow"
-    );
-  }
-
-  async agentMap(): Promise<WorkflowAgentMap> {
-    return readApiResult<WorkflowAgentMap>(
-      await this.request.get(
-        `${this.api}/workflows/${this.workflowId}/agents`,
-        {
-          headers: bearer(this.token),
-        }
-      ),
-      "Read the agent map"
-    );
-  }
-
-  async postCaseMessage(input: { text: string; toAgentId?: string }) {
-    const detail = await this.caseDetail();
-    const conversationId = detail.conversations[0]?.id ?? "";
-    return this.request.post(
-      `${this.api}/orchestrator/cases/${this.caseId}/messages`,
-      {
-        data: {
-          conversationId,
-          text: input.text,
-          answers: [],
-          ...(input.toAgentId ? { toAgentId: input.toAgentId } : {}),
-        },
-        headers: bearer(this.token),
-      }
-    );
-  }
-
-  async setProjectAgents(runnerIds: string[]): Promise<void> {
-    const response = await this.request.put(
-      `${this.api}/projects/${this.projectId}/runners`,
-      {
-        data: { runnerIds },
-        headers: bearer(this.token),
-      }
-    );
-    expect(response.status(), await response.text()).toBe(200);
-  }
-
-  expectNoAgentErrors(): void {
-    const errors = this.agents.flatMap((agent) =>
-      agent.errors().map((e) => `${agent.name}: ${e}`)
-    );
-    expect(errors, "fake Agent errors").toEqual([]);
-  }
-
-  async cleanUp(): Promise<void> {
-    await deleteWorkflow(this.request, this.workflowId, this.token);
-    await deleteProjectConnection(
-      this.request,
-      this.projectId,
-      this.projectConnectionId,
-      this.token
-    );
-    await deleteIntegrationConnection(
-      this.request,
-      this.connectionId,
-      this.token
-    );
-    if (this.projectId) {
-      await deleteProject(this.request, this.projectId, this.token);
-    }
-    for (const agent of this.agents) {
-      await agent.delete();
-    }
-    await this.jira?.close();
-  }
-
-  private async findCase(): Promise<OrchestratorCaseListItem | undefined> {
-    const cases = await readApiResult<OrchestratorCaseListItem[]>(
-      await this.request.get(
-        `${this.api}/orchestrator/cases?workflowId=${this.workflowId}`,
-        {
-          headers: bearer(this.token),
-        }
-      ),
-      "List the workflow's cases"
-    );
-    return cases[0];
-  }
-
-  private async agent(prefix: string): Promise<FakeAgent> {
-    const agent = await FakeAgent.register(
-      this.token,
-      createUniqueName(prefix)
-    );
-    this.agents.push(agent);
-    await agent.connect();
-    return agent;
-  }
-
-  private async uploadAgentflowMd(
-    computeTargetId: string,
-    projectId: string
-  ): Promise<void> {
-    await readApiResult(
-      await this.request.put(
-        `${this.api}/compute-targets/${computeTargetId}/capabilities`,
-        {
-          data: {
-            project: projectId,
-            source: RunnerCapabilitiesSource.Toolkit,
-            content: AGENTFLOW_MD,
-            warnings: [],
-          },
-          headers: bearer(this.token),
-        }
-      ),
-      "Upload AGENTFLOW.md"
-    );
-  }
-
-  /** The project's loops need a repository: one of the org's Local Git repositories. */
-  private async addRepository(projectId: string): Promise<void> {
-    const connections = await readApiResult<
-      | { connections: { id: string; provider: string }[] }
-      | { id: string; provider: string }[]
-    >(
-      await this.request.get(`${this.api}/integrations/connections`, {
-        headers: bearer(this.token),
-      }),
-      "List connections"
-    );
-    const list = Array.isArray(connections)
-      ? connections
-      : connections.connections;
-    const localGit = list.find(
-      (c) => c.provider === IntegrationProviderKey.LocalGit
-    );
-    if (!localGit) {
-      throw new Error(
-        "The org has no Local Git connection (LOCAL_GIT_TOKEN on the API): a task needs a project repository."
-      );
-    }
-    const repos = await readApiResult<{
-      repositories: { externalId: string }[];
-    }>(
-      await this.request.get(
-        `${this.api}/integrations/connections/${localGit.id}/repositories`,
-        { headers: bearer(this.token) }
-      ),
-      "List Local Git repositories"
-    );
-    const first = repos.repositories[0];
-    if (!first) {
-      throw new Error("Local Git has no repository to add to the project.");
-    }
-    await readApiResult(
-      await this.request.post(
-        `${this.api}/projects/${projectId}/repositories`,
-        {
-          data: { connectionId: localGit.id, externalId: first.externalId },
-          headers: bearer(this.token),
-        }
-      ),
-      "Add a repository to the project"
-    );
-  }
 }
