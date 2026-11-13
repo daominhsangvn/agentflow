@@ -11,10 +11,7 @@ import {
 } from "@repo/observability/span";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import { isRecord } from "@/lib/type-guards";
-import {
-  LOOP_FAIL_KIND_ATTRIBUTE,
-  LoopFailKind,
-} from "./launch-failure-cleanup";
+import { LOOP_FAIL_KIND_ATTRIBUTE, LoopFailKind } from "./loop-fail-kind";
 
 const SYMPHONY_LOOP_OPERATION_ID = "symphony_loop";
 const DEFAULT_DESKTOP_LOOP_COMMAND_FAILURE_MESSAGE =

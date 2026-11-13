@@ -18,6 +18,8 @@
 // of a dependency it must not carry.
 // ---------------------------------------------------------------------------
 
+import { globalSlot } from "./global-slot";
+
 /** The active span's identifiers, as OpenTelemetry reports them (lowercase hex). */
 export type TraceContext = {
   /** 128-bit trace id, 32 lowercase hex characters. */
@@ -31,19 +33,22 @@ export type TraceContextProvider = () => TraceContext | undefined;
 
 const noTraceContext: TraceContextProvider = () => undefined;
 
-let traceContextProvider: TraceContextProvider = noTraceContext;
+const providerSlot = globalSlot<TraceContextProvider>(
+  "trace-context",
+  () => noTraceContext
+);
 
 /**
  * Register the process-wide trace-context provider. Called once by the tracer
  * bootstrap in `@repo/observability/tracing`; never by application code.
  */
 export function setTraceContextProvider(provider: TraceContextProvider): void {
-  traceContextProvider = provider;
+  providerSlot.value = provider;
 }
 
 /** Restore the default no-op provider. Used by tests and by tracer shutdown. */
 export function resetTraceContextProvider(): void {
-  traceContextProvider = noTraceContext;
+  providerSlot.value = noTraceContext;
 }
 
 /**
@@ -52,7 +57,7 @@ export function resetTraceContextProvider(): void {
  */
 export function getTraceContext(): TraceContext | undefined {
   try {
-    return traceContextProvider();
+    return providerSlot.value();
   } catch {
     return undefined;
   }

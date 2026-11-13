@@ -34,6 +34,7 @@ import {
   ATTR_SERVICE_VERSION,
 } from "@opentelemetry/semantic-conventions";
 import { PrismaInstrumentation } from "@prisma/instrumentation";
+import { globalSlot } from "../global-slot";
 import type { LogLevel } from "../log";
 import {
   type LogRecordInput,
@@ -89,9 +90,20 @@ type SdkHandle = {
   flushables: Flushable[];
 };
 
-let handle: SdkHandle | undefined;
-let initResult: TelemetryConfig | undefined;
-let installedHandlers: Array<{ event: string; listener: () => void }> = [];
+type ProviderState = {
+  handle: SdkHandle | undefined;
+  initResult: TelemetryConfig | undefined;
+  installedHandlers: Array<{ event: string; listener: () => void }>;
+};
+
+// Shared across every copy of this module in the process (see global-slot.ts):
+// a second copy must see the first copy's init outcome and never start a
+// second SDK.
+const state = globalSlot<ProviderState>("provider", () => ({
+  handle: undefined,
+  initResult: undefined,
+  installedHandlers: [],
+})).value;
 
 /**
  * Initialise telemetry once per process. Safe to call repeatedly: subsequent
@@ -110,12 +122,12 @@ let installedHandlers: Array<{ event: string; listener: () => void }> = [];
 export function initTelemetry(
   options: InitTelemetryOptions = {}
 ): TelemetryConfig {
-  if (initResult) {
-    return initResult;
+  if (state.initResult) {
+    return state.initResult;
   }
 
   const config = resolveTelemetryConfig();
-  initResult = config;
+  state.initResult = config;
   if (!config.enabled) {
     return config;
   }
@@ -124,7 +136,7 @@ export function initTelemetry(
   try {
     created = createSdk(config);
     created.sdk.start();
-    handle = created;
+    state.handle = created;
     setTraceContextProvider(readActiveTraceContext);
     setLogRecordSink(emitOtelLogRecord);
     setTelemetryFlushHook(forceFlushAll);
@@ -132,19 +144,22 @@ export function initTelemetry(
     return config;
   } catch {
     // A failed bootstrap must leave the process untelemetered, not broken.
-    handle = undefined;
+    state.handle = undefined;
     resetSeams();
     removeShutdownHandlers();
     abandonSdk(created);
-    initResult = { enabled: false, reason: TelemetryDisabledReason.InitFailed };
-    return initResult;
+    state.initResult = {
+      enabled: false,
+      reason: TelemetryDisabledReason.InitFailed,
+    };
+    return state.initResult;
   }
 }
 
 /** Flush and stop the SDK. Never rejects; gives up after `deadlineMs`. */
 export async function shutdownTelemetry(deadlineMs = 5000): Promise<void> {
-  const current = handle;
-  handle = undefined;
+  const current = state.handle;
+  state.handle = undefined;
   resetSeams();
   if (!current) {
     return;
@@ -161,9 +176,9 @@ export async function shutdownTelemetry(deadlineMs = 5000): Promise<void> {
  * state. **Await it** so the next test does not race a draining SDK.
  */
 export async function resetTelemetryForTest(): Promise<void> {
-  const current = handle;
-  handle = undefined;
-  initResult = undefined;
+  const current = state.handle;
+  state.handle = undefined;
+  state.initResult = undefined;
   resetSeams();
   removeShutdownHandlers();
   try {
@@ -263,7 +278,7 @@ function emitOtelLogRecord(record: LogRecordInput): void {
  * registers into.
  */
 async function forceFlushAll(): Promise<void> {
-  const flushables = handle?.flushables ?? [];
+  const flushables = state.handle?.flushables ?? [];
   await Promise.allSettled(flushables.map((item) => item.forceFlush()));
 }
 
@@ -278,7 +293,7 @@ function registerShutdownHandlers(options: InitTelemetryOptions): void {
     shutdownTelemetry().catch(() => undefined);
   };
   process.once("beforeExit", onBeforeExit);
-  installedHandlers.push({ event: "beforeExit", listener: onBeforeExit });
+  state.installedHandlers.push({ event: "beforeExit", listener: onBeforeExit });
 
   if (options.handleShutdownSignals === false) {
     return;
@@ -297,15 +312,15 @@ function registerShutdownHandlers(options: InitTelemetryOptions): void {
         .catch(() => undefined);
     };
     process.once(signal, listener);
-    installedHandlers.push({ event: signal, listener });
+    state.installedHandlers.push({ event: signal, listener });
   }
 }
 
 function removeShutdownHandlers(): void {
-  for (const { event, listener } of installedHandlers) {
+  for (const { event, listener } of state.installedHandlers) {
     process.removeListener(event, listener);
   }
-  installedHandlers = [];
+  state.installedHandlers = [];
 }
 
 /**

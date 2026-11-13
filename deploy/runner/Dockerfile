@@ -61,6 +61,12 @@ RUN --mount=type=cache,id=af-runner-pnpm-store,target=/pnpm/store,sharing=locked
 RUN pnpm config set ignore-scripts true \
     && pnpm config set verify-deps-before-run false
 COPY --from=pruner /repo/out/full/ ./
+# The headless bundle imports the desktop telemetry runtime, which resolves
+# these workspace packages through their dist/ exports (loops-api is aliased to
+# source by build-headless-runner.mjs). Build only the code, not the
+# telemetry-contract schema/collector artifacts.
+RUN pnpm -C packages/telemetry-contract build:code \
+    && pnpm -C packages/shared-platform build
 ARG BUILD_COMMIT_HASH=unknown
 RUN BUILD_COMMIT_HASH="${BUILD_COMMIT_HASH}" pnpm -C apps/desktop build:headless
 

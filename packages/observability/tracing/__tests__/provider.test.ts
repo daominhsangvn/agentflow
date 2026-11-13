@@ -115,6 +115,20 @@ describe("initTelemetry", () => {
     expect(isTelemetryActive()).toBe(false);
   });
 
+  it("is a no-op from a second module copy", async () => {
+    stubEnabledEnv();
+    const first = initTelemetry();
+    const sink = hasLogRecordSink();
+
+    vi.resetModules();
+    const copy = await import("../provider");
+    expect(copy.initTelemetry).not.toBe(initTelemetry);
+
+    expect(copy.initTelemetry()).toEqual(first);
+    expect(isTelemetryActive()).toBe(true);
+    expect(hasLogRecordSink()).toBe(sink);
+  });
+
   it("returns the first outcome even after the env changes", () => {
     clearEnv();
     const first = initTelemetry();

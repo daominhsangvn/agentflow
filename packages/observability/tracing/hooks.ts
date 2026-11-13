@@ -18,22 +18,27 @@
 // `packages/database`.
 // ---------------------------------------------------------------------------
 
+import { globalSlot } from "../global-slot";
+
 /** Flushes buffered traces, logs and metrics. Registered by the telemetry bootstrap. */
 export type TelemetryFlushHook = () => Promise<void>;
 
-let telemetryFlushHook: TelemetryFlushHook | undefined;
+const hookSlot = globalSlot<TelemetryFlushHook | undefined>(
+  "flush-hook",
+  () => undefined
+);
 
 /**
  * Register the process-wide telemetry-flush implementation. Called once by
  * `./provider` after the tracer is installed; never by application code.
  */
 export function setTelemetryFlushHook(hook: TelemetryFlushHook): void {
-  telemetryFlushHook = hook;
+  hookSlot.value = hook;
 }
 
 /** Clear the hook. Used by tracer shutdown and by tests. */
 export function resetTelemetryFlushHook(): void {
-  telemetryFlushHook = undefined;
+  hookSlot.value = undefined;
 }
 
 /**
@@ -46,7 +51,7 @@ export function resetTelemetryFlushHook(): void {
  * tests legitimately assert on how much deferred work a request schedules.
  */
 export function isTelemetryActive(): boolean {
-  return telemetryFlushHook !== undefined;
+  return hookSlot.value !== undefined;
 }
 
 /**
@@ -54,11 +59,12 @@ export function isTelemetryActive(): boolean {
  * failed request — and resolves immediately when no tracer is installed.
  */
 export async function flushTelemetry(): Promise<void> {
-  if (!telemetryFlushHook) {
+  const hook = hookSlot.value;
+  if (!hook) {
     return;
   }
   try {
-    await telemetryFlushHook();
+    await hook();
   } catch {
     // Best-effort, by contract.
   }

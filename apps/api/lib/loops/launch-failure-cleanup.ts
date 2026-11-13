@@ -21,6 +21,7 @@ import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { isInvalidStatusTransitionError } from "@/app/loops/loop-errors";
 import { loopsService } from "@/app/loops/service";
 import { TERMINAL_LOOP_STATUSES } from "@/app/loops/validators";
+import { LOOP_FAIL_KIND_ATTRIBUTE, LoopFailKind } from "./loop-fail-kind";
 
 /**
  * User-facing message persisted on a loop whose dispatch threw before the
@@ -241,14 +242,3 @@ async function reportIfStillActive(
     });
   }
 }
-
-/** Which failure helper wrote the `loop.fail` span (low-cardinality). */
-export const LoopFailKind = {
-  WithError: "with_error",
-  AfterLaunch: "after_launch",
-  RejectedCommand: "rejected_command",
-  TerminalCommandError: "terminal_command_error",
-} as const;
-export type LoopFailKind = (typeof LoopFailKind)[keyof typeof LoopFailKind];
-
-export const LOOP_FAIL_KIND_ATTRIBUTE = "af.loop.fail_kind";

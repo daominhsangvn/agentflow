@@ -24,6 +24,28 @@ let nextConfig: NextConfig = withLogging(config);
 // __tests__/typecheck-owns-route-types.test.ts pins the two together.
 nextConfig.typescript = { ignoreBuildErrors: true };
 
+// The OpenTelemetry SDK is started by `server.ts` from node_modules; keep it
+// out of Next's server bundles so route code never carries a second SDK or
+// instrumentation copy. (`@opentelemetry/api` is aliased by Next to its own
+// compiled copy regardless, which still reads the global provider; the
+// `@repo/observability` registries are process-global, so a bundled copy of
+// that package shares them too.)
+nextConfig.serverExternalPackages = [
+  ...(nextConfig.serverExternalPackages ?? []),
+  "@opentelemetry/sdk-node",
+  "@opentelemetry/sdk-trace-node",
+  "@opentelemetry/sdk-logs",
+  "@opentelemetry/sdk-metrics",
+  "@opentelemetry/exporter-trace-otlp-http",
+  "@opentelemetry/exporter-logs-otlp-http",
+  "@opentelemetry/exporter-metrics-otlp-http",
+  "@opentelemetry/instrumentation",
+  "@opentelemetry/instrumentation-http",
+  "@opentelemetry/instrumentation-pg",
+  "@opentelemetry/instrumentation-undici",
+  "@prisma/instrumentation",
+];
+
 // ISS-5983: `/preview-schemas/ensure` SPAWNS the Prisma CLI, and a spawn is
 // invisible to Next's file tracing — nothing it needs would ship without being
 // named here.

@@ -7,32 +7,37 @@
 // call is inert, which is the state in every browser bundle.
 // ---------------------------------------------------------------------------
 
+import { globalSlot } from "./global-slot";
 import type { LogLevel } from "./log";
 
-let logRecordSink: LogRecordSink | undefined;
+const sinkSlot = globalSlot<LogRecordSink | undefined>(
+  "log-sink",
+  () => undefined
+);
 
 /** Register the process-wide sink. Called by the telemetry bootstrap only. */
 export function setLogRecordSink(sink: LogRecordSink): void {
-  logRecordSink = sink;
+  sinkSlot.value = sink;
 }
 
 /** Clear the sink. Used by telemetry shutdown and by tests. */
 export function resetLogRecordSink(): void {
-  logRecordSink = undefined;
+  sinkSlot.value = undefined;
 }
 
 /** Whether a sink is registered. */
 export function hasLogRecordSink(): boolean {
-  return logRecordSink !== undefined;
+  return sinkSlot.value !== undefined;
 }
 
 /** Hand a record to the sink. Never throws; no-op without a sink. */
 export function emitLogRecord(record: LogRecordInput): void {
-  if (!logRecordSink) {
+  const sink = sinkSlot.value;
+  if (!sink) {
     return;
   }
   try {
-    logRecordSink(record);
+    sink(record);
   } catch {
     // Fail-open: a broken sink must not break logging.
   }
