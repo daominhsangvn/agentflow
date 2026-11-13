@@ -199,7 +199,11 @@ function addTo<T>(index: Map<string, T[]>, name: string, node: T) {
  * Named type declarations AND named value declarations from the contract
  * packages. Values are indexed because a Zod schema is a `const`, not a type —
  * a `z.infer<typeof Schema>` payload is only readable by following the alias
- * into that const's initializer.
+ * into that const's initializer. Only module-scope variables are indexed:
+ * function locals (`parsed`, `value`, `key`...) are not contract schemas, and
+ * indexing them let unrelated same-named locals chain a route into foreign
+ * schemas (e.g. `searchHitSchema.updatedAt`), giving false `Date` keys on
+ * `/branches*` and the GitHub pull-requests route.
  */
 export function indexContractDeclarations(
   sources: ts.SourceFile[]
@@ -217,7 +221,8 @@ export function indexContractDeclarations(
       if (
         ts.isVariableDeclaration(node) &&
         ts.isIdentifier(node.name) &&
-        node.initializer
+        node.initializer &&
+        isModuleScopeVariable(node)
       ) {
         addTo(values, node.name.text, node.initializer);
       }
@@ -634,4 +639,10 @@ function isZodStringExpression(expression: ts.Expression): boolean {
   };
   walk(expression);
   return found;
+}
+
+/** A `const`/`let` declared at the top of a module, not a function-local binding. */
+function isModuleScopeVariable(node: ts.VariableDeclaration): boolean {
+  const statement = node.parent.parent;
+  return ts.isVariableStatement(statement) && ts.isSourceFile(statement.parent);
 }

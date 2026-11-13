@@ -137,6 +137,14 @@
     "@repo/rich-text#test": {
       "dependsOn": ["^test", "@agentflow-ai/design-system#build"]
     },
+    "storybook#test": {
+      "dependsOn": [
+        "^test",
+        "@agentflow-ai/design-system#build",
+        "@agentflow-ai/loops-api#build"
+      ],
+      "cache": false
+    },
     "desktop#test": {
       "dependsOn": [
         "@agentflow-ai/design-system#build",

@@ -45,7 +45,7 @@ const CONTENT_HASH_CRUMB_FALLBACK = "Agent";
  * legacy name-level slug is unchanged (its suffix IS the human key).
  *
  * ISS-4776: a slug whose `::`/`/` arrived percent-ENCODED (e.g.
- * `command%3A%3A%2F%2Fcl-ci-babysit`, when a router hop double-encoded the
+ * `command%3A%3A%2F%2Faf-ci-babysit`, when a router hop double-encoded the
  * segment instead of leaving it decoded) has no literal `::`, so the identity
  * codec below would miss it and the crumb would leak the raw `%3A%3A%2F%2F`. We
  * repair that up front by decoding the whole slug once when it holds no literal
@@ -138,7 +138,7 @@ function equalsNameFold(candidate: string, name: string): boolean {
  * The detail page must normalize the route param ONCE at the boundary and key
  * the breadcrumb, the detail fetch, and the token-trend fetch off the same
  * value, or the crumb (which decodes) and the body (which fetches the raw param)
- * disagree: a double-encoded `command%3A%3A%2F%2Fcl-ci-babysit` would render
+ * disagree: a double-encoded `command%3A%3A%2F%2Faf-ci-babysit` would render
  * `//af-ci-babysit` in the crumb above an `AgentDetailNotFound` body, because the
  * identity codec finds no literal `::` in the still-encoded slug and the API
  * lookup misses.

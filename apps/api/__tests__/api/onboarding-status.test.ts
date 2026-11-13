@@ -62,12 +62,9 @@ describe("GET /onboarding with a desktop managed API key", () => {
     expect(json.success).toBe(true);
     expect(typeof json.data.wizardCompleted).toBe("boolean");
     expect(json.data.wizardCompleted).toBe(true);
-    // ISS-5490: the desktop row asks whether THIS caller installed, so the
-    // route has to hand the service the user as well as the org.
-    expect(onboardingService.getStatus).toHaveBeenCalledWith(
-      "test-org-id",
-      "test-user-id"
-    );
+    // The runner row is org-scoped (any runner of the organization), so the
+    // route passes only the org.
+    expect(onboardingService.getStatus).toHaveBeenCalledWith("test-org-id");
   });
 
   it("returns wizardCompleted: false when the wizard is not yet complete", async () => {
@@ -93,10 +90,7 @@ describe("GET /onboarding with a desktop managed API key", () => {
     expect(json.success).toBe(true);
     expect(typeof json.data.wizardCompleted).toBe("boolean");
     expect(json.data.wizardCompleted).toBe(false);
-    expect(onboardingService.getStatus).toHaveBeenCalledWith(
-      "test-org-id",
-      "test-user-id"
-    );
+    expect(onboardingService.getStatus).toHaveBeenCalledWith("test-org-id");
   });
 
   it("returns 500 when the onboarding service throws", async () => {

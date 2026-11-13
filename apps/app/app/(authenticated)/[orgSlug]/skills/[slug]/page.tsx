@@ -19,7 +19,7 @@ export default async function AgentDetailPage({
   // ISS-4776: normalize the route param ONCE at the boundary so the breadcrumb,
   // the detail fetch, and the token-trend fetch (all downstream of this slug)
   // key off the same value. A router hop can double-encode the segment
-  // (`command%3A%3A%2F%2Fcl-ci-babysit`); without this the crumb would decode to
+  // (`command%3A%3A%2F%2Faf-ci-babysit`); without this the crumb would decode to
   // `//af-ci-babysit` while the still-encoded slug reaching the API misses the
   // lookup and the body renders "not found" — the crumb and body disagreeing.
   const slug = normalizeAgentSlug(rawSlug);

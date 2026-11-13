@@ -56,10 +56,11 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** A new workflow: open on the run events, plan.started and execute.started included. */
+/** A new workflow: the Run events tab, plan.started and execute.started included. */
 export const RunEvents: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("tab", { name: "Run events" }));
     await expect(canvas.getByText("plan.started")).toBeVisible();
     await expect(canvas.getByText("execute.started")).toBeVisible();
   },

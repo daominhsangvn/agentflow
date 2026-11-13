@@ -86,7 +86,7 @@ describe("AgentDetailPage (detail route)", () => {
       await AgentDetailPage({
         params: Promise.resolve({
           orgSlug: "test-org",
-          slug: "command%3A%3A%2F%2Fcl-ci-babysit",
+          slug: "command%3A%3A%2F%2Faf-ci-babysit",
         }),
       })
     );

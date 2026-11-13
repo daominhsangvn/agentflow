@@ -2,6 +2,7 @@ import { tooltipMockModule } from "@repo/app/test/mocks/tooltip";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { formatAbsoluteDateTime } from "../../lib/format";
 import {
   type SessionLimits,
   type SessionLimitsState,
@@ -20,7 +21,13 @@ const SONNET_RE = /Sonnet/;
 const CREDIT_SUMMARY_RE = /\$3\.50 of \$20\.00/;
 const USED_PERCENT_RE = /% used/;
 const AS_OF_RE = /As of/;
-const ABSOLUTE_DATE_RE = /Jul 19/;
+// The formatter uses the test machine's locale, so the expectation is derived instead of hard-coded.
+const STALE_ABSOLUTE = requireText(
+  formatAbsoluteDateTime("2026-07-19T11:20:00.000Z", "UTC")
+);
+const RESET_ABSOLUTE = requireText(
+  formatAbsoluteDateTime("2026-07-19T15:00:00.000Z", "UTC")
+);
 const RESET_RELATIVE_RE = /in 3h/;
 
 function readyState(limits: SessionLimits): SessionLimitsState {
@@ -419,7 +426,7 @@ describe("SessionLimitsNav four states", () => {
     expect(note).toHaveTextContent(AS_OF_RE);
     // The datetime is real and machine-readable, not only a relative phrase.
     expect(note).toHaveAttribute("datetime", "2026-07-19T11:20:00.000Z");
-    expect(note).toHaveTextContent(ABSOLUTE_DATE_RE);
+    expect(note).toHaveTextContent(STALE_ABSOLUTE);
   });
 
   it("renders a measured zero as a real zero, distinct from loading", () => {
@@ -486,7 +493,7 @@ describe("session-limit accessibility", () => {
     const trigger = screen.getByTestId("session-limits-nav-trigger");
     const spoken = trigger.getAttribute("aria-label") ?? "";
     expect(spoken).toMatch(AS_OF_RE);
-    expect(spoken).toMatch(ABSOLUTE_DATE_RE);
+    expect(spoken).toContain(STALE_ABSOLUTE);
     // Spoken and drawn agree because both read one selector.
     expect(screen.getByTestId("session-limits-stale-note")).toHaveTextContent(
       spoken.slice(spoken.indexOf("As of"), spoken.indexOf(". View details"))
@@ -517,7 +524,7 @@ describe("session-limit accessibility", () => {
     expect(session.tagName).toBe("TIME");
     expect(session).toHaveAttribute("datetime", "2026-07-19T15:00:00.000Z");
     // …and the absolute time is visible, not hidden in an attribute alone.
-    expect(session).toHaveTextContent(ABSOLUTE_DATE_RE);
+    expect(session).toHaveTextContent(RESET_ABSOLUTE);
   });
 
   it("opens a real dialog with a working way out from the nav trigger", async () => {
@@ -672,3 +679,10 @@ describe("the urgency scale", () => {
     );
   });
 });
+
+function requireText(value: string | null): string {
+  if (!value) {
+    throw new Error("formatAbsoluteDateTime returned no text");
+  }
+  return value;
+}
