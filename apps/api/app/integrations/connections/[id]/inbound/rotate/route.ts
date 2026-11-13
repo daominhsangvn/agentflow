@@ -6,7 +6,7 @@ import {
   notFoundResponse,
   successResponse,
 } from "@/lib/route-utils";
-import { denyUnlessOrgAdmin } from "../../../route-helpers";
+import { denyUnlessIntegrationManager } from "../../../route-helpers";
 
 /**
  * POST /integrations/connections/{id}/inbound/rotate
@@ -18,7 +18,7 @@ export const POST = withAnyAuth<
   "/integrations/connections/[id]/inbound/rotate"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
+    const denied = await denyUnlessIntegrationManager(auth, {
       method: request.method,
       route: "/integrations/connections/[id]/inbound/rotate",
     });

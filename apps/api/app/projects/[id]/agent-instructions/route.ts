@@ -1,9 +1,10 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   type ProjectAgentInstructions,
   updateProjectAgentInstructionsInputSchema,
 } from "@repo/api/src/types/project-agent-instructions";
 import { projectAgentInstructionsService } from "@/app/projects/project-agent-instructions-service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { resolveProjectId } from "@/lib/identifier-utils";
 import {
@@ -49,10 +50,10 @@ export const PUT = withAnyAuth<
   "/projects/[id]/agent-instructions"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      "agent instructions"
+      OrgPermission.ProjectManage
     );
     if (denied) {
       return denied;

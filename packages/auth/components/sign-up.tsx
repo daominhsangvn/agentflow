@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authApi, refreshSession } from "../auth-client";
 import {
   AuthCard,
   AuthField,
   errorMessage,
   readRedirectTarget,
+  SsoButtons,
+  withCurrentQuery,
 } from "./auth-card";
+import { readCallbackError, signInErrorMessage } from "./auth-error-messages";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -24,6 +27,13 @@ export const SignUp = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const code = readCallbackError(globalThis.location?.search);
+    if (code) {
+      setError(signInErrorMessage(code));
+    }
+  }, []);
 
   const signUp = async () => {
     if (password.length < MIN_PASSWORD_LENGTH) {
@@ -50,7 +60,7 @@ export const SignUp = () => {
       footer={
         <span>
           Already have an account?{" "}
-          <a className="underline" href="/sign-in">
+          <a className="underline" href={withCurrentQuery("/sign-in")}>
             Sign in
           </a>
         </span>
@@ -83,6 +93,7 @@ export const SignUp = () => {
         type="password"
         value={password}
       />
+      <SsoButtons onError={setError} />
     </AuthCard>
   );
 };

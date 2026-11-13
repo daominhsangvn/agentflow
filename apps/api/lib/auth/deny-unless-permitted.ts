@@ -1,31 +1,36 @@
 import type { ApiResult } from "@repo/api/src/types/common";
+import type { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { log } from "@repo/observability/log";
 import type { NextResponse } from "next/server";
-import { getOrgAdminStatus } from "@/lib/auth/org-admin";
+import { getOrgPermissionStatus } from "@/lib/auth/org-permissions";
 import type { AuthContext } from "@/lib/auth/with-auth";
 import { forbiddenResponse, scheduleLogFlush } from "@/lib/route-utils";
 
 /**
- * Returns a 403 response for non-admins, or null when the caller is an org
- * admin/owner. `subject` names the request kind in the denial log, e.g.
- * "workflow" or "project repository".
+ * Returns a 403 response when the caller lacks `permission` in the org, or
+ * null when permitted. Resolved from the database on every call, never from
+ * the JWT claim.
  */
-export async function denyUnlessOrgAdmin(
+export async function denyUnlessPermitted(
   auth: Pick<AuthContext, "clerkOrgId" | "clerkUserId">,
   request: { method: string; route: string },
-  subject: string
+  permission: OrgPermission
 ): Promise<NextResponse<ApiResult<never>> | null> {
-  const adminStatus = await getOrgAdminStatus(
+  const status = await getOrgPermissionStatus(
     auth.clerkOrgId,
     auth.clerkUserId
   );
-  if (adminStatus.isAdmin) {
+  if (
+    status.kind === "member" &&
+    (status.isOwner || status.permissions.has(permission))
+  ) {
     return null;
   }
-  log.warn(`Denied ${subject} request for non-admin user`, {
+  log.warn("Denied request for user without the required permission", {
     clerkOrgId: auth.clerkOrgId,
     clerkUserId: auth.clerkUserId,
-    reason: adminStatus.reason,
+    permission,
+    reason: status.kind === "member" ? "missing_permission" : status.kind,
     method: request.method,
     route: request.route,
   });

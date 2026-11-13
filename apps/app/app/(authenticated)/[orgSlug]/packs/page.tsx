@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { PacksPage } from "@repo/app/packs/components/packs-page";
 import {
   createPacksContext,
@@ -44,7 +45,7 @@ export default async function PacksRoutePage({ params }: PageProps) {
   // breadcrumb + capability lookup don't read orgSlug (auth() carries the org).
   const [{ has }] = await Promise.all([auth(), params]);
 
-  const isAdmin = has({ role: "org:admin" }) || has({ role: "org:owner" });
+  const isAdmin = has({ permission: OrgPermission.CatalogManage });
   const context = createPacksContext(
     isAdmin ? PacksMode.WebAdmin : PacksMode.WebMember
   );

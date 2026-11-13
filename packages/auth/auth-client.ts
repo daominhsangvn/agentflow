@@ -1,9 +1,25 @@
 "use client";
 
+import {
+  INVITATION_TOKEN_PARAM,
+  type InvitationDetails,
+  invitationDetailsSchema,
+  type SignInMethods,
+  type SignInProvider,
+  type SsoProviderId,
+  signInMethodsSchema,
+  signInProvidersSchema,
+} from "@repo/api/src/types/auth-account";
+import type { OrgPermission } from "@repo/api/src/types/org-permissions";
+import {
+  fromPermissionStatements,
+  toPermissionStatements,
+} from "@repo/api/src/types/org-permissions";
 import { jwtClient, organizationClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 import { decodeJwt } from "jose";
 import { useEffect, useSyncExternalStore } from "react";
+import { z } from "zod";
 import type { SessionClaims } from "./types";
 
 /**
@@ -23,13 +39,34 @@ const REFRESH_MARGIN_MS = 60_000;
 const authClient = createAuthClient({
   baseURL: resolveBaseUrl(),
   basePath: AUTH_BASE_PATH,
-  plugins: [organizationClient(), jwtClient()],
+  plugins: [
+    organizationClient({ dynamicAccessControl: { enabled: true } }),
+    jwtClient(),
+  ],
 });
 
 export type AuthError = { message?: string } | null;
 export type AuthResult<T = unknown> = { data: T | null; error: AuthError };
 
-export type AuthRoleName = "owner" | "admin" | "member";
+/** A member role: a built-in (`BuiltInOrgRole`) or an owner-defined custom role name. */
+export type AuthRoleName = string;
+
+export type AuthErrorDetail = {
+  message?: string;
+  code?: string;
+  status?: number;
+};
+
+export type InvitationResult = {
+  data: InvitationDetails | null;
+  error: AuthErrorDetail | null;
+};
+
+export type OrgRoleRecord = {
+  id: string;
+  role: string;
+  permissions: OrgPermission[];
+};
 
 export type OrganizationSummary = {
   id: string;
@@ -106,7 +143,164 @@ export const authApi = {
     authClient.organization.removeMember({ memberIdOrEmail: memberId }),
   cancelInvitation: (invitationId: string): Promise<AuthResult> =>
     authClient.organization.cancelInvitation({ invitationId }),
+  listRoles: async (): Promise<AuthResult<OrgRoleRecord[]>> => {
+    const result = await authClient.organization.listRoles();
+    return toRoleListResult(result.data, result.error);
+  },
+  createRole: (input: {
+    role: string;
+    permission: OrgPermission[];
+  }): Promise<AuthResult> =>
+    authClient.organization.createRole({
+      role: input.role,
+      permission: toPermissionStatements(input.permission),
+    }),
+  updateRole: (input: {
+    roleName: string;
+    data: { permission: OrgPermission[] };
+  }): Promise<AuthResult> =>
+    authClient.organization.updateRole({
+      roleName: input.roleName,
+      data: { permission: toPermissionStatements(input.data.permission) },
+    }),
+  deleteRole: (input: { roleName: string }): Promise<AuthResult> =>
+    authClient.organization.deleteRole({ roleName: input.roleName }),
+  getInvitation: async (
+    id: string,
+    token: string | null
+  ): Promise<InvitationResult> => {
+    const result = await authClient.$fetch("/organization/get-invitation", {
+      method: "GET",
+      query: { id, [INVITATION_TOKEN_PARAM]: token ?? "" },
+    });
+    if (result.error) {
+      return { data: null, error: result.error };
+    }
+    const parsed = invitationDetailsSchema.safeParse(result.data);
+    if (!parsed.success) {
+      return {
+        data: null,
+        error: { message: "Unexpected invitation response" },
+      };
+    }
+    return { data: parsed.data, error: null };
+  },
+  acceptInvitation: async (
+    id: string,
+    token: string | null
+  ): Promise<AuthResult> => {
+    const result = await authClient.$fetch("/organization/accept-invitation", {
+      method: "POST",
+      body: { invitationId: id, [INVITATION_TOKEN_PARAM]: token ?? "" },
+    });
+    return parseFetchResult(result, invitationActionResponseSchema);
+  },
+  rejectInvitation: async (
+    id: string,
+    token: string | null
+  ): Promise<AuthResult> => {
+    const result = await authClient.$fetch("/organization/reject-invitation", {
+      method: "POST",
+      body: { invitationId: id, [INVITATION_TOKEN_PARAM]: token ?? "" },
+    });
+    return parseFetchResult(result, invitationActionResponseSchema);
+  },
+  listSignInProviders: async (): Promise<AuthResult<SignInProvider[]>> => {
+    const result = await authClient.$fetch("/sign-in-providers", {
+      method: "GET",
+    });
+    return parseFetchResult(result, signInProvidersSchema);
+  },
+  getSignInMethods: async (): Promise<AuthResult<SignInMethods>> => {
+    const result = await authClient.$fetch("/account/sign-in-methods", {
+      method: "GET",
+    });
+    return parseFetchResult(result, signInMethodsSchema);
+  },
+  setPassword: async (newPassword: string): Promise<AuthResult> => {
+    const result = await authClient.$fetch("/account/set-password", {
+      method: "POST",
+      body: { newPassword },
+    });
+    return parseFetchResult(result, setPasswordResponseSchema);
+  },
+  sendVerificationEmail: (input: {
+    email: string;
+    callbackURL: string;
+  }): Promise<AuthResult> => authClient.sendVerificationEmail(input),
+  signInSocial: (input: {
+    provider: SsoProviderId;
+    callbackURL: string;
+    errorCallbackURL: string;
+    newUserCallbackURL: string;
+  }): Promise<AuthResult> => authClient.signIn.social(input),
+  linkSocial: (input: {
+    provider: SsoProviderId;
+    callbackURL: string;
+    errorCallbackURL: string;
+  }): Promise<AuthResult> => authClient.linkSocial(input),
+  unlinkAccount: async (input: {
+    providerId: SsoProviderId;
+  }): Promise<AuthResult> => {
+    // Better Auth 1.7.6 unlinks by the account row id, so resolve it first.
+    const accounts = await authClient.listAccounts();
+    if (accounts.error) {
+      return { data: null, error: accounts.error };
+    }
+    const account = accounts.data?.find(
+      (item) => item.providerId === input.providerId
+    );
+    if (!account) {
+      return { data: null, error: { message: "Account is not connected" } };
+    }
+    return authClient.unlinkAccount({ accountId: account.id });
+  },
 };
+
+const setPasswordResponseSchema = z.object({ status: z.boolean() });
+
+const roleListSchema = z.array(
+  z.object({
+    id: z.string(),
+    role: z.string(),
+    permission: z.record(z.string(), z.array(z.string())),
+  })
+);
+
+function toRoleListResult(
+  data: unknown,
+  error: AuthErrorDetail | null
+): AuthResult<OrgRoleRecord[]> {
+  if (error) {
+    return { data: null, error };
+  }
+  const parsed = roleListSchema.safeParse(data);
+  if (!parsed.success) {
+    return { data: null, error: { message: "Unexpected roles response" } };
+  }
+  return {
+    data: parsed.data.map((role) => ({
+      id: role.id,
+      role: role.role,
+      permissions: fromPermissionStatements(role.permission),
+    })),
+    error: null,
+  };
+}
+
+function parseFetchResult<T>(
+  result: { data: unknown; error: AuthErrorDetail | null },
+  schema: z.ZodType<T>
+): AuthResult<T> {
+  if (result.error) {
+    return { data: null, error: result.error };
+  }
+  const parsed = schema.safeParse(result.data);
+  if (!parsed.success) {
+    return { data: null, error: { message: "Unexpected server response" } };
+  }
+  return { data: parsed.data, error: null };
+}
 
 /** Organizations the signed-in user belongs to. */
 export function useOrganizationSummaries(): {
@@ -252,3 +446,5 @@ function resolveBaseUrl(): string {
   }
   return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 }
+
+const invitationActionResponseSchema = z.object({ invitation: z.unknown() });

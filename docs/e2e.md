@@ -44,12 +44,12 @@ cookie to `.auth/user.json`. Every other test starts from that storage state
 and mints a fresh 15-minute JWT from it (`getSessionBearerToken(page)`, or the
 `apiToken` fixture in `e2e/test.ts`) for API calls.
 
-The first account created on an empty database owns the `agentflow`
-organization; later sign-ups join it as members. Settings and the workflow
-spec need an org admin or owner, so prefer a dedicated database, or set
-`E2E_USER_EMAIL`/`E2E_USER_PASSWORD` to an admin. Sign-up must be open
-(`AUTH_ALLOW_SIGN_UP` not `false`) unless the account already exists, and
-`AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION` must not be `false`.
+Every account created through sign-up owns its own new organization (the first
+one on an empty database gets `agentflow`), so the e2e user is an owner.
+Settings and the workflow spec need an org admin or owner; set
+`E2E_USER_EMAIL`/`E2E_USER_PASSWORD` to an existing admin to reuse one. Sign-up
+must be open (`AUTH_ALLOW_SIGN_UP` not `false`) unless the account already
+exists. `e2e/invitations.spec.ts` also needs Mailpit at http://localhost:8025.
 
 ## Tags
 

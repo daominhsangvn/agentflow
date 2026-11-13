@@ -1,8 +1,9 @@
 import { failure } from "@repo/api/src/types/common";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { Status } from "@repo/api/src/types/result";
 import { NextResponse } from "next/server";
 import { orchestratorCaseService } from "@/app/orchestrator/cases/service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { errorResponse, successResponse } from "@/lib/route-utils";
 
@@ -24,10 +25,10 @@ export const POST = withAnyAuth<
   "/orchestrator/turns/[id]/cancel"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      "orchestrator turns"
+      OrgPermission.OrchestratorOperate
     );
     if (denied) {
       return denied;

@@ -1,6 +1,7 @@
 import { UserIdentifier } from "@repo/analytics/components/user-identifier";
 import { MobileBottomNav } from "@repo/app/shared/components/mobile-bottom-nav";
 import { auth, currentUser } from "@repo/auth/server";
+import { isOrganizationCreationAllowed } from "@repo/auth/sign-up-policy";
 import {
   SIDEBAR_COOKIE_NAME,
   SidebarProvider,
@@ -48,7 +49,10 @@ const AppLayout = async ({ children }: AppLayoutProperties) => {
   return (
     <CollaborationProviderWrapper>
       <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-        <GlobalSidebar envBadge={sidebarEnvBadge}>
+        <GlobalSidebar
+          allowCreateOrganization={isOrganizationCreationAllowed()}
+          envBadge={sidebarEnvBadge}
+        >
           {/* Outside OnboardingGuard: that guard unmounts its subtree on every
               onboarding-status refetch (isFetching), which would tear down and
               restart capture, splitting staff session replay into segments. */}

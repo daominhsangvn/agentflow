@@ -37,8 +37,8 @@ vi.mock("@/lib/auth/with-auth", () => ({
       handler(mocks.authContext, request, context?.params),
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  isOrgAdmin: mocks.isOrgAdmin,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  hasOrgPermission: mocks.isOrgAdmin,
 }));
 
 vi.mock("@/app/custom-fields/values-service", async () => {

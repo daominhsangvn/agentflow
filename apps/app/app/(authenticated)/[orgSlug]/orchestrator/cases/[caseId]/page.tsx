@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { OrchestratorCaseDetailView } from "@repo/app/orchestrator/components/orchestrator-case-detail-view";
 import type { Metadata } from "next";
 import { resolveWorkflowAdmin } from "@/app/(authenticated)/[orgSlug]/workflows/workflow-admin";
@@ -17,7 +18,7 @@ export default async function OrchestratorCasePage({
 }: Readonly<OrchestratorCasePageProps>) {
   const [{ orgSlug, caseId }, isAdmin] = await Promise.all([
     params,
-    resolveWorkflowAdmin(),
+    resolveWorkflowAdmin(OrgPermission.OrchestratorOperate),
   ]);
 
   return (

@@ -26,7 +26,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   withDb: Object.assign(vi.fn(), { tx: vi.fn() }),
-  isOrgAdmin: vi.fn(),
+  hasOrgPermission: vi.fn(),
   computeTargetsService: {
     findOwnedById: vi.fn(),
   },
@@ -52,8 +52,8 @@ vi.mock("@repo/storage/keys", () => ({
   keys: mocks.awsKeys,
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  isOrgAdmin: mocks.isOrgAdmin,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  hasOrgPermission: mocks.hasOrgPermission,
 }));
 
 vi.mock("@/app/compute-targets/service", () => ({
@@ -275,7 +275,7 @@ beforeEach(() => {
 
 describe("distributionsService.withdraw — authorization", () => {
   it("refuses a non-admin and leaves the distribution distributed", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(false);
+    mocks.hasOrgPermission.mockResolvedValue(false);
     const rows = liveAndWithdrawnRows();
     const db = installFilteringDb(rows);
 
@@ -295,7 +295,7 @@ describe("distributionsService.withdraw — authorization", () => {
   });
 
   it("returns 404 for a distribution in another org", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     installFilteringDb([]);
 
     const result = await distributionsService.withdraw(
@@ -317,7 +317,7 @@ describe("distributionsService.withdraw — authorization", () => {
 
 describe("distributionsService.withdraw — happy path", () => {
   beforeEach(() => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
   });
 
   it("stamps withdrawnAt and records who withdrew it", async () => {
@@ -444,7 +444,7 @@ describe("withdrawn distributions are no longer offered", () => {
   });
 
   it("cannot be edited — a racing PATCH is refused rather than silently ignored", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     installFilteringDb(liveAndWithdrawnRows());
 
     const result = await distributionsService.update(
@@ -470,7 +470,7 @@ describe("withdrawn distributions are no longer offered", () => {
    * the withdrawal as it hands back the live row, which is exactly that window.
    */
   it("refuses a targeting PATCH withdrawn between the read and the write, without rebuilding entries", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     const rows = [buildDistributionRow({ id: LIVE_ID })];
     const db = installFilteringDb(rows);
     const raced = rows[0];
@@ -508,7 +508,7 @@ describe("withdrawn distributions are no longer offered", () => {
   });
 
   it("refuses a scalar-only PATCH withdrawn between the read and the write", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     const rows = [buildDistributionRow({ id: LIVE_ID })];
     const db = installFilteringDb(rows);
     const raced = rows[0];

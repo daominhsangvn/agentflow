@@ -1,9 +1,10 @@
 "use client";
 
 import type { ComputeTarget } from "@repo/api/src/types/compute-target";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { useAgentComponents } from "@repo/app/agents/hooks/use-agent-components";
 import { useLocalStorageState } from "@repo/app/shared/hooks/use-local-storage-state";
-import { isAdminRole } from "@repo/app/shared/lib/role-utils";
+import { hasOrgPermission } from "@repo/app/shared/lib/role-utils";
 import { useOrganization } from "@repo/auth/client";
 import { useComputeTargets } from "@/hooks/queries/use-compute-targets";
 
@@ -37,7 +38,7 @@ export function useAgentOnboarding(): AgentOnboardingState {
     bootstrapKey,
     null
   );
-  const isAdmin = isAdminRole(membership?.role);
+  const isAdmin = hasOrgPermission(membership, OrgPermission.CatalogManage);
   const shouldFetch = !dismissed && isAdmin;
   const bootstrapInProgress = activeLoopId !== null;
 

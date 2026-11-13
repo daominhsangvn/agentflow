@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { auth } from "@repo/auth/server";
 import { SettingsPage } from "./components/settings-page";
 import {
@@ -24,11 +25,18 @@ export default async function Page({
   searchParams,
 }: Readonly<SettingsPageProperties>) {
   const [{ has }, params] = await Promise.all([auth(), searchParams]);
-  const isAdmin = has({ role: "org:admin" }) || has({ role: "org:owner" });
+  const isAdmin = has({ permission: OrgPermission.OrganizationUpdate });
+  const canManageCustomFields = has({
+    permission: OrgPermission.CustomFieldManage,
+  });
+  const canManageCatalog = has({ permission: OrgPermission.CatalogManage });
   const requestedTab = getRequestedTab(params.tab);
-  const allowedTabs = isAdmin
-    ? [...BASE_SETTINGS_TABS, ...ADMIN_SETTINGS_TABS]
-    : BASE_SETTINGS_TABS;
+  const allowedTabs = [
+    ...BASE_SETTINGS_TABS,
+    ...ADMIN_SETTINGS_TABS.filter((tab) =>
+      isAdminTabAllowed(tab, { canManageCatalog, canManageCustomFields })
+    ),
+  ];
   // Any integration OAuth callback (github / google / linear) returns the
   // admin to /settings with a status query param. Force the integrations
   // tab so the relevant card is mounted to surface the updated status,
@@ -43,7 +51,14 @@ export default async function Page({
     allowedTabs,
   });
 
-  return <SettingsPage initialTab={initialTab} isAdmin={isAdmin} />;
+  return (
+    <SettingsPage
+      canManageCatalog={canManageCatalog}
+      canManageCustomFields={canManageCustomFields}
+      initialTab={initialTab}
+      isAdmin={isAdmin}
+    />
+  );
 }
 
 function getRequestedTab(tab: string | string[] | undefined): string | null {
@@ -84,4 +99,19 @@ function hasSearchParamValue(value: string | string[] | undefined): boolean {
     return value.some((entry) => entry.length > 0);
   }
   return Boolean(value);
+}
+
+function isAdminTabAllowed(
+  tab: SettingsTab,
+  can: { canManageCatalog: boolean; canManageCustomFields: boolean }
+): boolean {
+  if (tab === SettingsTab.CustomFields) {
+    return can.canManageCustomFields;
+  }
+
+  if (tab === SettingsTab.Compliance) {
+    return can.canManageCatalog;
+  }
+
+  return false;
 }

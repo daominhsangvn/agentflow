@@ -14,12 +14,13 @@ import {
   DistributionTargetingType,
   DistributionTargetStatusValue,
 } from "@repo/api/src/types/distribution";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { Prisma, type TransactionClient, withDb } from "@repo/database";
 import { getCatalogAssetDownloadUrl } from "@repo/storage";
 import { v7 as uuidv7 } from "uuid";
 import { computeTargetsService } from "@/app/compute-targets/service";
-import { isOrgAdmin } from "@/lib/auth/org-admin";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -505,7 +506,11 @@ export const distributionsService = {
     clerkUserId: string,
     body: CreateDistributionRequest
   ): Promise<Result<DistributionDto, StatusCode>> {
-    const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
+    const admin = await hasOrgPermission(
+      clerkOrgId,
+      clerkUserId,
+      OrgPermission.CatalogManage
+    );
     if (!admin) {
       return Result.err(Status.Forbidden);
     }
@@ -567,7 +572,11 @@ export const distributionsService = {
     clerkUserId: string,
     body: UpdateDistributionRequest
   ): Promise<Result<DistributionDto, StatusCode>> {
-    const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
+    const admin = await hasOrgPermission(
+      clerkOrgId,
+      clerkUserId,
+      OrgPermission.CatalogManage
+    );
     if (!admin) {
       return Result.err(Status.Forbidden);
     }
@@ -722,7 +731,11 @@ export const distributionsService = {
     clerkOrgId: string,
     clerkUserId: string
   ): Promise<Result<DistributionDto, StatusCode>> {
-    const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
+    const admin = await hasOrgPermission(
+      clerkOrgId,
+      clerkUserId,
+      OrgPermission.CatalogManage
+    );
     if (!admin) {
       return Result.err(Status.Forbidden);
     }

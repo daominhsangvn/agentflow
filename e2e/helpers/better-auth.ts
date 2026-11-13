@@ -83,6 +83,14 @@ const sessionClaimsSchema = z.object({
   org_role: z.string().nullish(),
 });
 
+const organizationSummarySchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  slug: z.string().min(1),
+});
+
+export type OrganizationSummary = z.infer<typeof organizationSummarySchema>;
+
 const tokenResponseSchema = z.object({ token: z.string().min(1) });
 
 const sessionResponseSchema = z
@@ -133,6 +141,56 @@ export function signUpViaApi(
     },
     headers: originHeaders(),
   });
+}
+
+/** Signs up a brand-new account (own default org) and leaves its cookie in `request`. */
+export async function signUpUser(
+  request: APIRequestContext,
+  email: string,
+  options: { name?: string; password?: string } = {}
+): Promise<E2ECredentials> {
+  const base = getE2ECredentials();
+  const credentials: E2ECredentials = {
+    email,
+    name: options.name ?? email.split("@")[0] ?? base.name,
+    password: options.password ?? base.password,
+  };
+  const response = await signUpViaApi(request, credentials);
+  if (!response.ok()) {
+    throw await describeAuthFailure("sign-up", response, credentials);
+  }
+  return credentials;
+}
+
+/** Invites `email` into the signed-in user's active organization (needs owner/admin). */
+export async function createInvitation(
+  request: APIRequestContext,
+  input: { email: string; organizationId: string; role?: "member" | "admin" }
+): Promise<void> {
+  const response = await request.post(authUrl("/organization/invite-member"), {
+    data: {
+      email: input.email,
+      role: input.role ?? "member",
+      organizationId: input.organizationId,
+    },
+    headers: originHeaders(),
+  });
+  if (!response.ok()) {
+    throw new Error(
+      `invite-member for ${input.email} answered ${response.status()}: ${await response.text()}`
+    );
+  }
+}
+
+/** Organizations the signed-in user belongs to. */
+export async function listOrganizations(
+  request: APIRequestContext
+): Promise<OrganizationSummary[]> {
+  const response = await request.get(authUrl("/organization/list"));
+  if (!response.ok()) {
+    throw new Error(`organization/list answered ${response.status()}`);
+  }
+  return z.array(organizationSummarySchema).parse(await response.json());
 }
 
 export function signOutViaApi(
@@ -212,7 +270,7 @@ export function requireOrgClaims(token: string): OrgSessionClaims {
   if (!(claims.org_id && claims.org_slug && claims.org_role)) {
     throw new Error(
       `The e2e user (${claims.email ?? claims.sub}) has no active organization, so the API rejects its token. ` +
-        "Unset AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION=false on the API, or invite the user into an organization."
+        "The account has no organization; sign up again on this database or accept an invitation."
     );
   }
   return {

@@ -9,11 +9,11 @@ Open the web app (http://localhost:3000) and sign up. Accounts are local email a
 
 Docker Compose deployments create this account for you: the `bootstrap-admin` job signs up the owner from `AGENTFLOW_ADMIN_EMAIL` and `AGENTFLOW_ADMIN_PASSWORD` before the app starts, so you sign in instead, and it works with `AUTH_ALLOW_SIGN_UP=false`. See [Accounts](/docs/guides/setup/production-server#accounts).
 
-- The first account creates the organization (`AUTH_DEFAULT_ORGANIZATION_NAME` and `AUTH_DEFAULT_ORGANIZATION_SLUG`, default `AgentFlow` and `agentflow`) and becomes its owner.
-- Later accounts join it as members. Set `AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION=false` to stop that; an invitation for their email can still give them another role.
-- Owners and admins invite people from **Settings → Organization**. The email links to sign-up with the address filled in.
+- Every new account owns a new default organization and goes through onboarding. The first account on an empty install gets `AUTH_DEFAULT_ORGANIZATION_NAME` and `AUTH_DEFAULT_ORGANIZATION_SLUG` (default `AgentFlow` and `agentflow`).
+- Owners and admins invite people from **Settings → Organization**. The email links to `/invitations/<id>?token=...` and the signed token is required: the invitee signs in, then accepts or declines; the signed-in email must match the invited email. Rotating `BETTER_AUTH_SECRET` invalidates pending links, so re-send them. Invited people also get their own organization.
 - `AUTH_ALLOW_SIGN_UP=false` makes the deployment invite-only: only emails with a pending invitation can sign up.
-- `AUTH_ALLOW_CREATE_ORGANIZATION=true` allows more than one organization.
+- `AUTH_ALLOW_CREATE_ORGANIZATION=true` lets signed-in users create additional organizations.
+- Microsoft Entra ID sign-in is opt-in by env; see [Server environment](/docs/reference/server-env).
 
 Invitations and password resets are sent over `SMTP_URL`. In development, read them in Mailpit at http://localhost:8025.
 

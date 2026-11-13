@@ -14,6 +14,14 @@ import { sendInvitationEmail } from "./auth-email";
  * role name.
  */
 
+/** The email already belongs to the organization (member or pending invitation). */
+export class DuplicateInvitationError extends Error {
+  constructor() {
+    super("Email is already a member or has a pending invitation");
+    this.name = "DuplicateInvitationError";
+  }
+}
+
 export type IdentityOrganization = {
   id: string;
   name: string;
@@ -85,7 +93,7 @@ export const identityService = {
   },
 
   /**
-   * Records a pending invitation and emails a sign-up link. When the invitee
+   * Records a pending invitation and emails the review link. When the invitee
    * signs up with that address, `provisionNewUser` adds them to the
    * organization with the invited role.
    */
@@ -95,12 +103,16 @@ export const identityService = {
     role: string;
     inviterUserId: string;
   }): Promise<{ id: string }> {
+    const email = params.emailAddress.toLowerCase();
+    if (await hasMemberOrPendingInvitation(params.organizationId, email)) {
+      throw new DuplicateInvitationError();
+    }
     const invitation = await withDb((db) =>
       db.authInvitation.create({
         data: {
           id: randomUUID(),
           organizationId: params.organizationId,
-          email: params.emailAddress.toLowerCase(),
+          email,
           role: toAuthRole(params.role),
           status: PendingInvitationStatus,
           expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
@@ -109,12 +121,15 @@ export const identityService = {
         select: {
           id: true,
           email: true,
+          role: true,
           organization: { select: { name: true } },
           inviter: { select: { name: true, email: true } },
         },
       })
     );
     await sendInvitationEmail({
+      invitationId: invitation.id,
+      role: invitation.role ?? toAuthRole(params.role),
       email: invitation.email,
       organizationName: invitation.organization.name,
       inviterName: invitation.inviter.name || invitation.inviter.email,
@@ -165,4 +180,23 @@ export function splitDisplayName(name: string): {
     firstName: trimmed.slice(0, separator),
     lastName: trimmed.slice(separator + 1).trim() || null,
   };
+}
+
+async function hasMemberOrPendingInvitation(
+  organizationId: string,
+  email: string
+): Promise<boolean> {
+  const [member, pending] = await withDb((db) =>
+    Promise.all([
+      db.authMember.findFirst({
+        where: { organizationId, user: { email } },
+        select: { id: true },
+      }),
+      db.authInvitation.findFirst({
+        where: { organizationId, email, status: PendingInvitationStatus },
+        select: { id: true },
+      }),
+    ])
+  );
+  return Boolean(member ?? pending);
 }

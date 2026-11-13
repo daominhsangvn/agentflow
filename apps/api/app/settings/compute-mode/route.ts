@@ -1,15 +1,9 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import type { ComputeModeResponse } from "@repo/api/src/types/settings";
-import { log } from "@repo/observability/log";
 import { z } from "zod";
-import { getOrgAdminStatus } from "@/lib/auth/org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAuth } from "@/lib/auth/with-auth";
-import {
-  errorResponse,
-  forbiddenResponse,
-  parseBody,
-  scheduleLogFlush,
-  successResponse,
-} from "@/lib/route-utils";
+import { errorResponse, parseBody, successResponse } from "@/lib/route-utils";
 import { computeModeService } from "../compute-mode-service";
 
 const computeModeValidator = z.object({
@@ -40,17 +34,13 @@ export const GET = withAuth<ComputeModeResponse, "/settings/compute-mode">(
 export const PUT = withAuth<ComputeModeResponse, "/settings/compute-mode">(
   async ({ user, clerkOrgId, clerkUserId }, request) => {
     try {
-      const adminStatus = await getOrgAdminStatus(clerkOrgId, clerkUserId);
-      if (!adminStatus.isAdmin) {
-        log.warn("Denied compute mode update for non-admin user", {
-          clerkOrgId,
-          clerkUserId,
-          reason: adminStatus.reason,
-          method: "PUT",
-          route: "/settings/compute-mode",
-        });
-        scheduleLogFlush();
-        return forbiddenResponse();
+      const denied = await denyUnlessPermitted(
+        { clerkOrgId, clerkUserId },
+        { method: "PUT", route: "/settings/compute-mode" },
+        OrgPermission.OrganizationUpdate
+      );
+      if (denied) {
+        return denied;
       }
 
       const { body, errorResponse: parseError } = await parseBody(

@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
     clerkUserId: "auth-user-1",
     user: { id: "user-1", organizationId: "org-1" },
   },
-  getOrgAdminStatus: vi.fn(),
+  getOrgPermissionStatus: vi.fn(),
   workflowService: {
     list: vi.fn(),
     get: vi.fn(),
@@ -39,8 +39,19 @@ vi.mock("@/lib/auth/with-any-auth", () => ({
     (request: NextRequest, context: { params: Promise<unknown> }) =>
       handler(mocks.authContext, request, context?.params),
 }));
-vi.mock("@/lib/auth/org-admin", () => ({
-  getOrgAdminStatus: mocks.getOrgAdminStatus,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  getOrgPermissionStatus: mocks.getOrgPermissionStatus,
+  hasOrgPermission: async (
+    _orgId: string,
+    _userId: string,
+    permission: string
+  ) => {
+    const status = await mocks.getOrgPermissionStatus();
+    return (
+      status.kind === "member" &&
+      (status.isOwner || status.permissions.has(permission))
+    );
+  },
 }));
 vi.mock("@/lib/workflows/workflow-service", () => ({
   workflowService: mocks.workflowService,
@@ -102,7 +113,11 @@ const VALID_BODY = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getOrgAdminStatus.mockResolvedValue({ isAdmin: true, reason: "admin" });
+  mocks.getOrgPermissionStatus.mockResolvedValue({
+    kind: "member",
+    isOwner: true,
+    permissions: new Set(),
+  });
 });
 
 function request(path: string, method = "GET", body?: unknown) {
@@ -123,9 +138,10 @@ async function json(response: Response) {
 
 describe("admin gate", () => {
   beforeEach(() => {
-    mocks.getOrgAdminStatus.mockResolvedValue({
-      isAdmin: false,
-      reason: "not_admin",
+    mocks.getOrgPermissionStatus.mockResolvedValue({
+      kind: "member",
+      isOwner: false,
+      permissions: new Set(),
     });
   });
 

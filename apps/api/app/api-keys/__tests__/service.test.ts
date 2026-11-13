@@ -403,7 +403,7 @@ describe("apiKeysService.list", () => {
     vi.clearAllMocks();
   });
 
-  it("filters by organizationId only when caller is org:admin", async () => {
+  it("filters by organizationId only when caller can manage all keys", async () => {
     let capturedWhere: Record<string, unknown> | undefined;
 
     mockWithDb.mockImplementation((callback: (db: unknown) => unknown) => {
@@ -418,7 +418,7 @@ describe("apiKeysService.list", () => {
       return callback(mockDb);
     });
 
-    await apiKeysService.list(ORG_ID, USER_ID, "org:admin");
+    await apiKeysService.list(ORG_ID, USER_ID, true);
 
     expect(capturedWhere).toEqual({ organizationId: ORG_ID });
     // userId must NOT be present so admins see all keys in the org
@@ -440,12 +440,12 @@ describe("apiKeysService.list", () => {
       return callback(mockDb);
     });
 
-    await apiKeysService.list(ORG_ID, USER_ID, "org:member");
+    await apiKeysService.list(ORG_ID, USER_ID, false);
 
     expect(capturedWhere).toEqual({ organizationId: ORG_ID, userId: USER_ID });
   });
 
-  it("filters by both organizationId and userId when orgRole is undefined", async () => {
+  it("filters by both organizationId and userId when canManageAll is not set", async () => {
     let capturedWhere: Record<string, unknown> | undefined;
 
     mockWithDb.mockImplementation((callback: (db: unknown) => unknown) => {
@@ -477,7 +477,7 @@ describe("apiKeysService.list", () => {
       return callback(mockDb);
     });
 
-    const results = await apiKeysService.list(ORG_ID, USER_ID, "org:admin");
+    const results = await apiKeysService.list(ORG_ID, USER_ID, true);
 
     expect(results).toHaveLength(1);
     expect(results[0]).not.toHaveProperty("keyHash");

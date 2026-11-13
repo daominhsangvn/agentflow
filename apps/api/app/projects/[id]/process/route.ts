@@ -1,4 +1,5 @@
 import { failure } from "@repo/api/src/types/common";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   type ProjectProcessState,
   updateProjectProcessInputSchema,
@@ -6,7 +7,7 @@ import {
 import { NextResponse } from "next/server";
 import { computeTargetCapabilitiesRefreshService } from "@/app/compute-targets/capabilities-refresh-service";
 import { projectProcessService } from "@/app/projects/project-process-service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { resolveProjectId } from "@/lib/identifier-utils";
 import {
@@ -48,10 +49,10 @@ export const GET = withAnyAuth<ProjectProcessState, "/projects/[id]/process">(
 export const PUT = withAnyAuth<ProjectProcessState, "/projects/[id]/process">(
   async (auth, request, params) => {
     try {
-      const denied = await denyUnlessOrgAdmin(
+      const denied = await denyUnlessPermitted(
         auth,
         { method: request.method, route: ROUTE },
-        "the project process"
+        OrgPermission.ProjectManage
       );
       if (denied) {
         return denied;

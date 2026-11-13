@@ -11,6 +11,7 @@ export const RESERVED_ORG_SLUGS = [
   "sign-in",
   "sign-up",
   "onboarding",
+  "invitations",
 
   // API and system routes
   "api",

@@ -8,7 +8,7 @@ import { jwt } from "better-auth/plugins/jwt";
 import { organization } from "better-auth/plugins/organization";
 
 const tables = getAuthTables({
-  plugins: [organization(), jwt()],
+  plugins: [organization({ dynamicAccessControl: { enabled: true } }), jwt()],
 });
 
 for (const [key, table] of Object.entries(tables)) {

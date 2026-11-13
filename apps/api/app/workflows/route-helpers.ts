@@ -1,17 +1,18 @@
 import type { ApiResult } from "@repo/api/src/types/common";
 import { failure } from "@repo/api/src/types/common";
+import type { OrgPermission } from "@repo/api/src/types/org-permissions";
 import type { StatusCode } from "@repo/api/src/types/result";
 import { workflowRunStatusSchema } from "@repo/api/src/types/workflow";
 import { WORKFLOW_EVENT_LIST_MAX_LIMIT } from "@repo/api/src/types/workflow-event";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { denyUnlessOrgAdmin as denyUnlessOrgAdminFor } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import type { AuthContext } from "@/lib/auth/with-auth";
 import { RUN_LIST_MAX_LIMIT } from "@/lib/workflows/run-service";
 
 /**
  * Shared by the /workflows and /workflow-runs routes. Reads are open to every
- * org member; changes, manual runs, cancel and retry need an org admin/owner
+ * org member; changes, manual runs, cancel and retry need the workflow permissions
  * (workflows spend desktop compute and post to external systems).
  */
 
@@ -37,12 +38,13 @@ export const orgRunListQuerySchema = runListQuerySchema
   })
   .strict();
 
-/** Returns a 403 response for non-admins, or null when the caller is an org admin/owner. */
-export function denyUnlessOrgAdmin(
+/** Returns a 403 response when the caller lacks `permission`, or null when permitted. */
+export function denyUnlessWorkflowPermission(
   auth: Pick<AuthContext, "clerkOrgId" | "clerkUserId">,
-  request: { method: string; route: string }
+  request: { method: string; route: string },
+  permission: OrgPermission
 ): Promise<NextResponse<ApiResult<never>> | null> {
-  return denyUnlessOrgAdminFor(auth, request, "workflow");
+  return denyUnlessPermitted(auth, request, permission);
 }
 
 /** Maps a workflow/run service error to its HTTP status with the service message. */

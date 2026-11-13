@@ -62,20 +62,74 @@ organization (`org_id`, `org_slug`, `org_role`); the API verifies it against
 `/api/auth/jwks`. `@repo/auth` exposes the same `auth()`, middleware and client
 hooks the app used with Clerk.
 
-Single-tenant by default:
+Organizations and sign-up:
 
-- The first account creates the organization (`AUTH_DEFAULT_ORGANIZATION_NAME`
-  / `_SLUG`, default `AgentFlow` / `agentflow`) and becomes its owner.
-- Later accounts join it as members (`AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION=false`
-  to stop that), unless an invitation for their email assigns another role.
-- Owners and admins invite people from Settings → Organization; the email links
-  to sign-up with the address pre-filled. With `AUTH_ALLOW_SIGN_UP=false` the
-  deployment is invite-only: only emails with a pending invitation can sign up.
-- More organizations: `AUTH_ALLOW_CREATE_ORGANIZATION=true`.
+- Every new account owns a new default organization and goes through
+  onboarding. The first account on an empty install gets
+  `AUTH_DEFAULT_ORGANIZATION_NAME` / `_SLUG` (default `AgentFlow` /
+  `agentflow`).
+- `AUTH_ALLOW_SIGN_UP=false` makes the deployment invite-only: only emails with
+  a pending invitation can sign up. This applies to SSO sign-up too.
+- `AUTH_ALLOW_CREATE_ORGANIZATION=true` lets signed-in users create additional
+  organizations; it gates additional organizations only, not the default one.
 
-Password resets and invitations are sent over `SMTP_URL` (Mailpit at
-http://localhost:8025 in development). Microsoft Entra ID sign-in is not
-configured yet.
+Invitations: owners and admins invite people from Settings → Organization. The
+email links to `/invitations/<id>?token=<signed token>`. The link is the only
+way in: an invitation id shown in Settings cannot be used without the token.
+The invitee signs in (or signs up), then explicitly accepts or declines. The
+signed-in email must match the invited email, and accepting through the link
+verifies that email. Rotating `BETTER_AUTH_SECRET` invalidates pending
+invitation links, so re-send them. Invited people also get their own
+organization, and switch between organizations from the account menu.
+
+Custom roles: the owner creates custom roles on the Roles screen, built from the
+permission catalogue (a table of permissions grouped by area). The screen lists
+only custom roles; `owner`, `admin` and `member` are built in, are not listed
+there, cannot be edited or deleted, and stay assignable in the member role
+picker. Custom roles only add rights on top of `member`. Holders of a custom
+role can invite with or assign only roles whose permissions they hold, and
+nobody changes their own role. Deleting the organization is owner-only and
+cannot be put in a custom role.
+
+### Single sign-on (Microsoft Entra ID)
+
+SSO is platform-wide and opt-in by env on the api; organizations have no SSO
+settings. The sign-in and sign-up pages show "Continue with Microsoft" when it is
+enabled.
+
+1. In Entra, register one application. Set the redirect URI (Web) to
+   `<BETTER_AUTH_URL>/api/auth/callback/microsoft`.
+2. Create a client secret.
+3. Under Token configuration, add the optional ID-token claims `email`,
+   `xms_edov`, `verified_primary_email` and `verified_secondary_email`.
+4. Set `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET` and
+   `AUTH_MICROSOFT_TENANT_ID` (default `common`; use a specific tenant id for a
+   single-directory app).
+
+Account linking rule: one account per email, but an email joins two identities
+only when both sides have proven control of it.
+
+- Microsoft side: a Microsoft identity counts as verified only when the email is
+  asserted verified and either the `xms_edov` claim is true (Microsoft confirms
+  the tenant owns the email domain) or `AUTH_MICROSOFT_TENANT_ID` is a specific
+  tenant id, which means you trust that one directory. With tenant `common`
+  (or `organizations` / `consumers`) and no `xms_edov` claim, Microsoft
+  sign-up and linking are refused.
+- Local side: a password account whose email was never verified is not joined
+  to a Microsoft identity; sign-in fails with `account_not_linked`. Sign in with
+  the password, verify the email in Profile, then connect Microsoft.
+- Local emails become verified by the email verification link (sent from
+  Profile over `SMTP_URL`), completing a password reset, accepting an emailed
+  invitation through its link, or creating the account through a verified SSO identity.
+
+Open sign-up through SSO follows `AUTH_ALLOW_SIGN_UP`; a new SSO account gets its
+own default organization. In Profile a user sees the connected methods, can
+connect or disconnect Microsoft (at least one method must remain), verify the
+email, and set a password when the account has none. Changing the account email
+is disabled.
+
+Password resets, email verification and invitations are sent over `SMTP_URL`
+(Mailpit at http://localhost:8025 in development).
 
 ## Claude Code plugins
 

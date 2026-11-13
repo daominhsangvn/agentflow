@@ -1,4 +1,5 @@
 import { OrgInviteRole } from "@repo/api/src/types/onboarding";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import WorkflowDetailPage from "../[workflowId]/page";
@@ -73,8 +74,21 @@ vi.mock("../components/workflow-headers", () => ({
   },
 }));
 
+const ADMIN_PERMISSIONS: string[] = [
+  OrgPermission.WorkflowManage,
+  OrgPermission.WorkflowRunOperate,
+];
+
 function signInAs(orgRole: string | null) {
-  mocks.auth.mockResolvedValue({ orgRole });
+  const granted = orgRole === OrgInviteRole.Admin || orgRole === ORG_OWNER_ROLE;
+  signInWith(granted ? ADMIN_PERMISSIONS : []);
+}
+
+function signInWith(permissions: string[]) {
+  mocks.auth.mockResolvedValue({
+    has: ({ permission }: { permission: string }) =>
+      permissions.includes(permission),
+  });
 }
 
 beforeEach(() => {
@@ -91,6 +105,14 @@ describe("resolveWorkflowAdmin", () => {
     await expect(resolveWorkflowAdmin()).resolves.toBe(false);
     signInAs(null);
     await expect(resolveWorkflowAdmin()).resolves.toBe(false);
+  });
+
+  it("checks the requested permission for a custom role", async () => {
+    signInWith([OrgPermission.WorkflowRunOperate]);
+    await expect(resolveWorkflowAdmin()).resolves.toBe(false);
+    await expect(
+      resolveWorkflowAdmin(OrgPermission.WorkflowRunOperate)
+    ).resolves.toBe(true);
   });
 });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentComponentDetail } from "@repo/api/src/types/agent-component";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { AgentDetail } from "@repo/app/agents/components/workspace/agent-detail";
 import { PromoteModal } from "@repo/app/agents/components/workspace/promote-modal";
 import { TokenTrendChart } from "@repo/app/agents/components/workspace/token-trend-chart";
@@ -8,7 +9,7 @@ import {
   isLocallyInstallable,
   isPromotableKind,
 } from "@repo/app/agents/lib/component-meta";
-import { isAdminRole } from "@repo/app/shared/lib/role-utils";
+import { hasOrgPermission } from "@repo/app/shared/lib/role-utils";
 import { useOrganization } from "@repo/auth/client";
 import { Button } from "@repo/design-system/components/ui/button";
 import { DownloadIcon, RocketIcon } from "lucide-react";
@@ -32,7 +33,7 @@ export function AgentDetailWithPromote({
   slug: string;
 }) {
   const { membership } = useOrganization();
-  const isAdmin = isAdminRole(membership?.role);
+  const isAdmin = hasOrgPermission(membership, OrgPermission.CatalogManage);
 
   return (
     <AgentDetail

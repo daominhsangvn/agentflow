@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
     clerkUserId: "auth-user-1",
     user: { id: "user-1", organizationId: "org-1" },
   },
-  getOrgAdminStatus: vi.fn(),
+  getOrgPermissionStatus: vi.fn(),
   service: {
     list: vi.fn(),
     get: vi.fn(),
@@ -36,8 +36,8 @@ vi.mock("@/lib/auth/with-any-auth", () => ({
     (request: NextRequest, context: { params: Promise<unknown> }) =>
       handler(mocks.authContext, request, context?.params),
 }));
-vi.mock("@/lib/auth/org-admin", () => ({
-  getOrgAdminStatus: mocks.getOrgAdminStatus,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  getOrgPermissionStatus: mocks.getOrgPermissionStatus,
 }));
 vi.mock("@/lib/integrations/connection-service", () => ({
   integrationConnectionService: mocks.service,
@@ -112,13 +112,18 @@ function noParams() {
 }
 
 function asAdmin() {
-  mocks.getOrgAdminStatus.mockResolvedValue({ isAdmin: true, reason: "admin" });
+  mocks.getOrgPermissionStatus.mockResolvedValue({
+    kind: "member",
+    isOwner: true,
+    permissions: new Set(),
+  });
 }
 
 function asMember() {
-  mocks.getOrgAdminStatus.mockResolvedValue({
-    isAdmin: false,
-    reason: "not_admin",
+  mocks.getOrgPermissionStatus.mockResolvedValue({
+    kind: "member",
+    isOwner: false,
+    permissions: new Set(),
   });
 }
 
@@ -286,7 +291,7 @@ describe("admin-only endpoints", () => {
     const response = await call();
 
     expect(response.status).toBe(403);
-    expect(mocks.getOrgAdminStatus).toHaveBeenCalledWith(
+    expect(mocks.getOrgPermissionStatus).toHaveBeenCalledWith(
       "auth-org-1",
       "auth-user-1"
     );
@@ -298,10 +303,7 @@ describe("admin-only endpoints", () => {
   it.each(adminOnly)("$name fails closed when the role lookup fails", async ({
     call,
   }) => {
-    mocks.getOrgAdminStatus.mockResolvedValue({
-      isAdmin: false,
-      reason: "provider_error",
-    });
+    mocks.getOrgPermissionStatus.mockResolvedValue({ kind: "provider_error" });
 
     const response = await call();
 

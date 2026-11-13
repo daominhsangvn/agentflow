@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AgentRunnerStatus, useAgentOnboarding } from "../use-agent-onboarding";
@@ -15,7 +16,10 @@ vi.mock("@repo/app/shared/api/use-api-client", () => ({
   useApiClient: () => mockApiClient,
 }));
 
-const mockMembership = { role: "org:admin" };
+const mockMembership: { role: string; permissions: string[] } = {
+  role: "org:admin",
+  permissions: [OrgPermission.CatalogManage],
+};
 const mockOrganization = { id: "org-test-123" };
 vi.mock("@repo/auth/client", () => ({
   useOrganization: () => ({
@@ -24,16 +28,12 @@ vi.mock("@repo/auth/client", () => ({
   }),
 }));
 
-vi.mock("@repo/app/shared/lib/role-utils", () => ({
-  isAdminRole: (role: string | undefined) =>
-    role === "org:admin" || role === "org:owner",
-}));
-
 describe("useAgentOnboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
     mockMembership.role = "org:admin";
+    mockMembership.permissions = [OrgPermission.CatalogManage];
     mockApiClient.get.mockImplementation((path: string) => {
       // useAgentOnboarding fetches component inventory via useAgentComponents,
       // which calls GET /agent-components and returns AgentComponentListResponse
@@ -123,6 +123,7 @@ describe("useAgentOnboarding", () => {
 
   test("shouldShow is false for non-admin users", () => {
     mockMembership.role = "org:member";
+    mockMembership.permissions = [];
 
     const { result } = renderHook(() => useAgentOnboarding(), {
       wrapper: createWrapper(),

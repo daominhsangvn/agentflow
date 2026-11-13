@@ -1,12 +1,10 @@
 import type { LoopUsageSummary } from "@repo/api/src/types/loop";
-import { log } from "@repo/observability/log";
-import { getOrgAdminStatus } from "@/lib/auth/org-admin";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAuth } from "@/lib/auth/with-auth";
 import {
   badRequestResponse,
   errorResponse,
-  forbiddenResponse,
-  scheduleLogFlush,
   successResponse,
 } from "@/lib/route-utils";
 import { loopsService } from "../service";
@@ -14,17 +12,13 @@ import { loopsService } from "../service";
 export const GET = withAuth<LoopUsageSummary, "/loops/usage">(
   async ({ user, clerkOrgId, clerkUserId }, request) => {
     try {
-      const adminStatus = await getOrgAdminStatus(clerkOrgId, clerkUserId);
-      if (!adminStatus.isAdmin) {
-        log.warn("Denied loop usage read for non-admin user", {
-          clerkOrgId,
-          clerkUserId,
-          reason: adminStatus.reason,
-          method: "GET",
-          route: "/loops/usage",
-        });
-        scheduleLogFlush();
-        return forbiddenResponse();
+      const denied = await denyUnlessPermitted(
+        { clerkOrgId, clerkUserId },
+        { method: "GET", route: "/loops/usage" },
+        OrgPermission.UsageReadAll
+      );
+      if (denied) {
+        return denied;
       }
 
       const searchParams = request.nextUrl.searchParams;

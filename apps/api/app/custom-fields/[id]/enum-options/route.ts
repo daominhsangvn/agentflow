@@ -1,5 +1,6 @@
 import type { CustomFieldEnumOption } from "@repo/api/src/types/custom-field";
-import { isOrgAdmin } from "@/lib/auth/org-admin";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { withAuth } from "@/lib/auth/with-auth";
 import {
@@ -38,7 +39,13 @@ export const POST = withAuth<
   CustomFieldEnumOption,
   "/custom-fields/[id]/enum-options"
 >(async ({ user, clerkOrgId, clerkUserId }, request, params) => {
-  if (!(await isOrgAdmin(clerkOrgId, clerkUserId))) {
+  if (
+    !(await hasOrgPermission(
+      clerkOrgId,
+      clerkUserId,
+      OrgPermission.CustomFieldManage
+    ))
+  ) {
     return forbiddenResponse();
   }
 

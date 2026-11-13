@@ -1,6 +1,7 @@
 "use client";
 
 import { FeatureFlagged } from "@repo/analytics/components/feature-flagged";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import type { ProjectWithDetails } from "@repo/api/src/types/project";
 import { TagEntityType } from "@repo/api/src/types/tag";
 import { EditableProjectDescription } from "@repo/app/projects/components/editable-project-description";
@@ -12,7 +13,7 @@ import { ProjectRepositoriesPanel } from "@repo/app/projects/components/project-
 import { ProjectRunnerCapabilities } from "@repo/app/projects/components/project-runner-capabilities";
 import { ProjectRunnersPanel } from "@repo/app/projects/components/project-runners-panel";
 import { ProjectWorkflowsCasesPanel } from "@repo/app/projects/components/project-workflows-cases-panel";
-import { isAdminRole } from "@repo/app/shared/lib/role-utils";
+import { hasOrgPermission } from "@repo/app/shared/lib/role-utils";
 import { TagPicker } from "@repo/app/tags/components/tag-picker";
 import { useOrganization } from "@repo/auth/client";
 import { WORKFLOW_CONNECTIONS_SETTINGS_PATH } from "@/app/(authenticated)/[orgSlug]/workflows/components/workflow-connections-path";
@@ -37,7 +38,7 @@ export function ProjectPanelTab({
   tab: string;
 }) {
   const { membership } = useOrganization();
-  const isAdmin = isAdminRole(membership?.role);
+  const isAdmin = hasOrgPermission(membership, OrgPermission.ProjectManage);
 
   if (tab === "workflows") {
     return <ProjectWorkflowsCasesPanel projectId={project.id} />;

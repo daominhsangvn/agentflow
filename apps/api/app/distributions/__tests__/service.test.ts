@@ -22,7 +22,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   withDb: Object.assign(vi.fn(), { tx: vi.fn() }),
-  isOrgAdmin: vi.fn(),
+  hasOrgPermission: vi.fn(),
   computeTargetsService: {
     findOwnedById: vi.fn(),
   },
@@ -51,8 +51,8 @@ vi.mock("@repo/storage/keys", () => ({
   keys: mocks.awsKeys,
 }));
 
-vi.mock("@/lib/auth/org-admin", () => ({
-  isOrgAdmin: mocks.isOrgAdmin,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  hasOrgPermission: mocks.hasOrgPermission,
 }));
 
 vi.mock("@/app/compute-targets/service", () => ({
@@ -145,7 +145,7 @@ describe("distributionsService.create", () => {
   });
 
   it("returns 403 when caller is not an org admin", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(false);
+    mocks.hasOrgPermission.mockResolvedValue(false);
     installDb({});
 
     const result = await distributionsService.create(
@@ -165,7 +165,7 @@ describe("distributionsService.create", () => {
   });
 
   it("returns 400 when catalogItemId does not belong to the org", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     installDb({
       catalogItem: {
         findFirst: vi.fn().mockResolvedValue(null),
@@ -189,7 +189,7 @@ describe("distributionsService.create", () => {
   });
 
   it("creates distribution with no targeting entries for all-targeting", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     const distributionRow = buildDistributionRow({
       targetingType: DistributionTargetingType.All,
       targetingEntries: [],
@@ -225,7 +225,7 @@ describe("distributionsService.create", () => {
   });
 
   it("creates DistributionTargetingEntry rows for specific-targeting with compute targets", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     const distributionRow = buildDistributionRow({
       targetingType: DistributionTargetingType.Specific,
       targetingEntries: [
@@ -271,7 +271,7 @@ describe("distributionsService.create", () => {
   });
 
   it("creates DistributionTargetingEntry rows for specific-targeting with user IDs", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     const distributionRow = buildDistributionRow({
       targetingType: DistributionTargetingType.Specific,
       targetingEntries: [
@@ -313,7 +313,7 @@ describe("distributionsService.create", () => {
   });
 
   it("mixes compute target and user targeting entries in one create call", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     const distributionRow = buildDistributionRow({
       targetingType: DistributionTargetingType.Specific,
       targetingEntries: [
@@ -363,7 +363,7 @@ describe("distributionsService.update", () => {
   });
 
   it("returns 403 when caller is not an org admin", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(false);
+    mocks.hasOrgPermission.mockResolvedValue(false);
     installDb({});
 
     const result = await distributionsService.update(
@@ -379,7 +379,7 @@ describe("distributionsService.update", () => {
   });
 
   it("returns 404 when distribution does not belong to the org", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     installDb({
       distribution: {
         findFirst: vi.fn().mockResolvedValue(null),
@@ -399,7 +399,7 @@ describe("distributionsService.update", () => {
   });
 
   it("updates mode without rebuilding targeting entries when only mode changes", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     const updatedRow = buildDistributionRow({ mode: DistributionMode.OptIn });
     const distributionUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const distributionFindFirst = vi
@@ -443,7 +443,7 @@ describe("distributionsService.update", () => {
   });
 
   it("rebuilds targeting entries when targetingType changes to specific", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     const updatedRow = buildDistributionRow({
       targetingType: DistributionTargetingType.Specific,
       targetingEntries: [{ computeTargetId: "ct-3", userId: null }],
@@ -507,7 +507,7 @@ describe("distributionsService.update", () => {
   });
 
   it("deletes targeting entries when switching from specific to all", async () => {
-    mocks.isOrgAdmin.mockResolvedValue(true);
+    mocks.hasOrgPermission.mockResolvedValue(true);
     const updatedRow = buildDistributionRow({
       targetingType: DistributionTargetingType.All,
       targetingEntries: [],

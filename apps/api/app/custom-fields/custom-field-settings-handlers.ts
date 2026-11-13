@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import "server-only";
 
 import type {
@@ -5,7 +6,7 @@ import type {
   CustomFieldSettingWithOptions,
 } from "@repo/api/src/types/custom-field";
 import { z } from "zod";
-import { isOrgAdmin } from "@/lib/auth/org-admin";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { withAuth } from "@/lib/auth/with-auth";
 import {
@@ -46,7 +47,13 @@ export function makeCustomFieldSettingsHandlers(
    */
   const POST = withAuth<CustomFieldSettingWithOptions>(
     async ({ user, clerkOrgId, clerkUserId }, request, params) => {
-      if (!(await isOrgAdmin(clerkOrgId, clerkUserId))) {
+      if (
+        !(await hasOrgPermission(
+          clerkOrgId,
+          clerkUserId,
+          OrgPermission.CustomFieldManage
+        ))
+      ) {
         return forbiddenResponse();
       }
 
@@ -117,7 +124,13 @@ export function makeCustomFieldSettingsHandlers(
    */
   const DELETE = withAuth<{ deleted: true }>(
     async ({ user, clerkOrgId, clerkUserId }, _request, params) => {
-      if (!(await isOrgAdmin(clerkOrgId, clerkUserId))) {
+      if (
+        !(await hasOrgPermission(
+          clerkOrgId,
+          clerkUserId,
+          OrgPermission.CustomFieldManage
+        ))
+      ) {
         return forbiddenResponse();
       }
 

@@ -2,6 +2,10 @@
 
 import { useFeatureFlag } from "@repo/analytics/client";
 import { FeatureFlagged } from "@repo/analytics/components/feature-flagged";
+import {
+  BuiltInOrgRole,
+  OrgPermission,
+} from "@repo/api/src/types/org-permissions";
 import { APPROVER_ROLE_OPTIONS, ApproverRole } from "@repo/api/src/types/user";
 import { AgentComplianceSettingsTab } from "@repo/app/agents/components/agent-compliance-settings-tab";
 import { CustomFieldsSettingsTab } from "@repo/app/custom-fields/components/custom-fields-settings-tab";
@@ -68,6 +72,7 @@ import { ApiKeysSettingsPanel } from "./api-keys-settings-panel";
 import { CloudComputeModeCard } from "./cloud-compute-mode-card";
 import { GoogleIntegrationCard } from "./google-integration-card";
 import { LocalComputeTargetsCard } from "./local-compute-targets-card";
+import { OrganizationRolesCard } from "./organization-roles-card";
 import { OrganizationSlugSettings } from "./organization-slug-settings";
 import { SessionFrustrationCard } from "./session-frustration-card";
 import { TranscriptSearchCard } from "./transcript-search-card";
@@ -75,11 +80,15 @@ import { TranscriptSearchCard } from "./transcript-search-card";
 export type SettingsPageProperties = {
   initialTab: string;
   isAdmin: boolean;
+  canManageCustomFields?: boolean;
+  canManageCatalog?: boolean;
 };
 
 export function SettingsPage({
   initialTab,
   isAdmin,
+  canManageCustomFields = isAdmin,
+  canManageCatalog = isAdmin,
 }: Readonly<SettingsPageProperties>) {
   const searchParams = useSearchParamsValue();
   const queryClient = useQueryClient();
@@ -242,7 +251,7 @@ export function SettingsPage({
           >
             Organization
           </TabsTrigger>
-          {isAdmin ? (
+          {canManageCustomFields ? (
             <TabsTrigger
               className="flex-initial px-4"
               value={SettingsTab.CustomFields}
@@ -250,7 +259,7 @@ export function SettingsPage({
               Custom Fields
             </TabsTrigger>
           ) : null}
-          {isAdmin ? (
+          {canManageCatalog ? (
             <TabsTrigger
               className="flex-initial px-4"
               value={SettingsTab.Compliance}
@@ -315,17 +324,32 @@ export function SettingsPage({
               />
             </CardContent>
           </Card>
+          <Show
+            when={(
+              has: (
+                params: { role: string } | { permission: string }
+              ) => boolean
+            ) => has({ role: `org:${BuiltInOrgRole.Owner}` })}
+          >
+            <OrganizationRolesCard />
+          </Show>
           <OrganizationSlugSettings isAdmin={isAdmin} />
           <TranscriptSearchCard isAdmin={isAdmin} />
           <SessionFrustrationCard isAdmin={isAdmin} />
           {isAdmin && SHOW_AGENTFLOW_ROLES && <AgentFlowRolesSection />}
         </TabsContent>
 
-        <AdminOnlyTabContent value={SettingsTab.CustomFields}>
+        <AdminOnlyTabContent
+          permission={OrgPermission.CustomFieldManage}
+          value={SettingsTab.CustomFields}
+        >
           <CustomFieldsSettingsTab />
         </AdminOnlyTabContent>
 
-        <AdminOnlyTabContent value={SettingsTab.Compliance}>
+        <AdminOnlyTabContent
+          permission={OrgPermission.CatalogManage}
+          value={SettingsTab.Compliance}
+        >
           <AgentComplianceSettingsTab />
         </AdminOnlyTabContent>
 
@@ -385,8 +409,13 @@ export function SettingsPage({
  */
 function AdminOnlyTabContent({
   value,
+  permission,
   children,
-}: Readonly<{ value: SettingsTab; children: ReactNode }>) {
+}: Readonly<{
+  value: SettingsTab;
+  permission: OrgPermission;
+  children: ReactNode;
+}>) {
   return (
     <TabsContent className="mt-3 space-y-6" value={value}>
       <Show
@@ -395,7 +424,7 @@ function AdminOnlyTabContent({
             <CardHeader>
               <CardTitle>Admins only</CardTitle>
               <CardDescription>
-                You need an organization admin or owner role to view this
+                Your role does not include the permission needed to view this
                 section.
               </CardDescription>
             </CardHeader>
@@ -403,7 +432,7 @@ function AdminOnlyTabContent({
         }
         when={(
           has: (params: { role: string } | { permission: string }) => boolean
-        ) => has({ role: "org:admin" }) || has({ role: "org:owner" })}
+        ) => has({ permission })}
       >
         {children}
       </Show>

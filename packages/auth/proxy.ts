@@ -63,7 +63,7 @@ async function resolveRequestAuth(request: NextRequest): Promise<AuthObject> {
   return {
     ...state,
     getToken: () => Promise.resolve(token),
-    has: (params) => hasAccess(state.orgRole, params),
+    has: (params) => hasAccess(state, params),
     redirectToSignIn: () => {
       throw new Error(
         "redirectToSignIn is not available in middleware; return a redirect response"

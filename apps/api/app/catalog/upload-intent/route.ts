@@ -1,6 +1,7 @@
 import "server-only";
 
-import { isOrgAdmin } from "@/lib/auth/org-admin";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import {
   errorResponse,
@@ -29,7 +30,11 @@ type UploadIntentResponse = { presignedUrl: string; s3Key: string };
 
 export const POST = withAnyAuth<UploadIntentResponse, "/catalog/upload-intent">(
   async ({ user, clerkOrgId, clerkUserId }, request) => {
-    const adminCheck = await isOrgAdmin(clerkOrgId, clerkUserId);
+    const adminCheck = await hasOrgPermission(
+      clerkOrgId,
+      clerkUserId,
+      OrgPermission.CatalogManage
+    );
     if (!adminCheck) {
       return forbiddenResponse();
     }

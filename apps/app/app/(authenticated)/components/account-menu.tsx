@@ -47,7 +47,13 @@ import { useState } from "react";
 import { env } from "@/env";
 import { useOrgSlug } from "@/hooks/use-org-slug";
 
-export function AccountMenu() {
+type AccountMenuProperties = {
+  readonly allowCreateOrganization?: boolean;
+};
+
+export function AccountMenu({
+  allowCreateOrganization = false,
+}: AccountMenuProperties) {
   const { open: sidebarOpen } = useSidebar();
   const mounted = useIsMounted();
   const { organization } = useOrganization();
@@ -145,10 +151,12 @@ export function AccountMenu() {
                 <span className="truncate">{org.name}</span>
               </DropdownMenuItem>
             ))}
-          <DropdownMenuItem onSelect={() => setCreateOrgOpen(true)}>
-            <PlusIcon className="size-4" />
-            Create Org
-          </DropdownMenuItem>
+          {allowCreateOrganization && (
+            <DropdownMenuItem onSelect={() => setCreateOrgOpen(true)}>
+              <PlusIcon className="size-4" />
+              Create Org
+            </DropdownMenuItem>
+          )}
 
           <DropdownMenuSeparator />
 

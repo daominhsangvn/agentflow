@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { githubKeys } from "@repo/app/github/hooks/use-github-integration";
 import { INTEGRATION_CONNECTIONS_ANCHOR } from "@repo/app/integrations/lib/integration-anchors";
 import {
@@ -124,8 +125,7 @@ vi.mock("../transcript-search-card", () => ({
 function grantAdminRole() {
   mockHasRole.mockImplementation(
     (params: { role: string } | { permission: string }) =>
-      "role" in params &&
-      (params.role === "org:admin" || params.role === "org:owner")
+      "permission" in params
   );
 }
 
@@ -227,6 +227,34 @@ describe("SettingsPage tab list", () => {
     renderSettings(true);
 
     expect(screen.getByRole("tab", { name: "Compliance" })).toBeInTheDocument();
+  });
+
+  it("shows only the tab a custom role has the permission for", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    mockHasRole.mockImplementation(
+      (params: { role: string } | { permission: string }) =>
+        "permission" in params &&
+        params.permission === OrgPermission.CustomFieldManage
+    );
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SettingsPage
+          canManageCatalog={false}
+          canManageCustomFields
+          initialTab={SettingsTab.Compliance}
+          isAdmin={false}
+        />
+      </QueryClientProvider>
+    );
+
+    expect(
+      screen.getByRole("tab", { name: "Custom Fields" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Compliance" })
+    ).not.toBeInTheDocument();
   });
 
   it("hides the Compliance tab from non-admins (FEA-4029)", () => {

@@ -1,6 +1,7 @@
 import type { PromoteResponse } from "@repo/api/src/types/distribution";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { z } from "zod";
-import { isOrgAdmin } from "@/lib/auth/org-admin";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import {
   badRequestResponse,
@@ -42,11 +43,15 @@ const promoteSchema = z.object({
  * - Returns `{ catalogItemId, distributionId }`.
  *
  * Authentication: `withAnyAuth`.
- * Authorization: `isOrgAdmin` (Clerk org admin or owner role).
+ * Authorization: `hasOrgPermission` (Clerk org admin or owner role).
  */
 export const POST = withAnyAuth<PromoteResponse, "/agent-components/promote">(
   async ({ user, clerkOrgId, clerkUserId }, request) => {
-    const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
+    const admin = await hasOrgPermission(
+      clerkOrgId,
+      clerkUserId,
+      OrgPermission.CatalogManage
+    );
     if (!admin) {
       return forbiddenResponse();
     }

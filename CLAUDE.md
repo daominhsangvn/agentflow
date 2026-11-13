@@ -120,6 +120,7 @@ AgentFlow: human-governed, AI-centric software delivery platform. AI produces ar
 - **[convention]**: Never use inline `import()` types. Always top-level imports.
 - **[pattern]**: DocumentStatus has 4 synchronized layers — when adding values, update Prisma schema + TypeScript const (packages/api/src/types/document.ts); the Zod validator and status dropdown auto-derive from the const, but exhaustive Record<DocumentStatus, string> maps in status-badge.tsx and project-constants.ts require manual updates. (context: typescript|enum|DocumentStatus|record)
 - **[convention]**: use zod validators to validate object shape. do not "manually" validate unknown objects using `typeof` and other related checks. zod can be used to validate any object, not just in route handlers.
+- **[convention]**: Org authorization = `denyUnlessPermitted`/`has({permission})` with `OrgPermission`; never compare role strings.
 
 ### React Query & Mutations
 - **[convention]**: Do not add `.catch()` error toasts when calling `mutateAsync`. The global `QueryClient` in `apps/app/lib/query-client.tsx` has a default `mutations.onError` handler that toasts the error message. Only catch rejections to suppress unhandled promise warnings or reset local state.
@@ -128,6 +129,7 @@ AgentFlow: human-governed, AI-centric software delivery platform. AI produces ar
 - **[pattern]**: Case/agent time and token numbers go through `apps/api/lib/usage/`: a session's numbers win over its loop's, never add both.
 
 ### Code Organization
+- **[convention]**: Better Auth endpoint policy (invitation token, role assignment, grantable statements) lives in `apps/api/lib/auth/auth-endpoint-guards.ts` as plugin `hooks.before`; `organizationHooks` do not get the caller for `update-member-role`. Test it against `better-auth/test` `getTestInstance`, not mocks.
 - **[pattern]**: Check `@repo/github` (`packages/github/index.ts`) before implementing new GitHub API functions.
 - **[convention]**: Domain-specific parsers → domain package (`packages/github/`), not `apps/api/lib/`. Import via subpath.
 - **[convention]**: New parser/utility modules in domain packages must include unit tests.

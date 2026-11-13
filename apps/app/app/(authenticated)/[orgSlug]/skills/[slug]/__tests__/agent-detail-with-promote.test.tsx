@@ -5,6 +5,7 @@ import {
   Harness,
   SourceType,
 } from "@repo/api/src/types/agent-component";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { createAgentSessionListItemFixture } from "@repo/app/agents/components/sessions/session-list-fixtures";
 import { ApiError } from "@repo/app/shared/api/api-error";
 import { AppCoreStoryProviders } from "@repo/app/shared/storybook/decorators";
@@ -158,7 +159,10 @@ beforeEach(() => {
 describe("AgentDetailWithPromote", () => {
   it("shows the Promote action for an org admin and opens the modal on click", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:admin" },
+      membership: {
+        role: "org:admin",
+        permissions: [OrgPermission.CatalogManage],
+      },
     });
 
     render(
@@ -191,7 +195,7 @@ describe("AgentDetailWithPromote", () => {
   // right backHref, not just that AgentDetail renders whatever it's handed.
   it("renders a not-found state with an org-scoped 'Back to Agents' link on a 404", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
     detailResult = {
       data: undefined,
@@ -216,7 +220,7 @@ describe("AgentDetailWithPromote", () => {
     // Non-admin so only the analytics slot (not the Promote action) is asserted;
     // the section proves the shared AgentDetail `analytics` slot is wired on web.
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
 
     render(
@@ -230,7 +234,7 @@ describe("AgentDetailWithPromote", () => {
 
   it("does NOT render the Promote action for a non-admin member", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
 
     render(
@@ -252,7 +256,7 @@ describe("AgentDetailWithPromote", () => {
   // AgentDetail → DetailSessionsTab.
   it("renders the Sessions-tab name as a link to the org-scoped session route", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
 
     detail.sessionsTab = [
@@ -282,7 +286,7 @@ describe("AgentDetailWithPromote", () => {
     // this pair lives in
     // `apps/desktop/src/renderer/components/agents/__tests__/agent-detail-view.test.tsx`.
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
 
     detail.sessions = 1218;
@@ -313,7 +317,7 @@ describe("AgentDetailWithPromote", () => {
 
   it("shows an enabled Install action to a non-admin member for a pack-sourced component", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
     detail.sourceType = SourceType.Pack;
     detail.source = "rtk";
@@ -337,7 +341,7 @@ describe("AgentDetailWithPromote", () => {
 
   it("gates the compute-targets query on the modal being open (enabled: open)", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
     detail.sourceType = SourceType.Pack;
     detail.source = "rtk";
@@ -363,7 +367,7 @@ describe("AgentDetailWithPromote", () => {
 
   it("lists the member's own online target read-only with platform + status when Install is clicked", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
     detail.sourceType = SourceType.Pack;
     detail.source = "rtk";
@@ -387,7 +391,7 @@ describe("AgentDetailWithPromote", () => {
 
   it("hides teammate-owned org-shared targets (only the member's own machines)", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
     mockUseComputeTargets.mockReturnValue({
       data: [
@@ -418,7 +422,7 @@ describe("AgentDetailWithPromote", () => {
 
   it("surfaces an error state (not an empty list) when the targets query fails", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
     mockUseComputeTargets.mockReturnValue({
       data: undefined,
@@ -445,7 +449,7 @@ describe("AgentDetailWithPromote", () => {
 
   it("shows a Settings empty state when the member has no local target", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
     mockUseComputeTargets.mockReturnValue({
       data: [],
@@ -474,7 +478,7 @@ describe("AgentDetailWithPromote", () => {
 
   it("does NOT show Install for a non-pack (non-installable) source", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:member" },
+      membership: { role: "org:member", permissions: [] },
     });
     detail.sourceType = SourceType.Repo;
 
@@ -492,7 +496,10 @@ describe("AgentDetailWithPromote", () => {
 
   it("shows both Install and Promote to an admin for a pack-sourced promotable component", async () => {
     mockUseOrganization.mockReturnValue({
-      membership: { role: "org:admin" },
+      membership: {
+        role: "org:admin",
+        permissions: [OrgPermission.CatalogManage],
+      },
     });
     detail.sourceType = SourceType.Pack;
     detail.source = "rtk";

@@ -60,9 +60,10 @@ Generate a key with `node -e "console.log(require('crypto').randomBytes(32).toSt
 | `BETTER_AUTH_URL` | `http://localhost:3000` | Public web app origin: cookies, links, token issuer |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | none | Extra origins, comma-separated |
 | `AUTH_ALLOW_SIGN_UP` | allowed | `false`: invite-only; only emails with a pending invitation can sign up |
-| `AUTH_AUTO_JOIN_DEFAULT_ORGANIZATION` | joins | `false`: later accounts do not join the default organization |
-| `AUTH_ALLOW_CREATE_ORGANIZATION` | single organization | `true`: more than one organization |
-| `AUTH_DEFAULT_ORGANIZATION_NAME`, `AUTH_DEFAULT_ORGANIZATION_SLUG` | `AgentFlow`, `agentflow` | The organization the first account creates |
+| `AUTH_ALLOW_CREATE_ORGANIZATION` | off | `true`: signed-in users can create additional organizations |
+| `AUTH_DEFAULT_ORGANIZATION_NAME`, `AUTH_DEFAULT_ORGANIZATION_SLUG` | `AgentFlow`, `agentflow` | The default organization of the first account on an empty install |
+| `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET` | none | Both set: enables Microsoft Entra ID sign-in. Redirect URI `<BETTER_AUTH_URL>/api/auth/callback/microsoft` |
+| `AUTH_MICROSOFT_TENANT_ID` | `common` | Entra tenant. Add the optional ID-token claims `email`, `xms_edov`, `verified_primary_email`, `verified_secondary_email`; with `common` and no `xms_edov`, Microsoft sign-up and linking are refused. A specific tenant id trusts that directory |
 | `AGENTFLOW_ADMIN_EMAIL`, `AGENTFLOW_ADMIN_PASSWORD` | none | Production Compose only (read by the `bootstrap-admin` job, required there): the first owner, created when no user exists. Password: at least 8 characters |
 | `AGENTFLOW_ADMIN_NAME` | `Administrator` | Production Compose only: display name of that owner |
 

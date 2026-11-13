@@ -76,7 +76,7 @@ function manifestTemplate(appId: string): string {
       privacyUrl: "https://example.com/privacy",
       termsOfUseUrl: "https://example.com/terms",
     },
-    name: { short: "AgentFlow" },
+    name: { short: "AgentFlow", full: "AgentFlow" },
     description: {
       short: "Mention AgentFlow to start a workflow",
       full: "Mention AgentFlow in a channel: it reads the thread and carries out the request.",

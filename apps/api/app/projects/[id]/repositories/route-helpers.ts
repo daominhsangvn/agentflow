@@ -10,8 +10,6 @@ import type { ProjectRepositoryServiceError } from "@/app/projects/project-repos
  * integration connection's credentials.
  */
 
-export const PROJECT_REPOSITORY_SUBJECT = "project repository";
-
 /** Upper bound for add/update bodies (two ids and a flag). */
 export const PROJECT_REPOSITORY_BODY_MAX_BYTES = 4 * 1024;
 

@@ -1,9 +1,10 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import type { Organization } from "@repo/api/src/types/organization";
 import { parseError } from "@repo/observability/error";
 import { log } from "@repo/observability/log";
 import { z } from "zod";
 import { identityService } from "@/lib/auth/identity-service";
-import { isOrgAdmin } from "@/lib/auth/org-admin";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import { getPrismaErrorCode, getPrismaP2002Target } from "@/lib/db-utils";
 import {
   badRequestResponse,
@@ -72,7 +73,11 @@ export async function updateOrganizationForRoute({
     return badRequestResponse(parsedSlug.error);
   }
 
-  const admin = await isOrgAdmin(currentOrganization.clerkId, clerkUserId);
+  const admin = await hasOrgPermission(
+    currentOrganization.clerkId,
+    clerkUserId,
+    OrgPermission.OrganizationUpdate
+  );
 
   if (!admin) {
     return forbiddenResponse();
@@ -265,7 +270,11 @@ async function enforcePrivacyGateAdmin({
   if (!organization) {
     return notFoundResponse("Organization");
   }
-  const admin = await isOrgAdmin(organization.clerkId, clerkUserId);
+  const admin = await hasOrgPermission(
+    organization.clerkId,
+    clerkUserId,
+    OrgPermission.OrganizationUpdate
+  );
   if (!admin) {
     return forbiddenResponse();
   }

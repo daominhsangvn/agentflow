@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { WorkflowRunDetailView } from "@repo/app/workflows/components/workflow-run-detail-view";
 import type { Metadata } from "next";
 import { WorkflowRunHeader } from "../../../components/workflow-headers";
@@ -18,7 +19,7 @@ export default async function WorkflowRunPage({
 }: Readonly<WorkflowRunPageProps>) {
   const [{ orgSlug, workflowId, runId }, isAdmin] = await Promise.all([
     params,
-    resolveWorkflowAdmin(),
+    resolveWorkflowAdmin(OrgPermission.WorkflowRunOperate),
   ]);
 
   return (

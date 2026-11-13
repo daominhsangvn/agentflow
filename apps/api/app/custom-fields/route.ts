@@ -1,5 +1,6 @@
 import type { CustomFieldWithOptions } from "@repo/api/src/types/custom-field";
-import { isOrgAdmin } from "@/lib/auth/org-admin";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import {
   conflictResponse,
@@ -32,7 +33,11 @@ export const GET = withAnyAuth<CustomFieldWithOptions[], "/custom-fields">(
 export const POST = withAnyAuth<CustomFieldWithOptions, "/custom-fields">(
   async ({ user, clerkOrgId, clerkUserId }, request) => {
     try {
-      const adminCheck = await isOrgAdmin(clerkOrgId, clerkUserId);
+      const adminCheck = await hasOrgPermission(
+        clerkOrgId,
+        clerkUserId,
+        OrgPermission.CustomFieldManage
+      );
       if (!adminCheck) {
         return forbiddenResponse();
       }

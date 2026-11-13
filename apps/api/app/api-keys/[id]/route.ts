@@ -1,8 +1,10 @@
 import { AuditAction, AuditObjectType } from "@repo/api/src/types/audit";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   dispatchAuditEvent,
   userAuditActor,
 } from "@/app/audit/audit-emit-service";
+import { hasOrgPermission } from "@/lib/auth/org-permissions";
 import { withAuth } from "@/lib/auth/with-auth";
 import {
   deleteResponse,
@@ -12,14 +14,19 @@ import {
 import { apiKeysService } from "../service";
 
 export const DELETE = withAuth<{ deleted: true }, "/api-keys/[id]">(
-  async ({ user, orgRole }, _, params) => {
+  async ({ user, clerkOrgId, clerkUserId }, _, params) => {
     try {
+      const canManageAll = await hasOrgPermission(
+        clerkOrgId,
+        clerkUserId,
+        OrgPermission.OrgApiKeyManage
+      );
       const { id } = await params;
       const revoked = await apiKeysService.revoke(
         id,
         user.organizationId,
         user.id,
-        orgRole
+        canManageAll
       );
 
       if (!revoked) {

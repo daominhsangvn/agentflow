@@ -4995,6 +4995,7 @@ model AuthOrganization {
 
   members     AuthMember[]
   invitations AuthInvitation[]
+  roles       AuthOrganizationRole[]
 
   @@map("auth_organizations")
 }
@@ -5030,6 +5031,22 @@ model AuthInvitation {
   @@index([organizationId])
   @@index([email])
   @@map("auth_invitations")
+}
+
+/// Custom org roles created by the owner (Better Auth dynamic access control).
+/// Built-in roles (owner, admin, member) are not stored here.
+model AuthOrganizationRole {
+  id             String    @id
+  organizationId String    @map("organization_id")
+  role           String
+  permission     String
+  createdAt      DateTime  @map("created_at")
+  updatedAt      DateTime? @updatedAt @map("updated_at")
+
+  organization AuthOrganization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, role])
+  @@map("auth_organization_roles")
 }
 
 model AuthJwks {

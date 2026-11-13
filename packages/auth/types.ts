@@ -1,3 +1,5 @@
+import { BuiltInOrgRole } from "@repo/api/src/types/org-permissions";
+
 /**
  * Identity shapes shared by the server, middleware and client entry points.
  *
@@ -19,6 +21,8 @@ export type SessionClaims = {
   org_logo?: string | null;
   /** `org:owner`, `org:admin` or `org:member`. */
   org_role?: string;
+  /** Grantable permissions of the member's role. UI hint only, up to 15 minutes stale. */
+  org_permissions?: string[];
   exp?: number;
   iat?: number;
   iss?: string;
@@ -59,6 +63,7 @@ export type AuthState = {
   orgId: string | null;
   orgSlug: string | null;
   orgRole: string | null;
+  orgPermissions: string[];
   sessionClaims: SessionClaims | null;
 };
 
@@ -71,6 +76,7 @@ export function authStateFromClaims(claims: SessionClaims | null): AuthState {
       orgId: null,
       orgSlug: null,
       orgRole: null,
+      orgPermissions: [],
       sessionClaims: null,
     };
   }
@@ -81,6 +87,7 @@ export function authStateFromClaims(claims: SessionClaims | null): AuthState {
     orgId: claims.org_id ?? null,
     orgSlug: claims.org_slug ?? null,
     orgRole: claims.org_role ?? null,
+    orgPermissions: claims.org_permissions ?? [],
     sessionClaims: claims,
   };
 }
@@ -127,10 +134,22 @@ export function organizationFromClaims(
   };
 }
 
+const OWNER_ORG_ROLE = `org:${BuiltInOrgRole.Owner}`;
+
 /**
- * Role check with the semantics the app relies on: an exact role match.
- * Permission checks are not modelled; they never pass.
+ * Role check with the semantics the app relies on: an exact role match. A
+ * permission check passes for the owner role, or when the session claim lists
+ * the permission.
  */
-export function hasAccess(orgRole: string | null, params: HasParams): boolean {
-  return "role" in params && orgRole !== null && params.role === orgRole;
+export function hasAccess(
+  state: Pick<AuthState, "orgRole" | "orgPermissions">,
+  params: HasParams
+): boolean {
+  if ("role" in params) {
+    return state.orgRole !== null && params.role === state.orgRole;
+  }
+  return (
+    state.orgRole === OWNER_ORG_ROLE ||
+    state.orgPermissions.includes(params.permission)
+  );
 }

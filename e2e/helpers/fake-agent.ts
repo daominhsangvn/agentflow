@@ -46,9 +46,22 @@ export type LoopBody = {
   step?: { stepId: string; forkSession?: boolean; readOnly?: boolean };
 };
 
+/**
+ * A file the task leaves (a command's `attach` glob match). `path` is
+ * relative to the workspace root, like the runner's. Without `content` it is
+ * reported as not collected, with `skipped` as the reason.
+ */
+export type TaskAttachment = {
+  path: string;
+  content?: string | Uint8Array;
+  skipped?: string;
+  size?: number;
+};
+
 export type TaskOutcome = {
   questions?: { id: string; question: string; commentId?: string }[];
   reply?: string;
+  attachments?: TaskAttachment[];
 };
 
 export type TaskScript = (loop: LoopBody) => Promise<TaskOutcome>;
@@ -331,6 +344,9 @@ export class FakeAgent {
           ]
         : [],
       questionsError: null,
+      ...(outcome.attachments
+        ? { attachments: outcome.attachments.map(toStepAttachment) }
+        : {}),
     };
     const upload = await fetch(
       `${getApiBaseUrl()}/loops/${loop.loopId}/upload-artifacts`,
@@ -423,6 +439,23 @@ function jsonHeaders(token: string): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
     "content-type": "application/json",
+  };
+}
+
+/** Like the runner: the bytes go base64 in `data`, a file not collected says why. */
+function toStepAttachment(attachment: TaskAttachment): Record<string, unknown> {
+  if (attachment.content === undefined) {
+    return {
+      path: attachment.path,
+      size: attachment.size ?? 0,
+      skipped: attachment.skipped ?? "not collected",
+    };
+  }
+  const bytes = Buffer.from(attachment.content);
+  return {
+    path: attachment.path,
+    size: bytes.byteLength,
+    data: bytes.toString("base64"),
   };
 }
 

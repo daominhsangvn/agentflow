@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
     clerkUserId: "auth-user-1",
     user: { id: "user-1", organizationId: "org-1" },
   },
-  getOrgAdminStatus: vi.fn(),
+  getOrgPermissionStatus: vi.fn(),
   resolveProjectId: vi.fn(),
   service: {
     list: vi.fn(),
@@ -26,8 +26,8 @@ vi.mock("@/lib/auth/with-any-auth", () => ({
     (request: NextRequest, context: { params: Promise<unknown> }) =>
       handler(mocks.authContext, request, context?.params),
 }));
-vi.mock("@/lib/auth/org-admin", () => ({
-  getOrgAdminStatus: mocks.getOrgAdminStatus,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  getOrgPermissionStatus: mocks.getOrgPermissionStatus,
 }));
 vi.mock("@/lib/identifier-utils", () => ({
   resolveProjectId: mocks.resolveProjectId,
@@ -88,13 +88,18 @@ function params(values: Record<string, string>) {
 }
 
 function asAdmin() {
-  mocks.getOrgAdminStatus.mockResolvedValue({ isAdmin: true, reason: "admin" });
+  mocks.getOrgPermissionStatus.mockResolvedValue({
+    kind: "member",
+    isOwner: true,
+    permissions: new Set(),
+  });
 }
 
 function asMember() {
-  mocks.getOrgAdminStatus.mockResolvedValue({
-    isAdmin: false,
-    reason: "not_admin",
+  mocks.getOrgPermissionStatus.mockResolvedValue({
+    kind: "member",
+    isOwner: false,
+    permissions: new Set(),
   });
 }
 

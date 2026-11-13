@@ -1,5 +1,6 @@
 "use client";
 
+import type { SignInProvider } from "@repo/api/src/types/auth-account";
 import {
   Alert,
   AlertDescription,
@@ -15,7 +16,8 @@ import {
 } from "@repo/design-system/components/ui/card";
 import { Input } from "@repo/design-system/components/ui/input";
 import { Label } from "@repo/design-system/components/ui/label";
-import type { FormEvent, ReactNode } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { authApi } from "../auth-client";
 
 /** Shared layout for the sign-in, sign-up and password reset forms. */
 export function AuthCard({
@@ -128,4 +130,77 @@ export function errorMessage(
   fallback: string
 ): string {
   return error?.message || fallback;
+}
+
+/**
+ * "Continue with <provider>" buttons for the platform's configured SSO
+ * providers. Renders nothing while loading or when none are configured.
+ */
+export function SsoButtons({
+  onError,
+}: Readonly<{ onError: (message: string) => void }>) {
+  const [providers, setProviders] = useState<SignInProvider[]>([]);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    authApi
+      .listSignInProviders()
+      .then((result) => setProviders(result.data ?? []))
+      .catch(() => setProviders([]));
+  }, []);
+
+  if (providers.length === 0) {
+    return null;
+  }
+
+  const start = async (provider: SignInProvider) => {
+    setPending(true);
+    const target = readRedirectTarget();
+    const result = await authApi.signInSocial({
+      provider: provider.id,
+      callbackURL: target,
+      newUserCallbackURL: target,
+      errorCallbackURL: `/sign-in${globalThis.location.search}`,
+    });
+    if (result.error) {
+      setPending(false);
+      onError(errorMessage(result.error, "Could not start sign-in"));
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {providers.map((provider) => (
+        <Button
+          className="w-full"
+          disabled={pending}
+          key={provider.id}
+          onClick={() => start(provider)}
+          type="button"
+          variant="outline"
+        >
+          Continue with {provider.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+const PRESERVED_QUERY_KEYS = ["redirect_url", "email"] as const;
+
+/** `path` plus the `redirect_url` and `email` params of the current page. */
+export function withCurrentQuery(
+  path: string,
+  search: string = globalThis.location?.search ?? ""
+): string {
+  const source = new URLSearchParams(search);
+  const kept = new URLSearchParams();
+  for (const key of PRESERVED_QUERY_KEYS) {
+    const value = source.get(key);
+    if (value) {
+      kept.set(key, value);
+    }
+  }
+  const query = kept.toString();
+  return query ? `${path}?${query}` : path;
 }

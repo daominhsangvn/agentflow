@@ -1,16 +1,35 @@
+import {
+  BuiltInOrgRole,
+  type OrgPermission,
+} from "@repo/api/src/types/org-permissions";
+
 /**
- * Client-side role utilities.
+ * Client-side permission utilities.
  *
- * Mirrors the backend ADMIN_ROLES set in apps/api/lib/auth/org-admin.ts.
- * Both must be kept in sync.
+ * The membership comes from the session claims (`org_permissions`), which is
+ * a UI hint only: the API re-checks every permission.
  */
 
-const ADMIN_ROLES = new Set(["org:admin", "org:owner"]);
+const OWNER_ROLE = `org:${BuiltInOrgRole.Owner}`;
+
+export type PermissionMembership = {
+  role?: string;
+  permissions?: readonly string[];
+};
 
 /**
- * Check if a Clerk membership role has admin-level access.
- * Accepts both org:admin and org:owner, matching the backend.
+ * Whether the membership holds a permission. The owner holds every
+ * permission implicitly.
  */
-export function isAdminRole(role: string | undefined): boolean {
-  return !!role && ADMIN_ROLES.has(role);
+export function hasOrgPermission(
+  membership: PermissionMembership | null | undefined,
+  permission: OrgPermission
+): boolean {
+  if (!membership) {
+    return false;
+  }
+  if (membership.role === OWNER_ROLE) {
+    return true;
+  }
+  return membership.permissions?.includes(permission) ?? false;
 }

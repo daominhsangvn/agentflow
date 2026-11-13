@@ -203,19 +203,16 @@ export const apiKeysService = {
 
   /**
    * List API keys for an organization.
-   * Admins (org:admin) see all keys in the org; regular users see only their own.
+   * Callers with the org API key permission (owners included) see all keys in the org; regular users see only their own.
    */
   list(
     organizationId: string,
     userId: string,
-    orgRole?: string
+    canManageAll = false
   ): Promise<ApiKey[]> {
     return withDb(async (db) => {
       const records = await db.apiKey.findMany({
-        where:
-          orgRole === "org:admin"
-            ? { organizationId }
-            : { organizationId, userId },
+        where: canManageAll ? { organizationId } : { organizationId, userId },
         orderBy: { createdAt: "desc" },
       });
       return records.map(toApiKey);
@@ -224,20 +221,19 @@ export const apiKeysService = {
 
   /**
    * Revoke an API key by setting revokedAt to the current time.
-   * Admins can revoke any key in the org; regular users can only revoke their own.
+   * Callers with the org API key permission can revoke any key in the org; regular users can only revoke their own.
    * Returns false if the key was not found or already revoked.
    */
   revoke(
     id: string,
     organizationId: string,
     userId: string,
-    orgRole?: string
+    canManageAll = false
   ): Promise<boolean> {
     return withDb(async (db) => {
-      const where =
-        orgRole === "org:admin"
-          ? { id, organizationId, revokedAt: null }
-          : { id, organizationId, userId, revokedAt: null };
+      const where = canManageAll
+        ? { id, organizationId, revokedAt: null }
+        : { id, organizationId, userId, revokedAt: null };
 
       const result = await db.apiKey.updateMany({
         where,

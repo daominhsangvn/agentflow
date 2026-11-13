@@ -1,9 +1,10 @@
 import { failure } from "@repo/api/src/types/common";
 import { decideOrchestratorDecisionInputSchema } from "@repo/api/src/types/orchestrator";
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { Status } from "@repo/api/src/types/result";
 import { NextResponse } from "next/server";
 import { orchestratorDecisionService } from "@/app/orchestrator/decisions/service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { errorResponse, parseBody, successResponse } from "@/lib/route-utils";
 
@@ -20,10 +21,10 @@ export const POST = withAnyAuth<
   "/orchestrator/decisions/[id]"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      "orchestrator decisions"
+      OrgPermission.OrchestratorOperate
     );
     if (denied) {
       return denied;

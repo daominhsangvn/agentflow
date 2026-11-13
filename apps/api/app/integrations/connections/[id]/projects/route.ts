@@ -6,7 +6,7 @@ import {
   notFoundResponse,
   successResponse,
 } from "@/lib/route-utils";
-import { denyUnlessOrgAdmin } from "../../route-helpers";
+import { denyUnlessIntegrationManager } from "../../route-helpers";
 
 const ROUTE = "/integrations/connections/[id]/projects";
 
@@ -19,7 +19,7 @@ export const GET = withAnyAuth<
   "/integrations/connections/[id]/projects"
 >(async (auth, request, params) => {
   try {
-    const denied = await denyUnlessOrgAdmin(auth, {
+    const denied = await denyUnlessIntegrationManager(auth, {
       method: request.method,
       route: ROUTE,
     });

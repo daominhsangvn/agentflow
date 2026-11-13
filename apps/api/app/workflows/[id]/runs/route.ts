@@ -1,3 +1,4 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import {
   startWorkflowRunInputSchema,
   type WorkflowRunSummary,
@@ -12,7 +13,7 @@ import {
 } from "@/lib/route-utils";
 import { workflowRunService } from "@/lib/workflows/run-service";
 import {
-  denyUnlessOrgAdmin,
+  denyUnlessWorkflowPermission,
   MANUAL_RUN_BODY_MAX_BYTES,
   runListQuerySchema,
   serviceErrorResponse,
@@ -57,10 +58,14 @@ export const GET = withAnyAuth<WorkflowRunsResponse, "/workflows/[id]/runs">(
 export const POST = withAnyAuth<WorkflowRunSummary, "/workflows/[id]/runs">(
   async (auth, request, params) => {
     try {
-      const denied = await denyUnlessOrgAdmin(auth, {
-        method: request.method,
-        route: ROUTE,
-      });
+      const denied = await denyUnlessWorkflowPermission(
+        auth,
+        {
+          method: request.method,
+          route: ROUTE,
+        },
+        OrgPermission.WorkflowRunOperate
+      );
       if (denied) {
         return denied;
       }

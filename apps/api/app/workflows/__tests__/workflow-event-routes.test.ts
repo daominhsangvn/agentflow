@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
     clerkUserId: "auth-user-1",
     user: { id: "user-1", organizationId: "org-1" },
   },
-  getOrgAdminStatus: vi.fn(),
+  getOrgPermissionStatus: vi.fn(),
   eventService: { list: vi.fn(), getPayload: vi.fn() },
 }));
 
@@ -18,8 +18,8 @@ vi.mock("@/lib/auth/with-any-auth", () => ({
     (request: NextRequest, context: { params: Promise<unknown> }) =>
       handler(mocks.authContext, request, context?.params),
 }));
-vi.mock("@/lib/auth/org-admin", () => ({
-  getOrgAdminStatus: mocks.getOrgAdminStatus,
+vi.mock("@/lib/auth/org-permissions", () => ({
+  getOrgPermissionStatus: mocks.getOrgPermissionStatus,
 }));
 vi.mock("@/app/workflows/workflow-event-service", () => ({
   workflowEventService: mocks.eventService,
@@ -50,7 +50,11 @@ function params(values: Record<string, string>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getOrgAdminStatus.mockResolvedValue({ isAdmin: true, reason: "admin" });
+  mocks.getOrgPermissionStatus.mockResolvedValue({
+    kind: "member",
+    isOwner: true,
+    permissions: new Set(),
+  });
 });
 
 describe("GET /workflows/{id}/events", () => {
@@ -95,9 +99,10 @@ describe("GET /workflows/{id}/events/{eventId}", () => {
   const ids = params({ id: WORKFLOW_ID, eventId: EVENT_ID });
 
   it("denies non-admins without calling the service", async () => {
-    mocks.getOrgAdminStatus.mockResolvedValue({
-      isAdmin: false,
-      reason: "not_admin",
+    mocks.getOrgPermissionStatus.mockResolvedValue({
+      kind: "member",
+      isOwner: false,
+      permissions: new Set(),
     });
     const response = await getPayload(get(path), ids);
     expect(response.status).toBe(403);

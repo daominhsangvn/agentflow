@@ -53,7 +53,11 @@ export function buildLocalTrustedAuth(): AuthObject {
     ...authStateFromClaims(LOCAL_TRUSTED_CLAIMS),
     sessionId: LOCAL_TRUSTED_SESSION_ID,
     getToken: () => Promise.resolve(null),
-    has: (params) => hasAccess(LOCAL_TRUSTED_ORG_ROLE, params),
+    has: (params) =>
+      hasAccess(
+        { orgRole: LOCAL_TRUSTED_ORG_ROLE, orgPermissions: [] },
+        params
+      ),
     redirectToSignIn: () => redirect("/sign-in"),
     redirectToSignUp: () => redirect("/sign-up"),
   };

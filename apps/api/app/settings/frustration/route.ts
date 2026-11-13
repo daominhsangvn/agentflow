@@ -1,16 +1,10 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import type { SessionFrustrationSettingResponse } from "@repo/api/src/types/settings";
-import { log } from "@repo/observability/log";
 import { z } from "zod";
-import { getOrgAdminStatus } from "@/lib/auth/org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { withAuth } from "@/lib/auth/with-auth";
-import {
-  errorResponse,
-  forbiddenResponse,
-  parseBody,
-  scheduleLogFlush,
-  successResponse,
-} from "@/lib/route-utils";
+import { errorResponse, parseBody, successResponse } from "@/lib/route-utils";
 import { frustrationSettingService } from "../frustration-setting-service";
 
 const frustrationSettingValidator = z.object({
@@ -47,17 +41,13 @@ export const PUT = withAuth<
   "/settings/frustration"
 >(async ({ user, clerkOrgId, clerkUserId }, request) => {
   try {
-    const adminStatus = await getOrgAdminStatus(clerkOrgId, clerkUserId);
-    if (!adminStatus.isAdmin) {
-      log.warn("Denied frustration setting update for non-admin user", {
-        clerkOrgId,
-        clerkUserId,
-        reason: adminStatus.reason,
-        method: "PUT",
-        route: "/settings/frustration",
-      });
-      scheduleLogFlush();
-      return forbiddenResponse();
+    const denied = await denyUnlessPermitted(
+      { clerkOrgId, clerkUserId },
+      { method: "PUT", route: "/settings/frustration" },
+      OrgPermission.OrganizationUpdate
+    );
+    if (denied) {
+      return denied;
     }
 
     const { body, errorResponse: parseError } = await parseBody(

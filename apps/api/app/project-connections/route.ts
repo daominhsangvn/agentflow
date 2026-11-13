@@ -1,6 +1,7 @@
+import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import type { ProjectConnectionsResponse } from "@repo/api/src/types/project-connection";
 import { projectConnectionService } from "@/app/projects/project-connection-service";
-import { denyUnlessOrgAdmin } from "@/lib/auth/deny-unless-org-admin";
+import { denyUnlessPermitted } from "@/lib/auth/deny-unless-permitted";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
 import { errorResponse, successResponse } from "@/lib/route-utils";
 
@@ -16,10 +17,10 @@ export const GET = withAnyAuth<
   "/project-connections"
 >(async (auth, request) => {
   try {
-    const denied = await denyUnlessOrgAdmin(
+    const denied = await denyUnlessPermitted(
       auth,
       { method: request.method, route: ROUTE },
-      "project connection"
+      OrgPermission.ProjectManage
     );
     if (denied) {
       return denied;
