@@ -4,33 +4,18 @@ import ts from "typescript6";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
-// route-utils flush scheduling (ISS-4659).
+// route-utils flush scheduling.
 //
-// Deferred work per request is a contract, not an implementation detail:
-// `__tests__/unit/with-api-key-auth.test.ts` and
-// `__tests__/integration/branch-artifact-flows.test.ts` both pin how many
-// `waitUntil` promises a request schedules. Adding the span flush initially
-// broke both, because it scheduled telemetry work on every request even with
-// no tracer installed — which is every local run and every CI worker.
-//
-// The rule this file guards: schedule span-flush work only when a tracer is
-// actually active, and when it is, use `after()` so the flush runs once Next
-// has closed the route span rather than while it is still open.
+// Per-request flushing was removed: spans and logs are exported by the batch
+// processors. `scheduleLogFlush` is a no-op and `scheduleLogFlushAfter` only
+// hands the promise to `waitUntil`.
 // ---------------------------------------------------------------------------
 
 const mocks = vi.hoisted(() => ({
-  // The real `waitUntil` takes ownership of the promise it is handed. A bare
-  // `vi.fn()` does not, so a rejected promise passed to it surfaces as an
-  // unhandled rejection and fails the whole suite. Mirror the real contract.
-  waitUntil: vi.fn((promise?: unknown) => {
-    if (promise instanceof Promise) {
-      promise.catch(() => undefined);
-    }
-  }),
+  waitUntil: vi.fn(),
   after: vi.fn(),
   flushTelemetry: vi.fn(() => Promise.resolve()),
-  isTelemetryActive: vi.fn(() => false),
-  logFlush: vi.fn(() => Promise.resolve()),
+  isTelemetryActive: vi.fn(() => true),
 }));
 
 vi.mock("@/lib/wait-until", () => ({ waitUntil: mocks.waitUntil }));
@@ -51,103 +36,41 @@ vi.mock("@repo/observability/log", () => ({
     warn: vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
-    flush: mocks.logFlush,
+    flush: vi.fn(() => Promise.resolve()),
   },
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.isTelemetryActive.mockReturnValue(false);
 });
 
 afterEach(() => {
   vi.resetModules();
 });
 
-describe("scheduleLogFlush with tracing inactive", () => {
-  it("schedules only the log flush, adding no deferred telemetry work", async () => {
+describe("scheduleLogFlush", () => {
+  it("is a no-op even when tracing is active", async () => {
     const { scheduleLogFlush } = await import("../route-utils");
 
     scheduleLogFlush();
 
-    // Exactly one waitUntil — the log flush. A second one here is what broke
-    // the two suites named above.
-    expect(mocks.waitUntil).toHaveBeenCalledTimes(1);
+    expect(mocks.waitUntil).not.toHaveBeenCalled();
     expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.flushTelemetry).not.toHaveBeenCalled();
   });
 });
 
-describe("scheduleLogFlush with tracing active", () => {
-  it("defers the span flush through after() so the route span has closed", async () => {
-    mocks.isTelemetryActive.mockReturnValue(true);
-    const { scheduleLogFlush } = await import("../route-utils");
-
-    scheduleLogFlush();
-
-    expect(mocks.after).toHaveBeenCalledTimes(1);
-    // Not called yet — after() defers it past the response. Calling it inline
-    // would flush while Next's route span is still open.
-    expect(mocks.flushTelemetry).not.toHaveBeenCalled();
-
-    const deferred = mocks.after.mock.calls[0][0] as () => unknown;
-    deferred();
-
-    expect(mocks.flushTelemetry).toHaveBeenCalledTimes(1);
-  });
-
-  it("waits for scheduleLogFlushAfter's deferred work before flushing spans", async () => {
-    mocks.isTelemetryActive.mockReturnValue(true);
-    let settle: () => void = () => undefined;
-    const pending = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
+describe("scheduleLogFlushAfter", () => {
+  it("hands the deferred promise to waitUntil without flushing", async () => {
     const { scheduleLogFlushAfter } = await import("../route-utils");
+    const pending = Promise.resolve();
 
     scheduleLogFlushAfter(pending);
-    const deferred = mocks.after.mock.calls[0][0] as () => Promise<unknown>;
-    const flushed = deferred();
 
-    // Callers use this form because work is still running past the response —
-    // and that work emits spans. Flushing before it finishes would export the
-    // buffer as it stands and let those spans freeze with the function.
+    expect(mocks.waitUntil).toHaveBeenCalledTimes(1);
+    expect(mocks.waitUntil).toHaveBeenCalledWith(pending);
+    expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.flushTelemetry).not.toHaveBeenCalled();
-
-    settle();
-    await flushed;
-
-    expect(mocks.flushTelemetry).toHaveBeenCalledTimes(1);
-  });
-
-  it("still flushes spans when the deferred work rejects", async () => {
-    mocks.isTelemetryActive.mockReturnValue(true);
-    const pending = Promise.reject(new Error("deferred work failed"));
-    // Attach a handler in the same tick. The `await import(...)` below turns
-    // the microtask queue over, and Node flags a rejected promise with no
-    // handler by then — which fails the run even though every test passes.
-    pending.catch(() => undefined);
-    const { scheduleLogFlushAfter } = await import("../route-utils");
-
-    scheduleLogFlushAfter(pending);
-    const deferred = mocks.after.mock.calls[0][0] as () => Promise<unknown>;
-
-    await expect(deferred()).resolves.toBeUndefined();
-    expect(mocks.flushTelemetry).toHaveBeenCalledTimes(1);
-  });
-
-  it("falls back to waitUntil when there is no request scope for after()", async () => {
-    mocks.isTelemetryActive.mockReturnValue(true);
-    mocks.after.mockImplementation(() => {
-      throw new Error("after() called outside a request scope");
-    });
-    const { scheduleLogFlush } = await import("../route-utils");
-
-    expect(() => scheduleLogFlush()).not.toThrow();
-
-    // Log flush + the fallback span flush. Without the fallback, the
-    // container/custom-server path would never flush spans at all.
-    expect(mocks.waitUntil).toHaveBeenCalledTimes(2);
-    expect(mocks.flushTelemetry).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -162,7 +85,7 @@ describe("scheduleLogFlush with tracing active", () => {
  * real AST so a reformat cannot make it pass vacuously.
  */
 describe("route-utils.ts — SDK reachability", () => {
-  it("imports the SDK-free tracing seam, never the provider", () => {
+  it("never imports the OTel provider", () => {
     const filePath = join(import.meta.dirname, "..", "route-utils.ts");
     const sourceFile = ts.createSourceFile(
       filePath,
@@ -176,7 +99,6 @@ describe("route-utils.ts — SDK reachability", () => {
       .filter(ts.isStringLiteral)
       .map((specifier) => specifier.text);
 
-    expect(specifiers).toContain("@repo/observability/tracing/hooks");
     expect(specifiers).not.toContain("@repo/observability/tracing/provider");
   });
 });

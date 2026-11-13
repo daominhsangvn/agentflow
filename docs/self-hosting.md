@@ -124,6 +124,10 @@ image or a systemd service on Ubuntu/Debian): see [runner.md](runner.md).
 Workflows and the desktop app talk to compute targets through the desktop
 gateway socket hosted by `apps/api/server.ts`.
 
+Runner telemetry (`AGENTFLOW_RUNNER_TELEMETRY=true`, see Observability) starts
+asynchronously with the runner. Log records emitted before that OTel runtime
+finishes starting are dropped and never exported.
+
 ## Feature flags without PostHog
 
 Features still being rolled out sit behind PostHog flags, which are all off
@@ -183,11 +187,20 @@ Apps export with the standard OpenTelemetry variables:
 
 - `OTEL_EXPORTER_OTLP_ENDPOINT` – on/off switch. Unset means no telemetry export
   (e.g. `http://localhost:4318`, or `http://signoz-otel-collector:4318` in compose).
-- `OTEL_SERVICE_NAME` (`af-api`, `af-mcp`), `OTEL_RESOURCE_ATTRIBUTES`
+- `OTEL_SERVICE_NAME` (`af-api`, `af-app`, `af-mcp`, `af-runner`), `OTEL_RESOURCE_ATTRIBUTES`
   (`deployment.environment.name=production`).
 - `OTEL_TRACES_SAMPLER_ARG` – head sampling ratio, default `1`.
 - `OTEL_SDK_DISABLED=true` – turns telemetry off even when an endpoint is set.
 - `LOG_FORMAT=json|pretty` – stdout format. Default is JSON in production, readable otherwise.
+
+Runners do not need the collector. With `AGENTFLOW_RUNNER_TELEMETRY=true` they
+export through `POST /otel/v1/{traces,logs,metrics}` on the api (API key,
+protobuf only, 512 KiB per request, rate limited). The api forwards only to its
+own `OTEL_EXPORTER_OTLP_ENDPOINT` and answers 404 when that is unset. The
+browser sends only a `traceparent` header. The api and mcp flush pending
+telemetry within 5 s of shutdown; the app may lose its last batch because
+Next's own SIGTERM handler exits first. `apps/api/server.ts` logs
+`request_completed` once per request.
 
 Telemetry is fail-open: a missing or unreachable collector never breaks a request
 or stops an app from starting.

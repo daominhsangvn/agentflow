@@ -3,9 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "tsx watch --require ./src/preload.cjs --env-file=.env.local src/index.ts",
+    "dev": "tsx watch --require ./src/preload.cjs --env-file=.env.local src/server-main.ts",
     "build": "tsc && cp src/server-only-noop.cjs dist/apps/mcp/src/server-only-noop.cjs",
-    "start": "tsx --require ./dist/apps/mcp/src/preload.js dist/apps/mcp/src/index.js",
+    "start": "tsx --require ./dist/apps/mcp/src/preload.js dist/apps/mcp/src/server-main.js",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile ./tsconfig.tsbuildinfo",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage --coverage.reporter=json --coverage.reporter=json-summary --coverage.reportOnFailure '--coverage.include=src/**/*.{ts,tsx}'"

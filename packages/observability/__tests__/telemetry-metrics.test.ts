@@ -151,6 +151,21 @@ describe("emitTelemetryMetric — OTel Meter", () => {
     expect(dp?.attributes).toEqual({ origin: "api" });
   });
 
+  it("redacts sensitive string field values in metric attributes", async () => {
+    current = setup();
+    emitTelemetryMetric({
+      metric: "redaction_probe",
+      count: 1,
+      reason: `token ghp_${"b".repeat(36)} for a@b.com`,
+    });
+    const all = await current.collect();
+    const m = all.find((x) => x.descriptor.name === "redaction_probe");
+    const reason = String(m?.dataPoints[0]?.attributes.reason);
+    expect(reason).toContain("[redacted]");
+    expect(reason).not.toContain("ghp_");
+    expect(reason).not.toContain("a@b.com");
+  });
+
   it("does not throw without a provider", () => {
     expect(() =>
       emitTelemetryMetric({ metric: "x_metric", count: 1 })

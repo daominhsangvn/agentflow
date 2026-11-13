@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import next from "next";
 import { initDesktopGatewaySocketServer } from "./lib/desktop-gateway-socket-server";
+import { trackRequestCompleted } from "./lib/observability/request-completed-log";
 import { startSelfHostedCronRunner } from "./lib/self-hosted-cron";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -18,6 +19,7 @@ app
   .prepare()
   .then(() => {
     const server = createServer((request, response) => {
+      trackRequestCompleted(request, response);
       handle(request, response).catch((error) => {
         console.error("Failed handling API request", error);
         if (response.headersSent) {

@@ -11,11 +11,11 @@ import { waitUntil } from "@/lib/wait-until";
 import {
   forbiddenResponse,
   getBearerToken,
-  logRequestCompleted,
   unauthorizedResponse,
 } from "../route-utils";
 import type { VerifiedApiKeyContextWithMetadata } from "./api-key-context";
 import { hasApiKeyScopes } from "./api-key-scopes";
+import { annotateAuthSpan } from "./auth-span-attributes";
 import { getDesktopManagedPopRequestFailure } from "./desktop-managed-pop";
 import type {
   AuthContext,
@@ -65,7 +65,6 @@ export function withApiKeyAuth<TResponse, TRoute extends string = string>(
     request: NextRequest,
     routeContext: RouteContext<TRoute>
   ): Promise<AuthenticatedJsonResponse<TResponse>> => {
-    const startMs = globalThis.performance.now();
     let response: AuthenticatedJsonResponse<TResponse> | undefined;
     try {
       const token = getBearerToken(request);
@@ -131,6 +130,7 @@ export function withApiKeyAuth<TResponse, TRoute extends string = string>(
         return response;
       }
 
+      annotateAuthSpan(authContext);
       response = await handler(authContext, request, routeContext.params);
       return response;
     } catch (error) {
@@ -139,8 +139,6 @@ export function withApiKeyAuth<TResponse, TRoute extends string = string>(
         status: 500,
       });
       return response;
-    } finally {
-      logRequestCompleted(request, startMs, response?.status ?? 500);
     }
   };
 }

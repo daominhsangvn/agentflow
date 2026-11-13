@@ -13,10 +13,10 @@ import { log } from "@repo/observability/log";
 import { type NextRequest, NextResponse } from "next/server";
 import {
   forbiddenResponse,
-  logRequestCompleted,
   serviceUnavailableResponse,
   unauthorizedResponse,
 } from "../route-utils";
+import { annotateAuthSpan } from "./auth-span-attributes";
 import { findOrCreateUser } from "./find-or-create-user";
 import { resolveOrgHeader } from "./resolve-org-header";
 
@@ -95,7 +95,6 @@ export function withAuth<TResponse, TRoute extends string = string>(
     request: NextRequest,
     routeContext: RouteContext<TRoute>
   ): Promise<AuthenticatedJsonResponse<TResponse>> => {
-    const startMs = globalThis.performance.now();
     let response: AuthenticatedJsonResponse<TResponse> | undefined;
     try {
       const { userId: clerkUserId, orgId: clerkOrgId, orgRole } = await auth();
@@ -158,13 +157,12 @@ export function withAuth<TResponse, TRoute extends string = string>(
         apiKeyScopes: undefined,
       };
 
+      annotateAuthSpan(authContext);
       response = await handler(authContext, request, routeContext.params);
       return response;
     } catch (error) {
       response = authErrorResponse("Authentication failed", error);
       return response;
-    } finally {
-      logRequestCompleted(request, startMs, response?.status ?? 500);
     }
   };
 }

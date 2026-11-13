@@ -4,8 +4,14 @@ import {
   NodeTracerProvider,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AfAttribute, recordError, withSpan } from "../span";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  AfAttribute,
+  recordError,
+  runInLinkedSpan,
+  setActiveSpanAttributes,
+  withSpan,
+} from "../span";
 
 describe("span helpers", () => {
   let exporter: InMemorySpanExporter;
@@ -83,5 +89,87 @@ describe("span helpers", () => {
 
   it("runs fn when no provider is registered", async () => {
     await expect(withSpan("x", {}, () => "ok")).resolves.toBe("ok");
+  });
+
+  it("recordError keeps a redacted stack", async () => {
+    register();
+    const token = `ghp_${"a".repeat(36)}`;
+    const error = new Error("failed");
+    error.stack = `Error: failed\n    at call (token=${token})`;
+    await withSpan("s", {}, () => recordError(error));
+    const [span] = exporter.getFinishedSpans();
+    const event = span.events.find((e) => e.name === "exception");
+    const stack = String(event?.attributes?.["exception.stacktrace"]);
+    expect(stack).toContain("[redacted]");
+    expect(stack).not.toContain(token);
+  });
+
+  it("setActiveSpanAttributes sets attributes and drops sensitive keys", async () => {
+    register();
+    await withSpan("s", {}, () => {
+      setActiveSpanAttributes({ [AfAttribute.UserId]: "u_1", apiKey: "k" });
+    });
+    const [span] = exporter.getFinishedSpans();
+    expect(span.attributes[AfAttribute.UserId]).toBe("u_1");
+    expect(span.attributes.apiKey).toBeUndefined();
+  });
+
+  it("runInLinkedSpan starts a root span linked to the parent", async () => {
+    register();
+    await withSpan("parent", {}, () =>
+      runInLinkedSpan("bg", {}, async () => 1)
+    );
+    const spans = exporter.getFinishedSpans();
+    const parent = spans.find((s) => s.name === "parent");
+    const bg = spans.find((s) => s.name === "bg");
+    expect(bg?.parentSpanContext).toBeUndefined();
+    expect(bg?.links).toHaveLength(1);
+    expect(bg?.links[0].context.spanId).toBe(parent?.spanContext().spanId);
+  });
+
+  it("runInLinkedSpan marks errors and rethrows", async () => {
+    register();
+    await expect(
+      runInLinkedSpan("bg", {}, () => Promise.reject(new Error("bad")))
+    ).rejects.toThrow("bad");
+    const [span] = exporter.getFinishedSpans();
+    expect(span.status.code).toBe(SpanStatusCode.ERROR);
+  });
+
+  it("runInLinkedSpan turns a synchronous throw into a rejection", async () => {
+    const thunk = vi.fn((): Promise<number> => {
+      throw new Error("sync boom");
+    });
+    vi.spyOn(trace, "getTracer").mockImplementation(() => {
+      throw new Error("no tracer");
+    });
+    const pending = runInLinkedSpan("bg", {}, thunk);
+    await expect(pending).rejects.toThrow("sync boom");
+    expect(thunk).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
+  });
+
+  it("runInLinkedSpan never runs the thunk twice", async () => {
+    const thunk = vi.fn(async () => 1);
+    vi.spyOn(trace, "getTracer").mockImplementation(
+      () =>
+        ({
+          startActiveSpan: (
+            _name: string,
+            _opts: unknown,
+            cb: (span: unknown) => unknown
+          ) => {
+            cb({
+              end: () => undefined,
+              recordException: () => undefined,
+              setStatus: () => undefined,
+            });
+            throw new Error("setup failed after start");
+          },
+        }) as never
+    );
+    await expect(runInLinkedSpan("bg", {}, thunk)).rejects.toThrow();
+    expect(thunk).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
   });
 });

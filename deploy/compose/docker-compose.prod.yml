@@ -284,6 +284,10 @@ services:
     image: ${AGENTFLOW_IMAGE_NAMESPACE:-agentflow-prod}/app:local
     restart: unless-stopped
     environment:
+      OTEL_SERVICE_NAME: af-app
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment.name=production}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
       AUTH_API_URL: http://api:3002
       SERVER_API_URL: http://api:3002
       # Same value as the api: "false" hides sign-up and defaults to sign-in.
@@ -342,6 +346,8 @@ services:
     profiles: ["orchestrator"]
     restart: unless-stopped
     environment:
+      OTEL_SERVICE_NAME: af-runner
+      AGENTFLOW_RUNNER_TELEMETRY: ${AGENTFLOW_RUNNER_TELEMETRY:-false}
       AGENTFLOW_API_URL: http://api:3002
       AGENTFLOW_MCP_URL: http://mcp:3010/mcp
       AGENTFLOW_ALLOW_HTTP_HOSTS: api,mcp

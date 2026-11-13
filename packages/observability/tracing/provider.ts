@@ -54,7 +54,12 @@ import {
 import { resetTelemetryFlushHook, setTelemetryFlushHook } from "./hooks";
 import { RemoteParentEntropySampler } from "./remote-parent-sampler";
 import { RouteResourceSpanProcessor } from "./route-resource-processor";
-import { httpUrlAttributes, undiciUrlAttributes } from "./url-redaction";
+import {
+  httpIncomingUrlAttributes,
+  httpUrlAttributes,
+  SENSITIVE_QUERY_PARAMS,
+  undiciUrlAttributes,
+} from "./url-redaction";
 
 /**
  * Resource attribute recording the head-sampling rate the process ran with, so
@@ -65,6 +70,7 @@ const ATTR_TRACE_SAMPLE_RATE = "af.trace.sample_ratio";
 const ATTR_VCS_REF_HEAD_REVISION = "vcs.ref.head.revision";
 const METRIC_EXPORT_INTERVAL_MS = 15_000;
 const LOGGER_NAME = "@repo/observability";
+const UNTRACED_INCOMING_PATH_PREFIX = "/otel/v1/";
 const SHUTDOWN_SIGNALS = ["SIGTERM", "SIGINT"] as const;
 
 const LOG_SEVERITY: Record<LogLevel, SeverityNumber> = {
@@ -94,8 +100,16 @@ let installedHandlers: Array<{ event: string; listener: () => void }> = [];
  * Returning the cached outcome matters: re-resolving the config on a later call
  * would report whatever the environment says *now*, which can disagree with the
  * SDK that actually got installed (or with a bootstrap that failed).
+ *
+ * Processes that own their shutdown (mcp, the runner) pass
+ * `handleShutdownSignals: false` and call `flushTelemetry()` /
+ * `shutdownTelemetry()` themselves. Next standalone (apps/app) keeps the
+ * default; its telemetry shutdown may lose the race against Next's own
+ * `process.exit` after `server.close()`.
  */
-export function initTelemetry(): TelemetryConfig {
+export function initTelemetry(
+  options: InitTelemetryOptions = {}
+): TelemetryConfig {
   if (initResult) {
     return initResult;
   }
@@ -114,7 +128,7 @@ export function initTelemetry(): TelemetryConfig {
     setTraceContextProvider(readActiveTraceContext);
     setLogRecordSink(emitOtelLogRecord);
     setTelemetryFlushHook(forceFlushAll);
-    registerShutdownHandlers();
+    registerShutdownHandlers(options);
     return config;
   } catch {
     // A failed bootstrap must leave the process untelemetered, not broken.
@@ -164,6 +178,7 @@ export async function resetTelemetryForTest(): Promise<void> {
 }
 
 function createSdk(config: EnabledConfig): SdkHandle {
+  const collectorOrigin = originOf(config.endpoint);
   const spanProcessor = new BatchSpanProcessor(new OTLPTraceExporter());
   const logProcessor = new BatchLogRecordProcessor({
     exporter: new OTLPLogExporter(),
@@ -196,10 +211,24 @@ function createSdk(config: EnabledConfig): SdkHandle {
     logRecordProcessors: [logProcessor],
     metricReaders: [metricReader],
     instrumentations: [
-      // Outgoing URLs can carry signatures in the query (Teams `sig=`): both
-      // client instrumentations overwrite the URL attributes with redacted ones.
-      new HttpInstrumentation({ startOutgoingSpanHook: httpUrlAttributes }),
-      new UndiciInstrumentation({ startSpanHook: undiciUrlAttributes }),
+      // Outgoing URLs can carry signatures in the query (Teams `sig=`) and
+      // incoming ones OAuth codes (`/api/auth/*?code=`): the hooks overwrite the
+      // URL attributes with redacted ones; `redactedQueryParams` covers the rest.
+      // The OTLP proxy and the collector itself are never traced (amplification).
+      new HttpInstrumentation({
+        startOutgoingSpanHook: httpUrlAttributes,
+        startIncomingSpanHook: httpIncomingUrlAttributes,
+        redactedQueryParams: [...SENSITIVE_QUERY_PARAMS],
+        ignoreIncomingRequestHook: (req) =>
+          req.url?.startsWith(UNTRACED_INCOMING_PATH_PREFIX) === true,
+        ignoreOutgoingRequestHook: (options) =>
+          isCollectorOrigin(httpOptionsOrigin(options), collectorOrigin),
+      }),
+      new UndiciInstrumentation({
+        startSpanHook: undiciUrlAttributes,
+        ignoreRequestHook: (request) =>
+          isCollectorOrigin(String(request.origin), collectorOrigin),
+      }),
       // `pg` is what Prisma's driver adapter issues queries through.
       new PgInstrumentation(),
       new PrismaInstrumentation(),
@@ -244,12 +273,16 @@ function resetSeams(): void {
   resetLogRecordSink();
 }
 
-function registerShutdownHandlers(): void {
+function registerShutdownHandlers(options: InitTelemetryOptions): void {
   const onBeforeExit = () => {
     shutdownTelemetry().catch(() => undefined);
   };
   process.once("beforeExit", onBeforeExit);
   installedHandlers.push({ event: "beforeExit", listener: onBeforeExit });
+
+  if (options.handleShutdownSignals === false) {
+    return;
+  }
 
   for (const signal of SHUTDOWN_SIGNALS) {
     const listener = () => {
@@ -292,4 +325,41 @@ function readActiveTraceContext():
   }
   const spanContext = span.spanContext();
   return { traceId: spanContext.traceId, spanId: spanContext.spanId };
+}
+
+export type InitTelemetryOptions = {
+  /** Install SIGTERM/SIGINT listeners that shut telemetry down. Default true. */
+  handleShutdownSignals?: boolean;
+};
+
+function originOf(value: string): string | undefined {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function httpOptionsOrigin(options: {
+  protocol?: string | null;
+  hostname?: string | null;
+  host?: string | null;
+  port?: string | number | null;
+}): string | undefined {
+  const host = options.hostname ?? options.host;
+  if (!host) {
+    return undefined;
+  }
+  const port = options.port && !host.includes(":") ? `:${options.port}` : "";
+  return originOf(`${options.protocol ?? "http:"}//${host}${port}`);
+}
+
+function isCollectorOrigin(
+  origin: string | undefined,
+  collectorOrigin: string | undefined
+): boolean {
+  if (!(origin && collectorOrigin)) {
+    return false;
+  }
+  return originOf(origin) === collectorOrigin;
 }

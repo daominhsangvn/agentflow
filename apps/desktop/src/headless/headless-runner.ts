@@ -62,6 +62,7 @@ import {
   STATUS_REFRESH_INTERVAL_MS,
   writeRunnerStatus,
 } from "./headless-status.js";
+import { startHeadlessTelemetry } from "./headless-telemetry.js";
 import { createHeadlessTranscriptUploader } from "./headless-transcript-uploader.js";
 import { ensureRunnerWorktreeSettings } from "./headless-workspace.js";
 
@@ -87,6 +88,7 @@ export async function startHeadlessRunner(
 ): Promise<HeadlessRunner> {
   fs.mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
   const gatewayId = new GatewayIdentityStore(config.dataDir).loadSync();
+  const telemetry = startHeadlessTelemetry({ config, gatewayId });
   const gatewayAuthToken = randomBytes(GATEWAY_TOKEN_BYTES).toString("hex");
   const allowedDirectories = [config.workspaceDir];
   const loopTokenStore = new LoopTokenStore({
@@ -102,7 +104,7 @@ export async function startHeadlessRunner(
   const schedulers = new LoopSchedulerContext();
   const recovery = new BootRecoveryService({
     jobStore,
-    telemetry: { emit: () => undefined },
+    telemetry: telemetry.emitter,
     getApiKey: () => config.apiKey,
     getApiOrigin: () => config.apiUrl,
     getAllowedDirectories: () => [config.workspaceDir],
@@ -338,6 +340,7 @@ export async function startHeadlessRunner(
       // Clears the loop heartbeat/refresh timers shared with the server.
       recovery[Symbol.dispose]();
       publishStatus({ state: CloudSocketState.Idle, error: "stopped" });
+      await telemetry.stop();
     },
   };
 }

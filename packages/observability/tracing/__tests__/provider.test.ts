@@ -164,6 +164,44 @@ describe("initTelemetry", () => {
   });
 });
 
+describe("initTelemetry shutdown signals", () => {
+  const extraListener = () => undefined;
+
+  afterEach(() => {
+    process.removeListener("SIGTERM", extraListener);
+    vi.restoreAllMocks();
+  });
+
+  it("installs no signal listener with handleShutdownSignals false", () => {
+    stubEnabledEnv();
+    const sigterm = process.listenerCount("SIGTERM");
+    const sigint = process.listenerCount("SIGINT");
+
+    initTelemetry({ handleShutdownSignals: false });
+
+    expect(process.listenerCount("SIGTERM")).toBe(sigterm);
+    expect(process.listenerCount("SIGINT")).toBe(sigint);
+    expect(isTelemetryActive()).toBe(true);
+    expect(hasLogRecordSink()).toBe(true);
+  });
+
+  it("shuts down on SIGTERM by default without re-raising", async () => {
+    stubEnabledEnv();
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const before = process.listenerCount("SIGTERM");
+
+    initTelemetry();
+    process.on("SIGTERM", extraListener);
+    expect(process.listenerCount("SIGTERM")).toBe(before + 2);
+
+    process.emit("SIGTERM");
+    await vi.waitFor(() => {
+      expect(isTelemetryActive()).toBe(false);
+    });
+    expect(kill).not.toHaveBeenCalled();
+  });
+});
+
 describe("flushTelemetry", () => {
   it("resolves when never initialised", async () => {
     await expect(flushTelemetry()).resolves.toBeUndefined();

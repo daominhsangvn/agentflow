@@ -19,6 +19,7 @@ import {
   ORCHESTRATOR_TOOLS_CALL_ROUTE,
   ORCHESTRATOR_TOOLS_SESSION_ROUTE,
 } from "@repo/api/src/types/orchestrator.js";
+import { withToolSpan } from "./tool-span.js";
 
 /**
  * Integration tool sessions (docs/workflows.md "Integration tools"): an
@@ -143,38 +144,47 @@ export function createIntegrationMcpServer(
   }));
   server.setRequestHandler(
     CallToolRequestSchema,
-    async (request): Promise<CallToolResult> => {
-      try {
-        const result = await api.call(
-          token,
-          request.params.name,
-          request.params.arguments ?? {}
-        );
-        return result.ok
-          ? { content: [{ type: "text", text: formatOutput(result.output) }] }
-          : {
+    (request): Promise<CallToolResult> =>
+      withToolSpan(
+        request.params.name,
+        {},
+        async (): Promise<CallToolResult> => {
+          try {
+            const result = await api.call(
+              token,
+              request.params.name,
+              request.params.arguments ?? {}
+            );
+            return result.ok
+              ? {
+                  content: [
+                    { type: "text", text: formatOutput(result.output) },
+                  ],
+                }
+              : {
+                  content: [
+                    {
+                      type: "text",
+                      text: result.retryable
+                        ? `${result.error} (temporary: you may try again once)`
+                        : result.error,
+                    },
+                  ],
+                  isError: true,
+                };
+          } catch (error) {
+            return {
               content: [
                 {
                   type: "text",
-                  text: result.retryable
-                    ? `${result.error} (temporary: you may try again once)`
-                    : result.error,
+                  text: `AgentFlow could not run the tool: ${error instanceof Error ? error.message : String(error)}`,
                 },
               ],
               isError: true,
             };
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `AgentFlow could not run the tool: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    }
+          }
+        }
+      )
   );
   return server;
 }

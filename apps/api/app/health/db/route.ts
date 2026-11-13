@@ -25,11 +25,7 @@ export const GET = async (request: Request) => {
 
   const result = await getDatabaseHealth();
 
-  // Serverless: ensure buffered health.db_check_failed entries are shipped to
-  // Datadog before the function freezes (the flush timer is unref'd).
-  // ISS-4659: routed through the shared helper rather than a bare
-  // `waitUntil(log.flush())` so this route's spans flush too — it bypasses the
-  // auth wrappers, so `logRequestCompleted` never runs for it.
+  // Health checks bypass the auth wrappers; the server logs request_completed.
   scheduleLogFlush();
 
   return Response.json(result, { status: result.ok ? 200 : 503 });

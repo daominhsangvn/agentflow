@@ -19,6 +19,7 @@ import {
   flushLogsWithDeadline,
   waitForDeadline,
 } from "@repo/observability/shutdown";
+import { AfAttribute } from "@repo/observability/span";
 import { createRedisClient } from "@repo/redis";
 import {
   checkApiReachable,
@@ -75,6 +76,7 @@ import {
 } from "./oauth-scopes.js";
 import { createSessionUrlBuilder } from "./session-urls.js";
 import { TOOL_NAMES, TOOL_REGISTRATIONS } from "./tool-registrations.js";
+import { instrumentToolRegistration } from "./tool-span.js";
 
 const BEARER_API_KEY_REGEX = /^Bearer\s+(sk_live_\S+)$/;
 const BEARER_OAUTH_TOKEN_REGEX = /^Bearer\s+(mcp_at_[A-Za-z0-9._-]+)$/;
@@ -320,6 +322,11 @@ async function createMcpServer(
       instructions: SERVER_INSTRUCTIONS,
     }
   );
+
+  instrumentToolRegistration(server, {
+    [AfAttribute.OrgId]: context.organizationId,
+    [AfAttribute.UserId]: context.userId,
+  });
 
   const apiClient = createApiClient(context, plaintextKey);
   const allowWriteTools = hasWriteScope(grantedScopes);

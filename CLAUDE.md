@@ -45,7 +45,7 @@ Schema: `packages/database/prisma/schema.prisma`. Client: `packages/database/gen
 **Do NOT import `@repo/database` in `apps/app`.** All DB access: frontend hooks → `apps/api` routes → services → database.
 
 ### Background Work in API Routes (CRITICAL)
-**Never fire-and-forget promises.** Always wrap background work with `waitUntil()` from `@/lib/wait-until` (apps/api). It keeps the old `@vercel/functions` call shape and guarantees a rejection is logged instead of crashing the long-lived Node process. A `.catch()` without `waitUntil()` is a bug.
+**Never fire-and-forget promises.** Always wrap background work with `waitUntil()` from `@/lib/wait-until` (apps/api). It keeps the old `@vercel/functions` call shape and guarantees a rejection is logged instead of crashing the long-lived Node process. A `.catch()` without `waitUntil()` is a bug. `waitUntil` also accepts a thunk (`waitUntil(() => work())`), which runs the work in a background span linked to the request.
 
 ### Self-hosted infrastructure (IMPORTANT)
 No AWS or Vercel services. Object storage goes through `@repo/storage` (S3 protocol against RustFS from `docker-compose.yml`; configure with `S3_*` env vars, never construct an `S3Client` directly). Secrets at rest use `@/lib/secret-encryption` (AES-256-GCM, `ENCRYPTION_KEY`). Loops run only on desktop compute targets; there is no cloud runner. The Claude Code plugins live in `agent-plugins/` and are loaded with `claude --plugin-dir` — never via `/plugin install`. Production runs `deploy/compose/docker-compose.prod.yml` (images built on the server; `NEXT_PUBLIC_*` are build args of the app and api images).

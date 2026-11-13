@@ -161,4 +161,4 @@ EXPOSE 3010
 # pnpm --filter mcp exec sets CWD to /app/apps/mcp/, so paths are relative to that.
 # --require needs ./ prefix for CWD-relative resolution (not node_modules lookup).
 # preload.cjs (not .ts/.js) because --require only loads CJS modules.
-CMD ["pnpm", "--filter", "mcp", "exec", "tsx", "--require", "./src/preload.cjs", "src/index.ts"]
+CMD ["pnpm", "--filter", "mcp", "exec", "tsx", "--require", "./src/preload.cjs", "src/server-main.ts"]

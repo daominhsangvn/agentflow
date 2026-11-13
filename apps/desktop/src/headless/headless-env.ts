@@ -38,6 +38,11 @@ export const HeadlessRunnerEnv = {
    */
   ReportSessions: "AGENTFLOW_RUNNER_REPORT_SESSIONS",
   /**
+   * Opt-in (default off): export the runner's traces, logs and metrics
+   * through the API's authenticated `/otel/v1/*` proxy.
+   */
+  Telemetry: "AGENTFLOW_RUNNER_TELEMETRY",
+  /**
    * `auto` (default): loops clone the project repositories into the
    * workspace. `personal`: the runner works for one AgentFlow project, in a
    * folder of this computer, with this computer's credentials (docs/runner.md

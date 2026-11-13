@@ -1,4 +1,9 @@
-import { type Span, SpanStatusCode, trace } from "@opentelemetry/api";
+import {
+  isSpanContextValid,
+  type Span,
+  SpanStatusCode,
+  trace,
+} from "@opentelemetry/api";
 import { isSensitiveKey, redactSensitiveText } from "./redact";
 
 const TRACER_NAME = "@repo/observability";
@@ -12,6 +17,7 @@ export const AfAttribute = {
   WorkflowRunId: "af.workflow_run_id",
   ComputeTargetId: "af.compute_target_id",
   UserId: "af.user_id",
+  AuthMethod: "af.auth_method",
 } as const;
 export type AfAttribute = (typeof AfAttribute)[keyof typeof AfAttribute];
 
@@ -74,4 +80,64 @@ function sanitizeSpanAttributes(
       typeof value === "string" ? redactSensitiveText(value) : value;
   }
   return result;
+}
+
+export function setActiveSpanAttributes(attributes: SpanAttributes): void {
+  try {
+    const span = trace.getActiveSpan();
+    if (!span) {
+      return;
+    }
+    span.setAttributes(sanitizeSpanAttributes(attributes));
+  } catch {
+    // Telemetry must never throw.
+  }
+}
+
+export function runInLinkedSpan<T>(
+  name: string,
+  attributes: SpanAttributes,
+  fn: () => Promise<T>
+): Promise<T> {
+  let started: Promise<T>;
+  let invoked = false;
+  try {
+    const spanContext = trace.getActiveSpan()?.spanContext();
+    const parent =
+      spanContext && isSpanContextValid(spanContext) ? spanContext : undefined;
+    started = trace.getTracer(TRACER_NAME).startActiveSpan(
+      name,
+      {
+        root: true,
+        links: parent ? [{ context: parent }] : [],
+        attributes: sanitizeSpanAttributes(attributes),
+      },
+      async (span) => {
+        try {
+          invoked = true;
+          return await fn();
+        } catch (error) {
+          recordError(error, span);
+          throw error;
+        } finally {
+          span.end();
+        }
+      }
+    );
+  } catch {
+    // Fail open, but never run the work twice and always hand back a promise,
+    // so a synchronous throw reaches the caller's rejection handling.
+    return invoked
+      ? Promise.reject(new Error("span setup failed"))
+      : (async () => fn())();
+  }
+  return started;
+}
+
+export function markSpanError(span: Span, message?: string): void {
+  try {
+    span.setStatus({ code: SpanStatusCode.ERROR, message });
+  } catch {
+    // Telemetry must never throw.
+  }
 }
