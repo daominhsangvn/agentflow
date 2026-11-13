@@ -1,9 +1,22 @@
 <?xml version="1.0"?>
 <clickhouse>
+  <!-- The image entrypoint reads logger.log, logger.errorlog, format_schema_path and
+       user_directories.users_xml.path with `clickhouse extract-from-config` and exits
+       (code 232) when any of them is missing. -->
   <logger>
     <level>warning</level>
     <console>true</console>
+    <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+    <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+    <size>100M</size>
+    <count>3</count>
   </logger>
+  <format_schema_path>/var/lib/clickhouse/format_schemas/</format_schema_path>
+  <user_directories>
+    <users_xml>
+      <path>users.xml</path>
+    </users_xml>
+  </user_directories>
   <listen_host>0.0.0.0</listen_host>
   <tcp_port>9000</tcp_port>
   <http_port>8123</http_port>
@@ -12,7 +25,6 @@
   <user_files_path>/var/lib/clickhouse/user_files/</user_files_path>
   <user_scripts_path>/var/lib/clickhouse/user_scripts/</user_scripts_path>
   <user_defined_executable_functions_config>*function.xml</user_defined_executable_functions_config>
-  <users_config>users.xml</users_config>
   <default_profile>default</default_profile>
   <default_database>default</default_database>
   <mark_cache_size>5368709120</mark_cache_size>

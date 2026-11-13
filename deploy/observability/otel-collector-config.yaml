@@ -12,9 +12,9 @@
 #                        values. allow_all_keys keeps af.*, http.*, db.* keys.
 #   tail_sampling        keeps every error, 5xx and slow trace; samples the rest
 #                        at TAIL_SAMPLING_BASELINE_PERCENT.
-# NOTE: the image components (redaction, tail_sampling) could not be verified
-# with `components` at authoring time (registry unreachable). If `redaction` is
-# missing in the pinned image, replace it with attributes/redact + transform.
+# Verified against signoz/signoz-otel-collector:v0.129.6: the config loads and
+# both redaction and tail_sampling run (smoke test: secrets in log bodies,
+# attributes and URL queries arrive in ClickHouse redacted).
 
 receivers:
   otlp:
