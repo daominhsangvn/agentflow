@@ -2,6 +2,7 @@
  * Desktop loop dispatch — builds a command payload and dispatches it
  * to the electron harness via the desktop gateway.
  */
+// biome-ignore-all lint/style/noExcessiveLinesPerFile: span wrappers push the dispatch functions past the limit
 
 import type { LoopBranchMaterializationEnvelope } from "@agentflow-ai/loops-api/desktop-request";
 import {
@@ -45,7 +46,9 @@ import {
   WORKFLOW_INSTRUCTION_TIMEOUT_MS,
   type WorkflowInstructionRequest,
 } from "@repo/api/src/types/workflow-instruction";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { z } from "zod";
 import {
   type ComputeTargetClaudeRuntime,
@@ -81,7 +84,7 @@ type RelayDispatchContext = {
    * attempt.
    *
    * A not-delivered answer that will be replayed is an expected transient
-   * (ISS-5811), not a failure. Error-level logs here are wired to Datadog
+   * (ISS-5811), not a failure. Error-level logs here are wired to SigNoz
    * monitors, so a dispatch that recovers on its second attempt must not leave
    * an error behind -- an alert that fires on every recovered launch is an
    * alert people learn to ignore. Absent (the final attempt) means the failure
@@ -338,7 +341,7 @@ async function dispatchRelayApiOperation(input: {
     // the level its retry budget warrants and with the relay's reason attached.
     // Re-logging it here would emit a second, always-error line for one
     // transient miss -- so a launch that recovers on replay would still leave
-    // an error in Datadog. Everything else reaching this catch (a fetch throw,
+    // an error in SigNoz. Everything else reaching this catch (a fetch throw,
     // the 5s abort, a wire-conversion failure) is unexpected and terminal.
     if (!(dispatchError instanceof RelayDispatchNotDeliveredError)) {
       log.error(
@@ -620,8 +623,21 @@ export function buildDesktopLoopExecutionBody(
  *
  * @returns The desktop command ID
  */
-export async function launchLoopOnDesktop(
-  opts: LaunchDesktopOpts
+export function launchLoopOnDesktop(opts: LaunchDesktopOpts): Promise<string> {
+  return withSpan(
+    "loop.dispatch",
+    {
+      [AfAttribute.ComputeTargetId]: opts.computeTargetId,
+      [AfAttribute.LoopId]: opts.loopId,
+      "af.loop.dispatch_kind": LoopDispatchKind.Launch,
+    },
+    (span) => dispatchLaunchCommand(opts, span)
+  );
+}
+
+async function dispatchLaunchCommand(
+  opts: LaunchDesktopOpts,
+  span: DispatchSpan
 ): Promise<string> {
   const {
     loopId,
@@ -675,6 +691,7 @@ export async function launchLoopOnDesktop(
     input
   );
   const commandId = createResult.command.commandId;
+  span.setAttribute(AfAttribute.CommandId, commandId);
 
   const relayOperation = toRelayOperation(
     commandId,
@@ -695,6 +712,7 @@ export async function launchLoopOnDesktop(
       commandId,
     });
   } catch (err) {
+    markDispatchFailure(err, span);
     const dispatchReason =
       err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined;
     if (signatureForDispatch) {
@@ -736,96 +754,112 @@ export async function launchLoopOnDesktop(
  * but it must do so knowing the runner may still be alive rather than off a log
  * line that said the command was dispatched when it never left the cloud.
  */
-export async function stopDesktopLoop(
+export function stopDesktopLoop(
   loopId: string,
   computeTargetId: string,
   desktopUserIntentSignature?: DesktopUserIntentSignature
 ): Promise<void> {
-  const namespace = CURRENT_DESKTOP_API_NAMESPACE;
+  return withSpan(
+    "loop.dispatch",
+    {
+      [AfAttribute.ComputeTargetId]: computeTargetId,
+      [AfAttribute.LoopId]: loopId,
+      "af.loop.dispatch_kind": LoopDispatchKind.Stop,
+    },
+    async (span) => {
+      const namespace = CURRENT_DESKTOP_API_NAMESPACE;
 
-  const killInput: CreateDesktopCommandInput = desktopUserIntentSignature
-    ? {
-        commandId:
-          desktopUserIntentSignature.commandId as BrowserSignedCommandId,
-        operationId: "symphony_loop_kill",
-        method: "POST" as const,
-        path: rewriteDesktopApiPath(
-          "/api/gateway/symphony/loop/kill",
-          namespace
-        ),
-        body: {
-          loopId,
-          userIntent: desktopUserIntentSignature.body,
-        } satisfies JsonValue,
-        signature: desktopUserIntentSignature.signature,
-        signaturePayload: desktopUserIntentSignature.signaturePayload,
-        publicKeyFingerprint: desktopUserIntentSignature.publicKeyFingerprint,
-      }
-    : {
-        operationId: "symphony_loop_kill",
-        method: "POST" as const,
-        path: rewriteDesktopApiPath(
-          "/api/gateway/symphony/loop/kill",
-          namespace
-        ),
-        body: { loopId },
-      };
-  const createResult = await desktopCommandStore.createCommand(
-    computeTargetId,
-    killInput
-  );
-  const commandId = createResult.command.commandId;
-  const relayOp = toRelayOperation(
-    commandId,
-    killInput,
-    desktopUserIntentSignature
-      ? {
-          signature: desktopUserIntentSignature.signature,
-          signaturePayload: desktopUserIntentSignature.signaturePayload,
-          publicKeyFingerprint: desktopUserIntentSignature.publicKeyFingerprint,
-        }
-      : undefined
-  );
-
-  try {
-    await dispatchOperationWithReplay(computeTargetId, relayOp, {
-      label: "Kill",
-      loopId,
-      commandId,
-    });
-  } catch (err) {
-    const dispatchReason =
-      err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined;
-    // Only a SIGNED kill is terminalized here. An unsigned one deliberately
-    // leaves its row non-terminal so the desktop's hello-ack replay
-    // (`listNonTerminalDispatchCommands`) still delivers the kill on reconnect
-    // -- the durable backstop for the orphaned runner the replay above could
-    // not reach. A signed command cannot use that path: the desktop verifier
-    // rejects a signature past `MAX_SIGNATURE_AGE_SECONDS` and burns its nonce,
-    // so a later replay is refused as stale. It is expired instead.
-    if (desktopUserIntentSignature) {
-      await desktopCommandStore.markCommandExpired(
-        commandId,
-        `signed_command_delivery_failed:${dispatchReason ?? "unknown"}`,
-        {
-          commandId,
-          operationId: killInput.operationId,
-          computeTargetId,
-        }
+      const killInput: CreateDesktopCommandInput = desktopUserIntentSignature
+        ? {
+            commandId:
+              desktopUserIntentSignature.commandId as BrowserSignedCommandId,
+            operationId: "symphony_loop_kill",
+            method: "POST" as const,
+            path: rewriteDesktopApiPath(
+              "/api/gateway/symphony/loop/kill",
+              namespace
+            ),
+            body: {
+              loopId,
+              userIntent: desktopUserIntentSignature.body,
+            } satisfies JsonValue,
+            signature: desktopUserIntentSignature.signature,
+            signaturePayload: desktopUserIntentSignature.signaturePayload,
+            publicKeyFingerprint:
+              desktopUserIntentSignature.publicKeyFingerprint,
+          }
+        : {
+            operationId: "symphony_loop_kill",
+            method: "POST" as const,
+            path: rewriteDesktopApiPath(
+              "/api/gateway/symphony/loop/kill",
+              namespace
+            ),
+            body: { loopId },
+          };
+      const createResult = await desktopCommandStore.createCommand(
+        computeTargetId,
+        killInput
       );
-    }
-    throw new DispatchError(
-      err instanceof Error ? err.message : String(err),
-      commandId,
-      dispatchReason
-    );
-  }
+      const commandId = createResult.command.commandId;
+      span.setAttribute(AfAttribute.CommandId, commandId);
+      const relayOp = toRelayOperation(
+        commandId,
+        killInput,
+        desktopUserIntentSignature
+          ? {
+              signature: desktopUserIntentSignature.signature,
+              signaturePayload: desktopUserIntentSignature.signaturePayload,
+              publicKeyFingerprint:
+                desktopUserIntentSignature.publicKeyFingerprint,
+            }
+          : undefined
+      );
 
-  log.info("[loop-desktop] Desktop kill command dispatched", {
-    loopId,
-    commandId,
-    computeTargetId,
-  });
+      try {
+        await dispatchOperationWithReplay(computeTargetId, relayOp, {
+          label: "Kill",
+          loopId,
+          commandId,
+        });
+      } catch (err) {
+        markDispatchFailure(err, span);
+        const dispatchReason =
+          err instanceof RelayDispatchNotDeliveredError
+            ? err.reason
+            : undefined;
+        // Only a SIGNED kill is terminalized here. An unsigned one deliberately
+        // leaves its row non-terminal so the desktop's hello-ack replay
+        // (`listNonTerminalDispatchCommands`) still delivers the kill on reconnect
+        // -- the durable backstop for the orphaned runner the replay above could
+        // not reach. A signed command cannot use that path: the desktop verifier
+        // rejects a signature past `MAX_SIGNATURE_AGE_SECONDS` and burns its nonce,
+        // so a later replay is refused as stale. It is expired instead.
+        if (desktopUserIntentSignature) {
+          await desktopCommandStore.markCommandExpired(
+            commandId,
+            `signed_command_delivery_failed:${dispatchReason ?? "unknown"}`,
+            {
+              commandId,
+              operationId: killInput.operationId,
+              computeTargetId,
+            }
+          );
+        }
+        throw new DispatchError(
+          err instanceof Error ? err.message : String(err),
+          commandId,
+          dispatchReason
+        );
+      }
+
+      log.info("[loop-desktop] Desktop kill command dispatched", {
+        loopId,
+        commandId,
+        computeTargetId,
+      });
+    }
+  );
 }
 
 /**
@@ -883,58 +917,74 @@ const INSTRUCTION_COMMAND_TIMEOUT_MS = WORKFLOW_INSTRUCTION_TIMEOUT_MS + 60_000;
  * @returns The desktop command ID
  * @throws DispatchError when the command could not be delivered
  */
-export async function dispatchWorkflowInstruction(input: {
+export function dispatchWorkflowInstruction(input: {
   computeTargetId: string;
   request: WorkflowInstructionRequest;
 }): Promise<string> {
-  const { computeTargetId, request } = input;
-  const signing = await resolveLaunchCommandSigningRequirement(computeTargetId);
-  if (signing.status === CommandSigningRequirementStatus.Unknown) {
-    throw new Error(COMMAND_SIGNING_ELIGIBILITY_UNKNOWN_ERROR);
-  }
-  if (signing.status === CommandSigningRequirementStatus.Required) {
-    throw new Error(
-      "The computer only accepts commands signed in a browser, so it cannot run workflow instructions."
-    );
-  }
-  const commandInput: CreateDesktopCommandInput = {
-    operationId: WORKFLOW_INSTRUCTION_OPERATION_ID,
-    method: "POST",
-    path: rewriteDesktopApiPath(
-      WORKFLOW_INSTRUCTION_GATEWAY_PATH,
-      CURRENT_DESKTOP_API_NAMESPACE
-    ),
-    body: withClaudeRuntime(
-      request as JsonValue,
-      await resolveComputeTargetClaudeRuntime(computeTargetId)
-    ),
-    timeoutMs: INSTRUCTION_COMMAND_TIMEOUT_MS,
-    streaming: true,
-  };
-  const created = await desktopCommandStore.createCommand(
-    computeTargetId,
-    commandInput
+  return withSpan(
+    "loop.dispatch",
+    {
+      [AfAttribute.ComputeTargetId]: input.computeTargetId,
+      "af.loop.dispatch_kind": LoopDispatchKind.WorkflowInstruction,
+    },
+    async (span) => {
+      const { computeTargetId, request } = input;
+      const signing =
+        await resolveLaunchCommandSigningRequirement(computeTargetId);
+      if (signing.status === CommandSigningRequirementStatus.Unknown) {
+        throw new Error(COMMAND_SIGNING_ELIGIBILITY_UNKNOWN_ERROR);
+      }
+      if (signing.status === CommandSigningRequirementStatus.Required) {
+        throw new Error(
+          "The computer only accepts commands signed in a browser, so it cannot run workflow instructions."
+        );
+      }
+      const commandInput: CreateDesktopCommandInput = {
+        operationId: WORKFLOW_INSTRUCTION_OPERATION_ID,
+        method: "POST",
+        path: rewriteDesktopApiPath(
+          WORKFLOW_INSTRUCTION_GATEWAY_PATH,
+          CURRENT_DESKTOP_API_NAMESPACE
+        ),
+        body: withClaudeRuntime(
+          request as JsonValue,
+          await resolveComputeTargetClaudeRuntime(computeTargetId)
+        ),
+        timeoutMs: INSTRUCTION_COMMAND_TIMEOUT_MS,
+        streaming: true,
+      };
+      const created = await desktopCommandStore.createCommand(
+        computeTargetId,
+        commandInput
+      );
+      const commandId = created.command.commandId;
+      span.setAttribute(AfAttribute.CommandId, commandId);
+      try {
+        await dispatchOperationWithReplay(
+          computeTargetId,
+          toRelayOperation(commandId, commandInput),
+          {
+            label: "Workflow instruction",
+            loopId: request.actionRunId,
+            commandId,
+          }
+        );
+      } catch (err) {
+        markDispatchFailure(err, span);
+        throw new DispatchError(
+          err instanceof Error ? err.message : String(err),
+          commandId,
+          err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
+        );
+      }
+      log.info("[loop-desktop] Workflow instruction command dispatched", {
+        actionRunId: request.actionRunId,
+        commandId,
+        computeTargetId,
+      });
+      return commandId;
+    }
   );
-  const commandId = created.command.commandId;
-  try {
-    await dispatchOperationWithReplay(
-      computeTargetId,
-      toRelayOperation(commandId, commandInput),
-      { label: "Workflow instruction", loopId: request.actionRunId, commandId }
-    );
-  } catch (err) {
-    throw new DispatchError(
-      err instanceof Error ? err.message : String(err),
-      commandId,
-      err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
-    );
-  }
-  log.info("[loop-desktop] Workflow instruction command dispatched", {
-    actionRunId: request.actionRunId,
-    commandId,
-    computeTargetId,
-  });
-  return commandId;
 }
 
 /** The computer's own limit on a decision command, past the decision's. */
@@ -949,58 +999,70 @@ const DECISION_COMMAND_TIMEOUT_MS = WORKFLOW_DECISION_TIMEOUT_MS + 60_000;
  * @returns The desktop command ID
  * @throws DispatchError when the command could not be delivered
  */
-export async function dispatchWorkflowDecision(input: {
+export function dispatchWorkflowDecision(input: {
   computeTargetId: string;
   request: WorkflowDecisionRequest;
 }): Promise<string> {
-  const { computeTargetId, request } = input;
-  const signing = await resolveLaunchCommandSigningRequirement(computeTargetId);
-  if (signing.status === CommandSigningRequirementStatus.Unknown) {
-    throw new Error(COMMAND_SIGNING_ELIGIBILITY_UNKNOWN_ERROR);
-  }
-  if (signing.status === CommandSigningRequirementStatus.Required) {
-    throw new Error(
-      "The computer only accepts commands signed in a browser, so it cannot answer workflow decisions."
-    );
-  }
-  const commandInput: CreateDesktopCommandInput = {
-    operationId: WORKFLOW_DECISION_OPERATION_ID,
-    method: "POST",
-    path: rewriteDesktopApiPath(
-      WORKFLOW_DECISION_GATEWAY_PATH,
-      CURRENT_DESKTOP_API_NAMESPACE
-    ),
-    body: withClaudeRuntime(
-      request as JsonValue,
-      await resolveComputeTargetClaudeRuntime(computeTargetId)
-    ),
-    timeoutMs: DECISION_COMMAND_TIMEOUT_MS,
-    streaming: true,
-  };
-  const created = await desktopCommandStore.createCommand(
-    computeTargetId,
-    commandInput
+  return withSpan(
+    "loop.dispatch",
+    {
+      [AfAttribute.ComputeTargetId]: input.computeTargetId,
+      "af.loop.dispatch_kind": LoopDispatchKind.WorkflowDecision,
+    },
+    async (span) => {
+      const { computeTargetId, request } = input;
+      const signing =
+        await resolveLaunchCommandSigningRequirement(computeTargetId);
+      if (signing.status === CommandSigningRequirementStatus.Unknown) {
+        throw new Error(COMMAND_SIGNING_ELIGIBILITY_UNKNOWN_ERROR);
+      }
+      if (signing.status === CommandSigningRequirementStatus.Required) {
+        throw new Error(
+          "The computer only accepts commands signed in a browser, so it cannot answer workflow decisions."
+        );
+      }
+      const commandInput: CreateDesktopCommandInput = {
+        operationId: WORKFLOW_DECISION_OPERATION_ID,
+        method: "POST",
+        path: rewriteDesktopApiPath(
+          WORKFLOW_DECISION_GATEWAY_PATH,
+          CURRENT_DESKTOP_API_NAMESPACE
+        ),
+        body: withClaudeRuntime(
+          request as JsonValue,
+          await resolveComputeTargetClaudeRuntime(computeTargetId)
+        ),
+        timeoutMs: DECISION_COMMAND_TIMEOUT_MS,
+        streaming: true,
+      };
+      const created = await desktopCommandStore.createCommand(
+        computeTargetId,
+        commandInput
+      );
+      const commandId = created.command.commandId;
+      span.setAttribute(AfAttribute.CommandId, commandId);
+      try {
+        await dispatchOperationWithReplay(
+          computeTargetId,
+          toRelayOperation(commandId, commandInput),
+          { label: "Workflow decision", loopId: request.decisionId, commandId }
+        );
+      } catch (err) {
+        markDispatchFailure(err, span);
+        throw new DispatchError(
+          err instanceof Error ? err.message : String(err),
+          commandId,
+          err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
+        );
+      }
+      log.info("[loop-desktop] Workflow decision command dispatched", {
+        decisionId: request.decisionId,
+        commandId,
+        computeTargetId,
+      });
+      return commandId;
+    }
   );
-  const commandId = created.command.commandId;
-  try {
-    await dispatchOperationWithReplay(
-      computeTargetId,
-      toRelayOperation(commandId, commandInput),
-      { label: "Workflow decision", loopId: request.decisionId, commandId }
-    );
-  } catch (err) {
-    throw new DispatchError(
-      err instanceof Error ? err.message : String(err),
-      commandId,
-      err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
-    );
-  }
-  log.info("[loop-desktop] Workflow decision command dispatched", {
-    decisionId: request.decisionId,
-    commandId,
-    computeTargetId,
-  });
-  return commandId;
 }
 
 /** The computer's own limit on a turn command, past the turn's. */
@@ -1015,58 +1077,70 @@ const ORCHESTRATOR_TURN_COMMAND_GRACE_MS = 60_000;
  * @returns The desktop command ID
  * @throws DispatchError when the command could not be delivered
  */
-export async function dispatchOrchestratorTurn(input: {
+export function dispatchOrchestratorTurn(input: {
   computeTargetId: string;
   request: OrchestratorTurnRequest;
 }): Promise<string> {
-  const { computeTargetId, request } = input;
-  const signing = await resolveLaunchCommandSigningRequirement(computeTargetId);
-  if (signing.status === CommandSigningRequirementStatus.Unknown) {
-    throw new Error(COMMAND_SIGNING_ELIGIBILITY_UNKNOWN_ERROR);
-  }
-  if (signing.status === CommandSigningRequirementStatus.Required) {
-    throw new Error(
-      "The computer only accepts commands signed in a browser, so it cannot run the orchestrator."
-    );
-  }
-  const commandInput: CreateDesktopCommandInput = {
-    operationId: ORCHESTRATOR_TURN_OPERATION_ID,
-    method: "POST",
-    path: rewriteDesktopApiPath(
-      ORCHESTRATOR_TURN_GATEWAY_PATH,
-      CURRENT_DESKTOP_API_NAMESPACE
-    ),
-    body: withClaudeRuntime(
-      request as JsonValue,
-      await resolveComputeTargetClaudeRuntime(computeTargetId)
-    ),
-    timeoutMs: request.timeoutMs + ORCHESTRATOR_TURN_COMMAND_GRACE_MS,
-    streaming: true,
-  };
-  const created = await desktopCommandStore.createCommand(
-    computeTargetId,
-    commandInput
+  return withSpan(
+    "loop.dispatch",
+    {
+      [AfAttribute.ComputeTargetId]: input.computeTargetId,
+      "af.loop.dispatch_kind": LoopDispatchKind.OrchestratorTurn,
+    },
+    async (span) => {
+      const { computeTargetId, request } = input;
+      const signing =
+        await resolveLaunchCommandSigningRequirement(computeTargetId);
+      if (signing.status === CommandSigningRequirementStatus.Unknown) {
+        throw new Error(COMMAND_SIGNING_ELIGIBILITY_UNKNOWN_ERROR);
+      }
+      if (signing.status === CommandSigningRequirementStatus.Required) {
+        throw new Error(
+          "The computer only accepts commands signed in a browser, so it cannot run the orchestrator."
+        );
+      }
+      const commandInput: CreateDesktopCommandInput = {
+        operationId: ORCHESTRATOR_TURN_OPERATION_ID,
+        method: "POST",
+        path: rewriteDesktopApiPath(
+          ORCHESTRATOR_TURN_GATEWAY_PATH,
+          CURRENT_DESKTOP_API_NAMESPACE
+        ),
+        body: withClaudeRuntime(
+          request as JsonValue,
+          await resolveComputeTargetClaudeRuntime(computeTargetId)
+        ),
+        timeoutMs: request.timeoutMs + ORCHESTRATOR_TURN_COMMAND_GRACE_MS,
+        streaming: true,
+      };
+      const created = await desktopCommandStore.createCommand(
+        computeTargetId,
+        commandInput
+      );
+      const commandId = created.command.commandId;
+      span.setAttribute(AfAttribute.CommandId, commandId);
+      try {
+        await dispatchOperationWithReplay(
+          computeTargetId,
+          toRelayOperation(commandId, commandInput),
+          { label: "Orchestrator turn", loopId: request.turnId, commandId }
+        );
+      } catch (err) {
+        markDispatchFailure(err, span);
+        throw new DispatchError(
+          err instanceof Error ? err.message : String(err),
+          commandId,
+          err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
+        );
+      }
+      log.info("[loop-desktop] Orchestrator turn command dispatched", {
+        turnId: request.turnId,
+        commandId,
+        computeTargetId,
+      });
+      return commandId;
+    }
   );
-  const commandId = created.command.commandId;
-  try {
-    await dispatchOperationWithReplay(
-      computeTargetId,
-      toRelayOperation(commandId, commandInput),
-      { label: "Orchestrator turn", loopId: request.turnId, commandId }
-    );
-  } catch (err) {
-    throw new DispatchError(
-      err instanceof Error ? err.message : String(err),
-      commandId,
-      err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
-    );
-  }
-  log.info("[loop-desktop] Orchestrator turn command dispatched", {
-    turnId: request.turnId,
-    commandId,
-    computeTargetId,
-  });
-  return commandId;
 }
 
 const ORCHESTRATOR_TURN_CANCEL_TIMEOUT_MS = 30_000;
@@ -1078,39 +1152,50 @@ const ORCHESTRATOR_TURN_CANCEL_TIMEOUT_MS = 30_000;
  *
  * @throws DispatchError when the command could not be delivered
  */
-export async function dispatchOrchestratorTurnCancel(input: {
+export function dispatchOrchestratorTurnCancel(input: {
   computeTargetId: string;
   turnId: string;
 }): Promise<string> {
-  const commandInput: CreateDesktopCommandInput = {
-    operationId: ORCHESTRATOR_TURN_CANCEL_OPERATION_ID,
-    method: "POST",
-    path: rewriteDesktopApiPath(
-      ORCHESTRATOR_TURN_CANCEL_GATEWAY_PATH,
-      CURRENT_DESKTOP_API_NAMESPACE
-    ),
-    body: { turnId: input.turnId },
-    timeoutMs: ORCHESTRATOR_TURN_CANCEL_TIMEOUT_MS,
-  };
-  const created = await desktopCommandStore.createCommand(
-    input.computeTargetId,
-    commandInput
+  return withSpan(
+    "loop.dispatch",
+    {
+      [AfAttribute.ComputeTargetId]: input.computeTargetId,
+      "af.loop.dispatch_kind": LoopDispatchKind.OrchestratorTurnCancel,
+    },
+    async (span) => {
+      const commandInput: CreateDesktopCommandInput = {
+        operationId: ORCHESTRATOR_TURN_CANCEL_OPERATION_ID,
+        method: "POST",
+        path: rewriteDesktopApiPath(
+          ORCHESTRATOR_TURN_CANCEL_GATEWAY_PATH,
+          CURRENT_DESKTOP_API_NAMESPACE
+        ),
+        body: { turnId: input.turnId },
+        timeoutMs: ORCHESTRATOR_TURN_CANCEL_TIMEOUT_MS,
+      };
+      const created = await desktopCommandStore.createCommand(
+        input.computeTargetId,
+        commandInput
+      );
+      const commandId = created.command.commandId;
+      span.setAttribute(AfAttribute.CommandId, commandId);
+      try {
+        await dispatchOperationWithReplay(
+          input.computeTargetId,
+          toRelayOperation(commandId, commandInput),
+          { label: "Orchestrator turn cancel", loopId: input.turnId, commandId }
+        );
+      } catch (err) {
+        markDispatchFailure(err, span);
+        throw new DispatchError(
+          err instanceof Error ? err.message : String(err),
+          commandId,
+          err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
+        );
+      }
+      return commandId;
+    }
   );
-  const commandId = created.command.commandId;
-  try {
-    await dispatchOperationWithReplay(
-      input.computeTargetId,
-      toRelayOperation(commandId, commandInput),
-      { label: "Orchestrator turn cancel", loopId: input.turnId, commandId }
-    );
-  } catch (err) {
-    throw new DispatchError(
-      err instanceof Error ? err.message : String(err),
-      commandId,
-      err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
-    );
-  }
-  return commandId;
 }
 
 /**
@@ -1121,64 +1206,98 @@ export async function dispatchOrchestratorTurnCancel(input: {
  * @returns The desktop command ID
  * @throws DispatchError when the command could not be delivered
  */
-export async function dispatchCapabilitiesRefresh(input: {
+export function dispatchCapabilitiesRefresh(input: {
   computeTargetId: string;
   request: RunnerCapabilitiesRefreshRequest;
 }): Promise<string> {
-  const { computeTargetId, request } = input;
-  const signing = await resolveLaunchCommandSigningRequirement(computeTargetId);
-  if (signing.status === CommandSigningRequirementStatus.Unknown) {
-    throw new CommandSigningRefusedError(
-      COMMAND_SIGNING_ELIGIBILITY_UNKNOWN_ERROR
-    );
-  }
-  if (signing.status === CommandSigningRequirementStatus.Required) {
-    throw new CommandSigningRefusedError(
-      "The computer only accepts commands signed in a browser, so it cannot read its toolkit."
-    );
-  }
-  const commandInput: CreateDesktopCommandInput = {
-    operationId: RUNNER_CAPABILITIES_REFRESH_OPERATION_ID,
-    method: "POST",
-    path: rewriteDesktopApiPath(
-      RUNNER_CAPABILITIES_REFRESH_GATEWAY_PATH,
-      CURRENT_DESKTOP_API_NAMESPACE
-    ),
-    body: request as JsonValue,
-    timeoutMs:
-      RUNNER_CAPABILITIES_REFRESH_TIMEOUT_MS +
-      CAPABILITIES_REFRESH_COMMAND_GRACE_MS,
-    streaming: true,
-    idempotencyKey: runnerCapabilitiesRefreshKey(request.refreshId),
-  };
-  const created = await desktopCommandStore.createCommand(
-    computeTargetId,
-    commandInput
-  );
-  const commandId = created.command.commandId;
-  try {
-    await dispatchOperationWithReplay(
-      computeTargetId,
-      toRelayOperation(commandId, commandInput),
-      {
-        label: "Capabilities refresh",
-        loopId: request.refreshId,
-        commandId,
+  return withSpan(
+    "loop.dispatch",
+    {
+      [AfAttribute.ComputeTargetId]: input.computeTargetId,
+      "af.loop.dispatch_kind": LoopDispatchKind.CapabilitiesRefresh,
+    },
+    async (span) => {
+      const { computeTargetId, request } = input;
+      const signing =
+        await resolveLaunchCommandSigningRequirement(computeTargetId);
+      if (signing.status === CommandSigningRequirementStatus.Unknown) {
+        throw new CommandSigningRefusedError(
+          COMMAND_SIGNING_ELIGIBILITY_UNKNOWN_ERROR
+        );
       }
-    );
-  } catch (err) {
-    throw new DispatchError(
-      err instanceof Error ? err.message : String(err),
-      commandId,
-      err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
-    );
-  }
-  log.info("[loop-desktop] Capabilities refresh command dispatched", {
-    refreshId: request.refreshId,
-    commandId,
-    computeTargetId,
-  });
-  return commandId;
+      if (signing.status === CommandSigningRequirementStatus.Required) {
+        throw new CommandSigningRefusedError(
+          "The computer only accepts commands signed in a browser, so it cannot read its toolkit."
+        );
+      }
+      const commandInput: CreateDesktopCommandInput = {
+        operationId: RUNNER_CAPABILITIES_REFRESH_OPERATION_ID,
+        method: "POST",
+        path: rewriteDesktopApiPath(
+          RUNNER_CAPABILITIES_REFRESH_GATEWAY_PATH,
+          CURRENT_DESKTOP_API_NAMESPACE
+        ),
+        body: request as JsonValue,
+        timeoutMs:
+          RUNNER_CAPABILITIES_REFRESH_TIMEOUT_MS +
+          CAPABILITIES_REFRESH_COMMAND_GRACE_MS,
+        streaming: true,
+        idempotencyKey: runnerCapabilitiesRefreshKey(request.refreshId),
+      };
+      const created = await desktopCommandStore.createCommand(
+        computeTargetId,
+        commandInput
+      );
+      const commandId = created.command.commandId;
+      span.setAttribute(AfAttribute.CommandId, commandId);
+      try {
+        await dispatchOperationWithReplay(
+          computeTargetId,
+          toRelayOperation(commandId, commandInput),
+          {
+            label: "Capabilities refresh",
+            loopId: request.refreshId,
+            commandId,
+          }
+        );
+      } catch (err) {
+        markDispatchFailure(err, span);
+        throw new DispatchError(
+          err instanceof Error ? err.message : String(err),
+          commandId,
+          err instanceof RelayDispatchNotDeliveredError ? err.reason : undefined
+        );
+      }
+      log.info("[loop-desktop] Capabilities refresh command dispatched", {
+        refreshId: request.refreshId,
+        commandId,
+        computeTargetId,
+      });
+      return commandId;
+    }
+  );
 }
 
 const CAPABILITIES_REFRESH_COMMAND_GRACE_MS = 60_000;
+
+export const LoopDispatchKind = {
+  Launch: "launch",
+  Stop: "stop",
+  WorkflowInstruction: "workflow_instruction",
+  WorkflowDecision: "workflow_decision",
+  OrchestratorTurn: "orchestrator_turn",
+  OrchestratorTurnCancel: "orchestrator_turn_cancel",
+  CapabilitiesRefresh: "capabilities_refresh",
+} as const;
+export type LoopDispatchKind =
+  (typeof LoopDispatchKind)[keyof typeof LoopDispatchKind];
+
+type DispatchSpan = NonNullable<Parameters<typeof setSpanOutcome>[2]>;
+
+function markDispatchFailure(err: unknown, span: DispatchSpan): void {
+  const reason =
+    err instanceof RelayDispatchNotDeliveredError
+      ? "target_offline"
+      : "dispatch_failed";
+  setSpanOutcome(AfOutcome.Error, reason, span);
+}

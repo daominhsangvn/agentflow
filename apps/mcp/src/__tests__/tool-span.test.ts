@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { AfAttribute } from "@repo/observability/span";
+import { AfAttribute } from "@repo/observability/af-attributes";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { instrumentToolRegistration, withToolSpan } from "../tool-span.js";
 
@@ -66,6 +66,15 @@ describe("instrumentToolRegistration", () => {
     );
     expect(cb).toHaveBeenCalledWith({ secret: "token" }, { extra: 1 });
     expect(mocks.markSpanError).not.toHaveBeenCalled();
+  });
+
+  it("adds af.loop_id and af.case_id for UUID arguments only", async () => {
+    const id = "0190b2c4-1111-7222-8333-444455556666";
+    const { stored } = setup({ content: [] });
+    await stored[0]({ loopId: id, caseId: "not-a-uuid" });
+    const attrs = mocks.withSpan.mock.calls[0][1];
+    expect(attrs[AfAttribute.LoopId]).toBe(id);
+    expect(attrs[AfAttribute.CaseId]).toBeUndefined();
   });
 
   it("marks the span when the result is an error", async () => {

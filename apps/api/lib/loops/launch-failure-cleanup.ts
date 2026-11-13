@@ -15,7 +15,9 @@
  */
 
 import { LoopErrorCode, LoopStatus } from "@repo/api/src/types/loop";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { isInvalidStatusTransitionError } from "@/app/loops/loop-errors";
 import { loopsService } from "@/app/loops/service";
 import { TERMINAL_LOOP_STATUSES } from "@/app/loops/validators";
@@ -53,7 +55,40 @@ const LAUNCH_FAILURE_MESSAGE =
  * renders as a "Started" timestamp and a duration -- contradicting the error
  * copy that says the run never began (ISS-5711).
  */
-export async function failLoopWithError(
+export function failLoopWithError(
+  loopId: string,
+  organizationId: string,
+  code: LoopErrorCode,
+  message: string,
+  timestamp: string,
+  options?: { neverStarted?: boolean }
+): Promise<void> {
+  return withSpan(
+    "loop.fail",
+    {
+      [AfAttribute.LoopId]: loopId,
+      [AfAttribute.OrgId]: organizationId,
+      [LOOP_FAIL_KIND_ATTRIBUTE]: LoopFailKind.WithError,
+    },
+    async (span) => {
+      setSpanOutcome(AfOutcome.Error, message, span);
+      await recordLoopFailure(
+        loopId,
+        organizationId,
+        code,
+        message,
+        timestamp,
+        options
+      );
+    }
+  );
+}
+
+/**
+ * The failure bookkeeping without its own span, so a caller already inside a
+ * `loop.fail` span does not produce a second nested one.
+ */
+async function recordLoopFailure(
   loopId: string,
   organizationId: string,
   code: LoopErrorCode,
@@ -116,44 +151,55 @@ export async function failLoopWithError(
  * caller-visible semantics exactly: bookkeeping never masks the launch error
  * that callers (and `classifyLaunchFailure`) actually classify on.
  */
-export async function failLoopAfterLaunchFailure(
+export function failLoopAfterLaunchFailure(
   loopId: string,
   organizationId: string
 ): Promise<void> {
-  try {
-    await failLoopWithError(
-      loopId,
-      organizationId,
-      LoopErrorCode.LaunchFailed,
-      LAUNCH_FAILURE_MESSAGE,
-      new Date().toISOString(),
-      // Dispatch threw before the runner was reachable, so the run provably
-      // never started: keep `startedAt` null rather than let the terminal
-      // backfill invent one.
-      { neverStarted: true }
-    );
-    return;
-  } catch (failError) {
-    // `failLoopWithError` already swallows the benign terminal-status race, so
-    // an InvalidStatusTransitionError reaching here means the loop was in a
-    // NON-terminal status the state machine refuses to fail from — a real
-    // validation problem, not a race.
-    if (isInvalidStatusTransitionError(failError)) {
-      log.error("loop.fail_after_launch_failure_invalid_transition", {
-        loopId,
-        from: failError.from,
-        detail:
-          "Launch failed but the loop could not be transitioned to FAILED from a non-terminal status",
-      });
-    } else {
-      log.error("loop.fail_after_launch_failure_failed", {
-        loopId,
-        failError,
-      });
-    }
-  }
+  return withSpan(
+    "loop.fail",
+    {
+      [AfAttribute.LoopId]: loopId,
+      [AfAttribute.OrgId]: organizationId,
+      [LOOP_FAIL_KIND_ATTRIBUTE]: LoopFailKind.AfterLaunch,
+    },
+    async (span) => {
+      setSpanOutcome(AfOutcome.Error, LAUNCH_FAILURE_MESSAGE, span);
+      try {
+        await recordLoopFailure(
+          loopId,
+          organizationId,
+          LoopErrorCode.LaunchFailed,
+          LAUNCH_FAILURE_MESSAGE,
+          new Date().toISOString(),
+          // Dispatch threw before the runner was reachable, so the run provably
+          // never started: keep `startedAt` null rather than let the terminal
+          // backfill invent one.
+          { neverStarted: true }
+        );
+        return;
+      } catch (failError) {
+        // `failLoopWithError` already swallows the benign terminal-status race, so
+        // an InvalidStatusTransitionError reaching here means the loop was in a
+        // NON-terminal status the state machine refuses to fail from — a real
+        // validation problem, not a race.
+        if (isInvalidStatusTransitionError(failError)) {
+          log.error("loop.fail_after_launch_failure_invalid_transition", {
+            loopId,
+            from: failError.from,
+            detail:
+              "Launch failed but the loop could not be transitioned to FAILED from a non-terminal status",
+          });
+        } else {
+          log.error("loop.fail_after_launch_failure_failed", {
+            loopId,
+            failError,
+          });
+        }
+      }
 
-  await reportIfStillActive(loopId, organizationId);
+      await reportIfStillActive(loopId, organizationId);
+    }
+  );
 }
 
 /**
@@ -195,3 +241,14 @@ async function reportIfStillActive(
     });
   }
 }
+
+/** Which failure helper wrote the `loop.fail` span (low-cardinality). */
+export const LoopFailKind = {
+  WithError: "with_error",
+  AfterLaunch: "after_launch",
+  RejectedCommand: "rejected_command",
+  TerminalCommandError: "terminal_command_error",
+} as const;
+export type LoopFailKind = (typeof LoopFailKind)[keyof typeof LoopFailKind];
+
+export const LOOP_FAIL_KIND_ATTRIBUTE = "af.loop.fail_kind";

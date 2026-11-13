@@ -41,7 +41,7 @@ export const API_KEY_SCOPES_UNRESOLVABLE_EVENT = "api_key_scopes_unresolvable";
  * revokes the caller's whole refresh-token family — remedies that do not apply.
  * The literal deliberately matches the monitored event name above so one search
  * finds both the log and the response; they stay separate constants because a
- * Datadog event name and an HTTP wire code are independently versioned.
+ * SigNoz event name and an HTTP wire code are independently versioned.
  *
  * Additive and optional: an older client that ignores `code` still sees a 401
  * and degrades to its generic refusal.

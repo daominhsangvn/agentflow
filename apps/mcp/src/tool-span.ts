@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AfAttribute } from "@repo/observability/af-attributes";
 import {
   markSpanError,
   type SpanAttributes,
@@ -12,6 +13,9 @@ const SAFE_TOOL_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
 export const UNKNOWN_TOOL_SPAN_NAME = "unknown";
 
 export const McpSpanAttribute = { ToolName: "mcp.tool.name" } as const;
+
+const UUID_PATTERN =
+  /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 
 const errorResultSchema = z.object({ isError: z.literal(true) });
 
@@ -48,7 +52,9 @@ export function instrumentToolRegistration(
   const wrapped = (name: string, config: unknown, cb: unknown) => {
     const callback = cb as (...args: unknown[]) => Promise<unknown>;
     const instrumented = (...args: unknown[]) =>
-      withToolSpan(name, attributes, () => callback(...args));
+      withToolSpan(name, { ...attributes, ...entityAttributes(args[0]) }, () =>
+        callback(...args)
+      );
     return (original as (...a: unknown[]) => unknown)(
       name,
       config,
@@ -57,3 +63,30 @@ export function instrumentToolRegistration(
   };
   Reflect.set(server, "registerTool", wrapped);
 }
+
+/** `af.loop_id` / `af.case_id` from tool arguments, only when they are UUIDs. */
+function entityAttributes(toolArgs: unknown): SpanAttributes {
+  const parsed = entityArgsSchema.safeParse(toolArgs);
+  if (!parsed.success) {
+    return {};
+  }
+  const result: SpanAttributes = {};
+  if (parsed.data.loopId) {
+    result[AfAttribute.LoopId] = parsed.data.loopId;
+  }
+  if (parsed.data.caseId) {
+    result[AfAttribute.CaseId] = parsed.data.caseId;
+  }
+  return result;
+}
+
+const uuidOrUndefined = z
+  .string()
+  .regex(UUID_PATTERN)
+  .optional()
+  .catch(undefined);
+
+const entityArgsSchema = z.object({
+  loopId: uuidOrUndefined,
+  caseId: uuidOrUndefined,
+});

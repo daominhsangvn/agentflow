@@ -188,7 +188,7 @@ describe("handleDesktopAgentSessionsEvent", () => {
       })
     );
     // FEA-2917: the ingestion-failure error log must carry the gateway session
-    // identifiers so an operator can pivot from this Datadog error back to the
+    // identifiers so an operator can pivot from this SigNoz error back to the
     // originating gateway session.
     expect(mockLog.error).toHaveBeenCalledWith(
       "Desktop agent sessions ingestion failed",

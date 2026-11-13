@@ -4,7 +4,6 @@ import {
   type Meter,
   metrics,
 } from "@opentelemetry/api";
-import { log } from "../log";
 import { isSensitiveKey, redactSensitiveText } from "../redact";
 import { redactGatewaySessionId } from "../redact-correlation";
 import type { FilterToken } from "./filter-tokens";
@@ -136,27 +135,20 @@ export type DbPoolMetric = {
 // ---------------------------------------------------------------------------
 
 /**
- * Emit any telemetry metric as a JSON log line with the `_telemetryMetric: true`
- * marker, and record it through the OpenTelemetry Meter (`count` -> Counter,
- * `value` -> Gauge). Use this directly for
- * domain-specific metric types (e.g. loop.runner.*); use the typed wrappers
- * below for the queue/protocol metric families.
+ * Record a telemetry metric through the OpenTelemetry Meter (`count` ->
+ * Counter, `value` -> Gauge). Use this directly for domain-specific metric
+ * types (e.g. loop.runner.*); use the typed wrappers below for the
+ * queue/protocol metric families.
  */
 export function emitTelemetryMetric<T extends { metric: string }>(
   metric: T
 ): void {
-  // gatewaySessionId is a session-correlation token that must never be logged
-  // raw. The metric pipeline emits via log.info, so redact to the stable hash
-  // before stringifying; same id in means same hash out, so metric correlation
-  // by session survives.
-  const payload: Record<string, unknown> = {
-    ...metric,
-    _telemetryMetric: true,
-  };
+  // gatewaySessionId is a session-correlation token that must never be
+  // recorded raw. Redact to the stable hash; same id in means same hash out.
+  const payload: Record<string, unknown> = { ...metric };
   if (typeof payload.gatewaySessionId === "string") {
     payload.gatewaySessionId = redactGatewaySessionId(payload.gatewaySessionId);
   }
-  log.info(JSON.stringify(payload));
   recordOtelMetric(payload);
 }
 
@@ -191,7 +183,6 @@ const METRIC_ATTRIBUTE_EXCLUDED_KEYS = new Set([
   "inUse",
   "idle",
   "total",
-  "_telemetryMetric",
 ]);
 
 type MetricAttributes = Record<string, string | number | boolean>;

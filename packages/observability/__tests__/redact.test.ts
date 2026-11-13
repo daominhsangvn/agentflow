@@ -14,7 +14,7 @@ describe("isSensitiveKey", () => {
       "apiKey",
       "api_key",
       "API-KEY",
-      "datadogApiKey",
+      "exampleApiKey",
       "accessToken",
       "refresh_token",
       "sessionToken",
@@ -73,7 +73,7 @@ describe("redactSensitiveText", () => {
     // ISS-6233 moved the pattern to `@agentflow-ai/loops-api/secret-value-pattern`,
     // which exports a non-global `.test()` twin beside the global `.replace()`
     // one. Importing the wrong twin here still scrubs the FIRST secret in a
-    // string and ships the rest to the Datadog intake and the log drain — every
+    // string and ships the rest to the OTLP exporter and the log drain — every
     // other case above carries a single secret, so all of them stay green under
     // that mutation. This one does not.
     expect(

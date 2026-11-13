@@ -42,7 +42,9 @@ import {
   type LoopRunnerTokenIssueResult,
 } from "@repo/auth/loop-runner-jwt";
 import { Prisma, type Loop as PrismaLoop, withDb } from "@repo/database";
+import { AfAttribute } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setActiveSpanAttributes, withSpan } from "@repo/observability/span";
 import { z } from "zod";
 import { documentPullRequestService } from "@/app/documents/document-pull-request-service";
 import type { LoopRuntimeState } from "@/app/loops/types";
@@ -886,152 +888,173 @@ export const loopsService = {
    * Create a new Loop.
    * Enforces a per-user concurrency limit on active loops.
    */
-  async create(
+  create(
     organizationId: string,
     userId: string,
     input: CreateLoopRequest
   ): Promise<CreateLoopResponse> {
-    await loopsService.reapStalePendingLoops(
-      organizationId,
-      input.documentId ?? null,
-      input.command ?? null
-    );
-
-    await enforceConcurrencyLimit(userId, organizationId);
-
-    await authorizeLoopRepositories({
-      organizationId,
-      documentId: input.documentId,
-      primary: input.repo,
-      additionalRepos: input.additionalRepos,
-    });
-
-    const isManual = input.command === LoopCommand.Manual;
-
-    // Nested-loop prevention: reject manual loop creation when a platform-managed
-    // loop is active for the same document + user.
-    if (isManual && input.documentId) {
-      const activeNonManual = await withDb((db) =>
-        db.loop.count({
-          where: {
-            userId,
-            organizationId,
-            artifactId: input.documentId,
-            status: { in: ACTIVE_LOOP_STATUSES },
-            command: { not: LoopCommand.Manual },
-          },
-        })
-      );
-      if (activeNonManual > 0) {
-        throw new NestedManualLoopError(input.documentId);
-      }
-    }
-
-    // Dependency-aware dispatch gating: defer an autonomous loop whose linked
-    // artifact still has a non-terminal blocker, surfacing it as BLOCKED until
-    // reconciliation releases it. Manual loops are explicit user actions and
-    // are never gated.
-    const blockedBy =
-      !isManual && input.documentId
-        ? await findNonTerminalBlockers(organizationId, input.documentId)
-        : [];
-    const isBlocked = blockedBy.length > 0;
-
-    if (isBlocked && input.documentId) {
-      // Idempotency for deferred dispatch: the active-loop gate and its partial
-      // unique index both ignore BLOCKED rows, so without this guard a repeated
-      // trigger would create a second BLOCKED loop that reconciliation would
-      // later release as a duplicate run. Fast-path: reuse the existing deferred
-      // loop. Concurrent creators that both miss here are caught below by the
-      // blocked partial unique index.
-      const existingBlocked = await findExistingBlockedLoop(
-        input.documentId,
-        input.command,
-        organizationId
-      );
-      if (existingBlocked) {
-        log.info("Loop dispatch deferred; reusing existing blocked loop", {
-          loopId: existingBlocked.id,
+    return withSpan(
+      "loop.create",
+      { [AfAttribute.OrgId]: organizationId, [AfAttribute.UserId]: userId },
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the span wrapper only adds nesting to the pre-existing body
+      async () => {
+        await loopsService.reapStalePendingLoops(
           organizationId,
-          command: input.command,
-        });
-        return { loopId: existingBlocked.id, status: LoopStatus.Blocked };
-      }
-    }
+          input.documentId ?? null,
+          input.command ?? null
+        );
 
-    let loop: { id: string; status: string };
-    try {
-      loop = await createLoopWithActiveGate({
-        command: input.command,
-        documentId: input.documentId,
-        organizationId,
-        insert: () =>
-          withDb((db) =>
-            db.loop.create({
-              data: {
-                organizationId,
+        await enforceConcurrencyLimit(userId, organizationId);
+
+        await authorizeLoopRepositories({
+          organizationId,
+          documentId: input.documentId,
+          primary: input.repo,
+          additionalRepos: input.additionalRepos,
+        });
+
+        const isManual = input.command === LoopCommand.Manual;
+
+        // Nested-loop prevention: reject manual loop creation when a platform-managed
+        // loop is active for the same document + user.
+        if (isManual && input.documentId) {
+          const activeNonManual = await withDb((db) =>
+            db.loop.count({
+              where: {
                 userId,
-                command: input.command,
-                harness: input.harness ?? HarnessType.Claude,
-                artifactId: input.documentId ?? null,
-                parentLoopId: input.parentLoopId ?? null,
-                computeTargetId: input.computeTargetId ?? null,
-                prompt: input.prompt ?? null,
-                repo: input.repo ?? undefined,
-                additionalRepos: input.additionalRepos ?? undefined,
-                contextRefs: input.contextRefs ?? undefined,
-                artifactVersion: input.documentVersion ?? null,
-                metadata: buildCreateMetadata(input.metadata, blockedBy),
-                status: resolveInitialLoopStatus(isManual, isBlocked),
-                startedAt: isManual ? new Date() : undefined,
+                organizationId,
+                artifactId: input.documentId,
+                status: { in: ACTIVE_LOOP_STATUSES },
+                command: { not: LoopCommand.Manual },
               },
             })
-          ),
-      });
-    } catch (error) {
-      // TOCTOU recovery: two concurrent dispatches for the same blocked
-      // artifact+command both passed the optimistic check above and both tried
-      // to insert a BLOCKED row. The blocked partial unique index rejected the
-      // loser with P2002 — resolve to the row that won the race instead of
-      // surfacing a duplicate (which reconciliation would later double-run).
-      if (isBlocked && input.documentId && isLoopBlockedIndexViolation(error)) {
-        const existingBlocked = await findExistingBlockedLoop(
-          input.documentId,
-          input.command,
-          organizationId
-        );
-        if (existingBlocked) {
-          log.info("Loop dispatch deferred; reusing blocked loop after race", {
-            loopId: existingBlocked.id,
-            organizationId,
-            command: input.command,
-          });
-          return { loopId: existingBlocked.id, status: LoopStatus.Blocked };
+          );
+          if (activeNonManual > 0) {
+            throw new NestedManualLoopError(input.documentId);
+          }
         }
+
+        // Dependency-aware dispatch gating: defer an autonomous loop whose linked
+        // artifact still has a non-terminal blocker, surfacing it as BLOCKED until
+        // reconciliation releases it. Manual loops are explicit user actions and
+        // are never gated.
+        const blockedBy =
+          !isManual && input.documentId
+            ? await findNonTerminalBlockers(organizationId, input.documentId)
+            : [];
+        const isBlocked = blockedBy.length > 0;
+
+        if (isBlocked && input.documentId) {
+          // Idempotency for deferred dispatch: the active-loop gate and its partial
+          // unique index both ignore BLOCKED rows, so without this guard a repeated
+          // trigger would create a second BLOCKED loop that reconciliation would
+          // later release as a duplicate run. Fast-path: reuse the existing deferred
+          // loop. Concurrent creators that both miss here are caught below by the
+          // blocked partial unique index.
+          const existingBlocked = await findExistingBlockedLoop(
+            input.documentId,
+            input.command,
+            organizationId
+          );
+          if (existingBlocked) {
+            log.info("Loop dispatch deferred; reusing existing blocked loop", {
+              loopId: existingBlocked.id,
+              organizationId,
+              command: input.command,
+            });
+            return { loopId: existingBlocked.id, status: LoopStatus.Blocked };
+          }
+        }
+
+        let loop: { id: string; status: string };
+        try {
+          loop = await createLoopWithActiveGate({
+            command: input.command,
+            documentId: input.documentId,
+            organizationId,
+            insert: () =>
+              withDb((db) =>
+                db.loop.create({
+                  data: {
+                    organizationId,
+                    userId,
+                    command: input.command,
+                    harness: input.harness ?? HarnessType.Claude,
+                    artifactId: input.documentId ?? null,
+                    parentLoopId: input.parentLoopId ?? null,
+                    computeTargetId: input.computeTargetId ?? null,
+                    prompt: input.prompt ?? null,
+                    repo: input.repo ?? undefined,
+                    additionalRepos: input.additionalRepos ?? undefined,
+                    contextRefs: input.contextRefs ?? undefined,
+                    artifactVersion: input.documentVersion ?? null,
+                    metadata: buildCreateMetadata(input.metadata, blockedBy),
+                    status: resolveInitialLoopStatus(isManual, isBlocked),
+                    startedAt: isManual ? new Date() : undefined,
+                  },
+                })
+              ),
+          });
+        } catch (error) {
+          // TOCTOU recovery: two concurrent dispatches for the same blocked
+          // artifact+command both passed the optimistic check above and both tried
+          // to insert a BLOCKED row. The blocked partial unique index rejected the
+          // loser with P2002 — resolve to the row that won the race instead of
+          // surfacing a duplicate (which reconciliation would later double-run).
+          if (
+            isBlocked &&
+            input.documentId &&
+            isLoopBlockedIndexViolation(error)
+          ) {
+            const existingBlocked = await findExistingBlockedLoop(
+              input.documentId,
+              input.command,
+              organizationId
+            );
+            if (existingBlocked) {
+              log.info(
+                "Loop dispatch deferred; reusing blocked loop after race",
+                {
+                  loopId: existingBlocked.id,
+                  organizationId,
+                  command: input.command,
+                }
+              );
+              return { loopId: existingBlocked.id, status: LoopStatus.Blocked };
+            }
+          }
+          throw error;
+        }
+
+        log.info("Loop created", {
+          loopId: loop.id,
+          organizationId,
+          userId,
+          command: input.command,
+          blocked: isBlocked,
+          blockedBy: blockedBy.map((blocker) => blocker.id),
+        });
+
+        // FEA-3863: best-effort, post-commit, fail-open search projection upsert.
+        // A loop's searchable text (command title + prompt body) is immutable, so a
+        // single index at create suffices; later status updates don't change it. The
+        // status is captured at create (PENDING/BLOCKED/…) for the `:status` filter;
+        // the backfill reconciles the live status for later transitions (FEA-3930).
+        setActiveSpanAttributes({ [AfAttribute.LoopId]: loop.id });
+        indexLoopProjection(
+          loop.id,
+          organizationId,
+          userId,
+          input,
+          loop.status
+        );
+
+        return {
+          loopId: loop.id,
+          status: loop.status as LoopStatus,
+        };
       }
-      throw error;
-    }
-
-    log.info("Loop created", {
-      loopId: loop.id,
-      organizationId,
-      userId,
-      command: input.command,
-      blocked: isBlocked,
-      blockedBy: blockedBy.map((blocker) => blocker.id),
-    });
-
-    // FEA-3863: best-effort, post-commit, fail-open search projection upsert.
-    // A loop's searchable text (command title + prompt body) is immutable, so a
-    // single index at create suffices; later status updates don't change it. The
-    // status is captured at create (PENDING/BLOCKED/…) for the `:status` filter;
-    // the backfill reconciles the live status for later transitions (FEA-3930).
-    indexLoopProjection(loop.id, organizationId, userId, input, loop.status);
-
-    return {
-      loopId: loop.id,
-      status: loop.status as LoopStatus,
-    };
+    );
   },
 
   /**
@@ -1306,7 +1329,7 @@ export const loopsService = {
    * Update Loop status with transition validation.
    * Enforces the state machine: PENDING → CLAIMED → RUNNING → terminal.
    */
-  async updateStatus(
+  updateStatus(
     id: string,
     organizationId: string,
     status: LoopStatus,
@@ -1327,133 +1350,147 @@ export const loopsService = {
       metadata: JsonObject;
     }>
   ): Promise<Loop> {
-    // Compute the set of valid source statuses for this target status
-    const validFromStatuses = Object.entries(VALID_TRANSITIONS)
-      .filter(([, allowed]) => allowed.has(status))
-      .map(([from]) => from as LoopStatus);
+    return withSpan(
+      "loop.update_status",
+      {
+        [AfAttribute.LoopId]: id,
+        [AfAttribute.OrgId]: organizationId,
+        "af.loop.status": status,
+      },
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the span wrapper only adds nesting to the pre-existing body
+      async () => {
+        // Compute the set of valid source statuses for this target status
+        const validFromStatuses = Object.entries(VALID_TRANSITIONS)
+          .filter(([, allowed]) => allowed.has(status))
+          .map(([from]) => from as LoopStatus);
 
-    if (validFromStatuses.length === 0) {
-      throw new Error(
-        `No valid transition to ${status} exists in the state machine`
-      );
-    }
-
-    // Build the update payload outside the lambda to keep it simple.
-    // Only include fields that are explicitly provided (not undefined).
-    const updateData: Record<string, unknown> = { status };
-    if (data) {
-      const optionalFields = [
-        "containerId",
-        "startedAt",
-        "completedAt",
-        "tokensInput",
-        "tokensOutput",
-        "tokensByModel",
-        "estimatedCost",
-        "error",
-        "s3StateKey",
-        "prUrl",
-        "prNumber",
-        "branchName",
-        "sessionId",
-        "metadata",
-      ] as const;
-      for (const field of optionalFields) {
-        if (data[field] !== undefined) {
-          updateData[field] = data[field];
+        if (validFromStatuses.length === 0) {
+          throw new Error(
+            `No valid transition to ${status} exists in the state machine`
+          );
         }
-      }
-    }
 
-    // Safety net: auto-set completedAt when transitioning to a terminal state
-    // if the caller didn't explicitly provide it.
-    if (TERMINAL_STATUSES.has(status) && !updateData.completedAt) {
-      updateData.completedAt = new Date();
-    }
+        // Build the update payload outside the lambda to keep it simple.
+        // Only include fields that are explicitly provided (not undefined).
+        const updateData: Record<string, unknown> = { status };
+        if (data) {
+          const optionalFields = [
+            "containerId",
+            "startedAt",
+            "completedAt",
+            "tokensInput",
+            "tokensOutput",
+            "tokensByModel",
+            "estimatedCost",
+            "error",
+            "s3StateKey",
+            "prUrl",
+            "prNumber",
+            "branchName",
+            "sessionId",
+            "metadata",
+          ] as const;
+          for (const field of optionalFields) {
+            if (data[field] !== undefined) {
+              updateData[field] = data[field];
+            }
+          }
+        }
 
-    // Atomic conditional update: only transitions from a valid source status.
-    // This prevents TOCTOU races where two concurrent requests both pass
-    // validation but one clobbers the other's status change.
-    // For terminal transitions (COMPLETED, FAILED, CANCELLED, TIMED_OUT),
-    // runner tokens are deleted and an audit event is inserted in the same
-    // transaction so the cleanup is atomic with the status flip.
-    const isTerminalCleanupStatus = TERMINAL_STATUSES.has(status);
+        // Safety net: auto-set completedAt when transitioning to a terminal state
+        // if the caller didn't explicitly provide it.
+        if (TERMINAL_STATUSES.has(status) && !updateData.completedAt) {
+          updateData.completedAt = new Date();
+        }
 
-    // Terminal transitions need CAS + runner-token cleanup + audit event in one
-    // atomic block. Non-terminal transitions (PENDING->CLAIMED, CLAIMED->RUNNING)
-    // do a single updateMany — already atomic at the SQL level — so they skip
-    // the interactive transaction to avoid BEGIN/COMMIT overhead on the hot path.
-    const result = isTerminalCleanupStatus
-      ? await withDb.tx(async (db) => {
-          const cas = await db.loop.updateMany({
-            where: {
-              id,
-              organizationId,
-              status: { in: validFromStatuses },
-            },
-            data: updateData,
-          });
+        // Atomic conditional update: only transitions from a valid source status.
+        // This prevents TOCTOU races where two concurrent requests both pass
+        // validation but one clobbers the other's status change.
+        // For terminal transitions (COMPLETED, FAILED, CANCELLED, TIMED_OUT),
+        // runner tokens are deleted and an audit event is inserted in the same
+        // transaction so the cleanup is atomic with the status flip.
+        const isTerminalCleanupStatus = TERMINAL_STATUSES.has(status);
 
-          if (cas.count > 0) {
-            await clearLoopTokens(db, id, organizationId, status);
+        // Terminal transitions need CAS + runner-token cleanup + audit event in one
+        // atomic block. Non-terminal transitions (PENDING->CLAIMED, CLAIMED->RUNNING)
+        // do a single updateMany — already atomic at the SQL level — so they skip
+        // the interactive transaction to avoid BEGIN/COMMIT overhead on the hot path.
+        const result = isTerminalCleanupStatus
+          ? await withDb.tx(async (db) => {
+              const cas = await db.loop.updateMany({
+                where: {
+                  id,
+                  organizationId,
+                  status: { in: validFromStatuses },
+                },
+                data: updateData,
+              });
+
+              if (cas.count > 0) {
+                await clearLoopTokens(db, id, organizationId, status);
+              }
+
+              return cas;
+            })
+          : await withDb((db) =>
+              db.loop.updateMany({
+                where: {
+                  id,
+                  organizationId,
+                  status: { in: validFromStatuses },
+                },
+                data: updateData,
+              })
+            );
+
+        if (result.count === 0) {
+          // Either the loop doesn't exist, or it's in a status that doesn't
+          // allow this transition (e.g., it was already cancelled/completed).
+          const current = await withDb((db) =>
+            db.loop.findUnique({
+              where: { id, organizationId },
+              select: { status: true },
+            })
+          );
+
+          if (!current) {
+            throw new Error(`Loop not found: ${id}`);
           }
 
-          return cas;
-        })
-      : await withDb((db) =>
-          db.loop.updateMany({
-            where: {
-              id,
-              organizationId,
-              status: { in: validFromStatuses },
-            },
-            data: updateData,
-          })
+          throw new InvalidStatusTransitionError(current.status, status);
+        }
+
+        log.info("Loop status updated", {
+          loopId: id,
+          to: status,
+        });
+
+        // Backfill startedAt on a terminal transition (e.g. from CLAIMED when the
+        // "started" event was lost). Explicit null = never started, so skip (ISS-5711).
+        if (
+          TERMINAL_STATUSES.has(status) &&
+          updateData.startedAt === undefined
+        ) {
+          await withDb((db) =>
+            db.loop.updateMany({
+              where: { id, organizationId, startedAt: null },
+              data: { startedAt: new Date() },
+            })
+          );
+        }
+
+        // Re-fetch the updated record to return the full Loop object
+        const loop = await withDb((db) =>
+          db.loop.findUnique({ where: { id, organizationId } })
         );
 
-    if (result.count === 0) {
-      // Either the loop doesn't exist, or it's in a status that doesn't
-      // allow this transition (e.g., it was already cancelled/completed).
-      const current = await withDb((db) =>
-        db.loop.findUnique({
-          where: { id, organizationId },
-          select: { status: true },
-        })
-      );
+        if (!loop) {
+          throw new Error(`Loop not found after update: ${id}`);
+        }
 
-      if (!current) {
-        throw new Error(`Loop not found: ${id}`);
+        return toLoop(loop);
       }
-
-      throw new InvalidStatusTransitionError(current.status, status);
-    }
-
-    log.info("Loop status updated", {
-      loopId: id,
-      to: status,
-    });
-
-    // Backfill startedAt on a terminal transition (e.g. from CLAIMED when the
-    // "started" event was lost). Explicit null = never started, so skip (ISS-5711).
-    if (TERMINAL_STATUSES.has(status) && updateData.startedAt === undefined) {
-      await withDb((db) =>
-        db.loop.updateMany({
-          where: { id, organizationId, startedAt: null },
-          data: { startedAt: new Date() },
-        })
-      );
-    }
-
-    // Re-fetch the updated record to return the full Loop object
-    const loop = await withDb((db) =>
-      db.loop.findUnique({ where: { id, organizationId } })
     );
-
-    if (!loop) {
-      throw new Error(`Loop not found after update: ${id}`);
-    }
-
-    return toLoop(loop);
   },
 
   /**
@@ -1489,65 +1526,71 @@ export const loopsService = {
    * Can cancel from PENDING, CLAIMED, or RUNNING states.
    * Uses atomic conditional update to prevent TOCTOU races.
    */
-  async cancel(id: string, organizationId: string): Promise<Loop> {
-    // Compute valid source statuses for CANCELLED transition
-    const validFromStatuses = Object.entries(VALID_TRANSITIONS)
-      .filter(([, allowed]) => allowed.has(LoopStatus.Cancelled))
-      .map(([from]) => from as LoopStatus);
+  cancel(id: string, organizationId: string): Promise<Loop> {
+    return withSpan(
+      "loop.cancel",
+      { [AfAttribute.LoopId]: id, [AfAttribute.OrgId]: organizationId },
+      async () => {
+        // Compute valid source statuses for CANCELLED transition
+        const validFromStatuses = Object.entries(VALID_TRANSITIONS)
+          .filter(([, allowed]) => allowed.has(LoopStatus.Cancelled))
+          .map(([from]) => from as LoopStatus);
 
-    // Atomic conditional update: only transitions from a valid source status.
-    // Token cleanup and audit log run in the same transaction so cleanup is
-    // atomic with the status flip.
-    const result = await withDb.tx(async (db) => {
-      const cas = await db.loop.updateMany({
-        where: {
-          id,
-          organizationId,
-          status: { in: validFromStatuses },
-        },
-        data: {
-          status: LoopStatus.Cancelled,
-          completedAt: new Date(),
-        },
-      });
+        // Atomic conditional update: only transitions from a valid source status.
+        // Token cleanup and audit log run in the same transaction so cleanup is
+        // atomic with the status flip.
+        const result = await withDb.tx(async (db) => {
+          const cas = await db.loop.updateMany({
+            where: {
+              id,
+              organizationId,
+              status: { in: validFromStatuses },
+            },
+            data: {
+              status: LoopStatus.Cancelled,
+              completedAt: new Date(),
+            },
+          });
 
-      if (cas.count > 0) {
-        await clearLoopTokens(db, id, organizationId, LoopStatus.Cancelled);
+          if (cas.count > 0) {
+            await clearLoopTokens(db, id, organizationId, LoopStatus.Cancelled);
+          }
+
+          return cas;
+        });
+
+        if (result.count === 0) {
+          const current = await withDb((db) =>
+            db.loop.findUnique({
+              where: { id, organizationId },
+              select: { status: true },
+            })
+          );
+
+          if (!current) {
+            throw new Error(`Loop not found: ${id}`);
+          }
+
+          throw new InvalidStatusTransitionError(
+            current.status,
+            LoopStatus.Cancelled
+          );
+        }
+
+        log.info("Loop cancelled", { loopId: id });
+
+        // Re-fetch the updated record to return the full Loop object
+        const loop = await withDb((db) =>
+          db.loop.findUnique({ where: { id, organizationId } })
+        );
+
+        if (!loop) {
+          throw new Error(`Loop not found after cancel: ${id}`);
+        }
+
+        return toLoop(loop);
       }
-
-      return cas;
-    });
-
-    if (result.count === 0) {
-      const current = await withDb((db) =>
-        db.loop.findUnique({
-          where: { id, organizationId },
-          select: { status: true },
-        })
-      );
-
-      if (!current) {
-        throw new Error(`Loop not found: ${id}`);
-      }
-
-      throw new InvalidStatusTransitionError(
-        current.status,
-        LoopStatus.Cancelled
-      );
-    }
-
-    log.info("Loop cancelled", { loopId: id });
-
-    // Re-fetch the updated record to return the full Loop object
-    const loop = await withDb((db) =>
-      db.loop.findUnique({ where: { id, organizationId } })
     );
-
-    if (!loop) {
-      throw new Error(`Loop not found after cancel: ${id}`);
-    }
-
-    return toLoop(loop);
   },
 
   /**
@@ -1695,87 +1738,100 @@ export const loopsService = {
    * Create a resumed Loop from a parent.
    * The new loop inherits context from the parent but starts fresh.
    */
-  async resume(
+  resume(
     parentLoopId: string,
     organizationId: string,
     userId: string,
     input: ResumeLoopRequest,
     computeTargetId?: string
   ): Promise<CreateLoopResponse> {
-    const parent = await loopsService.validateParentForResume(
-      parentLoopId,
-      organizationId,
-      userId
-    );
-
-    // Reap stale PENDING rows before gate check
-    await loopsService.reapStalePendingLoops(
-      organizationId,
-      parent.artifactId,
-      parent.command
-    );
-
-    await enforceConcurrencyLimit(userId, organizationId);
-
-    const loop = await createLoopWithActiveGate({
-      command: parent.command,
-      documentId: parent.artifactId,
-      organizationId,
-      excludeLoopId: parent.id,
-      insert: async () => {
-        const parsedAdditionalRepos = parseAdditionalRepos(
-          parent.additionalRepos
-        );
-        if (parent.additionalRepos != null && parsedAdditionalRepos === null) {
-          throw new Error(
-            `Loop ${parentLoopId} has malformed additionalRepos data and cannot be resumed. Operator action required.`
-          );
-        }
-
-        if (parsedAdditionalRepos && parsedAdditionalRepos.length > 0) {
-          await authorizeLoopRepositories({
-            organizationId,
-            documentId: parent.artifactId,
-            primary: undefined,
-            additionalRepos: parsedAdditionalRepos,
-          });
-        }
-
-        // Do NOT copy parent.s3StateKey — the child loop gets its own key when
-        // launched (via ECS claim or desktop persistence). Copying the parent's
-        // key creates a window where the child reads/writes the parent's storage.
-        return withDb((db) =>
-          db.loop.create({
-            data: {
-              organizationId,
-              userId,
-              command: parent.command,
-              artifactId: parent.artifactId,
-              parentLoopId: parent.id,
-              prompt: input.prompt ?? parent.prompt,
-              repo: parent.repo ?? undefined,
-              additionalRepos: parsedAdditionalRepos ?? undefined,
-              contextRefs: parent.contextRefs ?? undefined,
-              computeTargetId: computeTargetId ?? null,
-              harness: parseHarness(parent.harness),
-              status: LoopStatus.Pending,
-            },
-          })
-        );
+    return withSpan(
+      "loop.resume",
+      {
+        [AfAttribute.LoopId]: parentLoopId,
+        [AfAttribute.OrgId]: organizationId,
+        [AfAttribute.UserId]: userId,
       },
-    });
+      async () => {
+        const parent = await loopsService.validateParentForResume(
+          parentLoopId,
+          organizationId,
+          userId
+        );
 
-    log.info("Loop resumed", {
-      loopId: loop.id,
-      parentLoopId,
-      organizationId,
-      userId,
-    });
+        // Reap stale PENDING rows before gate check
+        await loopsService.reapStalePendingLoops(
+          organizationId,
+          parent.artifactId,
+          parent.command
+        );
 
-    return {
-      loopId: loop.id,
-      status: loop.status as LoopStatus,
-    };
+        await enforceConcurrencyLimit(userId, organizationId);
+
+        const loop = await createLoopWithActiveGate({
+          command: parent.command,
+          documentId: parent.artifactId,
+          organizationId,
+          excludeLoopId: parent.id,
+          insert: async () => {
+            const parsedAdditionalRepos = parseAdditionalRepos(
+              parent.additionalRepos
+            );
+            if (
+              parent.additionalRepos != null &&
+              parsedAdditionalRepos === null
+            ) {
+              throw new Error(
+                `Loop ${parentLoopId} has malformed additionalRepos data and cannot be resumed. Operator action required.`
+              );
+            }
+
+            if (parsedAdditionalRepos && parsedAdditionalRepos.length > 0) {
+              await authorizeLoopRepositories({
+                organizationId,
+                documentId: parent.artifactId,
+                primary: undefined,
+                additionalRepos: parsedAdditionalRepos,
+              });
+            }
+
+            // Do NOT copy parent.s3StateKey — the child loop gets its own key when
+            // launched (via ECS claim or desktop persistence). Copying the parent's
+            // key creates a window where the child reads/writes the parent's storage.
+            return withDb((db) =>
+              db.loop.create({
+                data: {
+                  organizationId,
+                  userId,
+                  command: parent.command,
+                  artifactId: parent.artifactId,
+                  parentLoopId: parent.id,
+                  prompt: input.prompt ?? parent.prompt,
+                  repo: parent.repo ?? undefined,
+                  additionalRepos: parsedAdditionalRepos ?? undefined,
+                  contextRefs: parent.contextRefs ?? undefined,
+                  computeTargetId: computeTargetId ?? null,
+                  harness: parseHarness(parent.harness),
+                  status: LoopStatus.Pending,
+                },
+              })
+            );
+          },
+        });
+
+        log.info("Loop resumed", {
+          loopId: loop.id,
+          parentLoopId,
+          organizationId,
+          userId,
+        });
+
+        return {
+          loopId: loop.id,
+          status: loop.status as LoopStatus,
+        };
+      }
+    );
   },
 
   /**
@@ -2600,58 +2656,67 @@ export const loopsService = {
    * Returns a discriminated `IngestRunnerEventResult` (ok-style; see
    * `loop-ingest-types.ts` for the HTTP mapping).
    */
-  async ingestRunnerEvent(args: {
+  ingestRunnerEvent(args: {
     loopId: string;
     tokenJti: string;
     nonce: string;
     event: { type: string; data: Record<string, unknown> };
     organizationId: string;
   }): Promise<IngestRunnerEventResult> {
-    const { loopId, tokenJti, nonce, event, organizationId } = args;
+    return withSpan(
+      "loop.ingest_runner_event",
+      {
+        [AfAttribute.LoopId]: args.loopId,
+        [AfAttribute.OrgId]: args.organizationId,
+      },
+      async () => {
+        const { loopId, tokenJti, nonce, event, organizationId } = args;
 
-    const loop = await withDb((db) =>
-      db.loop.findUnique({
-        where: { id: loopId, organizationId },
-        select: { status: true },
-      })
+        const loop = await withDb((db) =>
+          db.loop.findUnique({
+            where: { id: loopId, organizationId },
+            select: { status: true },
+          })
+        );
+
+        if (!loop) {
+          return { ok: false, code: IngestRunnerEventErrorCode.LoopNotFound };
+        }
+
+        const loopStatus = loop.status as LoopStatus;
+
+        // Terminal status check: ignore non-terminal events for finished loops.
+        // `shouldIgnoreEventForTerminalLoop` exempts SupportBundleUploaded on
+        // FAILED/TIMED_OUT so Desktop crash recovery can still publish links.
+        if (shouldIgnoreEventForTerminalLoop(loopStatus, event.type)) {
+          return { ok: true, outcome: "ignored" };
+        }
+
+        // Explicit replay pre-check via the unique index on
+        // (loopId, eventSource, eventId). This is only a fast path: a concurrent
+        // request for the same composite key can still pass this read, so
+        // `addEvent` is the authoritative atomic duplicate gate via P2002.
+        const compositeEventId = `${tokenJti}:${nonce}`;
+        const existing = await withDb((db) =>
+          db.loopEvent.findUnique({
+            where: {
+              loopId_eventSource_eventId: {
+                loopId,
+                eventSource: "runner",
+                eventId: compositeEventId,
+              },
+            },
+            select: { id: true },
+          })
+        );
+
+        if (existing) {
+          return { ok: false, code: IngestRunnerEventErrorCode.Replay };
+        }
+
+        return { ok: true, outcome: "inserted" };
+      }
     );
-
-    if (!loop) {
-      return { ok: false, code: IngestRunnerEventErrorCode.LoopNotFound };
-    }
-
-    const loopStatus = loop.status as LoopStatus;
-
-    // Terminal status check: ignore non-terminal events for finished loops.
-    // `shouldIgnoreEventForTerminalLoop` exempts SupportBundleUploaded on
-    // FAILED/TIMED_OUT so Desktop crash recovery can still publish links.
-    if (shouldIgnoreEventForTerminalLoop(loopStatus, event.type)) {
-      return { ok: true, outcome: "ignored" };
-    }
-
-    // Explicit replay pre-check via the unique index on
-    // (loopId, eventSource, eventId). This is only a fast path: a concurrent
-    // request for the same composite key can still pass this read, so
-    // `addEvent` is the authoritative atomic duplicate gate via P2002.
-    const compositeEventId = `${tokenJti}:${nonce}`;
-    const existing = await withDb((db) =>
-      db.loopEvent.findUnique({
-        where: {
-          loopId_eventSource_eventId: {
-            loopId,
-            eventSource: "runner",
-            eventId: compositeEventId,
-          },
-        },
-        select: { id: true },
-      })
-    );
-
-    if (existing) {
-      return { ok: false, code: IngestRunnerEventErrorCode.Replay };
-    }
-
-    return { ok: true, outcome: "inserted" };
   },
 
   /**
@@ -2837,7 +2902,7 @@ export async function refreshRunnerToken(
   if (!loop) {
     // Skip org-scoped metrics for non-existent loops: tagging telemetry
     // with an empty orgId would create a synthetic empty-org bucket in
-    // Datadog dashboards. The Result return path is still observable via
+    // dashboards. The Result return path is still observable via
     // the route's log line.
     return {
       ok: false,

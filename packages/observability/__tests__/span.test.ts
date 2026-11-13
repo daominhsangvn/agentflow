@@ -5,13 +5,20 @@ import {
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AfAttribute, AfOutcome } from "../af-attributes";
 import {
-  AfAttribute,
+  getActiveTraceparent,
   recordError,
   runInLinkedSpan,
   setActiveSpanAttributes,
+  setSpanOutcome,
   withSpan,
 } from "../span";
+
+const TRACE_ID = "0af7651916cd43dd8448eb211c80319c";
+const SPAN_ID = "b7ad6b7169203331";
+const PARENT = `00-${TRACE_ID}-${SPAN_ID}-01`;
+const TRACEPARENT_FORMAT = /^00-[\da-f]{32}-[\da-f]{16}-[\da-f]{2}$/;
 
 describe("span helpers", () => {
   let exporter: InMemorySpanExporter;
@@ -65,7 +72,23 @@ describe("span helpers", () => {
     ).rejects.toThrow("nope");
     const [span] = exporter.getFinishedSpans();
     expect(span.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span.status.message).toBe("Error: nope");
     expect(span.events.some((e) => e.name === "exception")).toBe(true);
+  });
+
+  it("redacts and truncates the error message in the status", async () => {
+    register();
+    await expect(
+      withSpan("boom", {}, () => {
+        throw new TypeError(
+          `bad ghp_abcdefghijklmnopqrstuvwxyz0123456789 ${"x".repeat(600)}`
+        );
+      })
+    ).rejects.toThrow(TypeError);
+    const [span] = exporter.getFinishedSpans();
+    expect(span.status.message?.startsWith("TypeError: bad")).toBe(true);
+    expect(span.status.message).not.toContain("ghp_");
+    expect(span.status.message?.length).toBeLessThanOrEqual(512);
   });
 
   it("drops sensitive keys and redacts email values", async () => {
@@ -134,6 +157,7 @@ describe("span helpers", () => {
     ).rejects.toThrow("bad");
     const [span] = exporter.getFinishedSpans();
     expect(span.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span.status.message).toBe("Error: bad");
   });
 
   it("runInLinkedSpan turns a synchronous throw into a rejection", async () => {
@@ -171,5 +195,75 @@ describe("span helpers", () => {
     await expect(runInLinkedSpan("bg", {}, thunk)).rejects.toThrow();
     expect(thunk).toHaveBeenCalledTimes(1);
     vi.restoreAllMocks();
+  });
+
+  it("uses a valid parent traceparent", async () => {
+    register();
+    await withSpan("child", {}, () => 1, { parent: PARENT });
+    const [span] = exporter.getFinishedSpans();
+    expect(span.spanContext().traceId).toBe(TRACE_ID);
+    expect(span.parentSpanContext?.spanId).toBe(SPAN_ID);
+  });
+
+  it("starts a new trace with root despite an active span", async () => {
+    register();
+    await withSpan("outer", {}, async () => {
+      await withSpan("inner", {}, () => 1, { root: true });
+    });
+    const inner = exporter.getFinishedSpans().find((s) => s.name === "inner");
+    const outer = exporter.getFinishedSpans().find((s) => s.name === "outer");
+    expect(inner?.spanContext().traceId).not.toBe(outer?.spanContext().traceId);
+    expect(inner?.parentSpanContext).toBeUndefined();
+  });
+
+  it("adds links for valid traceparents only", async () => {
+    register();
+    await withSpan("linked", {}, () => 1, {
+      links: [PARENT, "bad", null, undefined],
+    });
+    const [span] = exporter.getFinishedSpans();
+    expect(span.links).toHaveLength(1);
+    expect(span.links[0].context.spanId).toBe(SPAN_ID);
+  });
+
+  it("ignores an invalid parent traceparent", async () => {
+    register();
+    await withSpan("x", {}, () => 1, { parent: "garbage" });
+    const [span] = exporter.getFinishedSpans();
+    expect(span.spanContext().traceId).not.toBe(TRACE_ID);
+    expect(span.parentSpanContext).toBeUndefined();
+  });
+
+  it("formats the active traceparent", async () => {
+    register();
+    expect(getActiveTraceparent()).toBeUndefined();
+    await withSpan("x", {}, () => {
+      expect(getActiveTraceparent()).toMatch(TRACEPARENT_FORMAT);
+    });
+  });
+
+  it("sets error outcome with a redacted reason", async () => {
+    register();
+    await withSpan("x", {}, (span) => {
+      setSpanOutcome(
+        AfOutcome.Error,
+        "failed ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        span
+      );
+    });
+    const [span] = exporter.getFinishedSpans();
+    expect(span.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span.status.message).not.toContain("ghp_");
+    expect(span.attributes[AfAttribute.Outcome]).toBe("error");
+  });
+
+  it("leaves status untouched for ok outcome", async () => {
+    register();
+    await withSpan("x", {}, (span) => {
+      setSpanOutcome(AfOutcome.Ok, undefined, span);
+    });
+    const [span] = exporter.getFinishedSpans();
+    expect(span.status.code).toBe(SpanStatusCode.UNSET);
+    expect(span.attributes[AfAttribute.Outcome]).toBe("ok");
   });
 });

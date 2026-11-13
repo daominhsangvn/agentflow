@@ -53,7 +53,7 @@ import {
 } from "./config";
 import { resetTelemetryFlushHook, setTelemetryFlushHook } from "./hooks";
 import { RemoteParentEntropySampler } from "./remote-parent-sampler";
-import { RouteResourceSpanProcessor } from "./route-resource-processor";
+import { RouteNameSpanProcessor } from "./route-name-processor";
 import {
   httpIncomingUrlAttributes,
   httpUrlAttributes,
@@ -205,9 +205,9 @@ function createSdk(config: EnabledConfig): SdkHandle {
       root: new TraceIdRatioBasedSampler(config.sampleRatio),
       remoteParentSampled: new RemoteParentEntropySampler(config.sampleRatio),
     }),
-    // The route-resource processor stamps each SERVER span's route onto
-    // `resource.name` in `onEnding`, ahead of any exporter's `onEnd`.
-    spanProcessors: [new RouteResourceSpanProcessor(), spanProcessor],
+    // The route-name processor stamps each SERVER span route onto
+    // `http.route` in `onEnding`, ahead of any exporter's `onEnd`.
+    spanProcessors: [new RouteNameSpanProcessor(), spanProcessor],
     logRecordProcessors: [logProcessor],
     metricReaders: [metricReader],
     instrumentations: [

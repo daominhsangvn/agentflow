@@ -81,7 +81,7 @@ function analyticsFor(sessions: BranchSession[]) {
  * report the two would be indistinguishable and bad persisted cost / a broken
  * pricing read would leave no trace to diagnose. This producer runs in Node, so
  * per the repo's bad-data contract it routes the anomaly through
- * `@repo/observability/log` (the Datadog-exported logger) BEFORE collapsing it.
+ * `@repo/observability/log` (the telemetry-exported logger) BEFORE collapsing it.
  */
 describe("buildBranchAnalytics — corrupt AI-spend totals", () => {
   beforeEach(() => {

@@ -89,6 +89,7 @@ import {
   PLAN_SOURCE_MARKDOWN_FILE,
   toUploadedPlanArtifact,
 } from "../../shared/plan-artifact-utils.js";
+import { annotateGatewayTrace } from "../gateway-trace-context.js";
 import type {
   OperationDispatcher,
   OperationRequestContext,
@@ -6421,6 +6422,8 @@ async function handleLoopRequest(
     json(context, 400, { error: "loopId must be a valid UUID" });
     return;
   }
+
+  annotateGatewayTrace({ loopId: body.loopId });
 
   if (!Array.isArray(body.artifacts)) {
     json(context, 400, { error: "artifacts must be an array" });

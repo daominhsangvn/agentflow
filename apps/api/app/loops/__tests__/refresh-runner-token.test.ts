@@ -225,7 +225,7 @@ describe("refreshRunnerToken", () => {
     }
     // No empty-orgId telemetry: the LoopNotFound path short-circuits before
     // any org-scoped emitter fires, avoiding a synthetic empty-org bucket in
-    // Datadog dashboards.
+    // dashboards.
     expect(mockEmitRefreshAttempt).not.toHaveBeenCalled();
     expect(mockEmitRefreshFailure).not.toHaveBeenCalled();
   });

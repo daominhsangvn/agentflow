@@ -1,8 +1,8 @@
 "use client";
 
 import { Button } from "@repo/design-system/components/ui/button";
+import { log } from "@repo/observability/log";
 import { useEffect } from "react";
-import { reportNextjsError } from "@/lib/datadog-rum/report-error";
 
 type ErrorProperties = {
   readonly error: Error & { digest?: string };
@@ -11,9 +11,9 @@ type ErrorProperties = {
 
 export default function AppError({ error, reset }: ErrorProperties) {
   useEffect(() => {
-    reportNextjsError(error, {
+    log.error("app.render_error", {
       digest: error.digest,
-      source: "nextjs-error-boundary",
+      message: error.message,
     });
   }, [error]);
 

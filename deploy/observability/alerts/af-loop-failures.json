@@ -1,0 +1,33 @@
+{
+  "alert": "AgentFlow: loop failures",
+  "alertType": "TRACES_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "version": "v4",
+  "evalWindow": "5m0s",
+  "frequency": "1m0s",
+  "condition": {
+    "compositeQuery": {
+      "queryType": "clickhouse_sql",
+      "panelType": "graph",
+      "chQueries": {
+        "A": {
+          "name": "A",
+          "query": "SELECT toStartOfInterval(timestamp, INTERVAL 5 MINUTE) AS ts, attributes_string['af.loop.fail_kind'] AS fail_kind, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'loop.fail' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, fail_kind ORDER BY ts",
+          "disabled": false
+        }
+      }
+    },
+    "op": "1",
+    "target": 3,
+    "matchType": "1",
+    "selectedQueryName": "A"
+  },
+  "labels": {
+    "severity": "warning"
+  },
+  "annotations": {
+    "summary": "More than 3 loop.fail spans in 5 minutes",
+    "description": "Open the Loops dashboard (loop.fail by kind), then the Journeys dashboard with the loop id."
+  },
+  "preferredChannels": []
+}

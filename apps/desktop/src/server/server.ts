@@ -64,6 +64,7 @@ export type DesktopGatewayServerOptions = {
   worktreeProvider?: WorktreeProvider;
   retrySpawnDeps?: RetrySpawnDeps;
   getClaudeCodeOtelReceiverStatus?: () => unknown;
+  claudeCodeOtelEnvOverrides?: Record<string, string>;
   onUnexpectedClose?: () => void;
   loopTokenStore?: LoopTokenStore;
   /**
@@ -171,6 +172,7 @@ export class DesktopGatewayServer {
       retrySpawnDeps: this.options.retrySpawnDeps,
       getClaudeCodeOtelReceiverStatus:
         this.options.getClaudeCodeOtelReceiverStatus,
+      claudeCodeOtelEnvOverrides: this.options.claudeCodeOtelEnvOverrides,
       getGatewayId: this.options.getGatewayId ?? (() => ""),
       getComputeTargetId: this.options.getComputeTargetId,
       handleSecurityUpgrade: this.options.handleSecurityUpgrade,

@@ -8,6 +8,7 @@ import {
   parseExecutionResultFile,
   type RepoExecutionResult,
 } from "@agentflow-ai/loops-api/execution-result";
+import { gatewayTraceHeaders } from "../../server/gateway-trace-context.js";
 import {
   type LoopHttpResult,
   postLoopEvent,
@@ -899,6 +900,7 @@ async function requestSupportUploadUrls(
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
+        ...gatewayTraceHeaders(),
       },
       // Support files are highly compressible JSONL, so every one is uploaded
       // gzip-compressed (see putSupportFile). Declaring them as gzipKeys makes

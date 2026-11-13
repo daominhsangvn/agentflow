@@ -16,6 +16,13 @@ import {
 } from "@repo/api/src/types/distribution";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { Prisma, type TransactionClient, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import {
+  type SpanAttributes,
+  setActiveSpanAttributes,
+  setSpanOutcome,
+  withSpan,
+} from "@repo/observability/span";
 import { getCatalogAssetDownloadUrl } from "@repo/storage";
 import { v7 as uuidv7 } from "uuid";
 import { computeTargetsService } from "@/app/compute-targets/service";
@@ -498,190 +505,210 @@ export const distributionsService = {
    * Validates that the catalogItem belongs to the org (or is curated).
    * Creates DistributionTargetingEntry rows for specific-targeting.
    */
-  async create(
+  create(
     organizationId: string,
     userId: string,
     clerkOrgId: string,
     clerkUserId: string,
     body: CreateDistributionRequest
   ): Promise<Result<DistributionDto, StatusCode>> {
-    const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
-    if (!admin) {
-      return Result.err(Status.Forbidden);
-    }
+    return withResultSpan(
+      "distribution.create",
+      { [AfAttribute.OrgId]: organizationId, [AfAttribute.UserId]: userId },
+      async () => {
+        const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
+        if (!admin) {
+          return Result.err(Status.Forbidden);
+        }
 
-    const catalogItem = await withDb((db) =>
-      db.catalogItem.findFirst({
-        where: {
-          id: body.catalogItemId,
-          OR: [{ organizationId }, { scope: "global" }],
-          archived: false,
-        },
-        select: { id: true },
-      })
-    );
-    if (!catalogItem) {
-      return Result.err(Status.BadRequest);
-    }
-
-    const distribution = await withDb((db) =>
-      db.distribution.create({
-        data: {
-          organizationId,
-          catalogItemId: body.catalogItemId,
-          mode: body.mode,
-          targetingType: body.targetingType,
-          desiredEnabled: body.desiredEnabled ?? true,
-          createdById: userId,
-          ...(body.targetingType === DistributionTargetingType.Specific && {
-            targetingEntries: {
-              create: [
-                ...(body.targetComputeTargetIds ?? []).map(
-                  (computeTargetId) => ({
-                    computeTargetId,
-                    userId: null,
-                  })
-                ),
-                ...(body.targetUserIds ?? []).map((targetUserId) => ({
-                  computeTargetId: null,
-                  userId: targetUserId,
-                })),
-              ],
+        const catalogItem = await withDb((db) =>
+          db.catalogItem.findFirst({
+            where: {
+              id: body.catalogItemId,
+              OR: [{ organizationId }, { scope: "global" }],
+              archived: false,
             },
-          }),
-        },
-        select: distributionSelect,
-      })
-    );
+            select: { id: true },
+          })
+        );
+        if (!catalogItem) {
+          return Result.err(Status.BadRequest);
+        }
 
-    return Result.ok(toDistributionDto(distribution));
+        const distribution = await withDb((db) =>
+          db.distribution.create({
+            data: {
+              organizationId,
+              catalogItemId: body.catalogItemId,
+              mode: body.mode,
+              targetingType: body.targetingType,
+              desiredEnabled: body.desiredEnabled ?? true,
+              createdById: userId,
+              ...(body.targetingType === DistributionTargetingType.Specific && {
+                targetingEntries: {
+                  create: [
+                    ...(body.targetComputeTargetIds ?? []).map(
+                      (computeTargetId) => ({
+                        computeTargetId,
+                        userId: null,
+                      })
+                    ),
+                    ...(body.targetUserIds ?? []).map((targetUserId) => ({
+                      computeTargetId: null,
+                      userId: targetUserId,
+                    })),
+                  ],
+                },
+              }),
+            },
+            select: distributionSelect,
+          })
+        );
+
+        return Result.ok(toDistributionDto(distribution));
+      },
+      (value) => ({ [DistributionSpanAttribute.DistributionId]: value.id })
+    );
   },
 
   /**
    * Update an existing Distribution's mode/targeting (admin-only).
    */
-  async update(
+  update(
     organizationId: string,
     distributionId: string,
     clerkOrgId: string,
     clerkUserId: string,
     body: UpdateDistributionRequest
   ): Promise<Result<DistributionDto, StatusCode>> {
-    const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
-    if (!admin) {
-      return Result.err(Status.Forbidden);
-    }
-
-    // ISS-5123: a withdrawn distribution is not editable. Two admins can race —
-    // one withdraws while the other has the edit dialog open — and letting the
-    // late PATCH land would report success for a change no member will ever
-    // receive, because every live read filters the row out. Treating it as gone
-    // (404) is the only answer that does not lie about the roll-out state.
-    //
-    // This read resolves the CURRENT targeting type (needed to decide what the
-    // rebuild should write when the body omits it); it deliberately does NOT
-    // stand in for the liveness check. A separate read leaves a window in which
-    // a concurrent DELETE stamps `withdrawnAt` before the update lands, and a
-    // write keyed on `id` alone would then edit — and report 200 for — a
-    // distribution that is already gone. The `withdrawnAt: null` predicate
-    // therefore rides on the write itself, below.
-    const existing = await withDb((db) =>
-      db.distribution.findFirst({
-        where: { id: distributionId, organizationId, withdrawnAt: null },
-        select: { id: true, targetingType: true },
-      })
-    );
-    if (!existing) {
-      return Result.err(Status.NotFound);
-    }
-
-    const newTargetingType = body.targetingType ?? existing.targetingType;
-    const needsEntryRebuild =
-      body.targetingType !== undefined ||
-      body.targetComputeTargetIds !== undefined ||
-      body.targetUserIds !== undefined;
-
-    // `updateMany`, not `update`: it is the only form that carries the
-    // `withdrawnAt: null` predicate into the same statement as the write, so the
-    // affected-row count is an atomic answer to "was this still live when I
-    // wrote?" rather than a stale echo of the read above.
-    const liveDistribution = {
-      id: distributionId,
-      organizationId,
-      withdrawnAt: null,
-    };
-    const scalarEdits = {
-      ...(body.mode !== undefined && { mode: body.mode }),
-      ...(body.targetingType !== undefined && {
-        targetingType: body.targetingType,
-      }),
-      ...(body.desiredEnabled !== undefined && {
-        desiredEnabled: body.desiredEnabled,
-      }),
-    };
-
-    if (needsEntryRebuild) {
-      const rebuilt = await withDb.tx(async (tx) => {
-        const { count } = await tx.distribution.updateMany({
-          where: liveDistribution,
-          data: scalarEdits,
-        });
-        if (count === 0) {
-          // Withdrawn between the read and this write. Nothing has been written
-          // yet, and returning here keeps it that way: the targeting rebuild is
-          // skipped inside the same transaction, so a withdrawn row can never be
-          // left carrying entries rewritten by a PATCH that answers 404.
-          return false;
+    return withResultSpan(
+      "distribution.update",
+      {
+        [AfAttribute.OrgId]: organizationId,
+        [DistributionSpanAttribute.DistributionId]: distributionId,
+      },
+      async () => {
+        const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
+        if (!admin) {
+          return Result.err(Status.Forbidden);
         }
-        // Every rebuild starts from a clean slate; "all" simply stops here,
-        // which is what dropping its stale specific entries means.
-        await tx.distributionTargetingEntry.deleteMany({
-          where: { distributionId },
-        });
-        if (newTargetingType === DistributionTargetingType.Specific) {
-          const entries = [
-            ...(body.targetComputeTargetIds ?? []).map((computeTargetId) => ({
-              distributionId,
-              computeTargetId,
-              userId: null as string | null,
-            })),
-            ...(body.targetUserIds ?? []).map((targetUserId) => ({
-              distributionId,
-              computeTargetId: null as string | null,
-              userId: targetUserId,
-            })),
-          ];
-          if (entries.length > 0) {
-            await tx.distributionTargetingEntry.createMany({ data: entries });
+
+        // ISS-5123: a withdrawn distribution is not editable. Two admins can race —
+        // one withdraws while the other has the edit dialog open — and letting the
+        // late PATCH land would report success for a change no member will ever
+        // receive, because every live read filters the row out. Treating it as gone
+        // (404) is the only answer that does not lie about the roll-out state.
+        //
+        // This read resolves the CURRENT targeting type (needed to decide what the
+        // rebuild should write when the body omits it); it deliberately does NOT
+        // stand in for the liveness check. A separate read leaves a window in which
+        // a concurrent DELETE stamps `withdrawnAt` before the update lands, and a
+        // write keyed on `id` alone would then edit — and report 200 for — a
+        // distribution that is already gone. The `withdrawnAt: null` predicate
+        // therefore rides on the write itself, below.
+        const existing = await withDb((db) =>
+          db.distribution.findFirst({
+            where: { id: distributionId, organizationId, withdrawnAt: null },
+            select: { id: true, targetingType: true },
+          })
+        );
+        if (!existing) {
+          return Result.err(Status.NotFound);
+        }
+
+        const newTargetingType = body.targetingType ?? existing.targetingType;
+        const needsEntryRebuild =
+          body.targetingType !== undefined ||
+          body.targetComputeTargetIds !== undefined ||
+          body.targetUserIds !== undefined;
+
+        // `updateMany`, not `update`: it is the only form that carries the
+        // `withdrawnAt: null` predicate into the same statement as the write, so the
+        // affected-row count is an atomic answer to "was this still live when I
+        // wrote?" rather than a stale echo of the read above.
+        const liveDistribution = {
+          id: distributionId,
+          organizationId,
+          withdrawnAt: null,
+        };
+        const scalarEdits = {
+          ...(body.mode !== undefined && { mode: body.mode }),
+          ...(body.targetingType !== undefined && {
+            targetingType: body.targetingType,
+          }),
+          ...(body.desiredEnabled !== undefined && {
+            desiredEnabled: body.desiredEnabled,
+          }),
+        };
+
+        if (needsEntryRebuild) {
+          const rebuilt = await withDb.tx(async (tx) => {
+            const { count } = await tx.distribution.updateMany({
+              where: liveDistribution,
+              data: scalarEdits,
+            });
+            if (count === 0) {
+              // Withdrawn between the read and this write. Nothing has been written
+              // yet, and returning here keeps it that way: the targeting rebuild is
+              // skipped inside the same transaction, so a withdrawn row can never be
+              // left carrying entries rewritten by a PATCH that answers 404.
+              return false;
+            }
+            // Every rebuild starts from a clean slate; "all" simply stops here,
+            // which is what dropping its stale specific entries means.
+            await tx.distributionTargetingEntry.deleteMany({
+              where: { distributionId },
+            });
+            if (newTargetingType === DistributionTargetingType.Specific) {
+              const entries = [
+                ...(body.targetComputeTargetIds ?? []).map(
+                  (computeTargetId) => ({
+                    distributionId,
+                    computeTargetId,
+                    userId: null as string | null,
+                  })
+                ),
+                ...(body.targetUserIds ?? []).map((targetUserId) => ({
+                  distributionId,
+                  computeTargetId: null as string | null,
+                  userId: targetUserId,
+                })),
+              ];
+              if (entries.length > 0) {
+                await tx.distributionTargetingEntry.createMany({
+                  data: entries,
+                });
+              }
+            }
+            return true;
+          });
+          if (!rebuilt) {
+            return Result.err(Status.NotFound);
+          }
+        } else {
+          const { count } = await withDb((db) =>
+            db.distribution.updateMany({
+              where: liveDistribution,
+              data: scalarEdits,
+            })
+          );
+          if (count === 0) {
+            return Result.err(Status.NotFound);
           }
         }
-        return true;
-      });
-      if (!rebuilt) {
-        return Result.err(Status.NotFound);
-      }
-    } else {
-      const { count } = await withDb((db) =>
-        db.distribution.updateMany({
-          where: liveDistribution,
-          data: scalarEdits,
-        })
-      );
-      if (count === 0) {
-        return Result.err(Status.NotFound);
-      }
-    }
 
-    const updated = await withDb((db) =>
-      db.distribution.findFirst({
-        where: { id: distributionId },
-        select: distributionSelect,
-      })
+        const updated = await withDb((db) =>
+          db.distribution.findFirst({
+            where: { id: distributionId },
+            select: distributionSelect,
+          })
+        );
+        if (!updated) {
+          return Result.err(Status.Error);
+        }
+        return Result.ok(toDistributionDto(updated));
+      }
     );
-    if (!updated) {
-      return Result.err(Status.Error);
-    }
-    return Result.ok(toDistributionDto(updated));
   },
 
   /**
@@ -715,39 +742,49 @@ export const distributionsService = {
    *
    * Returns `NotFound` only when no such distribution exists in this org at all.
    */
-  async withdraw(
+  withdraw(
     organizationId: string,
     distributionId: string,
     userId: string,
     clerkOrgId: string,
     clerkUserId: string
   ): Promise<Result<DistributionDto, StatusCode>> {
-    const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
-    if (!admin) {
-      return Result.err(Status.Forbidden);
-    }
+    return withResultSpan(
+      "distribution.withdraw",
+      {
+        [AfAttribute.OrgId]: organizationId,
+        [AfAttribute.UserId]: userId,
+        [DistributionSpanAttribute.DistributionId]: distributionId,
+      },
+      async () => {
+        const admin = await isOrgAdmin(clerkOrgId, clerkUserId);
+        if (!admin) {
+          return Result.err(Status.Forbidden);
+        }
 
-    await withDb((db) =>
-      db.distribution.updateMany({
-        where: { id: distributionId, organizationId, withdrawnAt: null },
-        data: { withdrawnAt: new Date(), withdrawnById: userId },
-      })
-    );
+        await withDb((db) =>
+          db.distribution.updateMany({
+            where: { id: distributionId, organizationId, withdrawnAt: null },
+            data: { withdrawnAt: new Date(), withdrawnById: userId },
+          })
+        );
 
-    // Re-read unconditionally rather than branching on the update count: the
-    // already-withdrawn case and the just-withdrawn case must return the same
-    // shape, and a zero count alone cannot tell "already withdrawn" from
-    // "wrong org / no such id".
-    const row = await withDb((db) =>
-      db.distribution.findFirst({
-        where: { id: distributionId, organizationId },
-        select: distributionSelect,
-      })
+        // Re-read unconditionally rather than branching on the update count: the
+        // already-withdrawn case and the just-withdrawn case must return the same
+        // shape, and a zero count alone cannot tell "already withdrawn" from
+        // "wrong org / no such id".
+        const row = await withDb((db) =>
+          db.distribution.findFirst({
+            where: { id: distributionId, organizationId },
+            select: distributionSelect,
+          })
+        );
+        if (!row) {
+          return Result.err(Status.NotFound);
+        }
+        return Result.ok(toDistributionDto(row));
+      }
     );
-    if (!row) {
-      return Result.err(Status.NotFound);
-    }
-    return Result.ok(toDistributionDto(row));
   },
 
   // ---------------------------------------------------------------------------
@@ -835,68 +872,111 @@ export const distributionsService = {
    * ComputeTarget ownership must be verified by the route before calling this method.
    * Returns the count of accepted (upserted) reports.
    */
-  async upsertStatusReports(
+  upsertStatusReports(
     organizationId: string,
     computeTargetId: string,
     userId: string,
     clerkUserId: string | null,
     reports: DistributionStatusReport[]
   ): Promise<Result<number, StatusCode | "forbidden">> {
-    // Verify compute target ownership
-    const target = await computeTargetsService.findOwnedById(
-      computeTargetId,
-      organizationId,
-      userId,
-      clerkUserId
-    );
-    if (!target) {
-      return Result.err("forbidden");
-    }
-
-    // Validate that all distributionIds belong to this org
-    const distributionIds = [...new Set(reports.map((r) => r.distributionId))];
-    const validDistributions = await withDb((db) =>
-      db.distribution.findMany({
-        where: { id: { in: distributionIds }, organizationId },
-        select: { id: true },
-      })
-    );
-    const validIds = new Set(validDistributions.map((d) => d.id));
-    const validReports = reports.filter((r) => validIds.has(r.distributionId));
-
-    if (validReports.length === 0) {
-      return Result.ok(0);
-    }
-
-    const now = new Date();
-    // The distribution_target_status table has a partial unique index on
-    // (distribution_id, compute_target_id WHERE compute_target_id IS NOT NULL)
-    // maintained via raw migration. Prisma cannot express partial indexes, so
-    // each report is applied with an atomic raw INSERT ... ON CONFLICT DO UPDATE
-    // (see upsertOneStatusReport) — concurrent reports for the same target can't
-    // race the index into a P2002 and roll back the whole batch.
-    //
-    // Process reports in a deterministic distributionId order (FEA-2994) so that
-    // two concurrent batches for the same compute target acquire the per-report
-    // advisory locks (taken inside upsertOneStatusReport) in the same sequence
-    // and can never deadlock on an overlapping pair. Each report serializes only
-    // on its own (distributionId, computeTargetId) key, so unrelated
-    // distributions in different batches no longer block behind one another.
-    const orderedReports = [...validReports].sort((a, b) =>
-      a.distributionId.localeCompare(b.distributionId)
-    );
-    await withDb.tx(
-      async (tx) => {
-        for (const report of orderedReports) {
-          await upsertOneStatusReport(tx, report, computeTargetId, userId, now);
-        }
-      },
+    return withResultSpan(
+      "distribution.upsert_status_reports",
       {
-        maxWait: STATUS_REPORT_TRANSACTION_MAX_WAIT_MS,
-        timeout: STATUS_REPORT_TRANSACTION_TIMEOUT_MS,
+        [AfAttribute.OrgId]: organizationId,
+        [AfAttribute.UserId]: userId,
+        [AfAttribute.ComputeTargetId]: computeTargetId,
+      },
+      async () => {
+        // Verify compute target ownership
+        const target = await computeTargetsService.findOwnedById(
+          computeTargetId,
+          organizationId,
+          userId,
+          clerkUserId
+        );
+        if (!target) {
+          return Result.err("forbidden");
+        }
+
+        // Validate that all distributionIds belong to this org
+        const distributionIds = [
+          ...new Set(reports.map((r) => r.distributionId)),
+        ];
+        const validDistributions = await withDb((db) =>
+          db.distribution.findMany({
+            where: { id: { in: distributionIds }, organizationId },
+            select: { id: true },
+          })
+        );
+        const validIds = new Set(validDistributions.map((d) => d.id));
+        const validReports = reports.filter((r) =>
+          validIds.has(r.distributionId)
+        );
+
+        if (validReports.length === 0) {
+          return Result.ok(0);
+        }
+
+        const now = new Date();
+        // The distribution_target_status table has a partial unique index on
+        // (distribution_id, compute_target_id WHERE compute_target_id IS NOT NULL)
+        // maintained via raw migration. Prisma cannot express partial indexes, so
+        // each report is applied with an atomic raw INSERT ... ON CONFLICT DO UPDATE
+        // (see upsertOneStatusReport) — concurrent reports for the same target can't
+        // race the index into a P2002 and roll back the whole batch.
+        //
+        // Process reports in a deterministic distributionId order (FEA-2994) so that
+        // two concurrent batches for the same compute target acquire the per-report
+        // advisory locks (taken inside upsertOneStatusReport) in the same sequence
+        // and can never deadlock on an overlapping pair. Each report serializes only
+        // on its own (distributionId, computeTargetId) key, so unrelated
+        // distributions in different batches no longer block behind one another.
+        const orderedReports = [...validReports].sort((a, b) =>
+          a.distributionId.localeCompare(b.distributionId)
+        );
+        await withDb.tx(
+          async (tx) => {
+            for (const report of orderedReports) {
+              await upsertOneStatusReport(
+                tx,
+                report,
+                computeTargetId,
+                userId,
+                now
+              );
+            }
+          },
+          {
+            maxWait: STATUS_REPORT_TRANSACTION_MAX_WAIT_MS,
+            timeout: STATUS_REPORT_TRANSACTION_TIMEOUT_MS,
+          }
+        );
+
+        return Result.ok(validReports.length);
       }
     );
-
-    return Result.ok(validReports.length);
   },
 };
+
+/** Span attribute key local to distribution writes. */
+const DistributionSpanAttribute = {
+  DistributionId: "af.distribution_id",
+} as const;
+
+/** Runs `fn` in a span and marks the span failed when it returns a failure Result. */
+function withResultSpan<T, E>(
+  name: string,
+  attributes: SpanAttributes,
+  fn: () => Promise<Result<T, E>>,
+  okAttributes?: (value: T) => SpanAttributes
+): Promise<Result<T, E>> {
+  return withSpan(name, attributes, async () => {
+    const result = await fn();
+    if (!result.ok) {
+      setSpanOutcome(AfOutcome.Error, String(result.error));
+    } else if (okAttributes) {
+      setActiveSpanAttributes(okAttributes(result.value));
+    }
+    return result;
+  });
+}

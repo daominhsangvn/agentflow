@@ -244,7 +244,7 @@ importers:
         version: 0.5.16
       better-auth:
         specifier: 1.7.6
-        version: 1.7.6(@opentelemetry/api@1.9.1)(@prisma/client@7.8.0(@typescript/typescript6@6.0.2)(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(@typescript/typescript6@6.0.2)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)))(mysql2@3.15.3)(next@16.2.6(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.20.0)(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(@typescript/typescript6@6.0.2)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@7.3.5(@types/node@25.9.3)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4)))
+        version: 1.7.6(@opentelemetry/api@1.9.1)(@prisma/client@7.8.0(@typescript/typescript6@6.0.2)(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(@typescript/typescript6@6.0.2)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)))(mysql2@3.15.3)(next@16.2.6(@babel/core@8.0.1)(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.20.0)(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(@typescript/typescript6@6.0.2)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@7.3.5(@types/node@25.9.3)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4)))
       cross-env:
         specifier: 10.1.0
         version: 10.1.0
@@ -351,12 +351,6 @@ importers:
       '@agentflow-ai/loops-api':
         specifier: workspace:*
         version: link:../../packages/loops-api
-      '@datadog/browser-rum':
-        specifier: ^7.2.0
-        version: 7.3.0
-      '@datadog/browser-rum-nextjs':
-        specifier: ^7.2.0
-        version: 7.3.0(@datadog/browser-rum@7.3.0)(next@16.2.6(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -1700,7 +1694,7 @@ importers:
         version: 7.8.0
       '@prisma/client':
         specifier: ~7.8.0
-        version: 7.8.0(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
+        version: 7.8.0(prisma@7.8.0(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
       '@prisma/client-runtime-utils':
         specifier: ~7.8.0
         version: 7.8.0
@@ -4032,57 +4026,6 @@ packages:
   '@csstools/css-tokenizer@4.0.0':
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
-
-  '@datadog/browser-core@7.3.0':
-    resolution: {integrity: sha512-bP6QuYyxdjaKYHwqpvYRihSEXgz/8P1iPr1ZI6OJVeDSJ7Zz/kAqK3dU5O7y6FrP9u99CbFG+rRGDtb4ytyJiw==}
-
-  '@datadog/browser-rum-core@7.3.0':
-    resolution: {integrity: sha512-E+lBOxaE7UazwhBA3/i8qc0080MQZgxBmpdQsVxkt/UWmql523U8Hf8u/0D4eIauVCOeB6faBhNJhfa/lsRxVg==}
-
-  '@datadog/browser-rum-nextjs@7.3.0':
-    resolution: {integrity: sha512-1hO03ffjUx9BERWhHqsZCShzGXsQitLArk2HC+nGtm6IXoSZRUIhDbhcPbxt0OWTHYPpFrtAbJN+FRMF1bifDg==}
-    peerDependencies:
-      next: 16.2.6
-      react: 19.2.8
-    peerDependenciesMeta:
-      next:
-        optional: true
-      react:
-        optional: true
-
-  '@datadog/browser-rum-react@7.3.0':
-    resolution: {integrity: sha512-VbKakeTg5mR8UjcR9EUMPkc5ovo/AR/ncoBeblIB2UC5wSkwQ6Awmtky85X+J0Swi4J5dvgllE82qfKCn4n17A==}
-    peerDependencies:
-      '@datadog/browser-rum': '*'
-      '@datadog/browser-rum-slim': '*'
-      '@tanstack/react-router': '>=1.64.0 <2'
-      react: 19.2.8
-      react-router: 6 || 7
-      react-router-dom: 6 || 7
-    peerDependenciesMeta:
-      '@datadog/browser-rum':
-        optional: true
-      '@datadog/browser-rum-slim':
-        optional: true
-      '@tanstack/react-router':
-        optional: true
-      react:
-        optional: true
-      react-router:
-        optional: true
-      react-router-dom:
-        optional: true
-
-  '@datadog/browser-rum@7.3.0':
-    resolution: {integrity: sha512-HxJ+wPBP9l4rVYo5/u7Ls1gH4Pf8W0YGSI+euJfbIdU3UngickRNMQ2tiONwZIc6JjdrVJEu1gKMU/iqAiwiWw==}
-    peerDependencies:
-      '@datadog/browser-logs': 7.3.0
-    peerDependenciesMeta:
-      '@datadog/browser-logs':
-        optional: true
-
-  '@datadog/js-core@0.0.2':
-    resolution: {integrity: sha512-tubNtQXlHiDovBB04M16MWQbUj4j0F7eu6lWMUmFo/+SD5j8adzSGcVxtSNdSR/u++IaghkCpqcAaR3ZAJh2jQ==}
 
   '@date-fns/tz@1.4.1':
     resolution: {integrity: sha512-P5LUNhtbj6YfI3iJjw5EL9eUAG6OitD0W3fWQcpQjDRc/QIsL0tRNuO1PcDvPccWL1fSTXXdE1ds+l95DV/OFA==}
@@ -15294,12 +15237,6 @@ packages:
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
-ignoredOptionalDependencies:
-  - '@datadog/native-appsec'
-  - '@datadog/native-iast-taint-tracking'
-  - '@datadog/native-metrics'
-  - '@datadog/pprof'
-
 snapshots:
 
   '@adobe/css-tools@4.4.4': {}
@@ -17530,48 +17467,6 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.0': {}
 
-  '@datadog/browser-core@7.3.0':
-    dependencies:
-      '@datadog/js-core': 0.0.2
-
-  '@datadog/browser-rum-core@7.3.0':
-    dependencies:
-      '@datadog/browser-core': 7.3.0
-      '@datadog/js-core': 0.0.2
-
-  '@datadog/browser-rum-nextjs@7.3.0(@datadog/browser-rum@7.3.0)(next@16.2.6(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)':
-    dependencies:
-      '@datadog/browser-core': 7.3.0
-      '@datadog/browser-rum-core': 7.3.0
-      '@datadog/browser-rum-react': 7.3.0(@datadog/browser-rum@7.3.0)(react@19.2.8)
-      '@datadog/js-core': 0.0.2
-    optionalDependencies:
-      next: 16.2.6(@babel/core@8.0.1)(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      react: 19.2.8
-    transitivePeerDependencies:
-      - '@datadog/browser-rum'
-      - '@datadog/browser-rum-slim'
-      - '@tanstack/react-router'
-      - react-router
-      - react-router-dom
-
-  '@datadog/browser-rum-react@7.3.0(@datadog/browser-rum@7.3.0)(react@19.2.8)':
-    dependencies:
-      '@datadog/browser-core': 7.3.0
-      '@datadog/browser-rum-core': 7.3.0
-      '@datadog/js-core': 0.0.2
-    optionalDependencies:
-      '@datadog/browser-rum': 7.3.0
-      react: 19.2.8
-
-  '@datadog/browser-rum@7.3.0':
-    dependencies:
-      '@datadog/browser-core': 7.3.0
-      '@datadog/browser-rum-core': 7.3.0
-      '@datadog/js-core': 0.0.2
-
-  '@datadog/js-core@0.0.2': {}
-
   '@date-fns/tz@1.4.1': {}
 
   '@discoveryjs/json-ext@0.5.7': {}
@@ -19547,6 +19442,13 @@ snapshots:
       '@prisma/client-runtime-utils': 7.8.0
     optionalDependencies:
       prisma: 7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
+      typescript: 7.0.2
+
+  '@prisma/client@7.8.0(prisma@7.8.0(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)':
+    dependencies:
+      '@prisma/client-runtime-utils': 7.8.0
+    optionalDependencies:
+      prisma: 7.8.0(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
       typescript: 7.0.2
 
   '@prisma/config@7.8.0(magicast@0.5.4)':
@@ -23241,7 +23143,7 @@ snapshots:
 
   before-after-hook@4.0.0: {}
 
-  better-auth@1.7.6(@opentelemetry/api@1.9.1)(@prisma/client@7.8.0(@typescript/typescript6@6.0.2)(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(@typescript/typescript6@6.0.2)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)))(mysql2@3.15.3)(next@16.2.6(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.20.0)(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(@typescript/typescript6@6.0.2)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@7.3.5(@types/node@25.9.3)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))):
+  better-auth@1.7.6(@opentelemetry/api@1.9.1)(@prisma/client@7.8.0(@typescript/typescript6@6.0.2)(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(@typescript/typescript6@6.0.2)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)))(mysql2@3.15.3)(next@16.2.6(@babel/core@8.0.1)(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.20.0)(prisma@7.8.0(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(@typescript/typescript6@6.0.2)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@7.3.5(@types/node@25.9.3)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))):
     dependencies:
       '@better-auth/core': 1.7.6(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4)
       '@better-auth/drizzle-adapter': 1.7.6(@better-auth/core@1.7.6(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)
@@ -27890,6 +27792,24 @@ snapshots:
       - magicast
       - react
       - react-dom
+
+  prisma@7.8.0(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2):
+    dependencies:
+      '@prisma/config': 7.8.0(magicast@0.5.4)
+      '@prisma/dev': 0.24.3(typescript@7.0.2)
+      '@prisma/engines': 7.8.0
+      '@prisma/studio-core': 0.27.3(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      mysql2: 3.15.3
+      postgres: 3.4.7
+    optionalDependencies:
+      typescript: 7.0.2
+    transitivePeerDependencies:
+      - '@types/react'
+      - '@types/react-dom'
+      - magicast
+      - react
+      - react-dom
+    optional: true
 
   prismjs@1.30.0: {}
 

@@ -1,0 +1,33 @@
+{
+  "alert": "AgentFlow: runner offline",
+  "alertType": "LOGS_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "version": "v4",
+  "evalWindow": "5m0s",
+  "frequency": "1m0s",
+  "condition": {
+    "compositeQuery": {
+      "queryType": "clickhouse_sql",
+      "panelType": "graph",
+      "chQueries": {
+        "A": {
+          "name": "A",
+          "query": "SELECT toStartOfInterval(fromUnixTimestamp64Nano(toInt64(timestamp)), INTERVAL 5 MINUTE) AS ts, attributes_string['af.compute_target_id'] AS compute_target_id, count() AS value FROM signoz_logs.distributed_logs_v2 WHERE body = 'compute_target.offline' AND timestamp BETWEEN {{.start_timestamp_nano}} AND {{.end_timestamp_nano}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, compute_target_id ORDER BY ts",
+          "disabled": false
+        }
+      }
+    },
+    "op": "1",
+    "target": 0,
+    "matchType": "1",
+    "selectedQueryName": "A"
+  },
+  "labels": {
+    "severity": "critical"
+  },
+  "annotations": {
+    "summary": "A compute target went offline",
+    "description": "Open the Runners dashboard (compute_target.offline events) and check the runner host."
+  },
+  "preferredChannels": []
+}

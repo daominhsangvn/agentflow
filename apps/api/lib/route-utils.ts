@@ -390,7 +390,7 @@ export function scheduleLogFlushAfter(promise: Promise<unknown>): void {
 /**
  * Emit the correlated ingest-failure log line shared by the loop event-ingest
  * routes (`/loops/[id]/events` and `/loops/[id]/manual-events`). Both stitch
- * the failure to its loop/org in Datadog with the same field shape; centralizing
+ * the failure to its loop/org in SigNoz with the same field shape; centralizing
  * it here keeps that shape defined once. `eventName` is the route-specific
  * metric name (e.g. `loop.event_ingest_failed`, `loop.manual_event_ingest_failed`).
  */

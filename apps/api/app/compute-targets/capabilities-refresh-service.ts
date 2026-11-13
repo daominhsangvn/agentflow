@@ -16,7 +16,13 @@ import {
   runnerCapabilitiesSchema,
 } from "@repo/api/src/types/runner-capabilities";
 import { withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import {
+  type SpanAttributes,
+  setSpanOutcome,
+  withSpan,
+} from "@repo/observability/span";
 import { z } from "zod";
 import { resolveOrgProjectId } from "@/app/compute-targets/capabilities-service";
 import { computeTargetsService } from "@/app/compute-targets/service";
@@ -84,20 +90,33 @@ const REFRESH_OVERDUE_ERROR =
 type RefreshCounts = { dispatched: number; skipped: number };
 
 export const computeTargetCapabilitiesRefreshService = {
-  async request(
+  request(
     organizationId: string,
     computeTargetId: string,
     input: RequestRunnerCapabilitiesRefreshInput
   ): Promise<Result<RunnerCapabilitiesRefresh, CapabilitiesRefreshError>> {
-    const projectId = await resolveOrgProjectId(input.project, organizationId);
-    if (!projectId) {
-      return refreshError(Status.NotFound, "Project not found");
-    }
-    return requestFor(
-      organizationId,
-      computeTargetId,
-      projectId,
-      input.repository
+    return withResultSpan(
+      "compute_target.capabilities_refresh",
+      {
+        [AfAttribute.OrgId]: organizationId,
+        [AfAttribute.ComputeTargetId]: computeTargetId,
+      },
+      async () => {
+        const projectId = await resolveOrgProjectId(
+          input.project,
+          organizationId
+        );
+        if (!projectId) {
+          return refreshError(Status.NotFound, "Project not found");
+        }
+        return requestFor(
+          organizationId,
+          computeTargetId,
+          projectId,
+          input.repository
+        );
+      },
+      (error) => error.message
     );
   },
 
@@ -190,64 +209,79 @@ export const computeTargetCapabilitiesRefreshService = {
   },
 
   /** Refreshes the runners that read a toolkit for the project, or are assigned to it. */
-  async refreshProject(
+  refreshProject(
     organizationId: string,
     projectId: string
   ): Promise<RefreshCounts> {
-    const { rows, project } = await withDb(async (db) => ({
-      rows: await db.computeTargetCapabilities.findMany({
-        where: {
-          organizationId,
-          projectId,
-          source: RunnerCapabilitiesSource.Toolkit,
-        },
-        select: { computeTargetId: true },
-      }),
-      project: await db.project.findFirst({
-        where: { id: projectId, organizationId },
-        select: { settings: true },
-      }),
-    }));
-    const targetIds = new Set([
-      ...rows.map((row) => row.computeTargetId),
-      ...readProjectRunnerIds(project?.settings),
-    ]);
-    const counts: RefreshCounts = { dispatched: 0, skipped: 0 };
-    for (const targetId of targetIds) {
-      await refreshOne(counts, organizationId, targetId, projectId);
-    }
-    return counts;
+    return withSpan(
+      "compute_target.capabilities_refresh_project",
+      {
+        [AfAttribute.OrgId]: organizationId,
+        [AfAttribute.ProjectId]: projectId,
+      },
+      async () => {
+        const { rows, project } = await withDb(async (db) => ({
+          rows: await db.computeTargetCapabilities.findMany({
+            where: {
+              organizationId,
+              projectId,
+              source: RunnerCapabilitiesSource.Toolkit,
+            },
+            select: { computeTargetId: true },
+          }),
+          project: await db.project.findFirst({
+            where: { id: projectId, organizationId },
+            select: { settings: true },
+          }),
+        }));
+        const targetIds = new Set([
+          ...rows.map((row) => row.computeTargetId),
+          ...readProjectRunnerIds(project?.settings),
+        ]);
+        const counts: RefreshCounts = { dispatched: 0, skipped: 0 };
+        for (const targetId of targetIds) {
+          await refreshOne(counts, organizationId, targetId, projectId);
+        }
+        return counts;
+      }
+    );
   },
 
   /** Refreshes toolkit files not uploaded for 20 hours (the daily cron). */
-  async refreshStale(now: Date): Promise<RefreshCounts> {
-    const rows = await withDb((db) =>
-      db.computeTargetCapabilities.findMany({
-        where: {
-          source: RunnerCapabilitiesSource.Toolkit,
-          uploadedAt: {
-            lt: new Date(now.getTime() - TOOLKIT_REFRESH_STALE_MS),
-          },
-        },
-        orderBy: { uploadedAt: "asc" },
-        take: TOOLKIT_REFRESH_BATCH_MAX,
-        select: {
-          organizationId: true,
-          computeTargetId: true,
-          projectId: true,
-        },
-      })
+  refreshStale(now: Date): Promise<RefreshCounts> {
+    return withSpan(
+      "compute_target.capabilities_refresh_stale",
+      {},
+      async () => {
+        const rows = await withDb((db) =>
+          db.computeTargetCapabilities.findMany({
+            where: {
+              source: RunnerCapabilitiesSource.Toolkit,
+              uploadedAt: {
+                lt: new Date(now.getTime() - TOOLKIT_REFRESH_STALE_MS),
+              },
+            },
+            orderBy: { uploadedAt: "asc" },
+            take: TOOLKIT_REFRESH_BATCH_MAX,
+            select: {
+              organizationId: true,
+              computeTargetId: true,
+              projectId: true,
+            },
+          })
+        );
+        const counts: RefreshCounts = { dispatched: 0, skipped: 0 };
+        for (const row of rows) {
+          await refreshOne(
+            counts,
+            row.organizationId,
+            row.computeTargetId,
+            row.projectId
+          );
+        }
+        return counts;
+      }
     );
-    const counts: RefreshCounts = { dispatched: 0, skipped: 0 };
-    for (const row of rows) {
-      await refreshOne(
-        counts,
-        row.organizationId,
-        row.computeTargetId,
-        row.projectId
-      );
-    }
-    return counts;
   },
 
   /** After a process save that changed the toolkit, refresh in the background. */
@@ -544,5 +578,21 @@ function toolkitSignature(
   return JSON.stringify({
     repository: toolkit.repository.toLowerCase(),
     mounts: toolkit.mounts ?? null,
+  });
+}
+
+/** Runs `fn` in a span and marks the span failed when it returns a failure Result. */
+function withResultSpan<T, E>(
+  name: string,
+  attributes: SpanAttributes,
+  fn: () => Promise<Result<T, E>>,
+  describeError: (error: E) => string
+): Promise<Result<T, E>> {
+  return withSpan(name, attributes, async () => {
+    const result = await fn();
+    if (!result.ok) {
+      setSpanOutcome(AfOutcome.Error, describeError(result.error));
+    }
+    return result;
   });
 }

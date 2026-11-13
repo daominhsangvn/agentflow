@@ -8,8 +8,8 @@ import { emitTelemetryMetric } from "@repo/observability/telemetry/metrics";
 // Follows the emitHeartbeatLag / emitZombieDetector pattern from
 // apps/api/lib/observability/loop-runner-metrics.ts: one payload `type` per
 // metric so the shape is enforced at compile time, and one thin wrapper each
-// delegating to `emitTelemetryMetric` so the `_telemetryMetric: true` marker
-// contract lives in exactly one place.
+// delegating to `emitTelemetryMetric` so the OTel metric contract lives
+// in exactly one place.
 //
 // WHY THIS FAMILY EXISTS. ISS-4537 froze cloud session ingestion for an entire
 // org for ~2 days and was found only by manual inspection: nothing measured
@@ -19,9 +19,8 @@ import { emitTelemetryMetric } from "@repo/observability/telemetry/metrics";
 // wedged), at the cost of taking the stall threshold to fire. Session ingestion
 // itself is always on: no org policy or flag denies it.
 //
-// Emitting these does NOT create a queryable Datadog metric on its own: each
-// needs a paired `datadog_logs_metric` generator plus a `datadog_monitor` in
-// `agentflow-ai/af-tofu-aws-live` (PRD-159). See packages/observability/README.md.
+// These are recorded as OTel metrics and queried in SigNoz; an alert on one
+// is an alert rule provisioned under deploy/observability/alerts (PRD-159).
 // ---------------------------------------------------------------------------
 
 type SessionIngestionStalenessMetric = {
@@ -48,8 +47,7 @@ type SessionIngestionActiveOrgsMetric = {
   /**
    * ISS-4829: how many orgs are QUIET (past the freshness window with no ingest
    * attempt) in the same sample. Additive plain FIELD, not a metric tag — it
-   * needs no `datadog_logs_metric`/monitor change in `af-tofu-aws-live` to be
-   * emitted, and it gives an operator reading a zero-active alert the population
+   * needs no alert-rule change to be emitted, and it gives an operator reading a zero-active alert the population
    * that explains it without re-deriving it from `stalled_orgs`.
    */
   quietOrgCount: number;
@@ -61,9 +59,8 @@ type SessionIngestionActiveOrgsMetric = {
  * ingest history has no baseline to be stale against.
  *
  * ISS-4830 — WHO IS IN THIS EMISSION. Only ACTIVE and STALLED orgs. The payload
- * carries no classification (adding one as a metric LABEL requires a paired
- * `datadog_logs_metric` + monitor change in `agentflow-ai/af-tofu-aws-live`,
- * PRD-159, which cannot be made from this repo), so a quiet org and a stalled
+ * carries no classification (adding one as a metric attribute changes the alert rule's
+ * grouping, PRD-159), so a quiet org and a stalled
  * org emitted an identical shape and an operator drilling into a `stalled_orgs`
  * page could not tell them apart. The caller narrows the population instead: an
  * org named here is one the page is about. Quiet and dormant orgs stay visible

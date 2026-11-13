@@ -15,6 +15,11 @@ vi.mock("@repo/observability/log", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock("@repo/observability/telemetry/metrics", async (importOriginal) => ({
+  ...(await importOriginal<typeof MetricsModule>()),
+  emitProtocolMetric: vi.fn(),
+}));
+
 vi.mock("@/env", () => ({
   env: { INTERNAL_API_SECRET: "test-secret" },
 }));
@@ -57,6 +62,8 @@ vi.mock("@/app/compute-targets/service", () => ({
 
 import { log } from "@repo/observability/log";
 import { SHORT_HASH_PATTERN } from "@repo/observability/redact-correlation";
+import type * as MetricsModule from "@repo/observability/telemetry/metrics";
+import { emitProtocolMetric } from "@repo/observability/telemetry/metrics";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/internal/relay/socket-event/route";
 
@@ -233,14 +240,12 @@ describe("POST /internal/relay/socket-event — correlation context propagation"
         reason: "missing_gateway_session",
       })
     );
-    expect(
-      vi
-        .mocked(log.info)
-        .mock.calls.some((call) =>
-          String(call[0]).includes(
-            '"metric":"command_ack_lifecycle_context_omitted"'
-          )
-        )
-    ).toBe(true);
+    expect(emitProtocolMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metric: "command_ack_lifecycle_context_omitted",
+        computeTargetId: "target-1",
+        count: 1,
+      })
+    );
   });
 });

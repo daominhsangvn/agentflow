@@ -6,6 +6,7 @@ import {
   workflowAgentConfigSchema,
   workflowRunStatusSchema,
 } from "@repo/api/src/types/workflow";
+import { getActiveTraceparent } from "@repo/observability/span";
 import { z } from "zod";
 import type {
   InboundEvent,
@@ -32,6 +33,8 @@ export type StoredRunSource = {
   extras: JsonObject;
   /** ISO timestamp of the occurrence. */
   occurredAt: string;
+  /** W3C traceparent of the span that ingested the event; links later run spans to it. */
+  traceparent?: string;
 };
 
 const nullableString = z.string().nullable().default(null);
@@ -98,6 +101,7 @@ const storedRunSourceSchema = z.object({
   attributes: z.record(z.string(), attributeValueSchema).default({}),
   extras: jsonObjectSchema.default({}),
   occurredAt: z.string(),
+  traceparent: z.string().max(64).optional(),
 });
 
 const runErrorSchema = z.object({ code: z.string(), message: z.string() });
@@ -132,6 +136,10 @@ export function buildRunSource(event: InboundEvent): JsonObject {
     extras: toJsonObject(event.extras ?? {}),
     occurredAt: event.occurredAt.toISOString(),
   };
+  const traceparent = getActiveTraceparent();
+  if (traceparent) {
+    source.traceparent = traceparent;
+  }
   return toJsonObject(source);
 }
 

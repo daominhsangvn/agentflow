@@ -144,7 +144,7 @@ describe("pool acquire timeout reporting", () => {
       waitingCount: number;
     };
     expect(report.level).toBe("warn");
-    // `status` is Datadog's reserved severity attribute; `level` alone leaves
+    // `status` is the telemetry backend's reserved severity attribute; `level` alone leaves
     // the line's severity to per-service level remapping (ISS-6341).
     expect(report.status).toBe("warn");
     expect(report.message).toContain(ACQUIRE_TIMEOUT_MESSAGE);

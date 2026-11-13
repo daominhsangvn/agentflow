@@ -6,7 +6,6 @@ import {
   PeriodicExportingMetricReader,
 } from "@opentelemetry/sdk-metrics";
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
-import { log } from "../log";
 import type { ProtocolMetric } from "../telemetry/metrics";
 import {
   ConnectionState,
@@ -16,30 +15,6 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-// ---------------------------------------------------------------------------
-// emitProtocolMetric — connection_state_count
-// ---------------------------------------------------------------------------
-
-describe("emitProtocolMetric — connection_state_count", () => {
-  it("emits state as top-level field with _telemetryMetric marker", () => {
-    const spy = vi.spyOn(log, "info");
-    emitProtocolMetric({
-      metric: "connection_state_count",
-      state: ConnectionState.Online,
-      count: 1,
-      computeTargetId: "ct_test",
-      gatewaySessionId: "sess_test",
-      timestamp: "2026-04-20T00:00:00.000Z",
-    });
-    const capturedArg = spy.mock.calls.at(-1)?.[0] as string;
-    const parsed = JSON.parse(capturedArg);
-    expect(parsed.state).toBe(ConnectionState.Online);
-    expect(parsed._telemetryMetric).toBe(true);
-    expect(parsed.metric).toBe("connection_state_count");
-    expect(parsed.computeTargetId).toBe("ct_test");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -131,6 +106,23 @@ describe("emitTelemetryMetric — OTel Meter", () => {
     const dp = m?.dataPoints[0];
     expect(dp?.value).toBe(2);
     expect(dp?.attributes).toEqual({ state: "online" });
+  });
+
+  it("records a protocol metric with its state attribute", async () => {
+    current = setup();
+    emitProtocolMetric({
+      metric: "connection_state_count",
+      state: ConnectionState.Online,
+      count: 1,
+      computeTargetId: "ct_test",
+      gatewaySessionId: "sess_test",
+      timestamp: "2026-04-20T00:00:00.000Z",
+    });
+    const all = await current.collect();
+    const m = all.find((x) => x.descriptor.name === "connection_state_count");
+    expect(m?.dataPoints[0]?.attributes).toEqual(
+      expect.objectContaining({ state: ConnectionState.Online })
+    );
   });
 
   it("records value as a gauge and drops excluded keys", async () => {

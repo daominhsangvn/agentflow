@@ -6,6 +6,7 @@ import type {
   LoopTokenMeta,
   LoopTokenStore,
 } from "../../main/loop/loop-token-store.js";
+import { gatewayTraceHeaders } from "../gateway-trace-context.js";
 import { loopError, loopLog } from "./symphony-utils.js";
 
 // ---------------------------------------------------------------------------
@@ -105,6 +106,7 @@ export async function postLoopEvent(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "x-loop-event-nonce": crypto.randomUUID(),
+        ...gatewayTraceHeaders(),
       },
       body: JSON.stringify(payload),
       signal,
@@ -206,6 +208,7 @@ export async function uploadArtifacts(
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
+        ...gatewayTraceHeaders(),
       },
       body: JSON.stringify(body),
     });
@@ -274,6 +277,7 @@ export async function getCloudLoopStatus(
       method: "GET",
       headers: {
         Authorization: `Bearer ${token ?? ""}`,
+        ...gatewayTraceHeaders(),
       },
       signal: controller.signal,
     });
@@ -508,6 +512,7 @@ export async function postLoopHeartbeat(
     Authorization: authorizationValue,
     "Content-Type": "application/json",
     ...(popHeaders ?? {}),
+    ...gatewayTraceHeaders(),
   };
 
   try {

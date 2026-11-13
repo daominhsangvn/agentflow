@@ -12,7 +12,9 @@ import {
 import { WORKFLOW_EMAIL_ACTION_TYPE } from "@repo/api/src/types/workflow-email";
 import type { WorkflowInstructionResult } from "@repo/api/src/types/workflow-instruction";
 import { Prisma, type WorkflowActionRun, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import pLimit from "p-limit";
 import { mapWithDbConcurrency } from "@/lib/db-fanout";
 import {
@@ -192,51 +194,58 @@ export function hasPostEvents(events: readonly WorkflowRunEvent[]): boolean {
  * for the next drain, so overlapping drains never run one run's rows side by
  * side and a later action sees what the earlier ones did.
  */
-export async function drainActionRuns(
+export function drainActionRuns(
   options: { runId?: string; limit?: number; now?: Date } = {}
 ): Promise<ActionDrainCounts> {
-  const now = options.now ?? new Date();
-  const runs = await withDb((db) =>
-    db.workflowActionRun.groupBy({
-      by: ["runId"],
-      where: {
-        stage: WorkflowActionStage.Post,
-        ...(options.runId ? { runId: options.runId } : {}),
-        OR: [
-          {
-            status: WorkflowActionRunStatus.Pending,
-            nextAttemptAt: { lte: now },
-          },
-          { status: WorkflowActionRunStatus.Waiting },
-        ],
-      },
-      _min: { nextAttemptAt: true },
-      orderBy: { _min: { nextAttemptAt: "asc" } },
-      take: options.limit ?? ACTION_DRAIN_DEFAULT_LIMIT,
-    })
-  );
-  const counts: ActionDrainCounts = {
-    claimed: 0,
-    succeeded: 0,
-    skipped: 0,
-    retried: 0,
-    failed: 0,
-  };
-  await mapWithDbConcurrency(
-    runs,
-    async ({ runId }) => {
-      const rows = await listOpenActionRuns(runId, WorkflowActionStage.Post);
-      for (const row of rows) {
-        const settlement = await advanceActionRun(row, now);
-        tally(counts, toDrainOutcome(settlement));
-        if (!(settlement && isFinalActionRunStatus(settlement.status))) {
-          return;
+  return withSpan("workflow.drain_action_runs", {}, async (span) => {
+    const now = options.now ?? new Date();
+    const runs = await withDb((db) =>
+      db.workflowActionRun.groupBy({
+        by: ["runId"],
+        where: {
+          stage: WorkflowActionStage.Post,
+          ...(options.runId ? { runId: options.runId } : {}),
+          OR: [
+            {
+              status: WorkflowActionRunStatus.Pending,
+              nextAttemptAt: { lte: now },
+            },
+            { status: WorkflowActionRunStatus.Waiting },
+          ],
+        },
+        _min: { nextAttemptAt: true },
+        orderBy: { _min: { nextAttemptAt: "asc" } },
+        take: options.limit ?? ACTION_DRAIN_DEFAULT_LIMIT,
+      })
+    );
+    const counts: ActionDrainCounts = {
+      claimed: 0,
+      succeeded: 0,
+      skipped: 0,
+      retried: 0,
+      failed: 0,
+    };
+    await mapWithDbConcurrency(
+      runs,
+      async ({ runId }) => {
+        const rows = await listOpenActionRuns(runId, WorkflowActionStage.Post);
+        for (const row of rows) {
+          const settlement = await advanceActionRun(row, now);
+          tally(counts, toDrainOutcome(settlement));
+          if (!(settlement && isFinalActionRunStatus(settlement.status))) {
+            return;
+          }
         }
-      }
-    },
-    pLimit(ACTION_DRAIN_RUN_CONCURRENCY)
-  );
-  return counts;
+      },
+      pLimit(ACTION_DRAIN_RUN_CONCURRENCY)
+    );
+    span.setAttributes({
+      "af.workflow.claimed": counts.claimed,
+      "af.workflow.succeeded": counts.succeeded,
+      "af.workflow.failed": counts.failed,
+    });
+    return counts;
+  });
 }
 
 /**
@@ -245,20 +254,22 @@ export async function drainActionRuns(
  * ended, or null when the row waits (backoff, agent at work, another worker
  * has it), which holds the run's later rows.
  */
-export async function advanceActionRun(
+export function advanceActionRun(
   row: WorkflowActionRun,
   now: Date
 ): Promise<ActionRunSettlement | null> {
-  if (row.status === WorkflowActionRunStatus.Waiting) {
-    return await resumeWaitingActionRun(row, now);
-  }
-  if (
-    row.status === WorkflowActionRunStatus.Pending &&
-    row.nextAttemptAt.getTime() <= now.getTime()
-  ) {
-    return await runActionRun(row, now);
-  }
-  return null;
+  return spanActionRun("workflow.advance_action_run", row, async () => {
+    if (row.status === WorkflowActionRunStatus.Waiting) {
+      return await resumeWaitingActionRun(row, now);
+    }
+    if (
+      row.status === WorkflowActionRunStatus.Pending &&
+      row.nextAttemptAt.getTime() <= now.getTime()
+    ) {
+      return await runActionRun(row, now);
+    }
+    return null;
+  });
 }
 
 /**
@@ -267,36 +278,38 @@ export async function advanceActionRun(
  * rows; the pre_actions step requeues the pre rows of its own run. Waiting
  * rows are not stuck: their agent bounds itself (instruction-action.ts).
  */
-export async function requeueStaleActionRuns(
+export function requeueStaleActionRuns(
   now: Date = new Date(),
   scope: { runId?: string; stage?: WorkflowActionStage } = {}
 ): Promise<number> {
-  const staleBefore = new Date(now.getTime() - ACTION_RUNNING_STALE_MS);
-  const stale: Prisma.WorkflowActionRunWhereInput = {
-    stage: scope.stage ?? WorkflowActionStage.Post,
-    ...(scope.runId ? { runId: scope.runId } : {}),
-    status: WorkflowActionRunStatus.Running,
-    updatedAt: { lt: staleBefore },
-  };
-  const [exhausted, requeued] = await Promise.all([
-    withDb((db) =>
-      db.workflowActionRun.updateMany({
-        where: { ...stale, attempts: { gte: ACTION_MAX_ATTEMPTS } },
-        data: {
-          status: WorkflowActionRunStatus.Failed,
-          completedAt: now,
-          lastError: "The action was interrupted and has no attempts left.",
-        },
-      })
-    ),
-    withDb((db) =>
-      db.workflowActionRun.updateMany({
-        where: { ...stale, attempts: { lt: ACTION_MAX_ATTEMPTS } },
-        data: { status: WorkflowActionRunStatus.Pending, nextAttemptAt: now },
-      })
-    ),
-  ]);
-  return exhausted.count + requeued.count;
+  return withSpan("workflow.requeue_action_runs", {}, async () => {
+    const staleBefore = new Date(now.getTime() - ACTION_RUNNING_STALE_MS);
+    const stale: Prisma.WorkflowActionRunWhereInput = {
+      stage: scope.stage ?? WorkflowActionStage.Post,
+      ...(scope.runId ? { runId: scope.runId } : {}),
+      status: WorkflowActionRunStatus.Running,
+      updatedAt: { lt: staleBefore },
+    };
+    const [exhausted, requeued] = await Promise.all([
+      withDb((db) =>
+        db.workflowActionRun.updateMany({
+          where: { ...stale, attempts: { gte: ACTION_MAX_ATTEMPTS } },
+          data: {
+            status: WorkflowActionRunStatus.Failed,
+            completedAt: now,
+            lastError: "The action was interrupted and has no attempts left.",
+          },
+        })
+      ),
+      withDb((db) =>
+        db.workflowActionRun.updateMany({
+          where: { ...stale, attempts: { lt: ACTION_MAX_ATTEMPTS } },
+          data: { status: WorkflowActionRunStatus.Pending, nextAttemptAt: now },
+        })
+      ),
+    ]);
+    return exhausted.count + requeued.count;
+  });
 }
 
 /** Retry delay after `attempts` attempts, or null when no attempt is left. */
@@ -320,7 +333,16 @@ export function retryDelayMs(attempts: number): number | null {
  * attempt time), or null when the row was not claimable (another worker has
  * it, or it was rescheduled to a later attempt since it was read).
  */
-export async function runActionRun(
+export function runActionRun(
+  row: WorkflowActionRun,
+  now: Date
+): Promise<ActionRunSettlement | null> {
+  return spanActionRun("workflow.action_run", row, () =>
+    claimAndRunActionRun(row, now)
+  );
+}
+
+async function claimAndRunActionRun(
   row: WorkflowActionRun,
   now: Date
 ): Promise<ActionRunSettlement | null> {
@@ -351,7 +373,16 @@ export async function runActionRun(
  * it from the integration tool calls the agent made. Null while the agent works, or when
  * another worker claimed the row.
  */
-export async function resumeWaitingActionRun(
+export function resumeWaitingActionRun(
+  row: WorkflowActionRun,
+  now: Date
+): Promise<ActionRunSettlement | null> {
+  return spanActionRun("workflow.resume_action_run", row, () =>
+    finishWaitingActionRun(row, now)
+  );
+}
+
+async function finishWaitingActionRun(
   row: WorkflowActionRun,
   now: Date
 ): Promise<ActionRunSettlement | null> {
@@ -934,4 +965,45 @@ export async function skipPendingPostActionRuns(
     })
   );
   return skipped.count;
+}
+
+type ActionRunSpan = NonNullable<Parameters<typeof setSpanOutcome>[2]>;
+
+function spanActionRun(
+  name: string,
+  row: WorkflowActionRun,
+  work: () => Promise<ActionRunSettlement | null>
+): Promise<ActionRunSettlement | null> {
+  return withSpan(
+    name,
+    {
+      [AfAttribute.ActionRunId]: row.id,
+      [AfAttribute.WorkflowRunId]: row.runId,
+      [AfAttribute.OrgId]: row.organizationId,
+      "af.workflow.action": row.actionType,
+    },
+    async (span) => {
+      const settlement = await work();
+      setSettlementOutcome(settlement, span);
+      return settlement;
+    }
+  );
+}
+
+function setSettlementOutcome(
+  settlement: ActionRunSettlement | null,
+  span: ActionRunSpan
+): void {
+  if (!settlement) {
+    setSpanOutcome(AfOutcome.Skipped, undefined, span);
+  } else if (settlement.status === WorkflowActionRunStatus.Succeeded) {
+    setSpanOutcome(AfOutcome.Ok, undefined, span);
+  } else if (settlement.status === WorkflowActionRunStatus.Pending) {
+    // A retry is scheduled; the failure is transient, so the span is not an error.
+    setSpanOutcome(AfOutcome.Retry, settlement.lastError ?? undefined, span);
+  } else if (settlement.status === WorkflowActionRunStatus.Failed) {
+    setSpanOutcome(AfOutcome.Error, settlement.lastError ?? "failed", span);
+  } else if (settlement.status === WorkflowActionRunStatus.Skipped) {
+    setSpanOutcome(AfOutcome.Skipped, undefined, span);
+  }
 }

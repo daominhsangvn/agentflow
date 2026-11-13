@@ -3,6 +3,7 @@ import {
   logs,
   SeverityNumber,
 } from "@opentelemetry/api-logs";
+import type { KeylessTelemetrySignal } from "@repo/shared-platform/keyless-telemetry";
 import { gatewayLog } from "../main/logging/gateway-logger.js";
 import { createApiOtlpTelemetryTransport } from "../main/telemetry/api-otlp-telemetry-transport.js";
 import {
@@ -40,6 +41,11 @@ export const RunnerTelemetryAttribute = {
 
 export type HeadlessTelemetry = {
   emitter: TelemetryEmitter;
+  /** Set only when telemetry is enabled; ships a raw OTLP body via the sanctioned transport. */
+  exportSignal?: (
+    signal: KeylessTelemetrySignal,
+    body: Uint8Array
+  ) => Promise<boolean>;
   stop(): Promise<void>;
 };
 
@@ -63,18 +69,19 @@ export function startHeadlessTelemetry(input: {
   }
   const env = input.env ?? process.env;
   const { config, gatewayId } = input;
+  const transport =
+    input.transport ??
+    createApiOtlpTelemetryTransport({
+      apiUrl: config.apiUrl,
+      getApiKey: () => config.apiKey,
+    });
   const runtime = createDesktopOtelRuntime({
     appVersion: BUILD_APP_VERSION,
     env,
     serviceName: env.OTEL_SERVICE_NAME ?? RUNNER_SERVICE_NAME,
     getAppInstallationId: () => gatewayId,
     isPackaged: false,
-    telemetryTransport:
-      input.transport ??
-      createApiOtlpTelemetryTransport({
-        apiUrl: config.apiUrl,
-        getApiKey: () => config.apiKey,
-      }),
+    telemetryTransport: transport,
   });
   let started = false;
   const ready = runtime
@@ -94,6 +101,7 @@ export function startHeadlessTelemetry(input: {
     });
   return {
     emitter: { emit: emitLogRecord },
+    exportSignal: (signal, body) => transport.export(signal, body),
     stop: () => stopRuntime(runtime, ready, () => started),
   };
 }

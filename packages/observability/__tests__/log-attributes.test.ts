@@ -4,6 +4,23 @@ import { logJsonReplacer, toLogAttributes } from "../log-attributes";
 const LIVE_TOKEN = "ya29.a0AfB_bZlFAKEtokenVALUE1234567890abcdefXYZ";
 
 describe("toLogAttributes", () => {
+  it("aliases camelCase ids to af.* and keeps the originals", () => {
+    const attrs = toLogAttributes({ loopId: "l1", runId: "r1" });
+    expect(attrs["af.loop_id"]).toBe("l1");
+    expect(attrs["af.workflow_run_id"]).toBe("r1");
+    expect(attrs.loopId).toBe("l1");
+    expect(attrs.runId).toBe("r1");
+  });
+
+  it("does not alias non-string ids", () => {
+    expect(toLogAttributes({ loopId: 5 })["af.loop_id"]).toBeUndefined();
+  });
+
+  it("keeps an explicit af.* key", () => {
+    const attrs = toLogAttributes({ "af.loop_id": "x", loopId: "l1" });
+    expect(attrs["af.loop_id"]).toBe("x");
+  });
+
   it("returns {} for undefined meta", () => {
     expect(toLogAttributes(undefined)).toEqual({});
   });

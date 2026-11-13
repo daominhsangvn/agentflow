@@ -17,7 +17,7 @@
  * `DESKTOP_AGENT_SESSION_SYNC_MAX_SESSIONS_PER_REQUEST` — so a per-row emit on
  * this authenticated path is the amplification vector `apps/api/AGENTS.md`
  * ("Emission and Abuse Control") forbids: one max-size request would write 200
- * Datadog-bound logs. The counter stays additive, so a monitor reading
+ * telemetry-bound logs. The counter stays additive, so a monitor reading
  * `sum(count)` sees the same total it would have seen per session.
  */
 
@@ -43,8 +43,8 @@ import type { UpsertSessionSliceResult } from "./upsert-session-slice";
  * status produces one distinct value, not five — and a `Set` means a batch of 200
  * identical spellings still logs one.
  *
- * These are a LOG FIELD, never a metric tag. If a `datadog_logs_metric`
- * generator is ever added for this metric (see the note on
+ * These are a LOG FIELD, never a metric tag. If an alert rule
+ * is ever added for this metric (see the note on
  * `SessionSyncMetric.UnmodelledStatusFolded`), it must tag on `source`-style
  * bounded dimensions only — tagging on caller-supplied text is unbounded
  * cardinality, which is the expensive failure this bound exists to prevent.

@@ -24,8 +24,8 @@ describe("[orgSlug]/[...unmatched] catch-all", () => {
   // The `notFound` mock is created once at module scope, so its call count is
   // cumulative across every execution of the test body. Vitest applies no
   // global reset (no `clearMocks` in vitest.config.mts, no `clearAllMocks` in
-  // vitest.setup.ts), so a re-run — vitest `retry`/`repeats`, or Datadog Early
-  // Flake Detection re-running a newly added test — would observe 2 calls and
+  // vitest.setup.ts), so a re-run — vitest `retry`/`repeats`, or a flake-detection
+  // tool re-running a newly added test — would observe 2 calls and
   // fail an assertion that passed the first time. Clearing here scopes the
   // count to the current execution and keeps the assertion exact.
   beforeEach(() => {

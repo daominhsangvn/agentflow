@@ -186,7 +186,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   // Hoisted so the outer catch can stitch the failure to its loop/org in
-  // Datadog — see `loop.event_ingest_failed` below.
+  // SigNoz — see `loop.event_ingest_failed` below.
   let loopId: string | undefined;
   let organizationId: string | undefined;
   try {

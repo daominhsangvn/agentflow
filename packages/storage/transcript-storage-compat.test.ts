@@ -33,6 +33,7 @@ vi.mock("@aws-sdk/client-s3", () => {
     UploadPartCommand: MockCommand,
     UploadPartCopyCommand: MockCommand,
     S3Client: class S3Client {
+      middlewareStack = { add: () => undefined };
       send = s3Send;
     },
   };

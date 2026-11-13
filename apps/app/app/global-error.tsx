@@ -2,8 +2,8 @@
 
 import { Button } from "@repo/design-system/components/ui/button";
 import { fonts } from "@repo/design-system/lib/fonts";
+import { log } from "@repo/observability/log";
 import { useEffect } from "react";
-import { reportNextjsError } from "@/lib/datadog-rum/report-error";
 
 type GlobalErrorProperties = {
   readonly error: Error & { digest?: string };
@@ -12,9 +12,9 @@ type GlobalErrorProperties = {
 
 const GlobalError = ({ error, reset }: GlobalErrorProperties) => {
   useEffect(() => {
-    reportNextjsError(error, {
+    log.error("app.render_error", {
       digest: error.digest,
-      source: "global-error",
+      message: error.message,
     });
   }, [error]);
 

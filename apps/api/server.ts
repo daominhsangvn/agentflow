@@ -1,8 +1,10 @@
 import { createServer } from "node:http";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import next from "next";
 import { initDesktopGatewaySocketServer } from "./lib/desktop-gateway-socket-server";
 import { trackRequestCompleted } from "./lib/observability/request-completed-log";
-import { startSelfHostedCronRunner } from "./lib/self-hosted-cron";
+import { cronJobName, startSelfHostedCronRunner } from "./lib/self-hosted-cron";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOST ?? "0.0.0.0";
@@ -38,7 +40,23 @@ app
       console.log(`> Ready on http://${hostname}:${port}`);
       // Self-hosted has no platform cron: workflow ticks and the loop reaper
       // are driven in-process (SELF_HOSTED_CRON_DISABLED=true opts out).
-      const stopCronRunner = startSelfHostedCronRunner({ port, hostname });
+      const stopCronRunner = startSelfHostedCronRunner({
+        port,
+        hostname,
+        runInSpan: (job, fn) =>
+          withSpan(
+            `cron.${cronJobName(job.path)}`,
+            { [AfAttribute.CronJob]: job.path },
+            async (span) => {
+              const result = await fn();
+              if (!result.ok) {
+                setSpanOutcome(AfOutcome.Error, result.reason, span);
+              }
+              return result;
+            },
+            { root: true }
+          ),
+      });
       server.on("close", stopCronRunner);
     });
   })

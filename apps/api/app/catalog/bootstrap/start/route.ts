@@ -85,7 +85,7 @@ export const POST = withAnyAuth(async ({ user }, request) => {
     if (result.error === "missing_anthropic_api_key") {
       // `badRequestResponse`, not `errorResponse`: a keyless Cloud user is an
       // expected configuration state, and `errorResponse` logs `log.error()`
-      // before returning — which would report every one of them to Datadog as a
+      // before returning — which would report every one of them to SigNoz as a
       // server error. Matches the sibling in `start-loop-from-local`.
       return badRequestResponse(MISSING_ANTHROPIC_API_KEY_MESSAGE);
     }

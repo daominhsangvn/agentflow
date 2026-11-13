@@ -24,7 +24,9 @@ import {
 } from "@repo/auth/loop-runner-jwt";
 import { withDb } from "@repo/database";
 import { getInstallationAccessToken } from "@repo/github";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { truncateUtf8 } from "@repo/observability/truncate-utf8";
 import { bulkIngestAgents } from "@/app/catalog/service";
 import { resolveComputeTargetClaudeRuntime } from "@/app/compute-targets/model-provider-service";
@@ -533,145 +535,152 @@ export type LaunchLoopOptions = {
   tokenOverrides?: LoopRunnerTokenIssueOverrides;
 };
 
-export async function launchLoop(
+export function launchLoop(
   loopId: string,
   organizationId: string,
   options?: LaunchLoopOptions
 ): Promise<string> {
-  const loop = await getPendingLoopOrThrow(loopId, organizationId);
+  return withSpan(
+    "loop.launch",
+    { [AfAttribute.LoopId]: loopId, [AfAttribute.OrgId]: organizationId },
+    async (span) => {
+      const loop = await getPendingLoopOrThrow(loopId, organizationId);
 
-  // Pre-dispatch guard: if the command requires a parent loop's state and the
-  // parent state is unavailable, fail the loop immediately rather than letting
-  // the runner start and immediately abort.
-  const parentInfo = await resolveParentLoopInfo(
-    loopId,
-    loop.parentLoopId,
-    organizationId
+      // Pre-dispatch guard: if the command requires a parent loop's state and the
+      // parent state is unavailable, fail the loop immediately rather than letting
+      // the runner start and immediately abort.
+      const parentInfo = await resolveParentLoopInfo(
+        loopId,
+        loop.parentLoopId,
+        organizationId
+      );
+      if (
+        getCommandHandler(loop.command)?.requiresParent === true &&
+        parentInfo.kind === "state-unavailable"
+      ) {
+        const timestamp = new Date().toISOString();
+        // `warn` for the same reason as `loop.launch_failed` below: this path now
+        // throws `LaunchNotDispatchedError`, and `dispatchAndClassify` owns the one
+        // error-level entry per dropped dispatch.
+        setSpanOutcome(AfOutcome.Error, "pre_dispatch_guard_failed", span);
+        log.warn("loop.pre_dispatch_guard_failed", {
+          loopId,
+          command: loop.command,
+          parentLoopId: loop.parentLoopId,
+          detail: "Pre-dispatch guard: parent state unavailable, failing loop",
+        });
+        await failLoopWithError(
+          loopId,
+          organizationId,
+          LoopErrorCode.PlanStateUnavailable,
+          "Parent loop state is unavailable, cannot resume execution",
+          timestamp,
+          // Nothing dispatched, so the run provably never started.
+          { neverStarted: true }
+        );
+        // Never a plain resolve: the row is FAILED and nothing was dispatched, so a
+        // resolve here reads as a delivered launch to `dispatchAndClassify` and the
+        // route answers 200 for a loop that will never run. Thrown outside the try
+        // block below on purpose — `failLoopWithError` has already terminalised the
+        // row, so the catch block's cleanup/cancel path must not run.
+        throw new LaunchNotDispatchedError(
+          "parent_state_unavailable",
+          "Parent loop state is unavailable, cannot resume execution"
+        );
+      }
+
+      log.info("loop.launching", {
+        loopId,
+        command: loop.command,
+        // commandId of the triggering desktop user-intent command (desktop loops
+        // only; undefined for ECS), so the launch log can be stitched to the
+        // browser-signed command that triggered it.
+        commandId: options?.desktopUserIntentSignature?.commandId,
+        repo: loop.repo,
+        hasDocument: !!loop.documentId,
+        hasParent: !!loop.parentLoopId,
+        computeTargetId: loop.computeTargetId,
+      });
+
+      const provider = resolveProvider(loop);
+
+      let prepared: PreparedContext | undefined;
+      let result: LaunchResult | undefined;
+      try {
+        const launchCtx = await resolveLoopLaunchContext(
+          loop,
+          organizationId,
+          parentInfo,
+          options
+        );
+        // Pin the JTI atomically before dispatch so the token is visible from
+        // second zero. This is the only non-CAS writer of active_token_jti; all
+        // subsequent writers use the CAS-guarded enforceJtiOrPin path.
+        await withDb((db) =>
+          db.loop.updateMany({
+            where: { id: loopId, organizationId },
+            data: {
+              activeTokenJti: launchCtx.tokenId,
+              tokenExpiresAt: launchCtx.expiresAt,
+              runnerCapabilities: launchCtx.runnerCapabilities,
+            },
+          })
+        );
+        prepared = await provider.prepareContext(launchCtx);
+        result = await provider.dispatch(launchCtx, prepared);
+        await claimOrPersistRunning(
+          loopId,
+          organizationId,
+          result.containerId,
+          result.s3StateKey
+        );
+
+        log.info("loop.launched", {
+          loopId,
+          containerId: result.containerId,
+          // Mirror loop.launching so a launch-success event can be stitched
+          // directly to the triggering desktop user-intent command without a
+          // secondary lookup by loopId (desktop loops only; undefined for ECS).
+          commandId: options?.desktopUserIntentSignature?.commandId,
+          computeTargetId: loop.computeTargetId,
+        });
+
+        return result.containerId;
+      } catch (error) {
+        // `warn`, not `error`, and deliberately so: `launchLoop` always rethrows,
+        // and its only production caller — `dispatchAndClassify` — logs the same
+        // failure at error level with the raw error, the dispatchReason and the
+        // classified code. Logging error here too made one dropped dispatch two
+        // SigNoz errors, the exact duplication `dispatchFailureResponse` refuses
+        // to add a third of. This entry survives as the orchestrator-layer trace
+        // event: it mirrors loop.launching / loop.launched so an operator can pivot
+        // from the launch failure back to the triggering desktop user-intent
+        // command (desktop loops only; undefined for ECS) and compute target,
+        // preserving the command→loop→incident trace.
+        log.warn("loop.launch_failed", {
+          loopId,
+          error,
+          commandId: options?.desktopUserIntentSignature?.commandId,
+          computeTargetId: loop.computeTargetId,
+        });
+
+        // BEFORE cleanup, not after: cleanup kills the runner, whose `cancelled`
+        // callback is a legal PENDING -> CANCELLED transition that would beat our
+        // FAILED write. See `failLoopAfterLaunchFailure` (ISS-5711).
+        await failLoopAfterLaunchFailure(loopId, organizationId);
+
+        await provider.cleanupOnLaunchFailure(
+          loopId,
+          organizationId,
+          result ?? { s3StateKey: prepared?.s3StateKey },
+          error,
+          loop.computeTargetId
+        );
+
+        throw error;
+      }
+    }
   );
-  if (
-    getCommandHandler(loop.command)?.requiresParent === true &&
-    parentInfo.kind === "state-unavailable"
-  ) {
-    const timestamp = new Date().toISOString();
-    // `warn` for the same reason as `loop.launch_failed` below: this path now
-    // throws `LaunchNotDispatchedError`, and `dispatchAndClassify` owns the one
-    // error-level entry per dropped dispatch.
-    log.warn("loop.pre_dispatch_guard_failed", {
-      loopId,
-      command: loop.command,
-      parentLoopId: loop.parentLoopId,
-      detail: "Pre-dispatch guard: parent state unavailable, failing loop",
-    });
-    await failLoopWithError(
-      loopId,
-      organizationId,
-      LoopErrorCode.PlanStateUnavailable,
-      "Parent loop state is unavailable, cannot resume execution",
-      timestamp,
-      // Nothing dispatched, so the run provably never started.
-      { neverStarted: true }
-    );
-    // Never a plain resolve: the row is FAILED and nothing was dispatched, so a
-    // resolve here reads as a delivered launch to `dispatchAndClassify` and the
-    // route answers 200 for a loop that will never run. Thrown outside the try
-    // block below on purpose — `failLoopWithError` has already terminalised the
-    // row, so the catch block's cleanup/cancel path must not run.
-    throw new LaunchNotDispatchedError(
-      "parent_state_unavailable",
-      "Parent loop state is unavailable, cannot resume execution"
-    );
-  }
-
-  log.info("loop.launching", {
-    loopId,
-    command: loop.command,
-    // commandId of the triggering desktop user-intent command (desktop loops
-    // only; undefined for ECS), so the launch log can be stitched to the
-    // browser-signed command that triggered it.
-    commandId: options?.desktopUserIntentSignature?.commandId,
-    repo: loop.repo,
-    hasDocument: !!loop.documentId,
-    hasParent: !!loop.parentLoopId,
-    computeTargetId: loop.computeTargetId,
-  });
-
-  const provider = resolveProvider(loop);
-
-  let prepared: PreparedContext | undefined;
-  let result: LaunchResult | undefined;
-  try {
-    const launchCtx = await resolveLoopLaunchContext(
-      loop,
-      organizationId,
-      parentInfo,
-      options
-    );
-    // Pin the JTI atomically before dispatch so the token is visible from
-    // second zero. This is the only non-CAS writer of active_token_jti; all
-    // subsequent writers use the CAS-guarded enforceJtiOrPin path.
-    await withDb((db) =>
-      db.loop.updateMany({
-        where: { id: loopId, organizationId },
-        data: {
-          activeTokenJti: launchCtx.tokenId,
-          tokenExpiresAt: launchCtx.expiresAt,
-          runnerCapabilities: launchCtx.runnerCapabilities,
-        },
-      })
-    );
-    prepared = await provider.prepareContext(launchCtx);
-    result = await provider.dispatch(launchCtx, prepared);
-    await claimOrPersistRunning(
-      loopId,
-      organizationId,
-      result.containerId,
-      result.s3StateKey
-    );
-
-    log.info("loop.launched", {
-      loopId,
-      containerId: result.containerId,
-      // Mirror loop.launching so a launch-success event can be stitched
-      // directly to the triggering desktop user-intent command without a
-      // secondary lookup by loopId (desktop loops only; undefined for ECS).
-      commandId: options?.desktopUserIntentSignature?.commandId,
-      computeTargetId: loop.computeTargetId,
-    });
-
-    return result.containerId;
-  } catch (error) {
-    // `warn`, not `error`, and deliberately so: `launchLoop` always rethrows,
-    // and its only production caller — `dispatchAndClassify` — logs the same
-    // failure at error level with the raw error, the dispatchReason and the
-    // classified code. Logging error here too made one dropped dispatch two
-    // Datadog errors, the exact duplication `dispatchFailureResponse` refuses
-    // to add a third of. This entry survives as the orchestrator-layer trace
-    // event: it mirrors loop.launching / loop.launched so an operator can pivot
-    // from the launch failure back to the triggering desktop user-intent
-    // command (desktop loops only; undefined for ECS) and compute target,
-    // preserving the command→loop→incident trace.
-    log.warn("loop.launch_failed", {
-      loopId,
-      error,
-      commandId: options?.desktopUserIntentSignature?.commandId,
-      computeTargetId: loop.computeTargetId,
-    });
-
-    // BEFORE cleanup, not after: cleanup kills the runner, whose `cancelled`
-    // callback is a legal PENDING -> CANCELLED transition that would beat our
-    // FAILED write. See `failLoopAfterLaunchFailure` (ISS-5711).
-    await failLoopAfterLaunchFailure(loopId, organizationId);
-
-    await provider.cleanupOnLaunchFailure(
-      loopId,
-      organizationId,
-      result ?? { s3StateKey: prepared?.s3StateKey },
-      error,
-      loop.computeTargetId
-    );
-
-    throw error;
-  }
 }
 
 /**
@@ -759,166 +768,177 @@ export async function buildDesktopLoopExecutionCredentials(input: {
  * - "completed": Download metadata from S3, update token counts, mark COMPLETED
  * - "error": Mark loop as FAILED with error details
  */
-export async function handleLoopEvent(
+export function handleLoopEvent(
   loopId: string,
   organizationId: string,
   event: LoopEvent,
   replayContext?: RunnerReplayContext
 ): Promise<LoopEvent[]> {
-  log.info("loop.event_handling", {
-    loopId,
-    eventType: event.type,
-  });
-
-  // Pre-resolve the runner arg once. When replayContext is present, addEvent
-  // uses the runner event unique key as the authoritative replay gate.
-  const runner = replayRunner(replayContext);
-
-  switch (event.type) {
-    case "started": {
-      // Extract sessionId if present on the started event
-      const startedData = event as Record<string, unknown>;
-      const startSessionId =
-        typeof startedData.sessionId === "string"
-          ? startedData.sessionId
-          : undefined;
-
-      await loopsService.updateStatus(
+  return withSpan(
+    "loop.event",
+    {
+      [AfAttribute.LoopId]: loopId,
+      [AfAttribute.OrgId]: organizationId,
+      "af.loop.event_type": event.type,
+    },
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the span wrapper only adds nesting to the pre-existing switch
+    async () => {
+      log.info("loop.event_handling", {
         loopId,
-        organizationId,
-        LoopStatus.Running,
-        {
-          startedAt: new Date(),
-          ...(startSessionId ? { sessionId: startSessionId } : {}),
-        }
-      );
-      await loopsService.addEvent(
-        loopId,
-        organizationId,
-        {
-          type: event.type,
-          data: { loopId: event.loopId, timestamp: event.timestamp },
-        },
-        runner
-      );
-      // Delegate post-start hook to provider (ECS: scrub secrets, Desktop: no-op).
-      const loop = await loopsService.findById(loopId, organizationId);
-      if (loop) {
-        const provider = resolveProvider(loop);
-        try {
-          await provider.onStarted(loop);
-        } catch (onStartedError) {
-          log.error("loop.on_started_hook_failed", {
+        eventType: event.type,
+      });
+
+      // Pre-resolve the runner arg once. When replayContext is present, addEvent
+      // uses the runner event unique key as the authoritative replay gate.
+      const runner = replayRunner(replayContext);
+
+      switch (event.type) {
+        case "started": {
+          // Extract sessionId if present on the started event
+          const startedData = event as Record<string, unknown>;
+          const startSessionId =
+            typeof startedData.sessionId === "string"
+              ? startedData.sessionId
+              : undefined;
+
+          await loopsService.updateStatus(
             loopId,
-            error: onStartedError,
-            detail:
-              "Provider onStarted hook failed — secrets may still be in S3",
-          });
-          await recordScrubFailureWarning(loopId, organizationId);
+            organizationId,
+            LoopStatus.Running,
+            {
+              startedAt: new Date(),
+              ...(startSessionId ? { sessionId: startSessionId } : {}),
+            }
+          );
+          await loopsService.addEvent(
+            loopId,
+            organizationId,
+            {
+              type: event.type,
+              data: { loopId: event.loopId, timestamp: event.timestamp },
+            },
+            runner
+          );
+          // Delegate post-start hook to provider (ECS: scrub secrets, Desktop: no-op).
+          const loop = await loopsService.findById(loopId, organizationId);
+          if (loop) {
+            const provider = resolveProvider(loop);
+            try {
+              await provider.onStarted(loop);
+            } catch (onStartedError) {
+              log.error("loop.on_started_hook_failed", {
+                loopId,
+                error: onStartedError,
+                detail:
+                  "Provider onStarted hook failed — secrets may still be in S3",
+              });
+              await recordScrubFailureWarning(loopId, organizationId);
+            }
+          }
+          return [event];
+        }
+
+        case "output": {
+          const persisted = await loopsService.addEvent(
+            loopId,
+            organizationId,
+            {
+              type: event.type,
+              data: { chunk: event.chunk, timestamp: event.timestamp },
+            },
+            runner
+          );
+          if (persisted && hasNonZeroTokenUsage(event.tokenUsage)) {
+            const tu = event.tokenUsage!;
+            await loopsService.updateTokens(
+              loopId,
+              organizationId,
+              tu.inputTokens,
+              tu.outputTokens,
+              tu.cacheCreationInputTokens ?? 0,
+              tu.cacheReadInputTokens ?? 0
+            );
+          }
+          return [event];
+        }
+
+        case "progress": {
+          await loopsService.addEvent(
+            loopId,
+            organizationId,
+            {
+              type: event.type,
+              data: {
+                percent: event.percent,
+                stage: event.stage,
+                timestamp: event.timestamp,
+              },
+            },
+            runner
+          );
+          return [event];
+        }
+
+        case "tool_call": {
+          await loopsService.addEvent(
+            loopId,
+            organizationId,
+            {
+              type: event.type,
+              data: {
+                tool: event.tool,
+                status: event.status,
+                input: event.input,
+                output: event.output,
+                timestamp: event.timestamp,
+              },
+            },
+            runner
+          );
+          return [event];
+        }
+
+        case "artifact_created": {
+          await loopsService.addEvent(
+            loopId,
+            organizationId,
+            {
+              type: event.type,
+              data: {
+                artifactId: event.artifactId,
+                artifactType: event.artifactType,
+                timestamp: event.timestamp,
+              },
+            },
+            runner
+          );
+          return [event];
+        }
+
+        case "completed": {
+          return handleLoopCompleted(loopId, organizationId, event, runner);
+        }
+
+        case "error": {
+          return handleLoopError(loopId, organizationId, event, runner);
+        }
+
+        default: {
+          // Store unknown event types for forward compatibility
+          await loopsService.addEvent(
+            loopId,
+            organizationId,
+            {
+              type: event.type,
+              data: event as unknown as Record<string, unknown>,
+            },
+            runner
+          );
+          return [event];
         }
       }
-      return [event];
     }
-
-    case "output": {
-      const persisted = await loopsService.addEvent(
-        loopId,
-        organizationId,
-        {
-          type: event.type,
-          data: { chunk: event.chunk, timestamp: event.timestamp },
-        },
-        runner
-      );
-      if (persisted && hasNonZeroTokenUsage(event.tokenUsage)) {
-        const tu = event.tokenUsage!;
-        await loopsService.updateTokens(
-          loopId,
-          organizationId,
-          tu.inputTokens,
-          tu.outputTokens,
-          tu.cacheCreationInputTokens ?? 0,
-          tu.cacheReadInputTokens ?? 0
-        );
-      }
-      return [event];
-    }
-
-    case "progress": {
-      await loopsService.addEvent(
-        loopId,
-        organizationId,
-        {
-          type: event.type,
-          data: {
-            percent: event.percent,
-            stage: event.stage,
-            timestamp: event.timestamp,
-          },
-        },
-        runner
-      );
-      return [event];
-    }
-
-    case "tool_call": {
-      await loopsService.addEvent(
-        loopId,
-        organizationId,
-        {
-          type: event.type,
-          data: {
-            tool: event.tool,
-            status: event.status,
-            input: event.input,
-            output: event.output,
-            timestamp: event.timestamp,
-          },
-        },
-        runner
-      );
-      return [event];
-    }
-
-    case "artifact_created": {
-      await loopsService.addEvent(
-        loopId,
-        organizationId,
-        {
-          type: event.type,
-          data: {
-            artifactId: event.artifactId,
-            artifactType: event.artifactType,
-            timestamp: event.timestamp,
-          },
-        },
-        runner
-      );
-      return [event];
-    }
-
-    case "completed": {
-      return handleLoopCompleted(loopId, organizationId, event, runner);
-    }
-
-    case "error": {
-      return handleLoopError(loopId, organizationId, event, runner);
-    }
-
-    default: {
-      // Store unknown event types for forward compatibility
-      await loopsService.addEvent(
-        loopId,
-        organizationId,
-        {
-          type: event.type,
-          data: event as unknown as Record<string, unknown>,
-        },
-        runner
-      );
-      return [event];
-    }
-  }
+  );
 }
 
 /**

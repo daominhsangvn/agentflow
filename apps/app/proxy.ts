@@ -84,8 +84,6 @@ export default authMiddleware(
               env.NEXT_PUBLIC_API_URL!,
               "https://api.liveblocks.io",
               "wss://api.liveblocks.io",
-              "https://browser-intake-datadoghq.com",
-              "https://*.browser-intake-datadoghq.com",
               "https://*.posthog.com",
               // Include Google Analytics only when the measurement ID is
               // configured. Without it, browser extension injections and

@@ -1,4 +1,9 @@
 import { URL } from "node:url";
+import {
+  getGatewayTraceparent,
+  runWithGatewayTrace,
+  TRACEPARENT_HEADER,
+} from "../../server/gateway-trace-context.js";
 import { COMMAND_SIGNING_REJECTION_REASONS } from "../../shared/contracts.js";
 import type { CommandSignatureVerifier } from "../command-signing/command-signature-verifier.js";
 import { gatewayLog } from "../logging/gateway-logger.js";
@@ -154,6 +159,7 @@ export class CloudCommandExecutor {
         commandId: command.commandId,
         accepted: true,
         state: "accepted",
+        ...(command.traceparent ? { traceparent: command.traceparent } : {}),
       });
       if (existing.state === "terminal") {
         this.replayBuffered(command.commandId, 0);
@@ -180,6 +186,7 @@ export class CloudCommandExecutor {
           accepted: false,
           state: "failed",
           reason: verification.reason,
+          ...(command.traceparent ? { traceparent: command.traceparent } : {}),
         });
         return;
       }
@@ -205,6 +212,7 @@ export class CloudCommandExecutor {
         accepted: false,
         state: "failed",
         reason: validationError,
+        ...(command.traceparent ? { traceparent: command.traceparent } : {}),
       });
       return;
     }
@@ -229,6 +237,7 @@ export class CloudCommandExecutor {
       commandId: command.commandId,
       accepted: true,
       state: "accepted",
+      ...(command.traceparent ? { traceparent: command.traceparent } : {}),
     });
     Observability.commandInitiated(command.commandId, command.operationId);
     this.schedule();
@@ -553,7 +562,22 @@ export class CloudCommandExecutor {
     }
   }
 
-  private async executeViaGateway(
+  private executeViaGateway(
+    command: DesktopCommandEvent,
+    signal: AbortSignal
+  ): Promise<void> {
+    return runWithGatewayTrace(
+      "runner.command",
+      command.traceparent,
+      {
+        [RunnerSpanAttribute.CommandId]: command.commandId,
+        [RunnerSpanAttribute.OperationId]: command.operationId,
+      },
+      () => this.executeViaGatewayTraced(command, signal)
+    );
+  }
+
+  private async executeViaGatewayTraced(
     command: DesktopCommandEvent,
     signal: AbortSignal
   ): Promise<void> {
@@ -564,6 +588,10 @@ export class CloudCommandExecutor {
     const headers = new Headers(command.headers);
     headers.set("x-desktop-gateway-token", this.options.getGatewayAuthToken());
     headers.set("x-desktop-source", "cloud-socket");
+    const traceparent = getGatewayTraceparent();
+    if (traceparent) {
+      headers.set(TRACEPARENT_HEADER, traceparent);
+    }
     if (isValidUuid(command.commandId)) {
       headers.set("x-desktop-command-id", command.commandId);
     }
@@ -753,6 +781,9 @@ export class CloudCommandExecutor {
       sequence,
       eventType,
       data,
+      ...(tracked.command.traceparent
+        ? { traceparent: tracked.command.traceparent }
+        : {}),
     });
   }
 
@@ -811,6 +842,9 @@ export class CloudCommandExecutor {
         sequence: event.sequence,
         eventType: event.eventType,
         data: event.data,
+        ...(tracked.command.traceparent
+          ? { traceparent: tracked.command.traceparent }
+          : {}),
       });
     }
   }
@@ -1083,3 +1117,8 @@ const SAFE_HEADER_VALUE_REGEX = /^[\x20-\x7e]+$/;
 function isSafeHeaderValue(value: string): boolean {
   return SAFE_HEADER_VALUE_REGEX.test(value);
 }
+
+const RunnerSpanAttribute = {
+  CommandId: "af.command_id",
+  OperationId: "af.operation_id",
+} as const;

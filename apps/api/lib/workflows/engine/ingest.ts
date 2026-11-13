@@ -11,7 +11,9 @@ import {
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
 import { WorkflowEventResult } from "@repo/api/src/types/workflow-event";
 import { Prisma, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { v7 as uuidv7 } from "uuid";
 import { z } from "zod";
 import { getPrismaErrorCode } from "@/lib/db-utils";
@@ -121,44 +123,53 @@ export type IngestResult = {
   detail: string | null;
 };
 
-export async function ingestEvents(
-  input: IngestEventsInput
-): Promise<IngestResult> {
-  const deliveryRowId = uuidv7();
-  const inserted = await insertDelivery(input, deliveryRowId);
-  if (!inserted) {
-    return {
-      outcome: IntegrationDeliveryOutcome.Duplicate,
-      runCount: 0,
-      deliveryRowId: null,
-      decisions: [],
-      detail: "Delivery already received",
-    };
-  }
+export function ingestEvents(input: IngestEventsInput): Promise<IngestResult> {
+  return withSpan(
+    "workflow.ingest",
+    {
+      [AfAttribute.OrgId]: input.connection.record.organizationId,
+      [AfAttribute.ConnectionId]: input.connection.record.id,
+    },
+    async (span) => {
+      const deliveryRowId = uuidv7();
+      const inserted = await insertDelivery(input, deliveryRowId);
+      span.setAttribute(AfAttribute.DeliveryId, deliveryRowId);
+      if (!inserted) {
+        setSpanOutcome(AfOutcome.Duplicate, undefined, span);
+        return {
+          outcome: IntegrationDeliveryOutcome.Duplicate,
+          runCount: 0,
+          deliveryRowId: null,
+          decisions: [],
+          detail: "Delivery already received",
+        };
+      }
 
-  let decided: DecidedRuns;
-  try {
-    decided = await decideRuns(input, deliveryRowId);
-  } catch (error) {
-    // Forget the delivery so the provider's retry is processed again.
-    await discardDelivery(deliveryRowId);
-    throw error;
-  }
+      let decided: DecidedRuns;
+      try {
+        decided = await decideRuns(input, deliveryRowId);
+      } catch (error) {
+        // Forget the delivery so the provider's retry is processed again.
+        await discardDelivery(deliveryRowId);
+        throw error;
+      }
 
-  const { decisions } = decided;
-  const summary = summarizeDecisions(input, decided);
-  await finishDelivery(input, deliveryRowId, summary);
-  await recordWorkflowEvents({
-    organizationId: input.connection.record.organizationId,
-    deliveryRowId,
-    drafts: decided.drafts,
-  });
-  for (const decision of decisions) {
-    if (startsWork(decision.decision)) {
-      waitUntil(advanceRun(decision.runId));
+      const { decisions } = decided;
+      const summary = summarizeDecisions(input, decided);
+      await finishDelivery(input, deliveryRowId, summary);
+      await recordWorkflowEvents({
+        organizationId: input.connection.record.organizationId,
+        deliveryRowId,
+        drafts: decided.drafts,
+      });
+      for (const decision of decisions) {
+        if (startsWork(decision.decision)) {
+          waitUntil(advanceRun(decision.runId));
+        }
+      }
+      return { ...summary, deliveryRowId, decisions };
     }
-  }
-  return { ...summary, deliveryRowId, decisions };
+  );
 }
 
 /**
@@ -248,44 +259,52 @@ type DecidedRuns = {
   ignoredReasons: string[];
 };
 
-async function decideRuns(
+function decideRuns(
   input: IngestEventsInput,
   deliveryRowId: string
 ): Promise<DecidedRuns> {
-  if (input.events.length === 0) {
-    return {
+  return withSpan("workflow.match", {}, async (span) => {
+    if (input.events.length === 0) {
+      return {
+        decisions: [],
+        drafts: [],
+        unrouted: 0,
+        orchestrated: 0,
+        ignoredReasons: [],
+      };
+    }
+    const triggers = await loadTriggers(input);
+    const routes = await routeEvents(input, triggers);
+    const decided: DecidedRuns = {
       decisions: [],
       drafts: [],
       unrouted: 0,
       orchestrated: 0,
       ignoredReasons: [],
     };
-  }
-  const triggers = await loadTriggers(input);
-  const routes = await routeEvents(input, triggers);
-  const decided: DecidedRuns = {
-    decisions: [],
-    drafts: [],
-    unrouted: 0,
-    orchestrated: 0,
-    ignoredReasons: [],
-  };
-  for (const [index, event] of input.events.entries()) {
-    const route = routes[index];
-    if (route === undefined) {
-      decided.unrouted += 1;
-      continue;
+    for (const [index, event] of input.events.entries()) {
+      const route = routes[index];
+      if (route === undefined) {
+        decided.unrouted += 1;
+        continue;
+      }
+      const one = await decideEvent(input, event, route, {
+        triggers,
+        deliveryRowId,
+      });
+      decided.decisions.push(...one.decisions);
+      for (const decision of one.decisions) {
+        span.addEvent("workflow.decision", {
+          "af.workflow.decision": decision.decision,
+          [AfAttribute.WorkflowRunId]: decision.runId,
+        });
+      }
+      decided.drafts.push(...one.drafts);
+      decided.orchestrated += one.orchestrated;
+      decided.ignoredReasons.push(...one.ignoredReasons);
     }
-    const one = await decideEvent(input, event, route, {
-      triggers,
-      deliveryRowId,
-    });
-    decided.decisions.push(...one.decisions);
-    decided.drafts.push(...one.drafts);
-    decided.orchestrated += one.orchestrated;
-    decided.ignoredReasons.push(...one.ignoredReasons);
-  }
-  return decided;
+    return decided;
+  });
 }
 
 /** One routed event: replies, review signals, run triggers, orchestrated workflows. */

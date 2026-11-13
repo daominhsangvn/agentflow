@@ -58,12 +58,14 @@ const commandAckPayloadSchema = z.object({
   commandId: z.string(),
   accepted: z.boolean(),
   reason: z.string().optional(),
+  traceparent: z.string().max(64).optional(),
 });
 const commandEventPayloadSchema = z.object({
   commandId: z.string(),
   sequence: z.number().int().min(1),
   eventType: desktopCommandEventTypeSchema,
   data: jsonValueSchema.optional(),
+  traceparent: z.string().max(64).optional(),
 });
 
 export function isTerminalEventData(data: JsonValue): boolean {
@@ -127,6 +129,7 @@ export function parseCommandEventPayload(
     sequence: event.sequence,
     eventType: event.eventType,
     data: event.data ?? null,
+    traceparent: event.traceparent,
   };
 }
 
@@ -184,6 +187,7 @@ export function toWireCommandFromStore(command: {
   requiresApproval?: boolean;
   approvalReason?: string;
   streaming?: boolean;
+  traceparent?: string;
   createdAt: string;
 }): WireCommandPayload {
   return {
@@ -200,6 +204,7 @@ export function toWireCommandFromStore(command: {
     requiresApproval: command.requiresApproval,
     approvalReason: command.approvalReason,
     streaming: command.streaming === true ? true : undefined,
+    traceparent: command.traceparent,
   };
 }
 
@@ -207,6 +212,7 @@ export function toWireCommandFromRelayOperation(operation: {
   operationId: string;
   params: JsonValue;
   streaming?: boolean;
+  traceparent?: string;
 }): WireCommandPayload | null {
   const params = parseJsonObject(operation.params) ?? {};
   const request = parseJsonObject(params.request) ?? {};
@@ -258,6 +264,10 @@ export function toWireCommandFromRelayOperation(operation: {
     publicKeyFingerprint:
       typeof params.publicKeyFingerprint === "string"
         ? params.publicKeyFingerprint
+        : undefined,
+    traceparent:
+      typeof operation.traceparent === "string"
+        ? operation.traceparent
         : undefined,
   };
 }

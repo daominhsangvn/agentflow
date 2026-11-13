@@ -200,6 +200,36 @@ describe("startSelfHostedCronRunner", () => {
     expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
+  it("hands the job result to runInSpan", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse(500))
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+      .mockResolvedValue(okResponse());
+    const results: unknown[] = [];
+    const runInSpan = vi.fn(
+      async (_job: unknown, fn: () => Promise<unknown>) => {
+        const result = await fn();
+        results.push(result);
+        return result;
+      }
+    );
+
+    stop = startSelfHostedCronRunner({
+      port: PORT,
+      env: { CRON_SECRET: "s" },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      logger: createLogger(),
+      initialDelayMs: 0,
+      runInSpan: runInSpan as never,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(results[0]).toEqual({ ok: false, reason: "HTTP 500" });
+    expect(results[1]).toEqual({ ok: false, reason: "ECONNREFUSED" });
+    expect(results[2]).toEqual({ ok: true });
+  });
+
   it("does nothing when SELF_HOSTED_CRON_DISABLED is true", async () => {
     const env: SelfHostedCronEnv = { SELF_HOSTED_CRON_DISABLED: "true" };
     const fetchImpl = vi.fn();

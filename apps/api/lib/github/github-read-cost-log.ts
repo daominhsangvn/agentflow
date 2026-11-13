@@ -6,7 +6,7 @@ import { log } from "@repo/observability/log";
  * that the bundled PR read parses and then discards (today only `state` is read,
  * to gate paging — see `mapRateLimitBudget`), plus a per-route request count.
  *
- * One structured `info` line per live GraphQL request lets Datadog count reads
+ * One structured `info` line per live GraphQL request lets SigNoz count reads
  * and sum spend by `route` — the week of data that sizes the D9 reserve-floor
  * and per-token spend-cap defaults (`github-sync-client-pool.ts`) before the M2
  * reconciler hardens them. Intentionally at `info`, not `debug`: these lines
@@ -17,7 +17,7 @@ import { log } from "@repo/observability/log";
 export const GITHUB_READ_COST_EVENT = "[github-read-cost]";
 
 /**
- * Stable Datadog facet identifying which server path drove the GitHub read.
+ * Stable SigNoz facet identifying which server path drove the GitHub read.
  * Scoped to the cost-bearing bundled-PR reads: only that query selects a
  * `rateLimit` block, and its spend is what sizes the D9 budget defaults. The
  * branches query carries no `rateLimit` and is slated for removal in M3 (the

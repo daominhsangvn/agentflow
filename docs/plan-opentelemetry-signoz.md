@@ -9,8 +9,9 @@ logs and metrics in a self-hosted SigNoz, so a problem can be traced end to end.
 - Datadog support is removed. Services only know the standard `OTEL_*` env vars
   (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`,
   `OTEL_TRACES_SAMPLER[_ARG]`). Telemetry is on when an endpoint is set, off otherwise.
-- SigNoz runs in the compose profile `observability` (dev `docker-compose.yml` and
-  `deploy/compose/docker-compose.prod.yml`), ports bound to `127.0.0.1`.
+- SigNoz runs in the default stack (dev `docker-compose.yml` and
+  `deploy/compose/docker-compose.prod.yml`), ports bound to `127.0.0.1`; `signoz-init`
+  provisions the admin, dashboards and alerts.
 - Retention: traces and logs 15 days, metrics 30 days.
 - Runners send OTLP through an authenticated api proxy (`/otel/v1/{traces,logs,metrics}`,
   runner JWT), not through the relay (the relay is not deployed).
@@ -34,7 +35,7 @@ runner ──OTLP via api /otel/v1/* proxy ──┘
 ## Phases
 
 ### 0. Infrastructure
-SigNoz (ClickHouse, collector, query service, UI) in the `observability` profile.
+SigNoz (ClickHouse, collector, query service, UI) in the default compose stack.
 Collector: `memory_limiter`, `batch`, redaction (from
 `packages/telemetry-contract/collector/keyless-telemetry-redaction.yaml`), tail sampling
 (keep all error and slow traces). Env examples and `docs/self-hosting.md`.
@@ -56,24 +57,24 @@ api (`instrumentation.node.ts`, auth wrappers set user/org, every route logs
 `instrumentation.ts`; browser only propagates `traceparent`), mcp (entrypoint init,
 span per tool call), runner (desktop OTel runtime exporting via the api proxy).
 
-### 3. Context propagation
+### 3. Context propagation (done)
 `traceparent` in api→runner command envelopes and runner→api callbacks; `TRACEPARENT`
 and Claude Code telemetry env (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_*`,
 `af.task_id` resource attribute) for spawned CLIs; inbound webhooks start root spans
 linked to the case/workflow they trigger.
 
-### 4. Domain spans
+### 4. Domain spans (done)
 `withSpan` at service level: orchestrator (advance, tasks, decisions, teams-ask, waits,
 supersede, inbound), loops (dispatch, state transitions, preflight), workflows
 (event → match → action), integrations (inbound/outbound delivery, retries),
 self-hosted cron jobs, compute-target health/capabilities, catalog/distributions/api-key writes.
 
-### 5. Dashboards, alerts, cleanup
+### 5. Dashboards, alerts, cleanup (done)
 SigNoz dashboards (API RED, orchestrator, loops, runners, DB pool, external calls),
 alerts via SMTP or Teams/Slack webhook, remove leftover Datadog code and tests, update
 `packages/observability/README.md`, CLAUDE.md and `docs/architecture/`.
 
 ## Verification
 Unit tests assert on in-memory exporter output (not on console). E2E: with the
-`observability` profile up, one Jira ticket → case → runner → Claude → PR flow shows a
+default stack up, one Jira ticket → case → runner → Claude → PR flow shows a
 single connected trace, and its logs link to that trace.

@@ -190,7 +190,7 @@ describe("handleTelemetryEvent — origin enrichment overwrites injected origin"
     expect(meta.origin).toBe(Origin.Desktop);
   });
 
-  it("preserves plugin update diagnostics into the Datadog-bound log metadata", () => {
+  it("preserves plugin update diagnostics into the telemetry-bound log metadata", () => {
     const infoSpy = vi.spyOn(log, "info").mockImplementation(() => {});
     const payload = {
       ...validDesktopWirePayload,
@@ -271,7 +271,7 @@ describe("handleTelemetryEvent — origin enrichment overwrites injected origin"
 // (b) buildEntry() — meta.origin: Origin.Desktop overrides ORIGIN constant
 //
 // When log.info is called with meta { origin: Origin.Desktop }, the built
-// Datadog entry carries origin: Origin.Desktop even though ORIGIN === Origin.Api
+// SigNoz entry carries origin: Origin.Desktop even though ORIGIN === Origin.Api
 // in the test harness (OTEL_SERVICE_NAME is not set at setup time for apps/api tests,
 // but the module ORIGIN defaults to Origin.Unknown — either way it is not Desktop).
 //
@@ -611,7 +611,7 @@ describe("handleTelemetryEvent — organizationId/userId enrichment", () => {
     expect(meta).not.toHaveProperty("userId");
   });
 
-  it("includes EXECUTE plan source diagnostics in the Datadog log metadata", () => {
+  it("includes EXECUTE plan source diagnostics in the SigNoz log metadata", () => {
     const infoSpy = vi.spyOn(log, "info").mockImplementation(() => {});
     const result = handleTelemetryEvent(
       {
@@ -656,7 +656,7 @@ describe("handleTelemetryEvent — organizationId/userId enrichment", () => {
 });
 
 // ---------------------------------------------------------------------------
-// (h) handleTelemetryEvent — decision-table verification diagnostics reach Datadog
+// (h) handleTelemetryEvent — decision-table verification diagnostics reach SigNoz
 // ---------------------------------------------------------------------------
 
 describe("handleTelemetryEvent — decision-table verification telemetry", () => {
@@ -666,7 +666,7 @@ describe("handleTelemetryEvent — decision-table verification telemetry", () =>
     vi.restoreAllMocks();
   });
 
-  it("flushes decision-table verification diagnostics and telemetryMessage in Datadog metadata", async () => {
+  it("flushes decision-table verification diagnostics and telemetryMessage in SigNoz metadata", async () => {
     vi.stubEnv("OTEL_SERVICE_NAME", "api");
     vi.stubEnv("RELEASE_VERSION", "1.0.0");
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
@@ -881,7 +881,7 @@ describe("handleTelemetryEvent — desktop update and shutdown telemetry", () =>
 });
 
 // ---------------------------------------------------------------------------
-// (h2) handleTelemetryEvent — outbound network diagnostics reach Datadog
+// (h2) handleTelemetryEvent — outbound network diagnostics reach SigNoz
 // ---------------------------------------------------------------------------
 
 describe("handleTelemetryEvent — outbound network telemetry", () => {
@@ -891,7 +891,7 @@ describe("handleTelemetryEvent — outbound network telemetry", () => {
     vi.restoreAllMocks();
   });
 
-  it("flushes descriptor-only outbound network diagnostics in Datadog metadata", async () => {
+  it("flushes descriptor-only outbound network diagnostics in SigNoz metadata", async () => {
     vi.stubEnv("OTEL_SERVICE_NAME", "api");
     vi.stubEnv("RELEASE_VERSION", "1.0.0");
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
@@ -1022,7 +1022,7 @@ describe("handleTelemetryEvent — support upload telemetry", () => {
     vi.restoreAllMocks();
   });
 
-  it("flushes support upload diagnostics in Datadog metadata", async () => {
+  it("flushes support upload diagnostics in SigNoz metadata", async () => {
     process.env.OTEL_SERVICE_NAME = "api";
     process.env.ORIGIN = Origin.Api;
     vi.resetModules();
@@ -1215,9 +1215,9 @@ describe("sanitizeDesktopTelemetryDiagnostics — envSnapshot filtering", () => 
 // (k1) handleTelemetryEvent — loop.perf.agent category pass-through (AC-001)
 //
 // Verifies that the handler is category-agnostic: a synthetic loop.perf.agent
-// event flows through without filtering and reaches the Datadog HTTP intake
+// event flows through without filtering and reaches the OTLP exporter
 // with origin: Origin.Desktop and the category string preserved. Asserts on
-// the flushed Datadog entry per AGENTS.md "assert on observable behavior".
+// the flushed SigNoz entry per AGENTS.md "assert on observable behavior".
 // ---------------------------------------------------------------------------
 
 describe("handleTelemetryEvent — loop.perf.agent category pass-through", () => {
@@ -1233,7 +1233,7 @@ describe("handleTelemetryEvent — loop.perf.agent category pass-through", () =>
     vi.restoreAllMocks();
   });
 
-  it("flushes a Datadog entry with origin: Origin.Desktop and category: TelemetryCategory.LoopPerfAgent for a loop.perf.agent payload", async () => {
+  it("flushes a SigNoz entry with origin: Origin.Desktop and category: TelemetryCategory.LoopPerfAgent for a loop.perf.agent payload", async () => {
     const { entries, freshLog, freshHandler } =
       await importFreshHandlerWithSink();
 
@@ -1268,7 +1268,7 @@ describe("handleTelemetryEvent — loop.perf.agent category pass-through", () =>
 //
 // For loop.perf.agent: emits a synthetic event with a fully-populated
 // diagnostics.loopPerf payload and asserts every field appears in the
-// flushed Datadog entry under diagnostics.loopPerf.*.
+// flushed SigNoz entry under diagnostics.loopPerf.*.
 //
 // Parametric variants exercise the remaining 8 event discriminators:
 // run, phase, iteration, pipeline_step (step: 8.5), tool (null sentinels),
@@ -1508,10 +1508,10 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
   });
 
   // (k2-c) PRD-254 §FR-6 producer-additivity: an unknown loopPerf.event value
-  // (desktop-version skew, e.g. post_loop_review) must be forwarded to Datadog
+  // (desktop-version skew, e.g. post_loop_review) must be forwarded to SigNoz
   // as an opaque payload AND a `loop.perf.unknown_event_variant` warning must
   // be emitted so drift is observable rather than silent or breaking.
-  it("forwards unknown loopPerf event variants to Datadog with a drift-detection warning", async () => {
+  it("forwards unknown loopPerf event variants to SigNoz with a drift-detection warning", async () => {
     const { entries, freshLog, freshHandler } =
       await importFreshHandlerWithSink();
 
@@ -1563,7 +1563,7 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
 
   // (k2-d) PRD-254 §FR-6 fail-open: a loopPerf payload with the discriminator
   // missing entirely (e.g. desktop bug or future field rename) must also flow
-  // through to Datadog with the drift warning carrying `loopPerfEvent: null`.
+  // through to SigNoz with the drift warning carrying `loopPerfEvent: null`.
   it("forwards loopPerf payloads with missing `event` field with a null-event drift warning", async () => {
     const { entries, freshLog, freshHandler } =
       await importFreshHandlerWithSink();
@@ -1602,7 +1602,7 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
       eventlessPayload
     );
 
-    // The drift warning fired with explicit null event marker so a Datadog
+    // The drift warning fired with explicit null event marker so a SigNoz
     // query can isolate "missing event" from "unknown event value".
     const warningEntry = body.find(
       (e) => e.category === TelemetryCategory.LoopPerfUnknownEventVariant
@@ -1613,7 +1613,7 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
     expect(warningEntry?.loopPerfEvent).toBeUndefined();
   });
 
-  it("redacts unsafe loopPerf command and rawBytes in Datadog-bound metadata", async () => {
+  it("redacts unsafe loopPerf command and rawBytes in telemetry-bound metadata", async () => {
     const { entries, freshLog, freshHandler } =
       await importFreshHandlerWithSink();
 
@@ -1658,9 +1658,9 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
 //
 // The handler's two rejection sites (schema parse failure and
 // computeTargetId mismatch) both log.warn with category in meta so the
-// documented Datadog query @category:"telemetry.validation_failed" matches
+// documented SigNoz query @category:"telemetry.validation_failed" matches
 // regardless of whether the failure came from the server emitter.ts path or
-// this handler. Observes the flushed Datadog entry rather than spying on
+// this handler. Observes the flushed SigNoz entry rather than spying on
 // log.warn, matching the "assert on observable behavior" convention in
 // AGENTS.md.
 // ---------------------------------------------------------------------------
@@ -1741,7 +1741,7 @@ describe("handleTelemetryEvent — validation failures emit category attribute",
 // (l) handleTelemetryEvent — onboarding popup telemetry round-trip (AC-003)
 //
 // Verifies all 5 onboarding popup telemetry categories flow through
-// handleTelemetryEvent to the Datadog-flushed metadata with
+// handleTelemetryEvent to the SigNoz-flushed metadata with
 // origin: Origin.Desktop and the correct category string preserved.
 // ---------------------------------------------------------------------------
 

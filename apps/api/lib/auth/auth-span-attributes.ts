@@ -1,5 +1,6 @@
 import type { LoopRunnerClaims } from "@repo/auth/loop-runner-jwt";
-import { AfAttribute, setActiveSpanAttributes } from "@repo/observability/span";
+import { AfAttribute } from "@repo/observability/af-attributes";
+import { setActiveSpanAttributes } from "@repo/observability/span";
 import type { AuthContext } from "./with-auth";
 
 /** Tag the active request span with the authenticated user, org and method. */

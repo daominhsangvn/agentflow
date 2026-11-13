@@ -1,5 +1,5 @@
 import type { LoopRunnerClaims } from "@repo/auth/loop-runner-jwt";
-import { AfAttribute } from "@repo/observability/span";
+import { AfAttribute } from "@repo/observability/af-attributes";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   annotateAuthSpan,

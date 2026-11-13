@@ -15,6 +15,8 @@ import {
   WorkflowRunErrorCode,
 } from "@repo/api/src/types/workflow";
 import { withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { computeTargetsService } from "@/app/compute-targets/service";
 import { integrationToolSessionService } from "@/app/integration-tools/integration-tool-session-service";
 import { loopsService } from "@/app/loops/service";
@@ -81,7 +83,34 @@ export type LaunchStepLoopInput = {
   resumeLoopId?: string;
 };
 
-export async function launchStepLoop(
+export function launchStepLoop(
+  input: LaunchStepLoopInput
+): Promise<
+  Result<{ loopId: string; computeTargetId: string }, WorkflowRunError>
+> {
+  return withSpan(
+    "workflow.launch_step_loop",
+    {
+      [AfAttribute.WorkflowRunId]: input.runId,
+      [AfAttribute.OrgId]: input.organizationId,
+    },
+    async (span) => {
+      const result = await launchStepLoopLocked(input);
+      if (result.ok) {
+        span.setAttribute(AfAttribute.LoopId, result.value.loopId);
+        span.setAttribute(
+          AfAttribute.ComputeTargetId,
+          result.value.computeTargetId
+        );
+      } else {
+        setSpanOutcome(AfOutcome.Error, result.error.message, span);
+      }
+      return result;
+    }
+  );
+}
+
+async function launchStepLoopLocked(
   input: LaunchStepLoopInput
 ): Promise<
   Result<{ loopId: string; computeTargetId: string }, WorkflowRunError>

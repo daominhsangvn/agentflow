@@ -6,7 +6,7 @@ import ts from "typescript6";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * FEA-3300: pool telemetry reaches Datadog only because `register()` injects the
+ * FEA-3300: pool telemetry reaches SigNoz only because `register()` injects the
  * emitter into `@repo/database` — that package cannot import
  * `@repo/observability` itself (apps/mcp packages it through a narrow Docker
  * context). If this wiring is ever dropped, the pool goes quiet silently and an

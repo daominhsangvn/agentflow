@@ -4,7 +4,9 @@ import {
 } from "@repo/api/src/types/orchestrator";
 import { Result } from "@repo/api/src/types/result";
 import { type Prisma, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { cancelLoop } from "@/lib/workflows/engine/cancel";
 import { readTaskResult, type TaskResult } from "./task-result";
 import { evaluateWaits } from "./waits";
@@ -43,7 +45,29 @@ export function cancelOnRefusal(cancelOn: readonly string[]): string {
   return `Only a ticket change listed in agent.orchestrator.cancelOn cancels tasks (cancelOn allows: ${cancelOn.join(", ")}); this turn handles none, so the task keeps running.`;
 }
 
-export async function cancelTask(
+export function cancelTask(
+  input: CancelTaskInput,
+  now = new Date()
+): Promise<Result<CancelTaskOutcome, string>> {
+  return withSpan(
+    "orchestrator.cancel_task",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [AfAttribute.CaseId]: input.caseId,
+      [AfAttribute.TurnId]: input.turnId,
+      [AfAttribute.TaskId]: input.taskId,
+    },
+    async (span) => {
+      const result = await runCancelTask(input, now);
+      if (!result.ok) {
+        setSpanOutcome(AfOutcome.Error, result.error, span);
+      }
+      return result;
+    }
+  );
+}
+
+async function runCancelTask(
   input: CancelTaskInput,
   now = new Date()
 ): Promise<Result<CancelTaskOutcome, string>> {

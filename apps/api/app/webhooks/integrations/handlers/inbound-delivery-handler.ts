@@ -1,9 +1,15 @@
 import {
   IntegrationConnectionStatus,
   IntegrationDeliveryMode,
+  IntegrationDeliveryOutcome,
   IntegrationDeliverySource,
 } from "@repo/api/src/types/integration";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import {
+  setActiveSpanAttributes,
+  setSpanOutcome,
+} from "@repo/observability/span";
 import {
   createProviderContext,
   type LoadedConnection,
@@ -136,12 +142,28 @@ export async function handleInboundDelivery(
     payload: toDeliveryPayload(request.rawBody),
     ignoredReason: parsed.ignoredReason,
   });
+  recordIngestOnSpan(parsed.deliveryId, ingest);
   return {
     ok: true,
     deliveryId: parsed.deliveryId,
     eventType: parsed.eventType,
     ingest,
   };
+}
+
+const MAX_SPAN_RUN_IDS = 20;
+
+function recordIngestOnSpan(deliveryId: string, ingest: IngestResult): void {
+  setActiveSpanAttributes({ [AfAttribute.DeliveryId]: deliveryId });
+  if (ingest.outcome === IntegrationDeliveryOutcome.Duplicate) {
+    setSpanOutcome(AfOutcome.Duplicate);
+  }
+  const runIds = ingest.decisions
+    .slice(0, MAX_SPAN_RUN_IDS)
+    .map((decision) => decision.runId);
+  if (runIds.length > 0) {
+    setActiveSpanAttributes({ "af.workflow_run_ids": runIds.join(",") });
+  }
 }
 
 const LOG_PREFIX = "[webhook/integrations]";

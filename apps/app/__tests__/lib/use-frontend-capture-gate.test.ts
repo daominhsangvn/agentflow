@@ -4,8 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockStartSessionRecording = vi.fn();
 const mockStopSessionRecording = vi.fn();
 const mockSetConfig = vi.fn();
-const mockEnableDatadog = vi.fn();
-const mockDisableDatadog = vi.fn();
 
 type MockUser = {
   id: string;
@@ -40,11 +38,6 @@ vi.mock("@repo/auth/client", () => ({
   useUser: () => ({ user: mockUser, isLoaded: mockIsLoaded }),
 }));
 
-vi.mock("@/lib/datadog-rum/staff-capture", () => ({
-  enableDatadogRumStaffCapture: mockEnableDatadog,
-  disableDatadogRumStaffCapture: mockDisableDatadog,
-}));
-
 async function loadHook() {
   return (await import("@/lib/frontend-capture/use-frontend-capture-gate"))
     .useFrontendCaptureGate;
@@ -61,14 +54,13 @@ afterEach(() => {
 });
 
 describe("useFrontendCaptureGate", () => {
-  it("starts staff capture on both backends when the flag is enabled", async () => {
+  it("starts staff capture when the flag is enabled", async () => {
     const useFrontendCaptureGate = await loadHook();
 
     renderHook(() => useFrontendCaptureGate());
 
     expect(mockStartSessionRecording).toHaveBeenCalledTimes(1);
     expect(mockSetConfig).toHaveBeenCalledWith({ capture_dead_clicks: true });
-    expect(mockEnableDatadog).toHaveBeenCalledWith("user-123");
   });
 
   it("does nothing when the flag is disabled", async () => {
@@ -78,7 +70,6 @@ describe("useFrontendCaptureGate", () => {
     renderHook(() => useFrontendCaptureGate());
 
     expect(mockStartSessionRecording).not.toHaveBeenCalled();
-    expect(mockEnableDatadog).not.toHaveBeenCalled();
   });
 
   it("fails closed for a non-staff user even when the flag reads enabled", async () => {
@@ -95,7 +86,6 @@ describe("useFrontendCaptureGate", () => {
     renderHook(() => useFrontendCaptureGate());
 
     expect(mockStartSessionRecording).not.toHaveBeenCalled();
-    expect(mockEnableDatadog).not.toHaveBeenCalled();
   });
 
   it("does nothing until the user is identified", async () => {
@@ -105,7 +95,6 @@ describe("useFrontendCaptureGate", () => {
     renderHook(() => useFrontendCaptureGate());
 
     expect(mockStartSessionRecording).not.toHaveBeenCalled();
-    expect(mockEnableDatadog).not.toHaveBeenCalled();
   });
 
   it("stops all added capture when unmounted", async () => {
@@ -116,6 +105,5 @@ describe("useFrontendCaptureGate", () => {
 
     expect(mockStopSessionRecording).toHaveBeenCalledTimes(1);
     expect(mockSetConfig).toHaveBeenCalledWith({ capture_dead_clicks: false });
-    expect(mockDisableDatadog).toHaveBeenCalledTimes(1);
   });
 });

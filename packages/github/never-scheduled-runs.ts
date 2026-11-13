@@ -511,7 +511,7 @@ export type OpenPullRequestsReadResult =
  *
  * `withComments` is opt-in rather than always-on: the comment page is only
  * useful to a caller that owns a marker comment on the PR, and selecting it
- * unconditionally would grow the stall cron's response for data it never reads.
+ * unconditionally would grow the stall check's response for data it never reads.
  * The `@include` directive keeps one query serving both.
  */
 export async function listOpenPullRequestHeads(

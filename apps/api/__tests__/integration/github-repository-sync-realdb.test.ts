@@ -236,7 +236,7 @@ describe.skipIf(!hasDatabase)(
     });
 
     it("orders authority, makes exact replay a no-op, retains known values, and detects equal-time conflict", async () => {
-      // Datadog Early Flake Detection may repeat this test in the same process.
+      // a flake-detection tool may repeat this test in the same process.
       // Use invocation-scoped repository IDs so each repetition starts from a
       // legacy-null row instead of inheriting the prior repetition's watermark.
       const runId = randomUUID();

@@ -2,7 +2,7 @@
  * @file telemetry-store-integrity.test.ts
  * @description FEA-1999 — the storeIntegrity diagnostics must survive the
  * desktop telemetry wire schema (the top-level diagnostics object strips unknown
- * keys, so an un-mirrored field would be silently dropped before Datadog), and
+ * keys, so an un-mirrored field would be silently dropped before SigNoz), and
  * its bounded shape must hold (capped issues, identifier-length cap, enums).
  */
 import { describe, expect, it } from "vitest";

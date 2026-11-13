@@ -1,0 +1,326 @@
+{
+  "title": "AgentFlow — Workflows & integrations",
+  "description": "Workflow ingest, actions, webhooks and ticks.",
+  "tags": ["agentflow"],
+  "version": "v4",
+  "variables": {},
+  "layout": [
+    {
+      "i": "459919ee-8b31-4070-ade4-0a57db0fbbf3",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "32f9c1d7-bdab-4d1d-a67e-909df3127371",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "d858f6cf-7cca-41fb-a2f4-4f4bab7d5dca",
+      "x": 0,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "8fae23e9-0854-4af0-a675-93ba174df6b9",
+      "x": 6,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "8b2c052e-6a48-4208-a719-4d2f37269731",
+      "x": 0,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "826b9e65-2041-4c89-af9f-cdb5692b1ef5",
+      "x": 6,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "9200eb0b-8d72-412d-a4f2-35e24f7bfcdf",
+      "x": 0,
+      "y": 18,
+      "w": 6,
+      "h": 6
+    }
+  ],
+  "widgets": [
+    {
+      "id": "459919ee-8b31-4070-ade4-0a57db0fbbf3",
+      "panelTypes": "graph",
+      "title": "workflow.ingest outcomes",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "a96dba46-0880-48c8-a670-d5ec3714ae0a",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.outcome'] AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'workflow.ingest' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "32f9c1d7-bdab-4d1d-a67e-909df3127371",
+      "panelTypes": "graph",
+      "title": "Webhook errors by provider",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "a434fa38-682b-4805-a0b3-097a8f374f58",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.integration.provider'] AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name IN ('webhook.integration', 'webhook.github') AND has_error = true AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "d858f6cf-7cca-41fb-a2f4-4f4bab7d5dca",
+      "panelTypes": "graph",
+      "title": "workflow.action_run outcome by action",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "1a7395fb-326d-4ad6-a42d-d8f15659d790",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, concat(attributes_string['af.workflow.action'], ':', attributes_string['af.outcome']) AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'workflow.action_run' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "8fae23e9-0854-4af0-a675-93ba174df6b9",
+      "panelTypes": "graph",
+      "title": "Retries",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "e384eab6-bb97-4418-a36a-fd9bbaefe97e",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'workflow.action_run' AND attributes_string['af.outcome'] = 'retry' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "8b2c052e-6a48-4208-a719-4d2f37269731",
+      "panelTypes": "graph",
+      "title": "integration.connection_test results",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "e0513eba-0985-49e4-a9b8-63d60040b28b",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.outcome'] AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'integration.connection_test' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "826b9e65-2041-4c89-af9f-cdb5692b1ef5",
+      "panelTypes": "graph",
+      "title": "workflow.tick.* errors by stage",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "4f96e1ea-5e8e-4bb9-af72-f2b080d58408",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, name AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name LIKE 'workflow.tick.%' AND has_error = true AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "9200eb0b-8d72-412d-a4f2-35e24f7bfcdf",
+      "panelTypes": "graph",
+      "title": "workflow.tick.* p95 (ms)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "ms",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "236d46ba-fb76-4b53-ad83-33d122705136",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, name AS label, quantile(0.95)(duration_nano) / 1e6 AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name LIKE 'workflow.tick.%' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    }
+  ]
+}

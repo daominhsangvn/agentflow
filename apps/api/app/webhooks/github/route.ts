@@ -4,8 +4,10 @@ import type {
   PushEvent,
 } from "@octokit/webhooks-types";
 import { verifyWebhookSignature } from "@repo/github";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { parseError } from "@repo/observability/error";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { NextResponse } from "next/server";
 import type { GitHubWebhookObservationContext } from "@/lib/github/github-webhook-observation";
 import { scheduleLogFlush } from "@/lib/route-utils";
@@ -32,7 +34,29 @@ import { handlePush } from "./handlers/push-handler";
 import { maybeDropPreviewSchemaOnClose } from "./preview-schema-drop";
 import { isGitHubConfigured, validateRequest } from "./webhook-service";
 
-export async function POST(request: Request): Promise<Response> {
+export function POST(request: Request): Promise<Response> {
+  const eventType = request.headers.get("x-github-event");
+  return withSpan(
+    "webhook.github",
+    {
+      "af.github.event": eventType?.slice(0, MAX_EVENT_ATTRIBUTE_LENGTH),
+      [AfAttribute.IntegrationProvider]: "github",
+    },
+    async () => {
+      const response = await handleGitHubWebhook(request);
+      if (response.status >= 400) {
+        setSpanOutcome(AfOutcome.Error, `http_${response.status}`);
+      } else {
+        setSpanOutcome(AfOutcome.Ok);
+      }
+      return response;
+    }
+  );
+}
+
+const MAX_EVENT_ATTRIBUTE_LENGTH = 64;
+
+async function handleGitHubWebhook(request: Request): Promise<Response> {
   if (!isGitHubConfigured()) {
     log.warn("[webhook/github] GitHub not configured, rejecting request");
     scheduleLogFlush();

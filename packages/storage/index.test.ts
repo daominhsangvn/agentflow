@@ -37,6 +37,7 @@ vi.mock("@aws-sdk/client-s3", () => {
     ListObjectsV2Command: MockCommand,
     PutObjectCommand: MockCommand,
     S3Client: class S3Client {
+      middlewareStack = { add: () => undefined };
       send = s3Send;
     },
     StorageClass: { INTELLIGENT_TIERING: "INTELLIGENT_TIERING" },

@@ -3,7 +3,7 @@
 //
 // `traceparent` is an untrusted request header on a public origin, so the
 // remote-parent branch of `ParentBasedSampler` is an attacker-reachable input
-// to our Datadog ingest bill. Two things have to hold:
+// to our telemetry ingest bill. Two things have to hold:
 //
 //  1. The caller's sampled bit must not be honoured verbatim — that is
 //     `AlwaysOn`, i.e. unbounded export on demand.

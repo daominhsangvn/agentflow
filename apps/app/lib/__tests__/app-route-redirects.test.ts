@@ -206,7 +206,6 @@ describe("requiresOrgSlugResolution (keeps auth() lazy in the proxy)", () => {
   it("is false for top-level routes outside the org-scoped layout", () => {
     expect(requiresOrgSlugResolution("/sign-in")).toBe(false);
     expect(requiresOrgSlugResolution("/onboarding")).toBe(false);
-    expect(requiresOrgSlugResolution("/rum-validation")).toBe(false);
     expect(requiresOrgSlugResolution("/")).toBe(false);
   });
 });

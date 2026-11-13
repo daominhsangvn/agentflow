@@ -1,5 +1,5 @@
 /**
- * FilterToken — application-side constants for the Datadog log-to-metric
+ * FilterToken — application-side constants for the log-to-metric
  * pipeline filter contract. Each value is the literal free-text token the
  * corresponding pipeline rule searches for in the emitted JSON message.
  *

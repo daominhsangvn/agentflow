@@ -67,6 +67,18 @@ model {
     objectStorage = datastore "Object storage (RustFS)" {
       description "Files tasks produce, loop state"
     }
+
+    otelCollector = container "OTel collector" {
+      description "Receives OTLP: redacts, tail-samples, writes to ClickHouse (SigNoz stack)"
+    }
+
+    clickhouse = datastore "ClickHouse" {
+      description "Traces, logs and metrics of the SigNoz stack"
+    }
+
+    signozUi = container "SigNoz UI" {
+      description "Journeys, dashboards and alerts; provisioned by signoz-init"
+    }
   }
 
   // People
@@ -99,6 +111,18 @@ model {
     technology "REST, turn token"
   }
   agentflow.orchestrator.agent -> llm "model calls"
+
+  // Observability
+  agentflow.app -> agentflow.otelCollector "OTLP traces, logs, metrics"
+  agentflow.integration -> agentflow.otelCollector "OTLP traces, logs, metrics"
+  agentflow.orchestrator.core -> agentflow.otelCollector "OTLP traces, logs, metrics"
+  agentflow.mcp -> agentflow.otelCollector "OTLP traces, logs, metrics"
+  agentflow.workers -> agentflow.integration "OTLP via /otel/v1 proxy" {
+    technology "OTLP http/protobuf, API key"
+  }
+  agentflow.otelCollector -> agentflow.clickhouse "writes"
+  agentflow.signozUi -> agentflow.clickhouse "queries"
+  admin -> agentflow.signozUi "journeys, dashboards, alerts"
 
   // Work
   agentflow.orchestrator.core -> agentflow.workers "tasks as STEP loops" {

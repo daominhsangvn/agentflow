@@ -308,7 +308,7 @@ describe("kill dispatch replay (ISS-6046)", () => {
   });
 
   it("leaves no error-level log behind when the kill recovers on replay", async () => {
-    // Error logs on this path feed a Datadog monitor, so a miss the next
+    // Error logs on this path feed a alert rule, so a miss the next
     // attempt recovers must not fire one.
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(

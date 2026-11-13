@@ -2,7 +2,7 @@
  * T-1.3 — Unit tests for loop-runner-metrics emitter module
  *
  * Each emitter is a typed passthrough into emitTelemetryMetric — the only
- * behavior worth testing is the exact JSON payload shape produced when the
+ * behavior worth testing is the exact payload shape produced when the
  * caller's arguments are placed into the literal. One full-shape toEqual per
  * emitter covers it; enum coverage for reason mapping lives in the
  * mapRefreshErrorCodeToReason table below.
@@ -14,17 +14,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks — must precede all imports
 // ---------------------------------------------------------------------------
 
-const { mockLogInfo } = vi.hoisted(() => ({
-  mockLogInfo: vi.fn(),
+const { mockEmitTelemetryMetric } = vi.hoisted(() => ({
+  mockEmitTelemetryMetric: vi.fn(),
 }));
 
-vi.mock("@repo/observability/log", () => ({
-  log: {
-    info: mockLogInfo,
-    warn: vi.fn(),
-    error: vi.fn(),
-    flush: vi.fn().mockResolvedValue(undefined),
-  },
+vi.mock("@repo/observability/telemetry/metrics", () => ({
+  emitTelemetryMetric: mockEmitTelemetryMetric,
 }));
 
 // ---------------------------------------------------------------------------
@@ -51,9 +46,11 @@ import {
 // Helpers + fixtures
 // ---------------------------------------------------------------------------
 
-function parsedLogCall(callIndex = 0): Record<string, unknown> {
-  const raw = mockLogInfo.mock.calls[callIndex]?.[0] as string;
-  return JSON.parse(raw) as Record<string, unknown>;
+function emittedPayload(callIndex = 0): Record<string, unknown> {
+  return mockEmitTelemetryMetric.mock.calls[callIndex]?.[0] as Record<
+    string,
+    unknown
+  >;
 }
 
 const ORG_ID = "org-test-001";
@@ -84,7 +81,6 @@ describe("loop-runner emitter payloads", () => {
         metric: "loop.runner.refresh.attempt",
         orgId: ORG_ID,
         count: 1,
-        _telemetryMetric: true,
       },
     },
     {
@@ -95,7 +91,6 @@ describe("loop-runner emitter payloads", () => {
         orgId: ORG_ID,
         reason: RefreshFailureReason.Expired,
         count: 1,
-        _telemetryMetric: true,
       },
     },
     {
@@ -106,7 +101,6 @@ describe("loop-runner emitter payloads", () => {
         orgId: ORG_ID,
         loopId: LOOP_ID,
         value: 5000,
-        _telemetryMetric: true,
       },
     },
     {
@@ -117,7 +111,6 @@ describe("loop-runner emitter payloads", () => {
         orgId: ORG_ID,
         loopId: LOOP_ID,
         count: 1,
-        _telemetryMetric: true,
       },
     },
     {
@@ -128,7 +121,6 @@ describe("loop-runner emitter payloads", () => {
         loopId: LOOP_ID,
         reason: "token_expired",
         count: 1,
-        _telemetryMetric: true,
       },
     },
     {
@@ -137,7 +129,6 @@ describe("loop-runner emitter payloads", () => {
       expected: {
         metric: "loop.runner.zombie_detector",
         count: 3,
-        _telemetryMetric: true,
       },
     },
   ];
@@ -147,8 +138,8 @@ describe("loop-runner emitter payloads", () => {
     expected,
   }) => {
     invoke();
-    expect(mockLogInfo).toHaveBeenCalledOnce();
-    expect(parsedLogCall()).toEqual(expected);
+    expect(mockEmitTelemetryMetric).toHaveBeenCalledOnce();
+    expect(emittedPayload()).toEqual(expected);
   });
 });
 

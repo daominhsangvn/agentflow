@@ -187,11 +187,11 @@ describe("resolveCollectorOrigin — SSRF / open-proxy guard", () => {
   it("allows public collector hosts in production", () => {
     expect(
       resolveCollectorOrigin({
-        collectorUrl: "https://otlp.datadoghq.com",
+        collectorUrl: "https://otlp.example.com",
         allowPrivateCollector: false,
         isProduction: true,
       })
-    ).toEqual({ ok: true, origin: "https://otlp.datadoghq.com" });
+    ).toEqual({ ok: true, origin: "https://otlp.example.com" });
   });
 });
 

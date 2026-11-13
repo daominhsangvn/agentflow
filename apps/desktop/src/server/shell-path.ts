@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { BinaryResolveSource } from "../shared/cli-binary-tools.js";
+import { gatewayTraceEnv } from "./gateway-trace-context.js";
 import { pluginDirsEnv } from "./operations/bundled-plugins.js";
 import {
   applyWindowsLoopEnv,
@@ -256,7 +257,29 @@ export async function getShellEnv(
   // Not a plain `PATH:` entry: on Windows the inherited key is `Path`, and a
   // child given both sees only one of them.
   setEnvValue(shellEnv, "PATH", extra?.PATH ?? shellPath);
+  applyGatewayTraceEnv(shellEnv);
   return applyWindowsLoopEnv(shellEnv);
+}
+
+/**
+ * Hand the current gateway trace to the spawned CLI (TRACEPARENT plus
+ * af.loop_id in OTEL_RESOURCE_ATTRIBUTES, appended to any existing value) and
+ * drop the runner's own OTEL_SERVICE_NAME, which would otherwise label Claude
+ * Code's telemetry as the runner.
+ */
+function applyGatewayTraceEnv(shellEnv: Record<string, string>): void {
+  const { OTEL_RESOURCE_ATTRIBUTES: resourceAttributes, ...traceEnv } =
+    gatewayTraceEnv();
+  if (!traceEnv.TRACEPARENT) {
+    return;
+  }
+  Object.assign(shellEnv, traceEnv);
+  if (resourceAttributes) {
+    shellEnv.OTEL_RESOURCE_ATTRIBUTES = shellEnv.OTEL_RESOURCE_ATTRIBUTES
+      ? `${shellEnv.OTEL_RESOURCE_ATTRIBUTES},${resourceAttributes}`
+      : resourceAttributes;
+  }
+  delete shellEnv.OTEL_SERVICE_NAME;
 }
 
 function clearShellPathSlot(slot: ShellPathCacheSlot): void {

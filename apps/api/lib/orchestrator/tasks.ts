@@ -23,7 +23,9 @@ import {
 } from "@repo/api/src/types/runner-capabilities";
 import { WorkflowRunErrorCode } from "@repo/api/src/types/workflow";
 import { type Prisma, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { z } from "zod";
 import { computeTargetCapabilitiesService } from "@/app/compute-targets/capabilities-service";
 import { documentService } from "@/app/documents/document-service";
@@ -115,7 +117,39 @@ export type StartTaskInput = {
   replyTo: string | null;
 };
 
-export async function startTask(input: StartTaskInput): Promise<
+export function startTask(input: StartTaskInput): Promise<
+  Result<
+    {
+      taskId: string;
+      status: string;
+      runner: string;
+      error: string | null;
+      waiting: string | null;
+      replyTo: string | null;
+    },
+    string
+  >
+> {
+  return withSpan(
+    "orchestrator.start_task",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [AfAttribute.ProjectId]: input.projectId,
+      [AfAttribute.CaseId]: input.caseId,
+      [AfAttribute.ConversationId]: input.conversationId,
+      [AfAttribute.TurnId]: input.turnId,
+    },
+    async (span) => {
+      const result = await runStartTask(input);
+      if (!result.ok) {
+        setSpanOutcome(AfOutcome.Error, result.error, span);
+      }
+      return result;
+    }
+  );
+}
+
+async function runStartTask(input: StartTaskInput): Promise<
   Result<
     {
       taskId: string;
@@ -233,44 +267,46 @@ export async function startTask(input: StartTaskInput): Promise<
 }
 
 /** The tick's stage: queued tasks try their runner again, running ones settle. */
-export async function advanceTasks(now: Date): Promise<{
+export function advanceTasks(now: Date): Promise<{
   launched: number;
   /** Conversations whose tasks finished: their waits are evaluated next. */
   settledConversationIds: string[];
 }> {
-  const queued = await withDb((db) =>
-    db.orchestratorTask.findMany({
-      where: { status: OrchestratorTaskStatus.Queued },
-      orderBy: { createdAt: "asc" },
-      take: TICK_LIMIT,
-      select: { id: true, conversationId: true },
-    })
-  );
-  let launched = 0;
-  const settled = new Set<string>();
-  for (const task of queued) {
-    const status = await launchTask(task.id);
-    if (status === OrchestratorTaskStatus.Running) {
-      launched += 1;
+  return withSpan("orchestrator.advance_tasks", {}, async () => {
+    const queued = await withDb((db) =>
+      db.orchestratorTask.findMany({
+        where: { status: OrchestratorTaskStatus.Queued },
+        orderBy: { createdAt: "asc" },
+        take: TICK_LIMIT,
+        select: { id: true, conversationId: true },
+      })
+    );
+    let launched = 0;
+    const settled = new Set<string>();
+    for (const task of queued) {
+      const status = await launchTask(task.id);
+      if (status === OrchestratorTaskStatus.Running) {
+        launched += 1;
+      }
+      // A queued task that fails now will never run: its wait must hear of it.
+      if (status === OrchestratorTaskStatus.Failed) {
+        settled.add(task.conversationId);
+      }
     }
-    // A queued task that fails now will never run: its wait must hear of it.
-    if (status === OrchestratorTaskStatus.Failed) {
-      settled.add(task.conversationId);
+    const running = await withDb((db) =>
+      db.orchestratorTask.findMany({
+        where: { status: OrchestratorTaskStatus.Running },
+        take: TICK_LIMIT,
+        select: { id: true, conversationId: true, loopId: true, result: true },
+      })
+    );
+    for (const task of running) {
+      if (task.loopId && (await settleTask(task, task.loopId, now))) {
+        settled.add(task.conversationId);
+      }
     }
-  }
-  const running = await withDb((db) =>
-    db.orchestratorTask.findMany({
-      where: { status: OrchestratorTaskStatus.Running },
-      take: TICK_LIMIT,
-      select: { id: true, conversationId: true, loopId: true, result: true },
-    })
-  );
-  for (const task of running) {
-    if (task.loopId && (await settleTask(task, task.loopId, now))) {
-      settled.add(task.conversationId);
-    }
-  }
-  return { launched, settledConversationIds: [...settled] };
+    return { launched, settledConversationIds: [...settled] };
+  });
 }
 
 const TICK_LIMIT = 50;

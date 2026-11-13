@@ -13,33 +13,20 @@
  * `packages/database` is consumed by `apps/mcp` through a narrow Docker context;
  * a `@repo/observability` import here would type-check and build green locally,
  * then fail at runtime inside the mcp image — the same rule `pool-telemetry.ts`
- * and `AGENTS.md` state. So this reimplements the minimal agentless-intake path
- * from `@repo/observability`'s `log.ts` rather than importing it, and reads DD_*
- * straight from `process.env`.
- *
- * The one `@repo/*` import is the Datadog site allowlist (ISS-5417). That is a
- * different case, and deliberately not covered by the rule above: `@repo/api` is
- * a DECLARED dependency of `@repo/database` (11 sibling modules under
- * `scripts/` already import `@repo/api/src/types/*`), so pnpm links it inside
- * the mcp image exactly as it does locally, and the module itself is a
- * zero-dependency constants leaf. What must not be imported here is
- * `@repo/observability`, which is not a dependency of this package at all.
+ * and `AGENTS.md` state. So this writes plain JSON lines to stdout and has no
+ * `@repo/*` import.
  *
  * ## Why a standalone emitter and not the pool-telemetry sink
- * The migrate step runs as a build-time `tsx scripts/migrate.ts` process
- * (`prebuild`), NOT the Next.js server — so `apps/api`'s `register()` hook (which
- * calls `setPoolTelemetrySink`) never runs here. There is no injected sink to
- * reuse; this module owns its own dual sink.
+ * The migrate step runs as a build-time `tsx scripts/migrate.ts` process, NOT
+ * the Next.js server — so `apps/api`'s `register()` hook (which calls
+ * `setPoolTelemetrySink`) never runs here. There is no injected sink to reuse.
  *
- * ## Dual sink (mirrors log.ts), gated + bounded
- *  1. Structured stdout, one JSON line per event — ALWAYS when running under
- *     Vercel (`env.VERCEL` set), picked up by the Vercel→Datadog log drain and
- *     greppable in the build log regardless. Zero deps, cannot fail the build.
- *  2. Agentless HTTPS POST to the Datadog logs intake — ONLY when `DD_API_KEY`
- *     is present. Events are buffered and sent as ONE batched body on
- *     `flushMigrateTelemetry()` (the preview-migrator walk migrates N schemas per
- *     process; per-event POST would be N × timeout). Bounded by `AbortSignal`
- *     AND a total flush deadline; NO retries on the deploy critical path.
+ * ## Stdout sink, gated + bounded
+ * One structured JSON line per event on stdout, ONLY when `env.VERCEL` is set
+ * (the storm is a Vercel-deploy phenomenon; this keeps local `pnpm migrate` and
+ * unit tests silent). The line is greppable in the build log and collectable by
+ * any stdout log shipper. `flushMigrateTelemetry()` drains stdout before the
+ * caller may `process.exit()`, bounded by a deadline.
  *
  * ## Never breaks or hangs the migrate
  * Every sink is wrapped in try/catch (warn once), and the flush is deadline-
@@ -56,10 +43,6 @@
  */
 
 import { createHash } from "node:crypto";
-import {
-  DEFAULT_DD_SITE,
-  isAllowedDatadogSite,
-} from "@repo/api/src/types/datadog-sites";
 
 // --- contract enums -------------------------------------------------------
 
@@ -100,11 +83,9 @@ export type MigrateResetKind =
 export type MigrateDeployEvent = {
   event: "migrate_deploy";
   /**
-   * Stable per-run id (`deployment_id:schema:started_at`). The SAME event reaches
-   * Datadog by TWO ingestion paths — the Vercel log drain (stdout) and the direct
-   * agentless POST — so a raw row count double-counts when both are live. Downstream
-   * metrics must `count_distinct(migrate_run_id)` (mirrors the pool-telemetry
-   * one-source contract). Both copies carry the same id, so the two rows collapse.
+   * Stable per-run id (`deployment_id:schema:started_at`). Downstream counts
+   * should `count_distinct(migrate_run_id)` so a re-shipped line does not
+   * double-count.
    */
   migrate_run_id: string;
   /** ISO-8601 start of the run — with `duration_ms` reconstructs concurrency windows. */
@@ -251,9 +232,8 @@ export function buildMigrateEvent(
 
 // --- sinks ----------------------------------------------------------------
 
-const DD_LOG_INTAKE_TIMEOUT_MS = 3000;
-const DD_SOURCE = "migrate";
-const DEFAULT_DD_SERVICE = "api";
+const FLUSH_DEADLINE_MS = 3000;
+const LOG_SOURCE = "migrate";
 
 type WarnKey = "sink_failed" | "flush_failed";
 const warned: Record<WarnKey, boolean> = {
@@ -275,19 +255,6 @@ function warnOnce(key: WarnKey, message: string): void {
   );
 }
 
-/** In-process buffer of events awaiting the batched flush. Append-only per event. */
-const buffer: MigrateDeployEvent[] = [];
-
-/**
- * The one call shape this module uses (URL + a fully-formed init). Narrower than
- * `typeof fetch` so an injected test mock's `mock.calls` are strongly typed; the
- * real global `fetch` is assignable to it.
- */
-export type MigrateFetch = (
-  url: string,
-  init: RequestInit
-) => Promise<Response>;
-
 /** The subset of `process.stdout` the flush drains; injected so tests avoid real stdout. */
 export type MigrateStdout = {
   writableLength: number;
@@ -298,17 +265,13 @@ export type MigrateStdout = {
 export type MigrateTelemetrySinkDeps = {
   env?: NodeJS.ProcessEnv;
   logImpl?: (line: string) => void;
-  fetchImpl?: MigrateFetch;
   /** Schedules the total-flush deadline; injected so tests need no real timers. */
   scheduleDeadline?: (ms: number, onFire: () => void) => void;
   /** stdout to drain before a forced exit; defaults to `process.stdout`. */
   stdoutImpl?: MigrateStdout;
 };
 
-/**
- * Record one event: write the stdout line immediately (Vercel builds only) and
- * buffer it for the batched flush. Never throws.
- */
+/** Record one event: write the stdout line (Vercel builds only). Never throws. */
 export function recordMigrateEvent(
   event: MigrateDeployEvent,
   deps: MigrateTelemetrySinkDeps = {}
@@ -321,13 +284,11 @@ export function recordMigrateEvent(
     return;
   }
   try {
-    buffer.push(event);
     const log = deps.logImpl ?? console.log;
     log(
       JSON.stringify({
         level: "info",
-        ddsource: DD_SOURCE,
-        service: env.DD_SERVICE ?? DEFAULT_DD_SERVICE,
+        source: LOG_SOURCE,
         message: "migrate_deploy",
         ...event,
       })
@@ -340,114 +301,22 @@ export function recordMigrateEvent(
   }
 }
 
-function toIntakeEntry(
-  event: MigrateDeployEvent,
-  service: string
-): Record<string, unknown> {
-  return {
-    ddsource: DD_SOURCE,
-    service,
-    message: "migrate_deploy",
-    ...event,
-  };
-}
-
 /**
- * Flush telemetry before the caller may `process.exit()`:
- *  1. When `DD_API_KEY` is present, POST the buffered events to the Datadog logs
- *     intake as ONE batched request (bounded by `AbortSignal` AND a total
- *     deadline; NO retries). A rejection or non-2xx warns once so a dead direct
- *     sink is visible (it is NOT silently treated as success).
- *  2. ALWAYS drain stdout — the structured lines already written by
- *     `recordMigrateEvent` reach Datadog via the Vercel log drain, and a forced
- *     `process.exit()` can truncate the last line on Vercel's async stdout pipe.
- * Clears the buffer regardless. Never throws.
+ * Flush telemetry before the caller may `process.exit()`: drain stdout, since a
+ * forced exit can truncate the last line on an async stdout pipe. Bounded by a
+ * deadline so it can never hang the caller. Never throws.
  */
 export async function flushMigrateTelemetry(
   deps: MigrateTelemetrySinkDeps = {}
 ): Promise<void> {
-  const env = deps.env ?? process.env;
-  const events = buffer.splice(0, buffer.length);
   try {
-    // ONE deadline bounds the POST AND the stdout drain together (not 3s each),
-    // and swallows any failure — including a synchronous drain throw — so
-    // telemetry can never reject into or over-hold the caller's `main()`.
-    await raceDeadline(flushWork(events, env, deps), deps);
+    await raceDeadline(drainStdout(deps), deps);
   } catch {
     warnOnce(
       "flush_failed",
       "migrate telemetry: flush failed; events dropped."
     );
   }
-}
-
-/**
- * POST the batch (when keyed) and drain stdout CONCURRENTLY so neither blocks the
- * other, bounded by the caller's single deadline. The stdout copy is the primary
- * (drain-backed) path; the POST is secondary and best-effort.
- */
-function flushWork(
-  events: MigrateDeployEvent[],
-  env: NodeJS.ProcessEnv,
-  deps: MigrateTelemetrySinkDeps
-): Promise<void> {
-  const work: Promise<void>[] = [drainStdout(deps)];
-  const apiKey = env.DD_API_KEY;
-  if (apiKey && events.length > 0) {
-    work.push(postEvents(events, apiKey, env, deps));
-  }
-  return Promise.all(work).then(() => undefined);
-}
-
-/** POST the batch to the Datadog intake, warning once on a dead sink. */
-function postEvents(
-  events: MigrateDeployEvent[],
-  apiKey: string,
-  env: NodeJS.ProcessEnv,
-  deps: MigrateTelemetrySinkDeps
-): Promise<void> {
-  const site = env.DD_SITE || DEFAULT_DD_SITE;
-  if (!isAllowedDatadogSite(site)) {
-    // Never attach DD-API-KEY to an unrecognized authority (SSRF / key egress).
-    warnOnce(
-      "flush_failed",
-      `migrate telemetry: DD_SITE "${site}" is not an allowed Datadog site; skipping POST.`
-    );
-    return Promise.resolve();
-  }
-  const service = env.DD_SERVICE ?? DEFAULT_DD_SERVICE;
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  return fetchImpl(`https://http-intake.logs.${site}/api/v2/logs`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "DD-API-KEY": apiKey,
-    },
-    body: JSON.stringify(events.map((e) => toIntakeEntry(e, service))),
-    signal: AbortSignal.timeout(DD_LOG_INTAKE_TIMEOUT_MS),
-    // Do NOT follow redirects: Undici keeps DD-API-KEY on a cross-origin redirect
-    // and a 307/308 replays the body, which would leak the key past the allowlist.
-    redirect: "error",
-  }).then(
-    (response) => {
-      // A non-2xx means the sink is (mis)configured and events are being dropped
-      // upstream — surface it once rather than reporting silent success.
-      if (!response.ok) {
-        warnOnce(
-          "flush_failed",
-          `migrate telemetry: intake returned ${response.status}.`
-        );
-      }
-    },
-    () => {
-      // NEVER interpolate the raw error: Undici's "invalid header value" error can
-      // echo the DD-API-KEY value, which would then land in Vercel build logs.
-      warnOnce(
-        "flush_failed",
-        "migrate telemetry: intake POST failed (transport error)."
-      );
-    }
-  );
 }
 
 /**
@@ -473,7 +342,7 @@ function drainStdout(deps: MigrateTelemetrySinkDeps): Promise<void> {
 
 /**
  * Resolve when `work` settles OR the deadline fires, whichever first — so a
- * `fetchImpl` that never settles cannot hang the process. The deadline timer is
+ * stuck stdout drain cannot hang the process. The deadline timer is
  * injectable so tests are deterministic without real time.
  */
 function raceDeadline(
@@ -488,7 +357,7 @@ function raceDeadline(
       timer.unref?.();
     });
   const deadline = new Promise<void>((resolve) => {
-    schedule(DD_LOG_INTAKE_TIMEOUT_MS, resolve);
+    schedule(FLUSH_DEADLINE_MS, resolve);
   });
   return Promise.race([work, deadline]);
 }
@@ -608,9 +477,8 @@ export function createMigrateRunRecorder(
   };
 }
 
-/** Test-only: clear the buffer and warn-once latches so cases cannot leak. */
+/** Test-only: clear the warn-once latches so cases cannot leak. */
 export function __resetMigrateTelemetryForTests(): void {
-  buffer.length = 0;
   warned.sink_failed = false;
   warned.flush_failed = false;
 }

@@ -1,4 +1,6 @@
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { parseError } from "@repo/observability/error";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import type {
   ProviderHttp,
   ProviderHttpRequest,
@@ -18,10 +20,32 @@ const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
  * webhooks, are bearer secrets). `fetchImpl` is injectable for tests.
  */
 export function createProviderHttp(
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  options: { provider?: string } = {}
 ): ProviderHttp {
   return {
-    request: (request) => sendRequest(fetchImpl, request),
+    request: (request) =>
+      withSpan(
+        "integration.http",
+        {
+          [AfAttribute.IntegrationProvider]: options.provider,
+          "http.request.method": request.method,
+        },
+        async (span) => {
+          const response = await sendRequest(fetchImpl, request);
+          span.setAttribute("http.response.status_code", response.status);
+          if (!response.ok) {
+            setSpanOutcome(
+              isTransientHttpFailure(response)
+                ? AfOutcome.Retry
+                : AfOutcome.Error,
+              response.error ?? "failed",
+              span
+            );
+          }
+          return response;
+        }
+      ),
   };
 }
 
@@ -135,4 +159,9 @@ function parseJsonBody(headers: Headers, text: string): unknown {
 
 function hasHeader(headers: Record<string, string>, name: string): boolean {
   return Object.keys(headers).some((key) => key.toLowerCase() === name);
+}
+
+/** A retryable HTTP status is a retry; a request that never got a response is an error. */
+function isTransientHttpFailure(response: ProviderHttpResponse): boolean {
+  return response.retryable && response.status !== 0;
 }

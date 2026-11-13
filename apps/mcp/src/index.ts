@@ -14,12 +14,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { withDb } from "@repo/database";
+import { AfAttribute } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
 import {
   flushLogsWithDeadline,
   waitForDeadline,
 } from "@repo/observability/shutdown";
-import { AfAttribute } from "@repo/observability/span";
 import { createRedisClient } from "@repo/redis";
 import {
   checkApiReachable,
@@ -3526,7 +3526,7 @@ async function dispatchHttpRequest(
       method: req.method ?? "",
       path: pathname,
       // `requestOrigin`, not `origin`: `origin` is a reserved logger meta key
-      // that overrides the service's Datadog origin facet when it matches a
+      // that overrides the service's SigNoz origin facet when it matches a
       // known origin, so the untrusted request Origin header must not use it.
       requestOrigin: req.headers.origin ?? "",
       host: req.headers.host ?? "",
@@ -3643,7 +3643,7 @@ export function createHttpServer(): import("node:http").Server {
     if (req.headers.origin && !corsAllowed) {
       log.warn("[mcp] cors-blocked", {
         // `requestOrigin`, not `origin`: `origin` is a reserved logger meta key
-        // that would let this untrusted Origin header spoof the Datadog origin facet.
+        // that would let this untrusted Origin header spoof the SigNoz origin facet.
         requestOrigin: req.headers.origin,
         host: req.headers.host ?? "",
         method: req.method ?? "",
@@ -3722,9 +3722,9 @@ export function startHttpServer(port = PORT): import("node:http").Server {
   });
 
   httpServer.on("error", (error) => {
-    // Flush the fatal startup diagnostic (e.g. EADDRINUSE/EACCES) to Datadog
+    // Flush the fatal startup diagnostic (e.g. EADDRINUSE/EACCES) to SigNoz
     // before exiting — otherwise the buffered log.error entry is dropped on
-    // exit and the reason the task never started is invisible in Datadog.
+    // exit and the reason the task never started is invisible in SigNoz.
     log.error("HTTP server error", { error });
     shutdownAndExit({ exitCode: 1 }).catch(() => {
       process.exit(1);

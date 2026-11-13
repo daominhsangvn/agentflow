@@ -5,6 +5,7 @@
 // (attributes). No OpenTelemetry import: `log.ts` is bundled into browsers.
 // ---------------------------------------------------------------------------
 
+import { AfAttribute } from "./af-attributes";
 import type { LogAttributes, LogAttributeValue } from "./log-sink";
 import { redactLogValue } from "./redact";
 
@@ -38,6 +39,7 @@ export function toLogAttributes(
   const attributes: LogAttributes = {};
   if (isPlainObject(parsed)) {
     flattenInto(attributes, "", parsed, 1);
+    addAfAliases(attributes, parsed);
   }
   return attributes;
 }
@@ -91,3 +93,35 @@ function toArrayAttribute(value: unknown[]): LogAttributeValue {
   }
   return JSON.stringify(value);
 }
+
+function addAfAliases(
+  target: LogAttributes,
+  source: Record<string, unknown>
+): void {
+  for (const [key, value] of Object.entries(source)) {
+    const alias = LOG_META_AF_ALIASES[key];
+    if (alias && typeof value === "string" && !(alias in target)) {
+      target[alias] = value;
+    }
+  }
+}
+
+const LOG_META_AF_ALIASES: Record<string, string> = {
+  organizationId: AfAttribute.OrgId,
+  orgId: AfAttribute.OrgId,
+  projectId: AfAttribute.ProjectId,
+  caseId: AfAttribute.CaseId,
+  taskId: AfAttribute.TaskId,
+  loopId: AfAttribute.LoopId,
+  runId: AfAttribute.WorkflowRunId,
+  workflowRunId: AfAttribute.WorkflowRunId,
+  computeTargetId: AfAttribute.ComputeTargetId,
+  userId: AfAttribute.UserId,
+  conversationId: AfAttribute.ConversationId,
+  turnId: AfAttribute.TurnId,
+  actionRunId: AfAttribute.ActionRunId,
+  connectionId: AfAttribute.ConnectionId,
+  commandId: AfAttribute.CommandId,
+  deliveryRowId: AfAttribute.DeliveryId,
+  deliveryId: AfAttribute.DeliveryId,
+};

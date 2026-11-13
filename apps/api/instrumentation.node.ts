@@ -16,6 +16,7 @@ import { TelemetryDisabledReason } from "@repo/observability/tracing/config";
 export async function registerNodeInstrumentation(): Promise<void> {
   await registerTelemetry();
   await registerPoolTelemetry();
+  await registerStorageTelemetry();
 }
 
 /**
@@ -64,4 +65,24 @@ async function registerPoolTelemetry(): Promise<void> {
   setPoolTelemetrySink((sample) =>
     emitDbPoolMetric({ ...sample, origin: ORIGIN })
   );
+}
+
+/**
+ * Wraps S3 commands in `storage.<Command>` spans through the storage package's
+ * observer seam. Fail-open: telemetry never blocks the cold start.
+ */
+async function registerStorageTelemetry(): Promise<void> {
+  try {
+    const { setStorageCommandObserver } = await import("@repo/storage/client");
+    const { withSpan } = await import("@repo/observability/span");
+    setStorageCommandObserver((command, run) =>
+      withSpan(
+        `storage.${command.name}`,
+        { "af.storage.bucket": command.bucket },
+        run
+      )
+    );
+  } catch {
+    log.warn("telemetry.storage_hook_failed");
+  }
 }

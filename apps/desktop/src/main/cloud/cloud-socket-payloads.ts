@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { parseTraceparent } from "../../server/gateway-trace-context.js";
 import type { DesktopCommandEvent } from "./cloud-protocol.js";
 import { PROTOCOL_VERSION } from "./cloud-protocol.js";
 
@@ -54,6 +55,9 @@ export function parseDesktopCommand(
     lockKey: asNonEmptyString(event.lockKey) ?? undefined,
     requiresApproval: Boolean(event.requiresApproval),
     approvalReason: asNonEmptyString(event.approvalReason) ?? undefined,
+    ...(parseTraceparent(event.traceparent)
+      ? { traceparent: parseTraceparent(event.traceparent)! }
+      : {}),
     ...(asNonEmptyString(event.signature)
       ? { signature: asNonEmptyString(event.signature)! }
       : {}),
