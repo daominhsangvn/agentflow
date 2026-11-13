@@ -1,114 +1,136 @@
-import { context, TraceFlags, trace } from "@opentelemetry/api";
+import { context, trace } from "@opentelemetry/api";
+import type { InMemoryLogRecordExporter } from "@opentelemetry/sdk-logs";
+import type { InMemorySpanExporter } from "@opentelemetry/sdk-trace-node";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deleteEnvForTest } from "../../__tests__/test-helpers";
+import { hasLogRecordSink } from "../../log-sink";
 import {
   getTraceContext,
   resetTraceContextProvider,
 } from "../../trace-context";
-import { TracingDisabledReason } from "../config";
-import { flushSpans, isTracingActive } from "../hooks";
-import { initTracing, resetTracingForTest } from "../provider";
+import { TelemetryDisabledReason } from "../config";
+import { flushTelemetry, isTelemetryActive } from "../hooks";
+import { initTelemetry, resetTelemetryForTest } from "../provider";
 
 // ---------------------------------------------------------------------------
-// tracing/provider.ts — fail-open behaviour (ISS-4659).
-//
-// Tracing is a diagnostic aid: it must never add latency to, or fail, a
-// request. These tests pin the two ways that promise could be broken — an
-// init that throws, and a flush that rejects when nothing was ever started.
+// tracing/provider.ts bootstrap. Exporters are replaced with in-memory ones so
+// nothing touches the network.
 // ---------------------------------------------------------------------------
 
-const SAMPLED_OUT_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
-const SAMPLED_OUT_SPAN_ID = "00f067aa0ba902b7";
+const exporters = vi.hoisted(() => ({
+  logs: undefined as unknown,
+  spans: undefined as unknown,
+}));
+
+vi.mock("@opentelemetry/exporter-logs-otlp-http", async () => {
+  const sdk = await import("@opentelemetry/sdk-logs");
+  return {
+    OTLPLogExporter: class extends sdk.InMemoryLogRecordExporter {
+      constructor() {
+        super();
+        exporters.logs = this;
+      }
+    },
+  };
+});
+
+vi.mock("@opentelemetry/exporter-trace-otlp-http", async () => {
+  const sdk = await import("@opentelemetry/sdk-trace-node");
+  return {
+    OTLPTraceExporter: class extends sdk.InMemorySpanExporter {
+      constructor() {
+        super();
+        exporters.spans = this;
+      }
+    },
+  };
+});
+
+vi.mock("@opentelemetry/exporter-metrics-otlp-http", () => ({
+  OTLPMetricExporter: class {
+    export(_metrics: unknown, done: (result: { code: number }) => void) {
+      done({ code: 0 });
+    }
+    forceFlush() {
+      return Promise.resolve();
+    }
+    shutdown() {
+      return Promise.resolve();
+    }
+  },
+}));
 
 afterEach(async () => {
-  // Awaited: the provider drains asynchronously, and a later test's register()
-  // must not race a teardown still in flight.
-  await resetTracingForTest();
+  await resetTelemetryForTest();
   resetTraceContextProvider();
   vi.unstubAllEnvs();
 });
 
-function clearTracingEnv(): void {
+function clearEnv(): void {
   deleteEnvForTest(
-    "DD_TRACING_DISABLED",
-    "DD_TRACING_ENABLED",
-    "DD_API_KEY",
-    "DD_OTLP_TRACES_ENDPOINT",
-    "DD_TRACE_SAMPLE_RATE",
-    "VERCEL"
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_SDK_DISABLED",
+    "OTEL_SERVICE_NAME",
+    "OTEL_TRACES_SAMPLER",
+    "OTEL_TRACES_SAMPLER_ARG"
   );
 }
 
-describe("initTracing", () => {
-  it("stays inert on an undeployed runtime and reports why", () => {
-    clearTracingEnv();
+function stubEnabledEnv(): void {
+  clearEnv();
+  vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1");
+}
 
-    const result = initTracing();
+describe("initTelemetry", () => {
+  it("reports an enabled config and installs the seams", () => {
+    stubEnabledEnv();
 
-    expect(result).toEqual({
-      enabled: false,
-      reason: TracingDisabledReason.NotDeployed,
-    });
-  });
-
-  it("leaves the logger's trace-context provider untouched when disabled", () => {
-    clearTracingEnv();
-
-    initTracing();
-
-    // The logger must emit exactly the pre-ISS-4659 shape when untraced.
-    expect(getTraceContext()).toBeUndefined();
-  });
-
-  it("does not throw when the kill switch is set", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACING_DISABLED", "1");
-
-    expect(() => initTracing()).not.toThrow();
-    expect(initTracing()).toEqual({
-      enabled: false,
-      reason: TracingDisabledReason.ExplicitlyDisabled,
-    });
-  });
-
-  it("registers a live trace-context provider once enabled", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACING_ENABLED", "1");
-    vi.stubEnv("DD_API_KEY", "dd-test-key");
-    vi.stubEnv(
-      "DD_OTLP_TRACES_ENDPOINT",
-      "https://otlp.example.test/v1/traces"
-    );
-
-    const result = initTracing();
+    const result = initTelemetry();
 
     expect(result.enabled).toBe(true);
-    // The SDK-free seam now reports a live tracer — this is what
-    // `route-utils` gates its flush scheduling on.
-    expect(isTracingActive()).toBe(true);
-    // A provider is now installed; with no span active it reports undefined
-    // rather than throwing, which is what keeps untraced log calls clean.
+    expect(isTelemetryActive()).toBe(true);
+    expect(hasLogRecordSink()).toBe(true);
     expect(getTraceContext()).toBeUndefined();
+  });
+
+  it("installs nothing without an endpoint", () => {
+    clearEnv();
+
+    expect(initTelemetry()).toEqual({
+      enabled: false,
+      reason: TelemetryDisabledReason.MissingEndpoint,
+    });
+    expect(isTelemetryActive()).toBe(false);
+    expect(hasLogRecordSink()).toBe(false);
+  });
+
+  it("honours OTEL_SDK_DISABLED", () => {
+    stubEnabledEnv();
+    vi.stubEnv("OTEL_SDK_DISABLED", "true");
+
+    expect(initTelemetry()).toEqual({
+      enabled: false,
+      reason: TelemetryDisabledReason.ExplicitlyDisabled,
+    });
+    expect(isTelemetryActive()).toBe(false);
+  });
+
+  it("returns the first outcome even after the env changes", () => {
+    clearEnv();
+    const first = initTelemetry();
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1");
+
+    expect(initTelemetry()).toEqual(first);
+    expect(isTelemetryActive()).toBe(false);
   });
 
   it("does not stamp trace ids for a sampled-out span", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACING_ENABLED", "1");
-    vi.stubEnv("DD_API_KEY", "dd-test-key");
-    vi.stubEnv(
-      "DD_OTLP_TRACES_ENDPOINT",
-      "https://otlp.example.test/v1/traces"
-    );
-    initTracing();
-
-    // `wrapSpanContext` yields a NonRecordingSpan — exactly what the sampler
-    // produces for a request it declined. It still has a real spanContext, so
-    // reading ids unconditionally would correlate logs to a trace that is
-    // never exported. At the default 10% rate that is most log lines.
+    stubEnabledEnv();
+    initTelemetry();
     const sampledOut = trace.wrapSpanContext({
-      traceId: SAMPLED_OUT_TRACE_ID,
-      spanId: SAMPLED_OUT_SPAN_ID,
-      traceFlags: TraceFlags.NONE,
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "00f067aa0ba902b7",
+      traceFlags: 0,
     });
 
     const stamped = context.with(
@@ -119,33 +141,31 @@ describe("initTracing", () => {
     expect(stamped).toBeUndefined();
   });
 
-  it("returns the first outcome on repeat calls rather than re-reading the env", () => {
-    clearTracingEnv();
+  it("exports log records carrying the active span's trace id", async () => {
+    stubEnabledEnv();
+    initTelemetry();
+    const { log } = await import("../../log");
 
-    const first = initTracing();
-    // Re-resolving here would report "enabled" for a tracer that was never
-    // installed, and a caller logging that would describe a fiction.
-    vi.stubEnv("DD_TRACING_ENABLED", "1");
-    vi.stubEnv("DD_API_KEY", "dd-test-key");
-    vi.stubEnv(
-      "DD_OTLP_TRACES_ENDPOINT",
-      "https://otlp.example.test/v1/traces"
-    );
+    let spanTraceId = "";
+    trace.getTracer("test").startActiveSpan("work", (span) => {
+      spanTraceId = span.spanContext().traceId;
+      log.info("inside span");
+      span.end();
+    });
+    await flushTelemetry();
 
-    expect(initTracing()).toEqual(first);
-    expect(isTracingActive()).toBe(false);
+    const records = (
+      exporters.logs as InMemoryLogRecordExporter
+    ).getFinishedLogRecords();
+    const match = records.find((r) => r.body === "inside span");
+    expect(spanTraceId).not.toBe("");
+    expect(match?.spanContext?.traceId).toBe(spanTraceId);
+    expect(exporters.spans as InMemorySpanExporter).toBeDefined();
   });
 });
 
-describe("flushSpans", () => {
-  it("resolves without a tracer rather than rejecting", async () => {
-    clearTracingEnv();
-    initTracing();
-
-    await expect(flushSpans()).resolves.toBeUndefined();
-  });
-
-  it("resolves when never initialised at all", async () => {
-    await expect(flushSpans()).resolves.toBeUndefined();
+describe("flushTelemetry", () => {
+  it("resolves when never initialised", async () => {
+    await expect(flushTelemetry()).resolves.toBeUndefined();
   });
 });

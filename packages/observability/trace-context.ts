@@ -59,19 +59,16 @@ export function getTraceContext(): TraceContext | undefined {
 }
 
 /**
- * Map a trace context onto the log attributes Datadog joins traces on.
+ * Map a trace context onto the log attributes backends join traces on.
  *
- * Kept as a single pure function because the correct encoding for
- * OTLP-ingested traces is the one thing here that rollout has to confirm:
- * Datadog's classic (dd-trace) correlation expects decimal ids, while OTLP
- * ingestion carries the W3C hex form. If verification shows Datadog wants a
- * different encoding, this function is the only thing that changes.
+ * Uses the OpenTelemetry log data-model names (`trace_id`, `span_id`) with the
+ * W3C lowercase hex encoding.
  */
 export function toLogCorrelationFields(
   context: TraceContext
 ): Record<string, string> {
   return {
-    "dd.trace_id": context.traceId,
-    "dd.span_id": context.spanId,
+    trace_id: context.traceId,
+    span_id: context.spanId,
   };
 }

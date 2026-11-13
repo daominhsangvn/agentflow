@@ -23,7 +23,6 @@ import {
   handleTelemetryEvent,
   type TelemetryHandlerContext,
 } from "@/lib/desktop-telemetry-handler";
-import { stubLogExporterEnv } from "./utils/telemetry-env";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -72,25 +71,81 @@ const defaultHandlerContext: TelemetryHandlerContext = {
   authenticatedTargetId: COMPUTE_TARGET_ID,
 };
 
+const JSON_ATTRIBUTE_PATTERN = /^[[{]/;
+
+type CapturedLogEntry = Record<string, unknown> & {
+  message?: string;
+  level?: string;
+};
+
 /**
- * Stub global fetch + reset modules + dynamically import the log buffer and
- * handler so each test gets a fresh module-scope state. Callers are
- * responsible for stubbing any env vars (DD_API_KEY, DD_SERVICE, etc.)
- * BEFORE invoking this helper, since module-load reads them once.
+ * Register a log record sink on the freshly reset module graph and return the
+ * live array of captured entries. Attributes are flat dotted keys; they are
+ * expanded back into nested objects so assertions read like the payload.
+ * Must be called after vi.resetModules() so the sink module is the same
+ * instance log.ts sees. Callers stub env vars (OTEL_SERVICE_NAME, etc.) BEFORE
+ * module load, since ORIGIN is resolved once.
  */
-async function importFreshHandlerWithFetch(
-  fetchMock: ReturnType<typeof vi.fn>
-): Promise<{
+async function captureLogEntries(): Promise<CapturedLogEntry[]> {
+  const { setLogRecordSink } = await import("@repo/observability/log-sink");
+  const entries: CapturedLogEntry[] = [];
+  setLogRecordSink((record) => {
+    entries.push({
+      message: record.message,
+      level: record.level,
+      ...expandAttributes(record.attributes),
+    });
+  });
+  return entries;
+}
+
+function expandAttributes(
+  attributes: Record<string, unknown>
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(attributes)) {
+    const parts = key.split(".");
+    let cursor = result;
+    for (const part of parts.slice(0, -1)) {
+      const next = cursor[part];
+      if (typeof next !== "object" || next === null) {
+        cursor[part] = {};
+      }
+      cursor = cursor[part] as Record<string, unknown>;
+    }
+    cursor[parts.at(-1) as string] = parseJsonAttribute(raw);
+  }
+  return result;
+}
+
+// Values beyond the flatten depth, or mixed arrays, are stored as JSON strings.
+function parseJsonAttribute(value: unknown): unknown {
+  if (typeof value === "string" && JSON_ATTRIBUTE_PATTERN.test(value)) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+/**
+ * Reset modules, register the sink, then dynamically import the log module and
+ * handler so each test gets a fresh module-scope state.
+ */
+async function importFreshHandlerWithSink(): Promise<{
+  entries: CapturedLogEntry[];
   freshLog: typeof import("@repo/observability/log").log;
   freshHandler: typeof handleTelemetryEvent;
 }> {
-  vi.stubGlobal("fetch", fetchMock);
   vi.resetModules();
+  const entries = await captureLogEntries();
   const { log: freshLog } = await import("@repo/observability/log");
   const { handleTelemetryEvent: freshHandler } = await import(
     "@/lib/desktop-telemetry-handler"
   );
-  return { freshLog, freshHandler };
+  return { entries, freshLog, freshHandler };
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +272,7 @@ describe("handleTelemetryEvent — origin enrichment overwrites injected origin"
 //
 // When log.info is called with meta { origin: Origin.Desktop }, the built
 // Datadog entry carries origin: Origin.Desktop even though ORIGIN === Origin.Api
-// in the test harness (DD_SERVICE is not set at setup time for apps/api tests,
+// in the test harness (OTEL_SERVICE_NAME is not set at setup time for apps/api tests,
 // but the module ORIGIN defaults to Origin.Unknown — either way it is not Desktop).
 //
 // Pattern mirrors packages/observability/__tests__/log-ddtags.test.ts:
@@ -232,21 +287,17 @@ describe("buildEntry() — valid meta.origin overrides ORIGIN", () => {
   });
 
   it("emits entry with origin: Origin.Desktop when meta supplies Origin.Desktop", async () => {
-    stubLogExporterEnv();
-    vi.stubEnv("DD_SERVICE", "api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "api");
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    vi.stubGlobal("fetch", fetchMock);
     vi.resetModules();
+    const entries = await captureLogEntries();
 
     const { log: freshLog } = await import("@repo/observability/log");
 
     freshLog.info("test", { origin: Origin.Desktop });
     await freshLog.flush();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const callArgs = fetchMock.mock.calls[0];
-    const body = JSON.parse(callArgs[1].body as string) as Array<{
+    const body = entries as Array<{
       origin: string;
     }>;
     // Find the "test" entry (ignoring any module-load warnings that may have fired)
@@ -264,7 +315,7 @@ describe("buildEntry() — valid meta.origin overrides ORIGIN", () => {
 // (c) buildEntry() — invalid meta.origin silently falls back to ORIGIN
 //
 // When meta.origin is not a known Origin value, buildEntry() falls back to
-// the module-level ORIGIN constant (Origin.Api when DD_SERVICE=api) with no
+// the module-level ORIGIN constant (Origin.Api when OTEL_SERVICE_NAME=api) with no
 // thrown exception and no console warning.
 // ---------------------------------------------------------------------------
 
@@ -276,12 +327,10 @@ describe("buildEntry() — invalid meta.origin falls back to ORIGIN silently", (
   });
 
   it("emits entry with origin: Origin.Api and does not throw when meta.origin is an invalid value", async () => {
-    stubLogExporterEnv();
-    vi.stubEnv("DD_SERVICE", "api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "api");
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    vi.stubGlobal("fetch", fetchMock);
     vi.resetModules();
+    const entries = await captureLogEntries();
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { log: freshLog } = await import("@repo/observability/log");
@@ -289,9 +338,7 @@ describe("buildEntry() — invalid meta.origin falls back to ORIGIN silently", (
     freshLog.info("invalid-origin-test", { origin: "notareal" });
     await freshLog.flush();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const callArgs = fetchMock.mock.calls[0];
-    const body = JSON.parse(callArgs[1].body as string) as Array<{
+    const body = entries as Array<{
       origin: string;
     }>;
     const testEntry = body.find(
@@ -620,14 +667,12 @@ describe("handleTelemetryEvent — decision-table verification telemetry", () =>
   });
 
   it("flushes decision-table verification diagnostics and telemetryMessage in Datadog metadata", async () => {
-    stubLogExporterEnv();
-    vi.stubEnv("DD_SERVICE", "api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "api");
     vi.stubEnv("RELEASE_VERSION", "1.0.0");
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    vi.stubGlobal("fetch", fetchMock);
     vi.resetModules();
+    const entries = await captureLogEntries();
 
     const { log: freshLog } = await import("@repo/observability/log");
     const { handleTelemetryEvent: freshHandler } = await import(
@@ -648,11 +693,8 @@ describe("handleTelemetryEvent — decision-table verification telemetry", () =>
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       category?: string;
       diagnostics?: {
         decisionTableVerification?: typeof reportedDecisionTableVerification;
@@ -850,14 +892,12 @@ describe("handleTelemetryEvent — outbound network telemetry", () => {
   });
 
   it("flushes descriptor-only outbound network diagnostics in Datadog metadata", async () => {
-    stubLogExporterEnv();
-    vi.stubEnv("DD_SERVICE", "api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "api");
     vi.stubEnv("RELEASE_VERSION", "1.0.0");
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    vi.stubGlobal("fetch", fetchMock);
     vi.resetModules();
+    const entries = await captureLogEntries();
 
     const { log: freshLog } = await import("@repo/observability/log");
     const { handleTelemetryEvent: freshHandler } = await import(
@@ -888,11 +928,8 @@ describe("handleTelemetryEvent — outbound network telemetry", () => {
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       category?: string;
       diagnostics?: {
         outboundNetwork?: Record<string, unknown>;
@@ -919,17 +956,10 @@ describe("handleTelemetryEvent — outbound network telemetry", () => {
   });
 
   it("preserves outbound network telemetry with unknown classification values", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 202,
-      text: () => Promise.resolve("accepted"),
-    });
-    globalThis.fetch = fetchMock;
-    stubLogExporterEnv();
-    process.env.DD_SITE = "datadoghq.com";
-    process.env.DD_SERVICE = "api";
+    process.env.OTEL_SERVICE_NAME = "api";
     process.env.ORIGIN = Origin.Api;
     vi.resetModules();
+    const entries = await captureLogEntries();
 
     const { log: freshLog } = await import("@repo/observability/log");
     const { handleTelemetryEvent: freshHandler } = await import(
@@ -959,11 +989,8 @@ describe("handleTelemetryEvent — outbound network telemetry", () => {
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       category?: string;
       diagnostics?: {
         outboundNetwork?: Record<string, unknown>;
@@ -996,17 +1023,10 @@ describe("handleTelemetryEvent — support upload telemetry", () => {
   });
 
   it("flushes support upload diagnostics in Datadog metadata", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 202,
-      text: () => Promise.resolve("accepted"),
-    });
-    globalThis.fetch = fetchMock;
-    stubLogExporterEnv();
-    process.env.DD_SITE = "datadoghq.com";
-    process.env.DD_SERVICE = "api";
+    process.env.OTEL_SERVICE_NAME = "api";
     process.env.ORIGIN = Origin.Api;
     vi.resetModules();
+    const entries = await captureLogEntries();
 
     const { log: freshLog } = await import("@repo/observability/log");
     const { handleTelemetryEvent: freshHandler } = await import(
@@ -1036,11 +1056,8 @@ describe("handleTelemetryEvent — support upload telemetry", () => {
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       category?: string;
       diagnostics?: {
         supportUpload?: Record<string, unknown>;
@@ -1205,8 +1222,7 @@ describe("sanitizeDesktopTelemetryDiagnostics — envSnapshot filtering", () => 
 
 describe("handleTelemetryEvent — loop.perf.agent category pass-through", () => {
   beforeEach(() => {
-    stubLogExporterEnv();
-    vi.stubEnv("DD_SERVICE", "api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "api");
     vi.stubEnv("RELEASE_VERSION", "1.0.0");
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
   });
@@ -1218,9 +1234,8 @@ describe("handleTelemetryEvent — loop.perf.agent category pass-through", () =>
   });
 
   it("flushes a Datadog entry with origin: Origin.Desktop and category: TelemetryCategory.LoopPerfAgent for a loop.perf.agent payload", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const { freshLog, freshHandler } =
-      await importFreshHandlerWithFetch(fetchMock);
+    const { entries, freshLog, freshHandler } =
+      await importFreshHandlerWithSink();
 
     const result = freshHandler(
       {
@@ -1233,11 +1248,8 @@ describe("handleTelemetryEvent — loop.perf.agent category pass-through", () =>
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       category?: string;
       origin?: string;
       message?: string;
@@ -1265,8 +1277,7 @@ describe("handleTelemetryEvent — loop.perf.agent category pass-through", () =>
 
 describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () => {
   beforeEach(() => {
-    stubLogExporterEnv();
-    vi.stubEnv("DD_SERVICE", "api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "api");
     vi.stubEnv("RELEASE_VERSION", "1.0.0");
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
   });
@@ -1279,9 +1290,8 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
 
   // (k2-a) Fully-populated agent event — verifies every field preserved
   it("preserves all diagnostics.loopPerf fields for a fully-populated loop.perf.agent event", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const { freshLog, freshHandler } =
-      await importFreshHandlerWithFetch(fetchMock);
+    const { entries, freshLog, freshHandler } =
+      await importFreshHandlerWithSink();
 
     const agentPayload = {
       event: "agent",
@@ -1314,11 +1324,8 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       category?: string;
       diagnostics?: { loopPerf?: typeof agentPayload };
     }>;
@@ -1463,9 +1470,8 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
     category,
     loopPerf,
   }) => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const { freshLog, freshHandler } =
-      await importFreshHandlerWithFetch(fetchMock);
+    const { entries, freshLog, freshHandler } =
+      await importFreshHandlerWithSink();
 
     const result = freshHandler(
       {
@@ -1478,11 +1484,8 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       category?: string;
       diagnostics?: { loopPerf?: Record<string, unknown> };
     }>;
@@ -1493,7 +1496,12 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
     expect(parsedLoopPerf).toBeDefined();
 
     // Every key supplied in the fixture must appear in the logged metadata
+    // (null values are omitted from OTel attributes, so they are skipped)
     for (const [key, value] of Object.entries(loopPerf)) {
+      if (value === null) {
+        expect(parsedLoopPerf?.[key]).toBeUndefined();
+        continue;
+      }
       expect(parsedLoopPerf).toHaveProperty(key);
       expect(parsedLoopPerf?.[key]).toStrictEqual(value);
     }
@@ -1504,9 +1512,8 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
   // as an opaque payload AND a `loop.perf.unknown_event_variant` warning must
   // be emitted so drift is observable rather than silent or breaking.
   it("forwards unknown loopPerf event variants to Datadog with a drift-detection warning", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const { freshLog, freshHandler } =
-      await importFreshHandlerWithFetch(fetchMock);
+    const { entries, freshLog, freshHandler } =
+      await importFreshHandlerWithSink();
 
     const skewedPayload = {
       event: "post_loop_review",
@@ -1528,11 +1535,8 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       level?: string;
       category?: string;
       diagnostics?: { loopPerf?: Record<string, unknown> };
@@ -1561,9 +1565,8 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
   // missing entirely (e.g. desktop bug or future field rename) must also flow
   // through to Datadog with the drift warning carrying `loopPerfEvent: null`.
   it("forwards loopPerf payloads with missing `event` field with a null-event drift warning", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const { freshLog, freshHandler } =
-      await importFreshHandlerWithFetch(fetchMock);
+    const { entries, freshLog, freshHandler } =
+      await importFreshHandlerWithSink();
 
     const eventlessPayload = {
       runId: "run-eventless-001",
@@ -1582,11 +1585,8 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       level?: string;
       category?: string;
       diagnostics?: { loopPerf?: Record<string, unknown> };
@@ -1609,13 +1609,13 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
     );
     expect(warningEntry).toBeDefined();
     expect(warningEntry?.level).toBe("warn");
-    expect(warningEntry?.loopPerfEvent).toBeNull();
+    // null attributes are omitted from OTel records
+    expect(warningEntry?.loopPerfEvent).toBeUndefined();
   });
 
   it("redacts unsafe loopPerf command and rawBytes in Datadog-bound metadata", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const { freshLog, freshHandler } =
-      await importFreshHandlerWithFetch(fetchMock);
+    const { entries, freshLog, freshHandler } =
+      await importFreshHandlerWithSink();
 
     const result = freshHandler(
       {
@@ -1637,11 +1637,8 @@ describe("handleTelemetryEvent — loopPerf payload-preservation (AC-006)", () =
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       category?: string;
       diagnostics?: { loopPerf?: Record<string, unknown> };
     }>;
@@ -1682,15 +1679,13 @@ describe("handleTelemetryEvent — validation failures emit category attribute",
   };
 
   it("(a) schema parse failure flushes entry with category: TelemetryValidationFailed", async () => {
-    stubLogExporterEnv();
     // Populate version + git_sha so log.ts's module-load fallback warnings
     // do not displace the validation-failed entry in the flushed batch.
     vi.stubEnv("RELEASE_VERSION", "1.0.0");
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const { freshLog, freshHandler } =
-      await importFreshHandlerWithFetch(fetchMock);
+    const { entries, freshLog, freshHandler } =
+      await importFreshHandlerWithSink();
 
     // Missing required schemaVersion — triggers the parse-failure branch.
     const invalidPayload = {
@@ -1708,11 +1703,8 @@ describe("handleTelemetryEvent — validation failures emit category attribute",
     expect(result.ok).toBe(false);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as ValidationEntry[];
+    const body = entries as ValidationEntry[];
     const entry = body.find(
       (e) => e.message === "Desktop telemetry validation failed"
     );
@@ -1722,13 +1714,11 @@ describe("handleTelemetryEvent — validation failures emit category attribute",
   });
 
   it("(b) computeTargetId mismatch flushes entry with category: TelemetryValidationFailed", async () => {
-    stubLogExporterEnv();
     vi.stubEnv("RELEASE_VERSION", "1.0.0");
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
 
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const { freshLog, freshHandler } =
-      await importFreshHandlerWithFetch(fetchMock);
+    const { entries, freshLog, freshHandler } =
+      await importFreshHandlerWithSink();
 
     const result = freshHandler(validDesktopWirePayload, {
       authenticatedTargetId: "different-target",
@@ -1736,11 +1726,8 @@ describe("handleTelemetryEvent — validation failures emit category attribute",
     expect(result.ok).toBe(false);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as ValidationEntry[];
+    const body = entries as ValidationEntry[];
     const entry = body.find(
       (e) => e.message === "Desktop telemetry computeTargetId mismatch"
     );
@@ -1760,8 +1747,7 @@ describe("handleTelemetryEvent — validation failures emit category attribute",
 
 describe("handleTelemetryEvent — onboarding popup telemetry (AC-003)", () => {
   beforeEach(() => {
-    stubLogExporterEnv();
-    vi.stubEnv("DD_SERVICE", "api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "api");
     vi.stubEnv("RELEASE_VERSION", "1.0.0");
     vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
   });
@@ -1803,9 +1789,8 @@ describe("handleTelemetryEvent — onboarding popup telemetry (AC-003)", () => {
   )("flushes $label with origin: Desktop and category preserved", async ({
     category,
   }) => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const { freshLog, freshHandler } =
-      await importFreshHandlerWithFetch(fetchMock);
+    const { entries, freshLog, freshHandler } =
+      await importFreshHandlerWithSink();
 
     const result = freshHandler(
       {
@@ -1817,11 +1802,8 @@ describe("handleTelemetryEvent — onboarding popup telemetry (AC-003)", () => {
     expect(result.ok).toBe(true);
 
     await freshLog.flush();
-    expect(fetchMock).toHaveBeenCalledOnce();
 
-    const body = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Array<{
+    const body = entries as Array<{
       category?: string;
       origin?: string;
     }>;

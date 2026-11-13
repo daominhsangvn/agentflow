@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isSensitiveKey, redactLogValue, redactSensitiveText } from "../redact";
-import { importLogWithFetch, parseFlushedBody } from "./test-helpers";
+import { importLogWithSink } from "./test-helpers";
 
 // ---------------------------------------------------------------------------
 // redact.ts — centralized redaction of secrets/PII in structured log metadata
@@ -149,26 +149,19 @@ describe("redactLogValue", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Integration — redaction is applied to the Datadog HTTP intake batch payload
+// Integration — redaction is applied to the exported log record
 // ---------------------------------------------------------------------------
 
-describe("log meta redaction reaches the Datadog intake body", () => {
+describe("log meta redaction reaches the exported log record", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
-  it("redacts sensitive meta keys and secret-shaped values before shipping", async () => {
-    vi.stubEnv("DD_API_KEY", "test-key");
-    vi.stubEnv("DD_ENV", "test");
-    // Set version/git_sha so the module-load fallback warnings don't get
-    // buffered ahead of our entry (they would otherwise occupy body[0]/[1]).
-    vi.stubEnv("RELEASE_VERSION", "1.2.3");
-    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "abc123def456");
-
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const log = await importLogWithFetch(fetchMock);
+  it("redacts sensitive meta keys and secret-shaped values before export", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { log, records } = await importLogWithSink();
+    records.length = 0;
 
     log.info("user authenticated", {
       apiKey: "sk_live_supersecretvalue",
@@ -176,25 +169,19 @@ describe("log meta redaction reaches the Datadog intake body", () => {
       note: "logged in via gho_0123456789abcdef0123456789abcdef token",
       inputTokens: 42,
     });
-    await log.flush();
 
-    const raw = fetchMock.mock.calls[0][1].body as string;
+    expect(records).toHaveLength(1);
+    const [record] = records;
+    const raw = JSON.stringify(record);
     expect(raw).not.toContain("sk_live_supersecretvalue");
     expect(raw).not.toContain("jane.doe@example.com");
     expect(raw).not.toContain("gho_0123456789abcdef0123456789abcdef");
 
-    const body = parseFlushedBody<{
-      apiKey: string;
-      userEmail: string;
-      note: string;
-      inputTokens: number;
-      message: string;
-    }>(fetchMock);
-    expect(body[0].apiKey).toBe(REDACTED);
-    expect(body[0].userEmail).toBe(REDACTED);
-    expect(body[0].note).toContain(REDACTED);
+    expect(record.attributes.apiKey).toBe(REDACTED);
+    expect(record.attributes.userEmail).toBe(REDACTED);
+    expect(String(record.attributes.note)).toContain(REDACTED);
     // Non-sensitive metric fields are preserved.
-    expect(body[0].inputTokens).toBe(42);
-    expect(body[0].message).toBe("user authenticated");
+    expect(record.attributes.inputTokens).toBe(42);
+    expect(record.message).toBe("user authenticated");
   });
 });

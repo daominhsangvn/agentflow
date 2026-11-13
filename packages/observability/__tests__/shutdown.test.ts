@@ -3,10 +3,8 @@ import { flushLogsWithDeadline } from "../shutdown";
 
 const { flush } = vi.hoisted(() => ({ flush: vi.fn() }));
 
-vi.mock("../log.ts", () => ({
-  log: {
-    flush,
-  },
+vi.mock("../tracing/hooks", () => ({
+  flushTelemetry: flush,
 }));
 
 describe("flushLogsWithDeadline", () => {
@@ -19,7 +17,7 @@ describe("flushLogsWithDeadline", () => {
     vi.restoreAllMocks();
   });
 
-  it("delegates to log.flush", async () => {
+  it("delegates to flushTelemetry", async () => {
     flush.mockResolvedValueOnce(undefined);
 
     await flushLogsWithDeadline();
@@ -27,7 +25,7 @@ describe("flushLogsWithDeadline", () => {
     expect(flush).toHaveBeenCalledTimes(1);
   });
 
-  it("returns when log.flush rejects", async () => {
+  it("returns when flushTelemetry rejects", async () => {
     flush.mockRejectedValueOnce(new Error("flush failed"));
 
     await expect(flushLogsWithDeadline()).resolves.toBeUndefined();

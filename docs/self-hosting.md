@@ -156,9 +156,55 @@ live Active Runs view of Sessions.
 | Vercel preview schemas (`/preview-schemas/ensure`) | Removed |
 | `/plugin install` of claude-plugins | `agent-plugins/` + `--plugin-dir` |
 | Clerk (auth, organizations, webhooks) | Better Auth in `apps/api` + `@repo/auth` facade |
+| Datadog (logs, APM) | OpenTelemetry → self-hosted SigNoz (profile `observability`) |
 
 Still to port: Microsoft Entra ID sign-in, Liveblocks → Hocuspocus, Linear →
 disabled.
+
+## Observability (SigNoz, optional)
+
+The `observability` compose profile runs a self-hosted
+[SigNoz](https://signoz.io): ClickHouse, ZooKeeper, the schema migrators
+(`signoz-schema-migrator-sync`/`-async`), `signoz` (UI and query service) and
+`signoz-otel-collector`. Config files are in `deploy/observability/`. Nothing
+is enabled by default and every published port is bound to `127.0.0.1`.
+
+```bash
+# development (UI http://localhost:8080, OTLP http on :4318)
+docker compose --profile observability up -d
+# production (or add observability to COMPOSE_PROFILES in deploy/compose/.env)
+docker compose -f deploy/compose/docker-compose.prod.yml --profile observability up -d
+```
+
+On a server, reach the UI through an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 host`)
+or your HTTPS reverse proxy. Create the first SigNoz admin account on first visit.
+
+Apps export with the standard OpenTelemetry variables:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` – on/off switch. Unset means no telemetry export
+  (e.g. `http://localhost:4318`, or `http://signoz-otel-collector:4318` in compose).
+- `OTEL_SERVICE_NAME` (`af-api`, `af-mcp`), `OTEL_RESOURCE_ATTRIBUTES`
+  (`deployment.environment.name=production`).
+- `OTEL_TRACES_SAMPLER_ARG` – head sampling ratio, default `1`.
+- `OTEL_SDK_DISABLED=true` – turns telemetry off even when an endpoint is set.
+- `LOG_FORMAT=json|pretty` – stdout format. Default is JSON in production, readable otherwise.
+
+Telemetry is fail-open: a missing or unreachable collector never breaks a request
+or stops an app from starting.
+
+Redaction has two layers: the in-process `packages/observability/redact.ts`
+(sensitive keys, secret-shaped and email values) and the collector's `redaction`
+processor, which repeats the key and value patterns.
+
+Tail sampling in the collector keeps every trace with an error status, an HTTP
+5xx or a duration over 2 s, and a baseline share of the rest
+(`TAIL_SAMPLING_BASELINE_PERCENT`, default 100 in dev, 25 in production).
+Span metrics are computed before sampling, so RED metrics count every span.
+
+Retention is not set by an init job. In the SigNoz UI open Settings > General and
+set traces and logs to 15 days and metrics to 30 days.
+
+Datadog is no longer supported; the former `DD_*` variables are ignored, except `DD_API_KEY`/`DD_SITE`, which the legacy merge-queue series cron still reads.
 
 ## Known limitations
 

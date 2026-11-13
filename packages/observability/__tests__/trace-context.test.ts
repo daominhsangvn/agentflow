@@ -73,8 +73,8 @@ describe("toLogCorrelationFields", () => {
         spanId: SAMPLE_SPAN_ID,
       })
     ).toEqual({
-      "dd.trace_id": SAMPLE_TRACE_ID,
-      "dd.span_id": SAMPLE_SPAN_ID,
+      trace_id: SAMPLE_TRACE_ID,
+      span_id: SAMPLE_SPAN_ID,
     });
   });
 });

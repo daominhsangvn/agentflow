@@ -25,8 +25,11 @@ vi.mock("@repo/observability/log", () => ({
     info: vi.fn(),
     warn,
     error: vi.fn(),
-    flush,
   },
+}));
+
+vi.mock("@repo/observability/tracing/hooks", () => ({
+  flushTelemetry: flush,
 }));
 
 vi.mock("@repo/redis", () => ({

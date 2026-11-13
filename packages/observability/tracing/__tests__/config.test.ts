@@ -1,173 +1,101 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deleteEnvForTest } from "../../__tests__/test-helpers";
 import {
-  resolveSampleRate,
-  resolveTracingConfig,
-  TracingDisabledReason,
+  resolveSampleRatio,
+  resolveTelemetryConfig,
+  TelemetryDisabledReason,
 } from "../config";
 
-// ---------------------------------------------------------------------------
-// tracing/config.ts — enable/disable precedence and sampling bounds (ISS-4659).
-//
-// The precedence tests each clear the higher-priority inputs they are not
-// exercising, so an inherited local or CI value cannot satisfy an earlier
-// branch and make the assertion pass for the wrong reason.
-// ---------------------------------------------------------------------------
-
-const ENDPOINT = "https://otlp.example.test/v1/traces";
+const ENDPOINT = "http://localhost:4318";
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
 /** Clear every input this module reads, so each test starts from a known floor. */
-function clearTracingEnv(): void {
+function clearOtelEnv(): void {
   deleteEnvForTest(
-    "DD_TRACING_DISABLED",
-    "DD_TRACING_ENABLED",
-    "DD_API_KEY",
-    "DD_OTLP_TRACES_ENDPOINT",
-    "DD_TRACE_SAMPLE_RATE",
-    "VERCEL"
+    "OTEL_SDK_DISABLED",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_SERVICE_NAME",
+    "OTEL_TRACES_SAMPLER",
+    "OTEL_TRACES_SAMPLER_ARG"
   );
 }
 
-/** The fully-configured, deployed happy path. */
-function stubEnabledEnv(): void {
-  clearTracingEnv();
-  vi.stubEnv("VERCEL", "1");
-  vi.stubEnv("DD_API_KEY", "dd-test-key");
-  vi.stubEnv("DD_OTLP_TRACES_ENDPOINT", ENDPOINT);
-}
-
-describe("resolveTracingConfig — disabled precedence", () => {
-  it("is disabled outside a deployed runtime even when fully configured", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_API_KEY", "dd-test-key");
-    vi.stubEnv("DD_OTLP_TRACES_ENDPOINT", ENDPOINT);
-
-    const config = resolveTracingConfig();
-
-    // This is the guard that stops CI test workers — which set DD_API_KEY for
-    // dd-trace Test Optimization — from exporting spans.
-    expect(config).toEqual({
+describe("resolveTelemetryConfig", () => {
+  it("is disabled when OTEL_SDK_DISABLED is truthy, even if configured", () => {
+    clearOtelEnv();
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ENDPOINT);
+    vi.stubEnv("OTEL_SDK_DISABLED", "TRUE");
+    expect(resolveTelemetryConfig()).toEqual({
       enabled: false,
-      reason: TracingDisabledReason.NotDeployed,
+      reason: TelemetryDisabledReason.ExplicitlyDisabled,
     });
   });
 
-  it("honours the kill switch ahead of every other signal", () => {
-    stubEnabledEnv();
-    vi.stubEnv("DD_TRACING_DISABLED", "1");
-
-    expect(resolveTracingConfig()).toEqual({
+  it("is disabled without an endpoint", () => {
+    clearOtelEnv();
+    expect(resolveTelemetryConfig()).toEqual({
       enabled: false,
-      reason: TracingDisabledReason.ExplicitlyDisabled,
+      reason: TelemetryDisabledReason.MissingEndpoint,
     });
   });
 
-  it("reports a missing API key rather than exporting unauthenticated", () => {
-    clearTracingEnv();
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("DD_OTLP_TRACES_ENDPOINT", ENDPOINT);
-
-    expect(resolveTracingConfig()).toEqual({
+  it("treats an empty-string endpoint as missing", () => {
+    clearOtelEnv();
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "");
+    expect(resolveTelemetryConfig()).toEqual({
       enabled: false,
-      reason: TracingDisabledReason.MissingApiKey,
+      reason: TelemetryDisabledReason.MissingEndpoint,
     });
   });
 
-  it("stays off when no endpoint is configured instead of guessing one", () => {
-    clearTracingEnv();
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("DD_API_KEY", "dd-test-key");
-
-    // A guessed endpoint would not fail loudly — it would black-hole spans
-    // while the service looked instrumented.
-    expect(resolveTracingConfig()).toEqual({
-      enabled: false,
-      reason: TracingDisabledReason.MissingEndpoint,
+  it("returns the enabled shape", () => {
+    clearOtelEnv();
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ENDPOINT);
+    vi.stubEnv("OTEL_SERVICE_NAME", "af-api");
+    vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "0.5");
+    expect(resolveTelemetryConfig()).toEqual({
+      enabled: true,
+      endpoint: ENDPOINT,
+      service: "af-api",
+      sampleRatio: 0.5,
     });
+  });
+
+  it("falls back to af-unknown for the service name", () => {
+    clearOtelEnv();
+    vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ENDPOINT);
+    const config = resolveTelemetryConfig();
+    expect(config.enabled && config.service).toBe("af-unknown");
   });
 });
 
-describe("resolveTracingConfig — enabled", () => {
-  it("resolves the full config on a deployed runtime", () => {
-    stubEnabledEnv();
-    vi.stubEnv("DD_SERVICE", "af-api");
-    vi.stubEnv("DD_ENV", "prod");
-
-    const config = resolveTracingConfig();
-
-    expect(config.enabled).toBe(true);
-    if (!config.enabled) {
-      throw new Error("expected tracing to be enabled");
-    }
-    expect(config.endpoint).toBe(ENDPOINT);
-    expect(config.service).toBe("af-api");
-    expect(config.env).toBe("prod");
+describe("resolveSampleRatio", () => {
+  it("defaults to 1", () => {
+    clearOtelEnv();
+    expect(resolveSampleRatio()).toBe(1);
   });
 
-  it("opts a non-Vercel runtime in explicitly", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACING_ENABLED", "true");
-    vi.stubEnv("DD_API_KEY", "dd-test-key");
-    vi.stubEnv("DD_OTLP_TRACES_ENDPOINT", ENDPOINT);
-
-    expect(resolveTracingConfig().enabled).toBe(true);
-  });
-});
-
-describe("resolveSampleRate", () => {
-  it("defaults conservatively when unset", () => {
-    clearTracingEnv();
-
-    expect(resolveSampleRate()).toBe(0.1);
+  it("falls back to 1 for a malformed value", () => {
+    clearOtelEnv();
+    vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "1oops");
+    expect(resolveSampleRatio()).toBe(1);
   });
 
-  it("honours a valid configured rate", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACE_SAMPLE_RATE", "0.25");
-
-    expect(resolveSampleRate()).toBe(0.25);
+  it("clamps above 1 and below 0", () => {
+    clearOtelEnv();
+    vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "5");
+    expect(resolveSampleRatio()).toBe(1);
+    vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "-2");
+    expect(resolveSampleRatio()).toBe(0);
   });
 
-  it("clamps an above-range rate to 1 rather than over-billing", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACE_SAMPLE_RATE", "17");
-
-    expect(resolveSampleRate()).toBe(1);
-  });
-
-  it("clamps a negative rate to 0", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACE_SAMPLE_RATE", "-3");
-
-    expect(resolveSampleRate()).toBe(0);
-  });
-
-  it("falls back to the default on an unparseable rate", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACE_SAMPLE_RATE", "aggressive");
-
-    // Not 0 (blind) and not 1 (unbounded bill) — a typo should be survivable.
-    expect(resolveSampleRate()).toBe(0.1);
-  });
-
-  it("rejects a numeric prefix instead of reading it as a valid rate", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACE_SAMPLE_RATE", "1oops");
-
-    // `parseFloat("1oops")` is 1 — a typo would silently switch the service to
-    // 100% sampling, the opposite of the malformed-value fallback and an
-    // expensive way to find out. The whole string has to parse.
-    expect(resolveSampleRate()).toBe(0.1);
-  });
-
-  it("rejects trailing garbage after a fractional rate", () => {
-    clearTracingEnv();
-    vi.stubEnv("DD_TRACE_SAMPLE_RATE", "0.5%");
-
-    expect(resolveSampleRate()).toBe(0.1);
+  it("returns 0 for always_off", () => {
+    clearOtelEnv();
+    vi.stubEnv("OTEL_TRACES_SAMPLER", "always_off");
+    vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "1");
+    expect(resolveSampleRatio()).toBe(0);
   });
 });

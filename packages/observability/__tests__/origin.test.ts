@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Origin } from "../telemetry/origin";
 
 // ---------------------------------------------------------------------------
-// ORIGIN — module-load-time resolution from DD_SERVICE
+// ORIGIN — module-load-time resolution from OTEL_SERVICE_NAME
 // ---------------------------------------------------------------------------
 //
 // Origin is a pure const object safe to import statically; ORIGIN requires
@@ -15,40 +15,40 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("ORIGIN — known DD_SERVICE values", () => {
-  it("resolves to Origin.Desktop when DD_SERVICE=desktop", async () => {
+describe("ORIGIN — known OTEL_SERVICE_NAME values", () => {
+  it("resolves to Origin.Desktop when OTEL_SERVICE_NAME=desktop", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "desktop");
+    vi.stubEnv("OTEL_SERVICE_NAME", "desktop");
     const mod = await import("../telemetry/origin");
     expect(mod.ORIGIN).toBe(Origin.Desktop);
   });
 
-  it("resolves to Origin.Api when DD_SERVICE=api", async () => {
+  it("resolves to Origin.Api when OTEL_SERVICE_NAME=api", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "api");
     const mod = await import("../telemetry/origin");
     expect(mod.ORIGIN).toBe(Origin.Api);
   });
 
-  it("resolves to Origin.Relay when DD_SERVICE=relay", async () => {
+  it("resolves to Origin.Relay when OTEL_SERVICE_NAME=relay", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "relay");
+    vi.stubEnv("OTEL_SERVICE_NAME", "relay");
     const mod = await import("../telemetry/origin");
     expect(mod.ORIGIN).toBe(Origin.Relay);
   });
 
-  it("resolves to Origin.Mcp when DD_SERVICE=mcp", async () => {
+  it("resolves to Origin.Mcp when OTEL_SERVICE_NAME=mcp", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "mcp");
+    vi.stubEnv("OTEL_SERVICE_NAME", "mcp");
     const mod = await import("../telemetry/origin");
     expect(mod.ORIGIN).toBe(Origin.Mcp);
   });
 });
 
 describe("ORIGIN — fallback to Unknown with console.warn", () => {
-  it("resolves to Origin.Unknown and warns when DD_SERVICE is unset", async () => {
+  it("resolves to Origin.Unknown and warns when OTEL_SERVICE_NAME is unset", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", undefined as unknown as string);
+    vi.stubEnv("OTEL_SERVICE_NAME", undefined as unknown as string);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await import("../telemetry/origin");
 
@@ -59,9 +59,9 @@ describe("ORIGIN — fallback to Unknown with console.warn", () => {
     );
   });
 
-  it("resolves to Origin.Unknown and warns when DD_SERVICE is an off-whitelist value", async () => {
+  it("resolves to Origin.Unknown and warns when OTEL_SERVICE_NAME is an off-whitelist value", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "bogus");
+    vi.stubEnv("OTEL_SERVICE_NAME", "bogus");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await import("../telemetry/origin");
 
@@ -73,7 +73,7 @@ describe("ORIGIN — fallback to Unknown with console.warn", () => {
   });
 });
 
-describe("ORIGIN — cl-* prefixed DD_SERVICE happy paths", () => {
+describe("ORIGIN — cl-* prefixed OTEL_SERVICE_NAME happy paths", () => {
   it.each([
     ["af-api", Origin.Api],
     ["af-relay", Origin.Relay],
@@ -84,7 +84,7 @@ describe("ORIGIN — cl-* prefixed DD_SERVICE happy paths", () => {
     Origin,
   ][])("resolves %s to %s without warning", async (ddServiceValue, expected) => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", ddServiceValue);
+    vi.stubEnv("OTEL_SERVICE_NAME", ddServiceValue);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await import("../telemetry/origin");
 
@@ -93,10 +93,10 @@ describe("ORIGIN — cl-* prefixed DD_SERVICE happy paths", () => {
   });
 });
 
-describe("ORIGIN — cl-* prefixed DD_SERVICE fallback/edge cases", () => {
+describe("ORIGIN — cl-* prefixed OTEL_SERVICE_NAME fallback/edge cases", () => {
   it("resolves af-bogus to Origin.Unknown and warns", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "af-bogus");
+    vi.stubEnv("OTEL_SERVICE_NAME", "af-bogus");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await import("../telemetry/origin");
 
@@ -109,7 +109,7 @@ describe("ORIGIN — cl-* prefixed DD_SERVICE fallback/edge cases", () => {
 
   it("resolves cl- (empty suffix) to Origin.Unknown and warns", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "af-");
+    vi.stubEnv("OTEL_SERVICE_NAME", "af-");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await import("../telemetry/origin");
 
@@ -122,7 +122,7 @@ describe("ORIGIN — cl-* prefixed DD_SERVICE fallback/edge cases", () => {
 
   it("resolves af-cl-api to Origin.Unknown and warns", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "af-cl-api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "af-cl-api");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await import("../telemetry/origin");
 
@@ -138,7 +138,7 @@ describe("ORIGIN — cl-* prefixed DD_SERVICE fallback/edge cases", () => {
   // out of KNOWN_ORIGINS (origin.ts:21), so it correctly falls through.
   it("resolves af-unknown to Origin.Unknown and warns", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "af-unknown");
+    vi.stubEnv("OTEL_SERVICE_NAME", "af-unknown");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await import("../telemetry/origin");
 
@@ -151,14 +151,14 @@ describe("ORIGIN — cl-* prefixed DD_SERVICE fallback/edge cases", () => {
 });
 
 describe("ORIGIN — immutability after module load", () => {
-  it("does not change when process.env.DD_SERVICE is mutated after import", async () => {
+  it("does not change when process.env.OTEL_SERVICE_NAME is mutated after import", async () => {
     vi.resetModules();
-    vi.stubEnv("DD_SERVICE", "api");
+    vi.stubEnv("OTEL_SERVICE_NAME", "api");
     const mod = await import("../telemetry/origin");
     const capturedOrigin = mod.ORIGIN;
 
     // Mutate the env after the module has already been evaluated
-    vi.stubEnv("DD_SERVICE", "desktop");
+    vi.stubEnv("OTEL_SERVICE_NAME", "desktop");
 
     // ORIGIN is a module-level const — mutation after load must have no effect
     expect(mod.ORIGIN).toBe(capturedOrigin);
@@ -168,17 +168,13 @@ describe("ORIGIN — immutability after module load", () => {
 
 /**
  * The platform drain JSON-parses this line into attributes, so the fields are
- * asserted on the parsed object rather than by scanning the raw string:
- * `status` is Datadog's reserved severity attribute and `level` is not, and
- * only a parse proves the line carries both at the same severity (ISS-6341).
- *
+ * asserted on the parsed object rather than by scanning the raw string.
  * Severity is a literal here because origin.ts cannot import `LogLevel` from
  * ../log — that import cycle is why it writes to console.warn at all.
  */
 const ORIGIN_FALLBACK_LINE = {
   event: "telemetry.origin_fallback",
   level: "warn",
-  status: "warn",
 } as const;
 
 function parseWarnLine(line: unknown): Record<string, unknown> {

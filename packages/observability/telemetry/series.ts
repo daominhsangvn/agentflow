@@ -19,7 +19,6 @@ import {
   DEFAULT_DD_SITE,
   isAllowedDatadogSite,
 } from "@repo/api/src/types/datadog-sites";
-import { keys } from "../keys";
 import { log } from "../log";
 
 /** Datadog v2 `/api/v2/series` metric types. */
@@ -84,7 +83,8 @@ export async function submitSeries(
   options: { maxRetries?: number } = {}
 ): Promise<SeriesSubmitStatus> {
   const maxRetries = Math.max(0, options.maxRetries ?? SERIES_MAX_RETRIES);
-  const { DD_API_KEY, DD_SITE } = keys();
+  const DD_API_KEY = process.env.DD_API_KEY || undefined;
+  const DD_SITE = process.env.DD_SITE || undefined;
   if (!DD_API_KEY) {
     log.info(`${logTag} DD_API_KEY not configured — not submitting series`);
     return SeriesSubmitStatus.NotConfigured;

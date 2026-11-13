@@ -28,8 +28,8 @@ const mocks = vi.hoisted(() => ({
     }
   }),
   after: vi.fn(),
-  flushSpans: vi.fn(() => Promise.resolve()),
-  isTracingActive: vi.fn(() => false),
+  flushTelemetry: vi.fn(() => Promise.resolve()),
+  isTelemetryActive: vi.fn(() => false),
   logFlush: vi.fn(() => Promise.resolve()),
 }));
 
@@ -41,8 +41,8 @@ vi.mock("next/server", () => ({
 }));
 
 vi.mock("@repo/observability/tracing/hooks", () => ({
-  flushSpans: mocks.flushSpans,
-  isTracingActive: mocks.isTracingActive,
+  flushTelemetry: mocks.flushTelemetry,
+  isTelemetryActive: mocks.isTelemetryActive,
 }));
 
 vi.mock("@repo/observability/log", () => ({
@@ -57,7 +57,7 @@ vi.mock("@repo/observability/log", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.isTracingActive.mockReturnValue(false);
+  mocks.isTelemetryActive.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -74,13 +74,13 @@ describe("scheduleLogFlush with tracing inactive", () => {
     // the two suites named above.
     expect(mocks.waitUntil).toHaveBeenCalledTimes(1);
     expect(mocks.after).not.toHaveBeenCalled();
-    expect(mocks.flushSpans).not.toHaveBeenCalled();
+    expect(mocks.flushTelemetry).not.toHaveBeenCalled();
   });
 });
 
 describe("scheduleLogFlush with tracing active", () => {
   it("defers the span flush through after() so the route span has closed", async () => {
-    mocks.isTracingActive.mockReturnValue(true);
+    mocks.isTelemetryActive.mockReturnValue(true);
     const { scheduleLogFlush } = await import("../route-utils");
 
     scheduleLogFlush();
@@ -88,16 +88,16 @@ describe("scheduleLogFlush with tracing active", () => {
     expect(mocks.after).toHaveBeenCalledTimes(1);
     // Not called yet — after() defers it past the response. Calling it inline
     // would flush while Next's route span is still open.
-    expect(mocks.flushSpans).not.toHaveBeenCalled();
+    expect(mocks.flushTelemetry).not.toHaveBeenCalled();
 
     const deferred = mocks.after.mock.calls[0][0] as () => unknown;
     deferred();
 
-    expect(mocks.flushSpans).toHaveBeenCalledTimes(1);
+    expect(mocks.flushTelemetry).toHaveBeenCalledTimes(1);
   });
 
   it("waits for scheduleLogFlushAfter's deferred work before flushing spans", async () => {
-    mocks.isTracingActive.mockReturnValue(true);
+    mocks.isTelemetryActive.mockReturnValue(true);
     let settle: () => void = () => undefined;
     const pending = new Promise<void>((resolve) => {
       settle = resolve;
@@ -111,16 +111,16 @@ describe("scheduleLogFlush with tracing active", () => {
     // Callers use this form because work is still running past the response —
     // and that work emits spans. Flushing before it finishes would export the
     // buffer as it stands and let those spans freeze with the function.
-    expect(mocks.flushSpans).not.toHaveBeenCalled();
+    expect(mocks.flushTelemetry).not.toHaveBeenCalled();
 
     settle();
     await flushed;
 
-    expect(mocks.flushSpans).toHaveBeenCalledTimes(1);
+    expect(mocks.flushTelemetry).toHaveBeenCalledTimes(1);
   });
 
   it("still flushes spans when the deferred work rejects", async () => {
-    mocks.isTracingActive.mockReturnValue(true);
+    mocks.isTelemetryActive.mockReturnValue(true);
     const pending = Promise.reject(new Error("deferred work failed"));
     // Attach a handler in the same tick. The `await import(...)` below turns
     // the microtask queue over, and Node flags a rejected promise with no
@@ -132,11 +132,11 @@ describe("scheduleLogFlush with tracing active", () => {
     const deferred = mocks.after.mock.calls[0][0] as () => Promise<unknown>;
 
     await expect(deferred()).resolves.toBeUndefined();
-    expect(mocks.flushSpans).toHaveBeenCalledTimes(1);
+    expect(mocks.flushTelemetry).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to waitUntil when there is no request scope for after()", async () => {
-    mocks.isTracingActive.mockReturnValue(true);
+    mocks.isTelemetryActive.mockReturnValue(true);
     mocks.after.mockImplementation(() => {
       throw new Error("after() called outside a request scope");
     });
@@ -147,7 +147,7 @@ describe("scheduleLogFlush with tracing active", () => {
     // Log flush + the fallback span flush. Without the fallback, the
     // container/custom-server path would never flush spans at all.
     expect(mocks.waitUntil).toHaveBeenCalledTimes(2);
-    expect(mocks.flushSpans).toHaveBeenCalledTimes(1);
+    expect(mocks.flushTelemetry).toHaveBeenCalledTimes(1);
   });
 });
 

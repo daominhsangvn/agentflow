@@ -2,7 +2,7 @@ import { SpanKind, trace } from "@opentelemetry/api";
 import type { ReadableSpan, Span } from "@opentelemetry/sdk-trace-node";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deleteEnvForTest } from "../../__tests__/test-helpers";
-import { initTracing, resetTracingForTest } from "../provider";
+import { initTelemetry, resetTelemetryForTest } from "../provider";
 import { RouteResourceSpanProcessor } from "../route-resource-processor";
 
 // ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ const BARE_METHOD_SPAN_NAME = "GET";
 const RSC_BRANCHES_SPAN_NAME = "RSC GET /branches/route";
 
 afterEach(async () => {
-  await resetTracingForTest();
+  await resetTelemetryForTest();
   vi.unstubAllEnvs();
 });
 
@@ -66,20 +66,16 @@ function fakeSpan(
 
 function enableTracingEnv(): void {
   deleteEnvForTest(
-    "DD_TRACING_DISABLED",
-    "DD_TRACING_ENABLED",
-    "DD_API_KEY",
-    "DD_OTLP_TRACES_ENDPOINT",
-    "DD_TRACE_SAMPLE_RATE",
-    "VERCEL"
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_SDK_DISABLED",
+    "OTEL_TRACES_SAMPLER",
+    "OTEL_TRACES_SAMPLER_ARG"
   );
-  vi.stubEnv("DD_TRACING_ENABLED", "1");
-  vi.stubEnv("DD_API_KEY", "dd-test-key");
-  vi.stubEnv("DD_OTLP_TRACES_ENDPOINT", "https://otlp.example.test/v1/traces");
-  // Pinned: the root sampler is trace-id-ratio based, so at the default rate
+  vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:1");
+  // Pinned: the root sampler is trace-id-ratio based, so at a fractional rate
   // this span would be recorded or dropped depending on the id it happened to
-  // mint — a coin flip, not a test.
-  vi.stubEnv("DD_TRACE_SAMPLE_RATE", "1.0");
+  // mint, a coin flip, not a test.
+  vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "1.0");
 }
 
 describe("RouteResourceSpanProcessor", () => {
@@ -214,10 +210,10 @@ describe("RouteResourceSpanProcessor", () => {
   });
 });
 
-describe("initTracing route-resource wiring", () => {
+describe("initTelemetry route-resource wiring", () => {
   it("stamps the resource name on a SERVER span produced by the live tracer", () => {
     enableTracingEnv();
-    expect(initTracing().enabled).toBe(true);
+    expect(initTelemetry().enabled).toBe(true);
 
     // Driven through the globally registered provider and a real `end()`, so
     // this fails if the processor is dropped from `createTracerProvider`'s
@@ -237,7 +233,7 @@ describe("initTracing route-resource wiring", () => {
 
   it("leaves a CLIENT fetch span produced by the live tracer untouched", () => {
     enableTracingEnv();
-    expect(initTracing().enabled).toBe(true);
+    expect(initTelemetry().enabled).toBe(true);
 
     const span = trace.getTracer("test").startSpan("fetch GET", {
       kind: SpanKind.CLIENT,

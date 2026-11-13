@@ -6,7 +6,10 @@ import { buildRequestCompletedContractAttributes } from "@repo/observability/tel
 // by ~40 routes, and importing the provider would make the OpenTelemetry Node
 // SDK statically reachable from all of them — breaking the first route that
 // ever opts into the edge runtime.
-import { flushSpans, isTracingActive } from "@repo/observability/tracing/hooks";
+import {
+  flushTelemetry,
+  isTelemetryActive,
+} from "@repo/observability/tracing/hooks";
 import { after, NextResponse } from "next/server";
 import type { z } from "zod";
 import { waitUntil } from "@/lib/wait-until";
@@ -365,7 +368,7 @@ export function scheduleLogFlushAfter(promise: Promise<unknown>): void {
  * 1. **`after()`, not `waitUntil()`.** Next closes the route's own span *after*
  *    the handler promise resolves, but `logRequestCompleted` runs inside the
  *    auth wrapper's `finally` — i.e. while that span is still open. A
- *    `waitUntil(flushSpans())` would start the export immediately and miss the
+ *    `waitUntil(flushTelemetry())` would start the export immediately and miss the
  *    root span. `after()` runs past the response, once the span has ended.
  * 2. **Attached to every log-flush site, not just the request-completed one.**
  *    Routes that bypass the auth wrappers — `/health`, the GitHub webhook, the
@@ -380,16 +383,16 @@ export function scheduleLogFlushAfter(promise: Promise<unknown>): void {
  */
 function scheduleSpanFlush(pending?: Promise<unknown>): void {
   // Schedule nothing when no tracer is installed — every local run, every CI
-  // worker, and any deploy with the kill switch set. `flushSpans()` would be a
+  // worker, and any deploy with the kill switch set. `flushTelemetry()` would be a
   // no-op anyway, but scheduling it still consumes a `waitUntil` slot, and
   // route tests legitimately assert on how much deferred work a request
   // schedules (with-api-key-auth and branch-artifact-flows both pin the count).
-  if (!isTracingActive()) {
+  if (!isTelemetryActive()) {
     return;
   }
   const flush = pending
-    ? () => pending.catch(() => undefined).then(() => flushSpans())
-    : () => flushSpans();
+    ? () => pending.catch(() => undefined).then(() => flushTelemetry())
+    : () => flushTelemetry();
   try {
     after(flush);
   } catch {
@@ -420,7 +423,7 @@ function scheduleSpanFlush(pending?: Promise<unknown>): void {
  * the metrics and monitors group on always win a collision. `duration_ms` is
  * the only overlap and both sides carry the same value.
  *
- * The `dd.trace_id`/`dd.span_id` correlation fields are NOT set here: the
+ * The `trace_id`/`span_id` correlation fields are NOT set here: the
  * logger stamps them onto every entry from the active span (ISS-4659).
  *
  * Call this from a `finally` block in the auth wrappers so it fires whether

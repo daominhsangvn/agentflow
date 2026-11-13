@@ -1,24 +1,31 @@
 // ---------------------------------------------------------------------------
-// OpenTelemetry tracer bootstrap for server runtimes (ISS-4659).
+// OpenTelemetry bootstrap for server runtimes (traces, logs, metrics).
 //
 // This is the ONLY module in @repo/observability that imports the OpenTelemetry
-// SDK. `log.ts` reaches the active trace through `../trace-context` instead,
-// because the logger is bundled into browsers (see the header of that file).
-// Keep it that way: a static OTel import anywhere in the logger's graph ships
-// the Node SDK to every end user.
+// SDK. `log.ts` reaches the active trace through `../trace-context` and emits
+// records through `../log-sink` instead, because the logger is bundled into
+// browsers (see the header of those files). Keep it that way: a static OTel
+// import anywhere in the logger's graph ships the Node SDK to every end user.
 //
-// Everything here is fail-open. Tracing is a diagnostic aid; it must never add
-// latency to, or fail, a request. Callers get a boolean, never an exception.
+// Everything here is fail-open. Telemetry is a diagnostic aid; it must never
+// add latency to, or fail, a request. Callers get a config result, never an
+// exception.
 // ---------------------------------------------------------------------------
 
-import { context, propagation, trace } from "@opentelemetry/api";
+import { context, metrics, trace } from "@opentelemetry/api";
+import { logs, SeverityNumber } from "@opentelemetry/api-logs";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
-import { registerInstrumentations } from "@opentelemetry/instrumentation";
+import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 import { PgInstrumentation } from "@opentelemetry/instrumentation-pg";
+import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici";
 import { resourceFromAttributes } from "@opentelemetry/resources";
+import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
+import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
+import { NodeSDK } from "@opentelemetry/sdk-node";
 import {
   BatchSpanProcessor,
-  NodeTracerProvider,
   ParentBasedSampler,
   TraceIdRatioBasedSampler,
 } from "@opentelemetry/sdk-trace-node";
@@ -26,178 +33,255 @@ import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
 } from "@opentelemetry/semantic-conventions";
-import { resolveServerVersion } from "../telemetry/context";
+import { PrismaInstrumentation } from "@prisma/instrumentation";
+import type { LogLevel } from "../log";
+import {
+  type LogRecordInput,
+  resetLogRecordSink,
+  setLogRecordSink,
+} from "../log-sink";
+import { waitForDeadline } from "../shutdown";
+import { resolveGitSha, resolveServerVersion } from "../telemetry/context";
 import {
   resetTraceContextProvider,
   setTraceContextProvider,
 } from "../trace-context";
 import {
-  resolveTracingConfig,
-  type TracingConfig,
-  TracingDisabledReason,
+  resolveTelemetryConfig,
+  type TelemetryConfig,
+  TelemetryDisabledReason,
 } from "./config";
-import { resetSpanFlushHook, setSpanFlushHook } from "./hooks";
+import { resetTelemetryFlushHook, setTelemetryFlushHook } from "./hooks";
 import { RemoteParentEntropySampler } from "./remote-parent-sampler";
 import { RouteResourceSpanProcessor } from "./route-resource-processor";
-
-/** Datadog's OTLP intake authenticates with this header, not a bearer token. */
-const DATADOG_API_KEY_HEADER = "dd-api-key";
+import { httpUrlAttributes, undiciUrlAttributes } from "./url-redaction";
 
 /**
  * Resource attribute recording the head-sampling rate the process ran with, so
  * ingest volume is auditable from the spans themselves rather than from
  * whatever the deploy config happened to be at the time.
  */
-const ATTR_TRACE_SAMPLE_RATE = "cl.trace.sample_rate";
+const ATTR_TRACE_SAMPLE_RATE = "af.trace.sample_ratio";
+const ATTR_VCS_REF_HEAD_REVISION = "vcs.ref.head.revision";
+const METRIC_EXPORT_INTERVAL_MS = 15_000;
+const LOGGER_NAME = "@repo/observability";
+const SHUTDOWN_SIGNALS = ["SIGTERM", "SIGINT"] as const;
 
-let tracerProvider: NodeTracerProvider | undefined;
-let initResult: TracingConfig | undefined;
+const LOG_SEVERITY: Record<LogLevel, SeverityNumber> = {
+  debug: SeverityNumber.DEBUG,
+  info: SeverityNumber.INFO,
+  warn: SeverityNumber.WARN,
+  error: SeverityNumber.ERROR,
+};
+
+type EnabledConfig = Extract<TelemetryConfig, { enabled: true }>;
+
+type Flushable = { forceFlush(): Promise<void> };
+
+type SdkHandle = {
+  sdk: NodeSDK;
+  flushables: Flushable[];
+};
+
+let handle: SdkHandle | undefined;
+let initResult: TelemetryConfig | undefined;
+let installedHandlers: Array<{ event: string; listener: () => void }> = [];
 
 /**
- * Initialise the tracer once per process. Safe to call repeatedly — subsequent
- * calls return the FIRST call's outcome, matching the `initDatadogRum`
- * idempotence pattern.
+ * Initialise telemetry once per process. Safe to call repeatedly: subsequent
+ * calls return the FIRST call's outcome.
  *
  * Returning the cached outcome matters: re-resolving the config on a later call
  * would report whatever the environment says *now*, which can disagree with the
- * tracer that actually got installed (or with a bootstrap that failed). A
- * caller logging that answer would describe a tracer that does not exist.
- *
- * Returns whether tracing is active, so the caller can report *why* it is not
- * without this module deciding how to log.
+ * SDK that actually got installed (or with a bootstrap that failed).
  */
-export function initTracing(): TracingConfig {
+export function initTelemetry(): TelemetryConfig {
   if (initResult) {
     return initResult;
   }
 
-  const config = resolveTracingConfig();
+  const config = resolveTelemetryConfig();
   initResult = config;
   if (!config.enabled) {
     return config;
   }
 
+  let created: SdkHandle | undefined;
   try {
-    const provider = createTracerProvider(config);
-    // Instrumentation is registered BEFORE the provider is installed globally.
-    // Both steps can throw, and doing it the other way round would leave a
-    // globally-registered tracer behind after a failed bootstrap — spans would
-    // be produced with nothing tracking the provider to flush them. Failing
-    // before the global is touched keeps the failure clean.
-    registerInstrumentations({
-      // `pg` is what Prisma's driver adapter (`@prisma/adapter-pg`) actually
-      // issues queries through, so patching the module here is what produces
-      // per-query child spans WITHOUT `packages/database` gaining an
-      // observability dependency it deliberately does not carry.
-      instrumentations: [new PgInstrumentation()],
-      tracerProvider: provider,
-    });
-    provider.register();
-    tracerProvider = provider;
+    created = createSdk(config);
+    created.sdk.start();
+    handle = created;
     setTraceContextProvider(readActiveTraceContext);
-    setSpanFlushHook(forceFlushSpans);
+    setLogRecordSink(emitOtelLogRecord);
+    setTelemetryFlushHook(forceFlushAll);
+    registerShutdownHandlers();
     return config;
   } catch {
-    // A failed bootstrap must leave the process untraced, not broken.
-    tracerProvider = undefined;
-    initResult = { enabled: false, reason: TracingDisabledReason.InitFailed };
+    // A failed bootstrap must leave the process untelemetered, not broken.
+    handle = undefined;
+    resetSeams();
+    removeShutdownHandlers();
+    abandonSdk(created);
+    initResult = { enabled: false, reason: TelemetryDisabledReason.InitFailed };
     return initResult;
   }
 }
 
-/**
- * Flush buffered spans. On Vercel the function freezes as soon as the response
- * is returned, so a `BatchSpanProcessor` would drop whatever is still buffered.
- *
- * Application code does NOT call this directly — it calls `flushSpans()` from
- * `./hooks`, the SDK-free seam this registers into. Keeping the app's import
- * off this module is what stops the OpenTelemetry SDK from being reachable from
- * `route-utils.ts` and, through it, every route.
- */
-async function forceFlushSpans(): Promise<void> {
-  await tracerProvider?.forceFlush();
+/** Flush and stop the SDK. Never rejects; gives up after `deadlineMs`. */
+export async function shutdownTelemetry(deadlineMs = 5000): Promise<void> {
+  const current = handle;
+  handle = undefined;
+  resetSeams();
+  if (!current) {
+    return;
+  }
+  try {
+    await Promise.race([current.sdk.shutdown(), waitForDeadline(deadlineMs)]);
+  } catch {
+    // Shutdown must continue even if the backend is unavailable.
+  }
 }
 
 /**
- * Test seam: tear the tracer down so a suite can re-initialise from a clean
- * state.
- *
- * Shuts the provider down and disables the OpenTelemetry globals. Without this
- * a suite that exercises the enabled path leaves a registered global tracer
- * (and its exporter timers) behind for every subsequent test in the worker.
- *
- * **Await it.** `shutdown()` drains the span processor asynchronously; letting
- * it run unawaited lets the next test's `register()` race a provider that is
- * still tearing down, which is precisely the kind of order-dependent flake the
- * repo's determinism rule exists to prevent.
+ * Test seam: tear telemetry down so a suite can re-initialise from a clean
+ * state. **Await it** so the next test does not race a draining SDK.
  */
-export async function resetTracingForTest(): Promise<void> {
-  const provider = tracerProvider;
-  tracerProvider = undefined;
+export async function resetTelemetryForTest(): Promise<void> {
+  const current = handle;
+  handle = undefined;
   initResult = undefined;
-  resetSpanFlushHook();
-  resetTraceContextProvider();
+  resetSeams();
+  removeShutdownHandlers();
   try {
-    await provider?.shutdown();
+    await current?.sdk.shutdown();
   } catch {
     // Teardown is best-effort; a failed shutdown must not fail the suite.
   }
   trace.disable();
   context.disable();
-  propagation.disable();
+  logs.disable();
+  metrics.disable();
 }
 
-function createTracerProvider(
-  config: Extract<TracingConfig, { enabled: true }>
-): NodeTracerProvider {
-  const exporter = new OTLPTraceExporter({
-    url: config.endpoint,
-    headers: { [DATADOG_API_KEY_HEADER]: config.apiKey },
+function createSdk(config: EnabledConfig): SdkHandle {
+  const spanProcessor = new BatchSpanProcessor(new OTLPTraceExporter());
+  const logProcessor = new BatchLogRecordProcessor({
+    exporter: new OTLPLogExporter(),
+  });
+  const metricReader = new PeriodicExportingMetricReader({
+    exporter: new OTLPMetricExporter(),
+    exportIntervalMillis: METRIC_EXPORT_INTERVAL_MS,
   });
 
-  return new NodeTracerProvider({
+  const sdk = new NodeSDK({
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: config.service,
       [ATTR_SERVICE_VERSION]: resolveServerVersion(),
-      "deployment.environment.name": config.env,
-      [ATTR_TRACE_SAMPLE_RATE]: config.sampleRate,
+      [ATTR_VCS_REF_HEAD_REVISION]: resolveGitSha(),
+      [ATTR_TRACE_SAMPLE_RATE]: config.sampleRatio,
     }),
-    // Remote parents are sampled with SERVER-side entropy — a security
+    // Remote parents are sampled with SERVER-side entropy: a security
     // property, not a tuning choice. `traceparent` is an untrusted header on a
     // public origin, so neither the caller's sampled bit (AlwaysOn, the
     // `ParentBasedSampler` default) nor anything derived from the caller's
-    // trace id can be trusted to bound export. See `./remote-parent-sampler`
-    // for why the trace-id-ratio variant is also attacker-defeatable.
-    //
-    // Root spans keep the trace-id ratio: we mint those ids ourselves, so the
-    // determinism is a feature rather than an attack surface.
+    // trace id can be trusted to bound export. See `./remote-parent-sampler`.
+    // Root spans keep the trace-id ratio: we mint those ids ourselves.
     sampler: new ParentBasedSampler({
-      root: new TraceIdRatioBasedSampler(config.sampleRate),
-      remoteParentSampled: new RemoteParentEntropySampler(config.sampleRate),
+      root: new TraceIdRatioBasedSampler(config.sampleRatio),
+      remoteParentSampled: new RemoteParentEntropySampler(config.sampleRatio),
     }),
-    // ISS-5856: the route-resource processor stamps each SERVER span's route
-    // onto `resource.name`. Without it Datadog derives the resource from the
-    // HTTP method alone and all ~40 API routes share four resources, which is
-    // what makes per-route DB attribution impossible to read. It stamps in
-    // `onEnding`, which the SDK runs for every processor before any `onEnd`, so
-    // sitting ahead of the exporter here is convention, not a requirement.
-    spanProcessors: [
-      new RouteResourceSpanProcessor(),
-      new BatchSpanProcessor(exporter),
+    // The route-resource processor stamps each SERVER span's route onto
+    // `resource.name` in `onEnding`, ahead of any exporter's `onEnd`.
+    spanProcessors: [new RouteResourceSpanProcessor(), spanProcessor],
+    logRecordProcessors: [logProcessor],
+    metricReaders: [metricReader],
+    instrumentations: [
+      // Outgoing URLs can carry signatures in the query (Teams `sig=`): both
+      // client instrumentations overwrite the URL attributes with redacted ones.
+      new HttpInstrumentation({ startOutgoingSpanHook: httpUrlAttributes }),
+      new UndiciInstrumentation({ startSpanHook: undiciUrlAttributes }),
+      // `pg` is what Prisma's driver adapter issues queries through.
+      new PgInstrumentation(),
+      new PrismaInstrumentation(),
     ],
+  });
+
+  return { sdk, flushables: [spanProcessor, logProcessor, metricReader] };
+}
+
+function abandonSdk(created: SdkHandle | undefined): void {
+  try {
+    created?.sdk.shutdown().catch(() => undefined);
+  } catch {
+    // Best-effort.
+  }
+}
+
+function emitOtelLogRecord(record: LogRecordInput): void {
+  logs.getLogger(LOGGER_NAME).emit({
+    severityNumber: LOG_SEVERITY[record.level],
+    severityText: record.level.toUpperCase(),
+    body: record.message,
+    attributes: record.attributes,
+    timestamp: record.timestampMs,
+    context: context.active(),
   });
 }
 
 /**
+ * Flush buffered spans, logs and metrics. Application code does NOT call this
+ * directly: it calls `flushTelemetry()` from `./hooks`, the SDK-free seam this
+ * registers into.
+ */
+async function forceFlushAll(): Promise<void> {
+  const flushables = handle?.flushables ?? [];
+  await Promise.allSettled(flushables.map((item) => item.forceFlush()));
+}
+
+function resetSeams(): void {
+  resetTelemetryFlushHook();
+  resetTraceContextProvider();
+  resetLogRecordSink();
+}
+
+function registerShutdownHandlers(): void {
+  const onBeforeExit = () => {
+    shutdownTelemetry().catch(() => undefined);
+  };
+  process.once("beforeExit", onBeforeExit);
+  installedHandlers.push({ event: "beforeExit", listener: onBeforeExit });
+
+  for (const signal of SHUTDOWN_SIGNALS) {
+    const listener = () => {
+      shutdownTelemetry()
+        .then(() => {
+          // Re-raise only when nobody else (e.g. Next) handles the signal, so
+          // default termination still happens.
+          if (process.listenerCount(signal) === 0) {
+            process.kill(process.pid, signal);
+          }
+        })
+        .catch(() => undefined);
+    };
+    process.once(signal, listener);
+    installedHandlers.push({ event: signal, listener });
+  }
+}
+
+function removeShutdownHandlers(): void {
+  for (const { event, listener } of installedHandlers) {
+    process.removeListener(event, listener);
+  }
+  installedHandlers = [];
+}
+
+/**
  * Read the active span's ids for the logger. Returns `undefined` when there is
- * no recording span, so untraced log calls stay byte-identical to pre-ISS-4659.
+ * no recording span, so untraced log calls stay unchanged.
  *
  * The `isRecording()` check is load-bearing. A sampled-out span is still a real
  * object with a real `spanContext()`, so reading the ids unconditionally would
- * stamp `dd.trace_id` onto logs for traces that are never exported — at the
- * default 10% rate, ~90% of correlated log lines would link to a trace that
- * does not exist in Datadog. A log that points at nothing is worse than a log
- * with no trace id at all.
+ * stamp `trace_id` onto logs for traces that are never exported.
  */
 function readActiveTraceContext():
   | { traceId: string; spanId: string }

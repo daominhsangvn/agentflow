@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<clickhouse>
+  <logger>
+    <level>warning</level>
+    <console>true</console>
+  </logger>
+  <listen_host>0.0.0.0</listen_host>
+  <tcp_port>9000</tcp_port>
+  <http_port>8123</http_port>
+  <path>/var/lib/clickhouse/</path>
+  <tmp_path>/var/lib/clickhouse/tmp/</tmp_path>
+  <user_files_path>/var/lib/clickhouse/user_files/</user_files_path>
+  <user_scripts_path>/var/lib/clickhouse/user_scripts/</user_scripts_path>
+  <user_defined_executable_functions_config>*function.xml</user_defined_executable_functions_config>
+  <users_config>users.xml</users_config>
+  <default_profile>default</default_profile>
+  <default_database>default</default_database>
+  <mark_cache_size>5368709120</mark_cache_size>
+  <max_concurrent_queries>100</max_concurrent_queries>
+  <include_from>/etc/clickhouse-server/config.d/cluster.xml</include_from>
+</clickhouse>

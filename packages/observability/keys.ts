@@ -5,16 +5,20 @@ export const keys = () =>
   createEnv({
     emptyStringAsUndefined: true,
     server: {
-      DD_API_KEY: z.string().min(1).optional(),
-      DD_SITE: z.string().min(1).optional(),
-      DD_SERVICE: z.string().min(1).optional(),
-      DD_ENV: z.string().min(1).optional(),
+      OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
+      OTEL_SERVICE_NAME: z.string().min(1).optional(),
+      OTEL_RESOURCE_ATTRIBUTES: z.string().min(1).optional(),
+      OTEL_TRACES_SAMPLER: z.string().min(1).optional(),
+      OTEL_TRACES_SAMPLER_ARG: z.string().min(1).optional(),
+      OTEL_SDK_DISABLED: z.string().min(1).optional(),
     },
     client: {},
     runtimeEnv: {
-      DD_API_KEY: process.env.DD_API_KEY,
-      DD_SITE: process.env.DD_SITE,
-      DD_SERVICE: process.env.DD_SERVICE,
-      DD_ENV: process.env.DD_ENV,
+      OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+      OTEL_SERVICE_NAME: process.env.OTEL_SERVICE_NAME,
+      OTEL_RESOURCE_ATTRIBUTES: process.env.OTEL_RESOURCE_ATTRIBUTES,
+      OTEL_TRACES_SAMPLER: process.env.OTEL_TRACES_SAMPLER,
+      OTEL_TRACES_SAMPLER_ARG: process.env.OTEL_TRACES_SAMPLER_ARG,
+      OTEL_SDK_DISABLED: process.env.OTEL_SDK_DISABLED,
     },
   });
