@@ -48,6 +48,7 @@ import {
   GATEWAY_PROTOCOL_VERSION,
 } from "../shared/contracts.js";
 import { startHeadlessCapabilitiesReporter } from "./headless-capabilities-reporter.js";
+import { createHeadlessClaudeCodeOtel } from "./headless-claude-code-otel.js";
 import {
   classifyHeadlessCommand,
   HEADLESS_RUNNER_OPERATION_IDS,
@@ -55,7 +56,6 @@ import {
 } from "./headless-commands.js";
 import type { HeadlessRunnerConfig } from "./headless-config.js";
 import { createRunnerModelProviderLookup } from "./headless-model-provider.js";
-import { startHeadlessOtlpForwarder } from "./headless-otlp-forwarder.js";
 import { createHeadlessSafeStorage } from "./headless-safe-storage.js";
 import { startHeadlessSessionReporter } from "./headless-session-reporter.js";
 import {
@@ -144,8 +144,9 @@ export async function startHeadlessRunner(
     writeRunnerStatus(config.dataDir, status);
   };
 
+  const claudeCodeOtel = createHeadlessClaudeCodeOtel(telemetry.exportSignal);
   const server = new DesktopGatewayServer({
-    claudeCodeOtelEnvOverrides: CLAUDE_CODE_OTEL_ENV_OVERRIDES,
+    ...claudeCodeOtel.serverOptions,
     host: LOOPBACK_HOST,
     // The configured port, or any free one: runners never compete for a
     // default port, however many share the computer.
@@ -302,17 +303,7 @@ export async function startHeadlessRunner(
       })
     : null;
 
-  const otlpForwarder = telemetry.exportSignal
-    ? await startHeadlessOtlpForwarder({
-        exportSignal: telemetry.exportSignal,
-      }).catch((error: unknown) => {
-        gatewayLog.warn(
-          LOG_TAG,
-          `Claude Code OTLP forwarder failed to start: ${error instanceof Error ? error.message : String(error)}`
-        );
-        return null;
-      })
-    : null;
+  const otlpForwarder = await claudeCodeOtel.start();
   await server.start();
   replayPendingFinalizations(deadJobs);
   recovery.reattachLiveJobs().catch((error: unknown) => {
@@ -419,16 +410,3 @@ function handleStatusChange(
     gatewayLog.warn(LOG_TAG, `Connection degraded: ${error}`);
   }
 }
-
-/** Claude Code telemetry labels: its own service name and slower export cadence. */
-const CLAUDE_CODE_OTEL_ENV_OVERRIDES: Record<string, string> = {
-  OTEL_SERVICE_NAME: "af-claude-code",
-  OTEL_LOGS_EXPORT_INTERVAL: "30000",
-  OTEL_METRIC_EXPORT_INTERVAL: "60000",
-  // Content switches stay off whatever the operator's profile sets, so prompt
-  // text, tool arguments/output and raw API bodies never reach SigNoz.
-  OTEL_LOG_USER_PROMPTS: "0",
-  OTEL_LOG_TOOL_DETAILS: "0",
-  OTEL_LOG_TOOL_CONTENT: "0",
-  OTEL_LOG_RAW_API_BODIES: "0",
-};
