@@ -32,5 +32,6 @@ export const AfOutcome = {
   Ignored: "ignored",
   Duplicate: "duplicate",
   Retry: "retry",
+  Rejected: "rejected",
 } as const;
 export type AfOutcome = (typeof AfOutcome)[keyof typeof AfOutcome];

@@ -1,12 +1,14 @@
 import "server-only";
 
 import { failure } from "@repo/api/src/types/common";
-import { parseError } from "@repo/observability/error";
-import { log } from "@repo/observability/log";
 import { type NextRequest, NextResponse } from "next/server";
 import { getBearerToken, unauthorizedResponse } from "../route-utils";
 import { annotateAuthSpan } from "./auth-span-attributes";
 import { resolveDesktopSessionContext } from "./desktop-session-auth";
+import {
+  observeFailedResponse,
+  observeThrownError,
+} from "./observe-failed-response";
 import type {
   AuthContext,
   AuthenticatedHandler,
@@ -66,13 +68,15 @@ export function withDesktopSessionAuth<
       response = await handler(authContext, request, routeContext.params);
       return response;
     } catch (error) {
-      log.error("Desktop session authentication failed", {
-        error: parseError(error),
-      });
+      observeThrownError("Desktop session authentication failed", error);
       response = NextResponse.json(failure("Authentication failed"), {
         status: 500,
       });
       return response;
+    } finally {
+      if (response) {
+        await observeFailedResponse(request, response);
+      }
     }
   };
 }

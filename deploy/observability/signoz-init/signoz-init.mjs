@@ -37,6 +37,10 @@ export function readConfig(env, scriptDir) {
     orgName: env.SIGNOZ_ORG_NAME || "AgentFlow",
     provisionDir: env.SIGNOZ_PROVISION_DIR || path.resolve(scriptDir, ".."),
     alertEmailTo: env.SIGNOZ_ALERT_EMAIL_TO || "",
+    // The pinned SigNoz ignores the global smtp_require_tls (SIGNOZ_ALERTMANAGER_
+    // ..._SMTP__REQUIRE__TLS) for email channels: each channel defaults to TLS
+    // required, so a plain-SMTP relay (Mailpit in dev) needs it on the channel.
+    alertEmailRequireTls: env.SIGNOZ_SMTP_REQUIRE_TLS !== "false",
     alertWebhookUrl: env.SIGNOZ_ALERT_WEBHOOK_URL || "",
     timeoutSeconds: Number(env.SIGNOZ_INIT_TIMEOUT_SECONDS || 300),
   };
@@ -162,7 +166,13 @@ export function desiredChannels(config) {
   if (config.alertEmailTo) {
     channels.push({
       name: ChannelName.Email,
-      email_configs: [{ send_resolved: true, to: config.alertEmailTo }],
+      email_configs: [
+        {
+          send_resolved: true,
+          to: config.alertEmailTo,
+          require_tls: config.alertEmailRequireTls,
+        },
+      ],
     });
   }
   return channels;

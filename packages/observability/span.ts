@@ -81,7 +81,11 @@ export function setSpanOutcome(
   }
   try {
     span.setAttribute(AfAttribute.Outcome, outcome);
-    if (outcome === AfOutcome.Error || outcome === AfOutcome.Retry) {
+    if (
+      outcome === AfOutcome.Error ||
+      outcome === AfOutcome.Retry ||
+      outcome === AfOutcome.Rejected
+    ) {
       const message = redactSensitiveText(reason ?? "error").slice(
         0,
         MAX_REASON_LENGTH

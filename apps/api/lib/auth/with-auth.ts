@@ -9,7 +9,6 @@ import type { ApiResult } from "@repo/api/src/types/common";
 import { failure } from "@repo/api/src/types/common";
 import type { User } from "@repo/api/src/types/user";
 import { auth } from "@repo/auth/server";
-import { log } from "@repo/observability/log";
 import { type NextRequest, NextResponse } from "next/server";
 import {
   forbiddenResponse,
@@ -18,6 +17,10 @@ import {
 } from "../route-utils";
 import { annotateAuthSpan } from "./auth-span-attributes";
 import { findOrCreateUser } from "./find-or-create-user";
+import {
+  observeFailedResponse,
+  observeThrownError,
+} from "./observe-failed-response";
 import { resolveOrgHeader } from "./resolve-org-header";
 
 /**
@@ -163,6 +166,10 @@ export function withAuth<TResponse, TRoute extends string = string>(
     } catch (error) {
       response = authErrorResponse("Authentication failed", error);
       return response;
+    } finally {
+      if (response) {
+        await observeFailedResponse(request, response);
+      }
     }
   };
 }
@@ -172,6 +179,6 @@ function authErrorResponse(
   error: unknown,
   status = 500
 ): NextResponse<ApiResult<never>> {
-  log.error(message, { error });
+  observeThrownError(message, error);
   return NextResponse.json(failure(message), { status });
 }

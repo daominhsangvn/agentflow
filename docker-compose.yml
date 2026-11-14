@@ -242,6 +242,7 @@ services:
       SIGNOZ_ADMIN_NAME: ${SIGNOZ_ADMIN_NAME:-Admin}
       SIGNOZ_ORG_NAME: ${SIGNOZ_ORG_NAME:-AgentFlow}
       SIGNOZ_ALERT_EMAIL_TO: ${SIGNOZ_ALERT_EMAIL_TO:-}
+      SIGNOZ_SMTP_REQUIRE_TLS: "${SIGNOZ_SMTP_REQUIRE_TLS:-false}"
       SIGNOZ_ALERT_WEBHOOK_URL: ${SIGNOZ_ALERT_WEBHOOK_URL:-}
     volumes:
       - ./deploy/observability:/provision:ro

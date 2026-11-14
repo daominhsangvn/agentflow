@@ -2,7 +2,6 @@ import "server-only";
 
 import type { ApiKeyScope } from "@repo/api/src/types/api-key";
 import { failure } from "@repo/api/src/types/common";
-import { log } from "@repo/observability/log";
 import { type NextRequest, NextResponse } from "next/server";
 import { apiKeysService } from "@/app/api-keys/service";
 import { organizationsService } from "@/app/organizations/service";
@@ -17,6 +16,10 @@ import type { VerifiedApiKeyContextWithMetadata } from "./api-key-context";
 import { hasApiKeyScopes } from "./api-key-scopes";
 import { annotateAuthSpan } from "./auth-span-attributes";
 import { getDesktopManagedPopRequestFailure } from "./desktop-managed-pop";
+import {
+  observeFailedResponse,
+  observeThrownError,
+} from "./observe-failed-response";
 import type {
   AuthContext,
   AuthenticatedHandler,
@@ -134,11 +137,15 @@ export function withApiKeyAuth<TResponse, TRoute extends string = string>(
       response = await handler(authContext, request, routeContext.params);
       return response;
     } catch (error) {
-      log.error("API key authentication failed", { error });
+      observeThrownError("API key authentication failed", error);
       response = NextResponse.json(failure("Authentication failed"), {
         status: 500,
       });
       return response;
+    } finally {
+      if (response) {
+        await observeFailedResponse(request, response);
+      }
     }
   };
 }
