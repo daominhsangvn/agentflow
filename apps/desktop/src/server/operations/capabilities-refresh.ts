@@ -178,6 +178,7 @@ async function readFileAtRef(
     );
     return stdout.slice(0, RUNNER_CAPABILITIES_MAX_CHARS);
   } catch {
+    // observability: probe — the capabilities file may not exist at this ref
     return null;
   }
 }
@@ -195,6 +196,7 @@ async function listClaudeTree(
     );
     return new Set(stdout.split("\n").filter(Boolean));
   } catch {
+    // observability: probe — the tree may not exist at this ref
     return new Set();
   }
 }

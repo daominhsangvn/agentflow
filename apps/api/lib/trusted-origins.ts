@@ -39,6 +39,7 @@ export function isTrustedOrigin(origin: string | null): boolean {
   try {
     parsedOrigin = new URL(origin);
   } catch {
+    // observability: (a) parse fallback — an invalid origin is untrusted
     return false;
   }
 

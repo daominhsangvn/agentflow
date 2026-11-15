@@ -200,7 +200,7 @@ export function registerTicketChatRoutes(
                 context.response.write(`${msg}\n`)
               );
             } catch {
-              // Skip malformed JSON lines.
+              // observability: parse fallback — malformed JSON lines are skipped (per line)
             }
           },
           onError: (error) => {

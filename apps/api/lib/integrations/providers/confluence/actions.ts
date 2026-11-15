@@ -8,6 +8,7 @@ import {
   WorkflowActionRunStatus,
   WorkflowRunEvent,
 } from "@repo/api/src/types/workflow";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 import {
   type ActionContext,
@@ -647,6 +648,11 @@ async function settle(
           retryable: result.error.retryable,
         };
   } catch (error) {
+    log.warn("integration.confluence.action_failed", {
+      provider: "confluence",
+      reason: "action_threw",
+      error,
+    });
     return {
       status: WorkflowActionRunStatus.Failed,
       error: error instanceof Error ? error.message : String(error),

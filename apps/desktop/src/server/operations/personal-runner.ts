@@ -247,6 +247,7 @@ async function removeStaleRunWorkDirs(
   try {
     names = await fs.readdir(runsDir);
   } catch {
+    // observability: probe — the runs directory is optional
     return;
   }
   for (const name of names) {
@@ -257,7 +258,7 @@ async function removeStaleRunWorkDirs(
         await fs.rm(dir, { recursive: true, force: true });
       }
     } catch {
-      // Best effort: another run may be removing it.
+      // observability: best-effort cleanup — another run may be removing it.
     }
   }
 }
@@ -266,6 +267,7 @@ function isDirectory(file: string): boolean {
   try {
     return existsSync(file) && statSync(file).isDirectory();
   } catch {
+    // observability: probe — absence is the answer
     return false;
   }
 }

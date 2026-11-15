@@ -1,4 +1,10 @@
-import { log } from "../log";
+import {
+  type Counter,
+  type Gauge,
+  type Meter,
+  metrics,
+} from "@opentelemetry/api";
+import { isSensitiveKey, redactSensitiveText } from "../redact";
 import { redactGatewaySessionId } from "../redact-correlation";
 import type { FilterToken } from "./filter-tokens";
 import type { Origin } from "./origin";
@@ -129,26 +135,21 @@ export type DbPoolMetric = {
 // ---------------------------------------------------------------------------
 
 /**
- * Emit any telemetry metric as JSON with the `_telemetryMetric: true` marker
- * that the Datadog log-to-metric pipeline filters on. Use this directly for
- * domain-specific metric types (e.g. loop.runner.*); use the typed wrappers
- * below for the queue/protocol metric families.
+ * Record a telemetry metric through the OpenTelemetry Meter (`count` ->
+ * Counter, `value` -> Gauge). Use this directly for domain-specific metric
+ * types (e.g. loop.runner.*); use the typed wrappers below for the
+ * queue/protocol metric families.
  */
 export function emitTelemetryMetric<T extends { metric: string }>(
   metric: T
 ): void {
-  // gatewaySessionId is a session-correlation token that must never be logged
-  // raw. The metric pipeline emits via log.info, so redact to the stable hash
-  // before stringifying; same id in means same hash out, so metric correlation
-  // by session survives.
-  const payload: Record<string, unknown> = {
-    ...metric,
-    _telemetryMetric: true,
-  };
+  // gatewaySessionId is a session-correlation token that must never be
+  // recorded raw. Redact to the stable hash; same id in means same hash out.
+  const payload: Record<string, unknown> = { ...metric };
   if (typeof payload.gatewaySessionId === "string") {
     payload.gatewaySessionId = redactGatewaySessionId(payload.gatewaySessionId);
   }
-  log.info(JSON.stringify(payload));
+  recordOtelMetric(payload);
 }
 
 export function emitQueueMetric(metric: QueueMetric): void {
@@ -161,4 +162,94 @@ export function emitProtocolMetric(metric: ProtocolMetric): void {
 
 export function emitDbPoolMetric(metric: DbPoolMetric): void {
   emitTelemetryMetric(metric);
+}
+
+// ---------------------------------------------------------------------------
+// OpenTelemetry Meter recording
+// ---------------------------------------------------------------------------
+
+const METER_NAME = "@repo/observability";
+
+/** High-cardinality or per-sample fields that must not become metric attributes. */
+const METRIC_ATTRIBUTE_EXCLUDED_KEYS = new Set([
+  "metric",
+  "count",
+  "value",
+  "timestamp",
+  "commandId",
+  "gatewaySessionId",
+  "poolMax",
+  "waitingCount",
+  "inUse",
+  "idle",
+  "total",
+]);
+
+type MetricAttributes = Record<string, string | number | boolean>;
+
+const counterCache = new WeakMap<Meter, Map<string, Counter>>();
+const gaugeCache = new WeakMap<Meter, Map<string, Gauge>>();
+
+function recordOtelMetric(metric: Record<string, unknown>): void {
+  try {
+    const name = metric.metric;
+    if (typeof name !== "string") {
+      return;
+    }
+    const count = typeof metric.count === "number" ? metric.count : undefined;
+    const value = typeof metric.value === "number" ? metric.value : undefined;
+    if (count === undefined && value === undefined) {
+      return;
+    }
+    const meter = metrics.getMeter(METER_NAME);
+    const attributes = buildMetricAttributes(metric);
+    if (count === undefined) {
+      getInstrument(gaugeCache, meter, name, (m) => m.createGauge(name)).record(
+        value as number,
+        attributes
+      );
+    } else {
+      getInstrument(counterCache, meter, name, (m) =>
+        m.createCounter(name)
+      ).add(count, attributes);
+    }
+  } catch {
+    // Fail-open: telemetry must never break the caller.
+  }
+}
+
+function getInstrument<T>(
+  cache: WeakMap<Meter, Map<string, T>>,
+  meter: Meter,
+  name: string,
+  create: (meter: Meter) => T
+): T {
+  let byName = cache.get(meter);
+  if (!byName) {
+    byName = new Map();
+    cache.set(meter, byName);
+  }
+  let instrument = byName.get(name);
+  if (!instrument) {
+    instrument = create(meter);
+    byName.set(name, instrument);
+  }
+  return instrument;
+}
+
+function buildMetricAttributes(
+  metric: Record<string, unknown>
+): MetricAttributes {
+  const attributes: MetricAttributes = {};
+  for (const [key, val] of Object.entries(metric)) {
+    if (METRIC_ATTRIBUTE_EXCLUDED_KEYS.has(key) || isSensitiveKey(key)) {
+      continue;
+    }
+    if (typeof val === "string") {
+      attributes[key] = redactSensitiveText(val);
+    } else if (typeof val === "number" || typeof val === "boolean") {
+      attributes[key] = val;
+    }
+  }
+  return attributes;
 }

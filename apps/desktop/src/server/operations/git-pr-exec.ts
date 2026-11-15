@@ -59,6 +59,7 @@ export async function getRepoSlug(cwd: string): Promise<string> {
     const match = GITHUB_REMOTE_REGEX.exec(remoteUrl);
     return match ? match[1].replace(GIT_SUFFIX_REGEX, "") : "";
   } catch {
+    // observability: probe — no GitHub origin remote is a normal state
     return "";
   }
 }

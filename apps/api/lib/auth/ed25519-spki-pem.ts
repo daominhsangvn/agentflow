@@ -18,6 +18,7 @@ export function normalizeEd25519SpkiPublicKeyPem(pem: string): string | null {
 
     return `${normalized}`;
   } catch {
+    // observability: parse fallback — an invalid PEM yields null
     return null;
   }
 }

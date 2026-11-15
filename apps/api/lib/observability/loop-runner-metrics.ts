@@ -133,8 +133,8 @@ type ZombieDetectorMetric = {
 // Emitters
 //
 // Each wrapper exists to enforce the per-metric payload shape at compile time.
-// The actual JSON emission is delegated to emitTelemetryMetric so the
-// `_telemetryMetric: true` marker contract lives in exactly one place.
+// The actual recording is delegated to emitTelemetryMetric so the
+// OTel metric contract lives in exactly one place.
 // ---------------------------------------------------------------------------
 
 export function emitRefreshAttempt(orgId: string): void {

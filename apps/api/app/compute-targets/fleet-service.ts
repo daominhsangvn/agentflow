@@ -8,11 +8,15 @@ import {
 } from "@repo/api/src/types/agent-fleet";
 import { ClaudeCodeVersionChannel } from "@repo/api/src/types/compute-target-model-provider";
 import { ProjectStatus } from "@repo/api/src/types/project";
-import { readProjectRunnerIds } from "@repo/api/src/types/project-runners";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
 import { withDb } from "@repo/database";
 import { z } from "zod";
 import { readPinnedClaudeCodeVersion } from "@/app/compute-targets/model-provider-service";
+import {
+  type ProjectAgentIdsRow,
+  projectAgentIds,
+  projectAgentIdsSelect,
+} from "@/app/projects/project-agent-ids";
 
 /**
  * Agents fleet: every compute target of the organization (personal ones
@@ -61,7 +65,7 @@ export type FleetCapabilityRow = {
   problems: unknown;
 };
 
-export type FleetProjectRow = { id: string; name: string; settings: unknown };
+export type FleetProjectRow = { id: string; name: string } & ProjectAgentIdsRow;
 
 export type FleetWorkflowRow = {
   id: string;
@@ -101,7 +105,7 @@ export const computeTargetFleetService = {
             organizationId,
             status: { not: ProjectStatus.Archived },
           },
-          select: { id: true, name: true, settings: true },
+          select: { id: true, name: true, ...projectAgentIdsSelect },
         })
       ),
       withDb((db) =>
@@ -159,14 +163,14 @@ export function ownerName(
   return name === "" ? null : name;
 }
 
-/** Projects that list the Agent (settings.runnerIds); AGENTFLOW.md only describes it. */
+/** Projects that list the Agent (project_agents); AGENTFLOW.md only describes it. */
 export function agentProjectIds(
   targetId: string,
-  projects: { id: string; settings: unknown }[]
+  projects: ({ id: string } & ProjectAgentIdsRow)[]
 ): Set<string> {
   const ids = new Set<string>();
   for (const project of projects) {
-    if (readProjectRunnerIds(project.settings).includes(targetId)) {
+    if (projectAgentIds(project).includes(targetId)) {
       ids.add(project.id);
     }
   }

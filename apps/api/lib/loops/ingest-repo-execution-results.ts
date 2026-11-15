@@ -16,7 +16,9 @@ import {
   type TransactionClient,
   withDb,
 } from "@repo/database";
+import { AfAttribute } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { withSpan } from "@repo/observability/span";
 import pLimit from "p-limit";
 import { documentWhere } from "@/lib/artifact-adapters";
 import { upsertEvaluationWithJudgeScores } from "@/lib/loops/loop-document-ingestion";
@@ -175,111 +177,120 @@ type IngestRepoExecutionResultsOpts = {
  *   failure in one repo does not abort processing for other repos.
  * - Failed and skipped entries are logged and skipped.
  */
-export async function ingestRepoExecutionResults(
+export function ingestRepoExecutionResults(
   ctx: IngestionContext,
   results: RepoExecutionResult[],
   opts: IngestRepoExecutionResultsOpts = {}
 ): Promise<void> {
-  const { organizationId, documentId, loopId, correlationId } = ctx;
-  const { codeJudgesReport = null, promptsSnapshot = null } = opts;
+  return withSpan(
+    "loop.ingest_execution_results",
+    { [AfAttribute.LoopId]: ctx.loopId },
+    async () => {
+      const { organizationId, documentId, loopId, correlationId } = ctx;
+      const { codeJudgesReport = null, promptsSnapshot = null } = opts;
 
-  // Process code judges report and prompts snapshot once, outside the per-repo
-  // loop — these apply to the overall loop run, not to individual repos.
-  // Persist prompts snapshot first so it is available before judge scores land.
-  await upsertFromSnapshot(organizationId, promptsSnapshot);
+      // Process code judges report and prompts snapshot once, outside the per-repo
+      // loop — these apply to the overall loop run, not to individual repos.
+      // Persist prompts snapshot first so it is available before judge scores land.
+      await upsertFromSnapshot(organizationId, promptsSnapshot);
 
-  if (codeJudgesReport) {
-    const persist = async (tx: TransactionClient) => {
-      await upsertEvaluationWithJudgeScores({
-        artifactId: documentId,
-        ...(loopId ? { loopId } : {}),
-        organizationId,
-        reportType: EvaluationReportType.Code,
-        report: codeJudgesReport,
-        tx,
-      });
-    };
+      if (codeJudgesReport) {
+        const persist = async (tx: TransactionClient) => {
+          await upsertEvaluationWithJudgeScores({
+            artifactId: documentId,
+            ...(loopId ? { loopId } : {}),
+            organizationId,
+            reportType: EvaluationReportType.Code,
+            report: codeJudgesReport,
+            tx,
+          });
+        };
 
-    if (opts.tx) {
-      await persist(opts.tx);
-    } else {
-      await withDb.tx(persist);
+        if (opts.tx) {
+          await persist(opts.tx);
+        } else {
+          await withDb.tx(persist);
+        }
+
+        log.info(
+          "[ingest-repo-execution-results] Persisted code judges report",
+          {
+            loopId,
+            correlationId,
+            documentId,
+            reportId: codeJudgesReport.report_id,
+            judgesCount: codeJudgesReport.stats.length,
+          }
+        );
+      }
+
+      // Process each per-repo result independently and concurrently. Each success
+      // entry keeps its own transaction and its own try/catch, so a failure in one
+      // repo is warn-logged and does not abort processing for the other repos.
+      // Concurrency is bounded (pLimit) so a many-repo loop can't exhaust the
+      // shared pg pool and hit transaction wait timeouts.
+      const limit = pLimit(REPO_INGEST_CONCURRENCY);
+      await Promise.all(
+        results.map((result) =>
+          limit(async () => {
+            if (result.status === "failed") {
+              log.error(
+                "[ingest-repo-execution-results] Repo execution result reported failure",
+                {
+                  loopId,
+                  correlationId,
+                  fullName: result.fullName,
+                  error: result.error,
+                }
+              );
+              return;
+            }
+
+            if (result.status === "skipped") {
+              log.info(
+                "[ingest-repo-execution-results] Repo execution result was skipped",
+                {
+                  loopId,
+                  correlationId,
+                  fullName: result.fullName,
+                  reason: result.reason,
+                }
+              );
+              return;
+            }
+
+            // A project repository: the branch is on the remote and a workflow
+            // action opens the pull request, so there is no PR to link here.
+            if (result.status === "pushed") {
+              log.info(
+                "[ingest-repo-execution-results] Repo branch pushed without a pull request",
+                {
+                  loopId,
+                  correlationId,
+                  fullName: result.fullName,
+                  branchName: result.branchName,
+                }
+              );
+              return;
+            }
+
+            // status === "success"
+            try {
+              await ingestSuccessEntry(ctx, result);
+            } catch (err) {
+              log.error(
+                "[ingest-repo-execution-results] Failed to ingest result for repo; continuing with remaining repos",
+                {
+                  loopId,
+                  correlationId,
+                  fullName: result.fullName,
+                  error: err,
+                }
+              );
+            }
+          })
+        )
+      );
     }
-
-    log.info("[ingest-repo-execution-results] Persisted code judges report", {
-      loopId,
-      correlationId,
-      documentId,
-      reportId: codeJudgesReport.report_id,
-      judgesCount: codeJudgesReport.stats.length,
-    });
-  }
-
-  // Process each per-repo result independently and concurrently. Each success
-  // entry keeps its own transaction and its own try/catch, so a failure in one
-  // repo is warn-logged and does not abort processing for the other repos.
-  // Concurrency is bounded (pLimit) so a many-repo loop can't exhaust the
-  // shared pg pool and hit transaction wait timeouts.
-  const limit = pLimit(REPO_INGEST_CONCURRENCY);
-  await Promise.all(
-    results.map((result) =>
-      limit(async () => {
-        if (result.status === "failed") {
-          log.error(
-            "[ingest-repo-execution-results] Repo execution result reported failure",
-            {
-              loopId,
-              correlationId,
-              fullName: result.fullName,
-              error: result.error,
-            }
-          );
-          return;
-        }
-
-        if (result.status === "skipped") {
-          log.info(
-            "[ingest-repo-execution-results] Repo execution result was skipped",
-            {
-              loopId,
-              correlationId,
-              fullName: result.fullName,
-              reason: result.reason,
-            }
-          );
-          return;
-        }
-
-        // A project repository: the branch is on the remote and a workflow
-        // action opens the pull request, so there is no PR to link here.
-        if (result.status === "pushed") {
-          log.info(
-            "[ingest-repo-execution-results] Repo branch pushed without a pull request",
-            {
-              loopId,
-              correlationId,
-              fullName: result.fullName,
-              branchName: result.branchName,
-            }
-          );
-          return;
-        }
-
-        // status === "success"
-        try {
-          await ingestSuccessEntry(ctx, result);
-        } catch (err) {
-          log.error(
-            "[ingest-repo-execution-results] Failed to ingest result for repo; continuing with remaining repos",
-            {
-              loopId,
-              correlationId,
-              fullName: result.fullName,
-              error: err,
-            }
-          );
-        }
-      })
-    )
   );
 }

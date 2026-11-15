@@ -35,7 +35,7 @@
  *    This sweep is the fail-open complement for everything else.
  * The deploy still stops reporting UNQUALIFIED success: the report below is
  * printed, `migrate.ts` qualifies its terminal line, and the count rides the
- * existing `migrate_deploy` Datadog event so a monitor can alert on it.
+ * existing `migrate_deploy` SigNoz event so a monitor can alert on it.
  *
  * BEST-EFFORT, AND HONEST ABOUT IT: a sweep that could not run returns `null`
  * ("unknown"), never `[]` ("clean") — an empty array is a claim we would not have

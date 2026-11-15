@@ -1,3 +1,4 @@
+import { log } from "@repo/observability/log";
 import "server-only";
 
 import { z } from "zod";
@@ -67,7 +68,8 @@ export async function POST(request: Request) {
       expiresAt: result.expiresAt.toISOString(),
       pollIntervalSeconds: result.pollIntervalSeconds,
     });
-  } catch {
+  } catch (error) {
+    log.error("desktop.device_onboarding.start_failed", { error });
     return desktopContractError(503, "DEVICE_SESSION_PERSIST_FAILED", true);
   }
 }

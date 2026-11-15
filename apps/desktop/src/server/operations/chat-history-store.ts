@@ -14,6 +14,7 @@ export async function loadJsonFile<T>(
     const content = await fs.readFile(filePath, "utf-8");
     return JSON.parse(content) as T;
   } catch {
+    // observability: parse fallback — a missing or corrupt history file yields the fallback
     return fallback;
   }
 }

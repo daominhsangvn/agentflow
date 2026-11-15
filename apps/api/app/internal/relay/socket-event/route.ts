@@ -17,6 +17,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     body = await request.json();
   } catch {
+    // observability: (f) 400 response — the reason is captured by request_completed
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 

@@ -10,6 +10,7 @@ import {
   NotificationEntityKind,
 } from "@repo/api/src/types/notification-routes";
 import { AssignmentEntityType } from "@repo/collaboration/server/inbox-notifications";
+import { log } from "@repo/observability/log";
 import {
   dispatchAuditEvent,
   userAuditActor,
@@ -190,7 +191,8 @@ export const PUT = withAnyAuth<Document, "/documents/[id]">(
             projectId: artifact.projectId,
           },
         });
-      } catch {
+      } catch (error) {
+        log.warn("documents.activity_capture_failed", { error });
         // Swallowed by design: activity capture must never fail the write.
       }
 

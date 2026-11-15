@@ -36,7 +36,7 @@ For database commands, see `packages/database/CLAUDE.md`.
 api (shared types) · database (Prisma, PostgreSQL) · storage (S3-compatible object storage) · auth (Better Auth facade: server `auth()`, middleware, client hooks) · design-system (Shadcn/Tailwind) · analytics (PostHog/GA) · email (Resend) · observability (logging) · security (Nosecone)
 
 ### Environment Variables
-Each app has `.env.local`. Empty `""` fails validation for optional fields — comment out unused. Keys validated with prefixes (`sk_`, `phc_`). Schemas in `packages/*/keys.ts`.
+Each app has `.env.local`. Empty `""` fails validation for optional fields — comment out unused. Keys validated with prefixes (`sk_`, `phc_`). Schemas in `packages/*/keys.ts`. `LOG_LEVEL` (`debug|info|warn|error`, default `info` in production, `debug` elsewhere) filters `@repo/observability/log` output.
 
 ### Database
 Schema: `packages/database/prisma/schema.prisma`. Client: `packages/database/generated/`. See `packages/database/CLAUDE.md`.
@@ -45,7 +45,7 @@ Schema: `packages/database/prisma/schema.prisma`. Client: `packages/database/gen
 **Do NOT import `@repo/database` in `apps/app`.** All DB access: frontend hooks → `apps/api` routes → services → database.
 
 ### Background Work in API Routes (CRITICAL)
-**Never fire-and-forget promises.** Always wrap background work with `waitUntil()` from `@/lib/wait-until` (apps/api). It keeps the old `@vercel/functions` call shape and guarantees a rejection is logged instead of crashing the long-lived Node process. A `.catch()` without `waitUntil()` is a bug.
+**Never fire-and-forget promises.** Always wrap background work with `waitUntil()` from `@/lib/wait-until` (apps/api). It keeps the old `@vercel/functions` call shape and guarantees a rejection is logged instead of crashing the long-lived Node process. A `.catch()` without `waitUntil()` is a bug. `waitUntil` also accepts a thunk (`waitUntil(() => work())`), which runs the work in a background span linked to the request.
 
 ### Self-hosted infrastructure (IMPORTANT)
 No AWS or Vercel services. Object storage goes through `@repo/storage` (S3 protocol against RustFS from `docker-compose.yml`; configure with `S3_*` env vars, never construct an `S3Client` directly). Secrets at rest use `@/lib/secret-encryption` (AES-256-GCM, `ENCRYPTION_KEY`). Loops run only on desktop compute targets; there is no cloud runner. The Claude Code plugins live in `agent-plugins/` and are loaded with `claude --plugin-dir` — never via `/plugin install`. Production runs `deploy/compose/docker-compose.prod.yml` (images built on the server; `NEXT_PUBLIC_*` are build args of the app and api images).
@@ -61,6 +61,12 @@ No AWS or Vercel services. Object storage goes through `@repo/storage` (S3 proto
 
 ### Engineer Feature (SECURITY CRITICAL)
 Spawns local CLI processes (Claude, git, codex) through the desktop gateway (`apps/desktop/src/server/`, shared by the Electron app and the headless runner), NOT in `apps/app` or `apps/api`. The browser fetch interceptor (`apps/app/lib/engineer/engineer-fetch-interceptor.ts`) installs the shared gateway fetch shim; the web routing adapter (`apps/app/lib/engineer/web-surface-routing-adapter.ts`) sends `/api/gateway/*` requests to either localhost (LocalElectron mode) or the same-origin `/api/gateway-relay/*` forwarder (CloudRelay mode). **Localhost-only enforcement**: the proxy (`apps/app/proxy.ts`) calls `gatewayGuard` (`apps/app/lib/engineer/gateway-guard.ts`), which rejects non-localhost `/api/gateway/*` requests with 403 and requires an authenticated user with a registered compute target for `/api/gateway-relay/*`. The gateway enforces its own `isAuthorizedGatewayRequest` auth on top (`apps/desktop/src/server/router.ts`). **Do NOT remove the proxy guard** (arbitrary command execution risk). **Do NOT reimplement gateway operations in `apps/app` or `apps/api`** — they require local filesystem access and live exclusively in `apps/desktop/src/server/operations/`.
+
+### Logging (IMPORTANT)
+Levels: error = needs attention (abort, 5xx, lost work); warn = degraded or recoverable; info = lifecycle/business outcomes; debug = expected control flow and hot-path success. Every warn/error carries `reason` (snake_case), the ids in scope and `error` (the caught value). No silent catch: log, rethrow, return an error value, or `// observability: <why>` as the first line of the body. Outcome rule: O1 `request_completed` is the one outcome line of every API route; O2 background operations in a span use the span as outcome and log every non-ok outcome with `reason`; O3 each lifecycle transition emits one `<entity>.<transition>` info line; O4 hot paths log success at debug. Enforced by `pnpm lint` (`scripts/observability/catch-audit.mjs`). Details: `packages/observability/README.md`.
+
+### Observability (IMPORTANT)
+New service operations use `withSpan` from `@repo/observability/span` with `AfAttribute` ids (`@repo/observability/af-attributes`); failures that are caught or returned as values call `setSpanOutcome(AfOutcome.Error, reason)`; see packages/observability/README.md. SigNoz runs by default in the prod compose and behind the `observability` profile in dev (`docker compose --profile observability up -d`), and `signoz-init` provisions its admin, dashboards and alerts; see `docs/self-hosting.md`.
 
 ### System Health Check
 A pre-loop gate, not a launch-time check: `PreLoopSystemCheckProvider` (`apps/app/lib/system-check/pre-loop-system-check-provider.tsx`, mounted in the authenticated layout `apps/app/app/(authenticated)/layout.tsx`) checks the selected or requested compute target's health before Generate/Execute dispatches a loop; callers use `usePreLoopSystemCheckGate()`. The request is `/api/gateway/health-check`, routed like any gateway request (localhost, or `/api/gateway-relay/*` to a remote compute target, which also stores the result as the target's health-check snapshot via `PUT /compute-targets/{id}/health-check`). The gateway's health check (`apps/desktop/src/server/operations/health-check*.ts`) resolves tools such as `python3`, `git`, `claude`, `gh` through the login-shell helpers in `apps/desktop/src/server/shell-path.ts`.
@@ -109,6 +115,7 @@ AgentFlow: human-governed, AI-centric software delivery platform. AI produces ar
 ## Learned Patterns
 
 ### Planning & Verification
+- **[convention]**: Service operations get a `withSpan` span named `<domain>.<operation>` with `AfAttribute` ids only; caught or returned failures call `setSpanOutcome(AfOutcome.Error, reason)` so the journey shows why.
 - **[mistake]**: New document types — check existing support in: useDocumentUIState type union, isNavigableDocument, getDocumentRoute switch, DOCUMENT_SECTIONS. Mark existing as verification, not implementation.
 - **[convention]**: Check `plan.json` architectureDecisions before implementing entity types or schema changes.
 - **[mistake]**: Check investigation-log.md for already-imported components before writing import tasks. Mark as verification when already present.
@@ -137,6 +144,7 @@ AgentFlow: human-governed, AI-centric software delivery platform. AI produces ar
 - **[insight]**: @repo/* imports are internal monorepo dependencies, not cross-repo needs.
 - **[insight]**: `@repo/observability/log` exports `console` directly, no `server-only` — safe in client components.
 - **[pattern]**: Shared mappings for both server packages and frontend → `packages/api/src/types/` (server packages can't import from `apps/app/lib/`).
+- **[pattern]**: The task file viewer (@file-viewer/*, preset-office + preset-lite, pinned to one exact version with file-viewer-copy-assets) needs Worker/WASM/font assets at /file-viewer/: apps/app/scripts/copy-file-viewer-assets.mjs copies the office renderer groups into apps/app/public/file-viewer (gitignored) from the dev script and scripts/build.mjs; turbo app#build caches it. Never add *-full, preset-all, preset-engineering or the cad group (AGPL); never use @file-viewer/cli (it only delegates). Set the base with setDefaultFileViewerAssetBaseUrl — auto-detection picks /_next/.
 
 ## Harness: AgentFlow delivery
 

@@ -143,6 +143,7 @@ export async function requestSourceClassification(input: {
     });
     return null;
   } catch (error) {
+    // observability: the failure reason is passed to fallBack, which records it
     return await fallBack(
       input,
       `The run's computer could not be asked: ${parseError(error)}`
@@ -288,6 +289,7 @@ function readAnswer(text: string): z.infer<typeof decisionAnswerSchema> | null {
   try {
     value = JSON.parse(json);
   } catch {
+    // observability: malformed decision JSON is treated as no decision
     return null;
   }
   const parsed = decisionAnswerSchema.safeParse(value);

@@ -27,7 +27,7 @@ import type { Pool, PoolClient } from "pg";
  *
  * ## Why every warning line carries both `status` and `level`
  *
- * These lines reach Datadog as JSON on stderr. `status` is Datadog's reserved
+ * These lines reach SigNoz as JSON on stderr. `status` is the telemetry backend's reserved
  * severity attribute and `level` is not, so a line carrying only `level` is
  * indexed at whatever severity per-service level remapping happens to assign.
  * Both are stamped at the source instead (ISS-6341) — the same fix the shared
@@ -246,6 +246,7 @@ function recordAcquire(
 
     emit(entry, { metric: "db_pool_acquire_wait", value: waitedMs });
   } catch {
+    // observability: telemetry code itself — warnSinkThrewOnce reports it, no recursion
     warnSinkThrewOnce();
   }
 }
@@ -284,6 +285,7 @@ function finishCheckout(pool: Pool, client: PoolClient): void {
       value: heldMs,
     });
   } catch {
+    // observability: telemetry code itself — warnSinkThrewOnce reports it, no recursion
     warnSinkThrewOnce();
   }
 }
@@ -305,6 +307,7 @@ function maybeSampleGauges(counters: PoolCounters): void {
       value: counters.waitingCount,
     });
   } catch {
+    // observability: telemetry code itself — warnSinkThrewOnce reports it, no recursion
     warnSinkThrewOnce();
   }
 }
@@ -336,6 +339,7 @@ function emit(
   try {
     sink({ ...sample, ...counters });
   } catch {
+    // observability: telemetry code itself — warnSinkThrewOnce reports it, no recursion
     warnSinkThrewOnce();
   }
 }
@@ -393,7 +397,7 @@ function warnSinkThrewOnce(): void {
  *
  * The message embeds pg's verbatim `timeout exceeded when trying to connect`
  * because that literal — not the metric, which no rule reads — is what the
- * `af-api — pg pool-acquire timeouts` Datadog monitor alerts on. Emitting it
+ * `af-api — pg pool-acquire timeouts` SigNoz monitor alerts on. Emitting it
  * from every service that runs this pool is what makes the same monitored
  * signal reachable beyond af-api.
  *

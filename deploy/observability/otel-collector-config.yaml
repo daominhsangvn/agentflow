@@ -1,0 +1,161 @@
+# SigNoz OpenTelemetry collector config (authoritative: the collector runs
+# without the OpAMP --manager-config, so UI log pipelines are not used).
+#
+# Processors
+#   memory_limiter       drops data before the collector is OOM-killed.
+#   batch                groups telemetry into large ClickHouse inserts.
+#   signozspanmetrics/delta  RED metrics from spans; runs BEFORE tail sampling
+#                        so the metrics count every span, not only kept traces.
+#   transform/claude_code_severity  raises Claude Code api_error to ERROR and
+#                        failed tool_result to WARN.
+#   redaction            second redaction layer (the in-process
+#                        packages/observability/redact.ts is the first): blocks
+#                        sensitive attribute keys and secret/email-shaped
+#                        values. allow_all_keys keeps af.*, http.*, db.* keys.
+#   tail_sampling        keeps every error, 5xx and slow trace; samples the rest
+#                        at TAIL_SAMPLING_BASELINE_PERCENT.
+# Verified against signoz/signoz-otel-collector:v0.129.6: the config loads and
+# both redaction and tail_sampling run (smoke test: secrets in log bodies,
+# attributes and URL queries arrive in ClickHouse redacted).
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Collector self-metrics (otelcol_exporter_send_failed_*) for the exporter-failure alert.
+  prometheus/self:
+    config:
+      scrape_configs:
+        - job_name: otel-collector
+          scrape_interval: 60s
+          static_configs:
+            - targets: ["localhost:8888"]
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  batch:
+    send_batch_size: 10000
+    send_batch_max_size: 11000
+    timeout: 10s
+  signozspanmetrics/delta:
+    metrics_exporter: signozclickhousemetrics
+    metrics_flush_interval: 60s
+    latency_histogram_buckets: [100us, 1ms, 2ms, 6ms, 10ms, 50ms, 100ms, 250ms, 500ms, 1000ms, 1400ms, 2000ms, 5s, 10s, 20s, 40s, 60s]
+    dimensions_cache_size: 100000
+    aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
+    enable_exp_histogram: true
+    dimensions:
+      - name: service.namespace
+        default: default
+      - name: deployment.environment
+        default: default
+      - name: signoz.collector.id
+      - name: service.version
+      - name: host.name
+  # Claude Code emits api_error and tool_result events at INFO. Raise them so
+  # severity filters and alerts see failures (names arrive with or without a
+  # claude_code. prefix).
+  transform/claude_code_severity:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(severity_number, SEVERITY_NUMBER_ERROR) where resource.attributes["service.name"] == "af-claude-code" and (attributes["event.name"] == "api_error" or attributes["event.name"] == "claude_code.api_error")
+          - set(severity_text, "ERROR") where resource.attributes["service.name"] == "af-claude-code" and (attributes["event.name"] == "api_error" or attributes["event.name"] == "claude_code.api_error")
+          - set(severity_number, SEVERITY_NUMBER_WARN) where resource.attributes["service.name"] == "af-claude-code" and (attributes["event.name"] == "tool_result" or attributes["event.name"] == "claude_code.tool_result") and attributes["success"] == "false"
+          - set(severity_text, "WARN") where resource.attributes["service.name"] == "af-claude-code" and (attributes["event.name"] == "tool_result" or attributes["event.name"] == "claude_code.tool_result") and attributes["success"] == "false"
+  redaction:
+    allow_all_keys: true
+    blocked_key_patterns:
+      - '(?i).*(api[_-]?key|api[_-]?secret|api[_-]?token|access[_-]?key|secret[_-]?key|secret|password|passwd|passphrase|pwd|credential|authorization|cookie|email|access[_-]?token|refresh[_-]?token|session[_-]?token|id[_-]?token|auth[_-]?token|bearer[_-]?token|private[_-]?key).*'
+    blocked_values:
+      # Email addresses.
+      - '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+      # Signed-URL query parameters (Teams Workflows `sig=`); see tracing/url-redaction.ts.
+      - '(?i)[?&](sig|signature|code|access_token|refresh_token|id_token|token|key|api_key|apikey|client_secret|secret|password)=[^&\s]+'
+      # Copies of SECRET_VALUE_FAMILY_SOURCE (packages/loops-api/src/secret-value-pattern.ts).
+      - '(?i)bearer\s+[A-Za-z0-9._~+/-]{12,}=*'
+      - 'ya29\.[A-Za-z0-9._~+-]{10,}=*'
+      - '1//[A-Za-z0-9._~+-]{20,}=*'
+      - 'github_pat_[A-Za-z0-9_]{20,}'
+      - 'gh[opsu]_[A-Za-z0-9_]{20,}'
+      - 'glpat-[A-Za-z0-9_-]{20,}'
+      - 'npm_[A-Za-z0-9]{20,}'
+      - 're_[A-Za-z0-9]{10,}'
+      - 'sk-(?:proj-)?[A-Za-z0-9_-]{6,}'
+      - 'sk_(?:live|test)_[A-Za-z0-9]{6,}'
+      - 'xox[baprs]-[A-Za-z0-9-]{10,}'
+    summary: info
+  tail_sampling:
+    decision_wait: 30s
+    num_traces: 50000
+    expected_new_traces_per_sec: 100
+    decision_cache:
+      sampled_cache_size: 100000
+      non_sampled_cache_size: 100000
+    policies:
+      - name: keep-error-status
+        type: status_code
+        status_code:
+          status_codes:
+            - ERROR
+      - name: keep-server-errors
+        type: numeric_attribute
+        numeric_attribute:
+          key: http.response.status_code
+          min_value: 500
+          max_value: 599
+      - name: keep-slow
+        type: latency
+        latency:
+          threshold_ms: 2000
+      - name: baseline
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: ${env:TAIL_SAMPLING_BASELINE_PERCENT}
+
+exporters:
+  clickhousetraces:
+    datasource: tcp://clickhouse:9000/signoz_traces
+    use_new_schema: true
+    low_cardinal_exception_grouping: ${env:LOW_CARDINAL_EXCEPTION_GROUPING}
+  signozclickhousemetrics:
+    dsn: tcp://clickhouse:9000/signoz_metrics
+  clickhouselogsexporter:
+    dsn: tcp://clickhouse:9000/signoz_logs
+    timeout: 10s
+    use_new_schema: true
+  metadataexporter:
+    dsn: tcp://clickhouse:9000/signoz_metadata
+    timeout: 10s
+    cache:
+      provider: in_memory
+
+service:
+  telemetry:
+    logs:
+      encoding: json
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, signozspanmetrics/delta, redaction, tail_sampling, batch]
+      exporters: [clickhousetraces, metadataexporter]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, redaction, batch]
+      exporters: [signozclickhousemetrics, metadataexporter]
+    metrics/self:
+      receivers: [prometheus/self]
+      processors: [memory_limiter, batch]
+      exporters: [signozclickhousemetrics]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/claude_code_severity, redaction, batch]
+      exporters: [clickhouselogsexporter, metadataexporter]

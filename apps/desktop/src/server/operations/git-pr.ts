@@ -1,3 +1,4 @@
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import { resolveBinaryFromLoginShell } from "../shell-path.js";
 import { registerGitPrCreateRoute } from "./git-pr-create.js";
@@ -93,7 +94,11 @@ export function registerGitPrRoutes(
         return;
       }
       json(context, 200, { login });
-    } catch {
+    } catch (error) {
+      gatewayLog.error(LOG_TAG, "reading the GitHub user failed", {
+        reason: "github_user_lookup_failed",
+        error,
+      });
       json(context, 500, {
         error:
           "Failed to get GitHub user. Ensure gh is installed and authenticated.",
@@ -103,3 +108,5 @@ export function registerGitPrRoutes(
 
   registerRetiredGithubDataRoutes(dispatcher);
 }
+
+const LOG_TAG = "git-pr";

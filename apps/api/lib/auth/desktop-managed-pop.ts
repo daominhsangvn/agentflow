@@ -350,6 +350,7 @@ function safePathname(url: string): string {
   try {
     return new URL(url).pathname || "/";
   } catch {
+    // observability: parse fallback — the pathname is only a log label
     return "unavailable";
   }
 }

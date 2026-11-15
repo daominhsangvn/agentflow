@@ -20,6 +20,16 @@ import { keys } from "./keys";
  * RustFS reject.
  */
 
+/**
+ * Wraps each S3 command (the api registers a tracing span). SDK-free seam: this
+ * package has no telemetry dependency.
+ */
+export type StorageCommandObserver = <T>(
+  command: { name: string; bucket?: string },
+  run: () => Promise<T>
+) => Promise<T>;
+
+let storageCommandObserver: StorageCommandObserver | null = null;
 let internalClient: S3Client | null = null;
 let presignClient: S3Client | null = null;
 
@@ -50,6 +60,13 @@ export function coldStorageClassInput(): { StorageClass?: StorageClass } {
   return storageClass ? { StorageClass: storageClass as StorageClass } : {};
 }
 
+/** Sets (or clears) the observer; read at call time so existing clients are covered. */
+export function setStorageCommandObserver(
+  observer: StorageCommandObserver | null
+): void {
+  storageCommandObserver = observer;
+}
+
 /** Test-only: drop memoized clients so a test can change storage env vars. */
 export function resetStorageClientsForTests(): void {
   internalClient = null;
@@ -73,5 +90,23 @@ function createClient(endpoint: string | undefined): S3Client {
       secretAccessKey: config.S3_SECRET_ACCESS_KEY,
     };
   }
-  return new S3Client(clientConfig);
+  const client = new S3Client(clientConfig);
+  client.middlewareStack.add(
+    (next, context) => (args) => {
+      const observer = storageCommandObserver;
+      if (!observer) {
+        return next(args);
+      }
+      const input = args.input as { Bucket?: unknown } | undefined;
+      return observer(
+        {
+          name: context.commandName ?? "UnknownCommand",
+          bucket: typeof input?.Bucket === "string" ? input.Bucket : undefined,
+        },
+        () => next(args)
+      );
+    },
+    { step: "initialize", name: "afStorageTelemetry" }
+  );
+  return client;
 }

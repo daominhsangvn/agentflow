@@ -26,6 +26,7 @@ describe("RESERVED_ORG_SLUGS", () => {
       // the static route.
       "connect",
       "sso-callback",
+      "file-viewer",
       "_next",
     ];
     for (const slug of required) {

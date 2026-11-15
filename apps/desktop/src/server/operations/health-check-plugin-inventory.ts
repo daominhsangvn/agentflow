@@ -13,6 +13,7 @@
  */
 
 import { CheckSeverity } from "@agentflow-ai/loops-api/compute-target";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { BinaryResolveResult } from "../shell-path.js";
 import {
   getBundledPluginsRoot,
@@ -322,6 +323,7 @@ async function runPluginListInvocation(
     const { stdout } = await runtime.runCommand(claudePath, args, options);
     return describeInterpretedOutput(stdout, commandLabel);
   } catch (error) {
+    gatewayLog.debug(LOG_TAG, "plugin list command failed", { error });
     const detail = describeCommandFailure(error);
     return {
       status: "command_failed",
@@ -329,3 +331,5 @@ async function runPluginListInvocation(
     };
   }
 }
+
+const LOG_TAG = "health-check";

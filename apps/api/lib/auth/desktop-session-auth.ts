@@ -1,5 +1,6 @@
 import type { User } from "@repo/api/src/types/user";
 import { verifyDesktopAccessToken } from "@repo/auth/desktop-session-jwt";
+import { log } from "@repo/observability/log";
 import { organizationsService } from "@/app/organizations/service";
 import { usersService } from "@/app/users/service";
 
@@ -48,7 +49,10 @@ export async function resolveDesktopSessionContext(
   let claims: Awaited<ReturnType<typeof verifyDesktopAccessToken>>;
   try {
     claims = await verifyDesktopAccessToken(token);
-  } catch {
+  } catch (error) {
+    log.info("auth.desktop_session.token_rejected", {
+      reason: error instanceof Error ? error.name : "invalid_token",
+    });
     return null;
   }
 

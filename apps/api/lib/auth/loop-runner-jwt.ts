@@ -10,6 +10,7 @@ import {
   RUNNER_REQUEST_PINNABLE_STATUSES,
 } from "@/lib/loops/loop-statuses";
 import { errorResponse } from "@/lib/route-utils";
+import { annotateLoopRunnerSpan } from "./auth-span-attributes";
 
 export const JTI_MISMATCH_ERROR_CODE = "jti_mismatch";
 
@@ -93,6 +94,7 @@ export async function authenticateLoopRunnerRequest(
     );
   }
 
+  annotateLoopRunnerSpan(claims);
   return claims;
 }
 

@@ -251,6 +251,7 @@ function httpsCloneUrl(repository: BitbucketRepository): string | null {
     url.password = "";
     return url.toString();
   } catch {
+    // observability: (a) parse fallback — an invalid link is null
     return null;
   }
 }

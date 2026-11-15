@@ -1,3 +1,4 @@
+import { log } from "@repo/observability/log";
 import "server-only";
 
 import { analytics } from "@repo/analytics/server";
@@ -290,7 +291,11 @@ async function isBranchPrEnabled(userId: string): Promise<boolean> {
   }
   try {
     return (await analytics.isFeatureEnabled("branch-pr", userId)) === true;
-  } catch {
+  } catch (error) {
+    log.debug("branch_view.feature_flag_failed", {
+      reason: "feature_flag_lookup_failed",
+      error,
+    });
     return false;
   }
 }

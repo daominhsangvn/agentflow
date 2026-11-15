@@ -192,6 +192,7 @@ function decodeCursor(cursor: string): EventCursor | null {
       ? { receivedAt: new Date(parsed.data.r), id: parsed.data.i }
       : null;
   } catch {
+    // observability: (a) parse fallback — an invalid cursor is ignored
     return null;
   }
 }

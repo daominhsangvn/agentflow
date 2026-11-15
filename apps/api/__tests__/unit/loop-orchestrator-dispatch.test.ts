@@ -126,6 +126,10 @@ vi.mock("@/lib/loops/loop-commands", () => {
   };
 });
 
+vi.mock("@/lib/loops/loop-telemetry-ids", () => ({
+  resolveLoopTelemetryIds: vi.fn().mockResolvedValue({}),
+}));
+
 vi.mock("@/lib/loops/loop-ecs", () => ({
   runEcsTask: vi.fn().mockResolvedValue("ecs-task-arn"),
   stopLoopTask: vi.fn().mockResolvedValue(undefined),
@@ -492,7 +496,7 @@ describe("dropped dispatch logging (dispatchAndClassify ∘ launchLoop)", () => 
     // Alert-noise contract, not incidental logging: an offline desktop is a
     // common user state on the highest-traffic launch route. `launchLoop`
     // logged `loop.launch_failed` at error, rethrew, and `dispatchAndClassify`
-    // logged again — two Datadog errors per outage, the exact duplication
+    // logged again — two SigNoz errors per outage, the exact duplication
     // `dispatchFailureResponse` refuses to add a third of. The entry that
     // survives must be the classified one, carrying the raw error.
     const loop = buildLoop({

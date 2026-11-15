@@ -193,6 +193,7 @@ export class ProcessManager {
       });
       return { stdout, stderr, exitCode: 0 };
     } catch (error) {
+      // observability: a failed command is returned to the caller as its result (exit code, stderr)
       const execError = error as NodeJS.ErrnoException & {
         stdout?: string;
         stderr?: string;
@@ -247,6 +248,7 @@ export class ProcessManager {
       const parsed = JSON.parse(line) as { type?: string };
       return parsed.type === "result";
     } catch {
+      // observability: parse fallback — non-JSON output lines are not result events
       return false;
     }
   }

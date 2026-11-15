@@ -3,6 +3,7 @@
 import type { ComputeTarget } from "@repo/api/src/types/compute-target";
 import type {
   ProjectRunners,
+  UpdateProjectAgentContactsInput,
   UpdateProjectRunnersInput,
 } from "@repo/api/src/types/project-runners";
 // Cross-slice: same server-message toasts as the integrations mutations.
@@ -60,6 +61,30 @@ export function useAssignableComputers(enabled: boolean) {
     queryKey: projectRunnersKeys.computers,
     queryFn: () => apiClient.get<ComputeTarget[]>("/compute-targets"),
     enabled,
+  });
+}
+
+export const SAVE_PROJECT_AGENT_CONTACTS_ERROR_TITLE =
+  "Couldn't save the Agent's contacts";
+
+/** Replaces the contacts of one Agent of the project. */
+export function useSaveProjectAgentContacts(projectId: string) {
+  const queryClient = useQueryClient();
+  const apiClient = useApiClient();
+
+  return useMutation({
+    mutationFn: ({
+      computeTargetId,
+      contacts,
+    }: { computeTargetId: string } & UpdateProjectAgentContactsInput) =>
+      apiClient.put<ProjectRunners>(
+        `${runnersPath(projectId)}/${encodeURIComponent(computeTargetId)}/contacts`,
+        { contacts }
+      ),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(projectRunnersKeys.detail(projectId), saved);
+    },
+    ...mutationErrorOptions(SAVE_PROJECT_AGENT_CONTACTS_ERROR_TITLE),
   });
 }
 

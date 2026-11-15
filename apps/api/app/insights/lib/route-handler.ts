@@ -25,7 +25,7 @@ import { insightsQueryValidator } from "../validators";
  *
  * A section failure is logged under `insights.<section>_failed` with the
  * org/user/scope correlation the handler holds (FEA-3031) — `errorResponse`
- * logs only the prose message and the raw error, which leaves a Datadog
+ * logs only the prose message and the raw error, which leaves a SigNoz
  * operator with no way to pivot to the org or user that hit it.
  */
 export function createInsightsHandler<TResponse>(config: {

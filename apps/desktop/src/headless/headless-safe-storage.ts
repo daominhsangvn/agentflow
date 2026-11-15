@@ -54,7 +54,7 @@ function loadOrCreateKey(dataDir: string): Buffer {
       return existing;
     }
   } catch {
-    // First run: fall through and create the key.
+    // observability: probe — first run, the key is created below
   }
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const key = randomBytes(KEY_BYTES);

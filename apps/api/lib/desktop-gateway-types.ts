@@ -68,6 +68,8 @@ export type WireCommandPayload = {
   signature?: string;
   signaturePayload?: string;
   publicKeyFingerprint?: string;
+  traceparent?: string;
+  baggage?: string;
 };
 
 export type DesktopHelloNackPayload = {
@@ -85,6 +87,7 @@ export type DesktopCommandAckPayload = {
   commandId: string;
   accepted: boolean;
   reason?: string;
+  traceparent?: string;
 };
 
 export type DesktopCommandEventPayload = {
@@ -92,6 +95,7 @@ export type DesktopCommandEventPayload = {
   sequence: number;
   eventType: DesktopCommandEventType;
   data: JsonValue;
+  traceparent?: string;
 };
 
 export type DesktopGatewaySocketServer = {

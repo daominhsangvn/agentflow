@@ -53,6 +53,7 @@ export async function readAgentTypeFiles(
       }
     }
   } catch {
+    // observability: best effort — an unreadable agent-types directory leaves the list empty
     // Best effort
   }
 
@@ -108,6 +109,7 @@ export async function readPlanProgress(
       currentTaskId: firstPending?.id,
     };
   } catch {
+    // observability: a — parse fallback, the fallback is the handling
     return {};
   }
 }

@@ -1,3 +1,4 @@
+import { log } from "@repo/observability/log";
 import type { Redis } from "@repo/redis";
 import type { VerifiedApiKeyContext } from "./api-key-contract.js";
 
@@ -67,7 +68,13 @@ class RedisAuthCacheStore implements AuthCacheStore {
         grantedScopes: stored.grantedScopes,
         createdAt: stored.createdAt,
       };
-    } catch {
+    } catch (error) {
+      if (firstRedisFailure("get")) {
+        log.warn("mcp.auth_cache_redis_failed", {
+          reason: "redis_get_failed",
+          error,
+        });
+      }
       return null;
     }
   }
@@ -92,24 +99,42 @@ class RedisAuthCacheStore implements AuthCacheStore {
         "PX",
         ttlMs
       );
-    } catch {
+    } catch (error) {
       // Graceful degradation — Redis failure doesn't break session creation
+      if (firstRedisFailure("set")) {
+        log.warn("mcp.auth_cache_redis_failed", {
+          reason: "redis_set_failed",
+          error,
+        });
+      }
     }
   }
 
   async delete(sessionId: string): Promise<void> {
     try {
       await this.redis.del(`auth:${sessionId}`);
-    } catch {
+    } catch (error) {
       // Graceful degradation
+      if (firstRedisFailure("delete")) {
+        log.warn("mcp.auth_cache_redis_failed", {
+          reason: "redis_delete_failed",
+          error,
+        });
+      }
     }
   }
 
   async touch(sessionId: string, ttlMs: number): Promise<void> {
     try {
       await this.redis.pexpire(`auth:${sessionId}`, ttlMs);
-    } catch {
+    } catch (error) {
       // Fire-and-forget TTL refresh
+      if (firstRedisFailure("touch")) {
+        log.warn("mcp.auth_cache_redis_failed", {
+          reason: "redis_touch_failed",
+          error,
+        });
+      }
     }
   }
 
@@ -120,3 +145,13 @@ class RedisAuthCacheStore implements AuthCacheStore {
 
 export type { AuthCacheStore, AuthKeyCipher, SerializedMcpAuth, StoredMcpAuth };
 export { RedisAuthCacheStore };
+
+const warnedRedisOperations = new Set<string>();
+
+function firstRedisFailure(operation: string): boolean {
+  if (warnedRedisOperations.has(operation)) {
+    return false;
+  }
+  warnedRedisOperations.add(operation);
+  return true;
+}

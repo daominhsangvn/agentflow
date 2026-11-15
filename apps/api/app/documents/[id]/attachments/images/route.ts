@@ -92,6 +92,7 @@ async function parseInlineImageAttachmentBody(
     }
     return { body: parseResult.data, errorResponse: null };
   } catch {
+    // observability: invalid JSON body is answered 400, request_completed captures it
     return {
       body: null,
       errorResponse: badRequestResponse("Invalid JSON body"),

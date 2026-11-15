@@ -242,6 +242,7 @@ function safeReaddir(dir: string): string[] {
   try {
     return fs.readdirSync(dir);
   } catch {
+    // observability: probe — a missing directory is empty
     return [];
   }
 }

@@ -35,6 +35,7 @@ async function readResolveInlineImagesDiagnostics(
   try {
     return getResolveInlineImagesDiagnostics(await request.clone().json());
   } catch {
+    // observability: parse fallback — diagnostics are optional
     return {};
   }
 }

@@ -289,6 +289,7 @@ async function isExecutable(file: string): Promise<boolean> {
     await access(file, constants.X_OK);
     return true;
   } catch {
+    // observability: probe — a missing or non-executable binary is a normal state
     return false;
   }
 }
@@ -302,6 +303,7 @@ async function readState(
     );
     return parsed.success ? parsed.data : null;
   } catch {
+    // observability: parse fallback — a missing or invalid state file means no state
     return null;
   }
 }

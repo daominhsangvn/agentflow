@@ -92,6 +92,7 @@ export const apiKeyService = {
             return { valid: true };
           }
         } catch {
+          // observability: (a) parse fallback — an unreadable error body falls through to the default
           // JSON parse failed — fall through to default
         }
         return { valid: false, error: "API key is disabled or unauthorized" };

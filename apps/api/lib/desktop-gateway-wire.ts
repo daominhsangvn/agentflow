@@ -58,12 +58,14 @@ const commandAckPayloadSchema = z.object({
   commandId: z.string(),
   accepted: z.boolean(),
   reason: z.string().optional(),
+  traceparent: z.string().max(64).optional(),
 });
 const commandEventPayloadSchema = z.object({
   commandId: z.string(),
   sequence: z.number().int().min(1),
   eventType: desktopCommandEventTypeSchema,
   data: jsonValueSchema.optional(),
+  traceparent: z.string().max(64).optional(),
 });
 
 export function isTerminalEventData(data: JsonValue): boolean {
@@ -127,6 +129,7 @@ export function parseCommandEventPayload(
     sequence: event.sequence,
     eventType: event.eventType,
     data: event.data ?? null,
+    traceparent: event.traceparent,
   };
 }
 
@@ -184,6 +187,8 @@ export function toWireCommandFromStore(command: {
   requiresApproval?: boolean;
   approvalReason?: string;
   streaming?: boolean;
+  traceparent?: string;
+  baggage?: string;
   createdAt: string;
 }): WireCommandPayload {
   return {
@@ -200,6 +205,8 @@ export function toWireCommandFromStore(command: {
     requiresApproval: command.requiresApproval,
     approvalReason: command.approvalReason,
     streaming: command.streaming === true ? true : undefined,
+    traceparent: command.traceparent,
+    baggage: toWireBaggage(command.baggage),
   };
 }
 
@@ -207,6 +214,8 @@ export function toWireCommandFromRelayOperation(operation: {
   operationId: string;
   params: JsonValue;
   streaming?: boolean;
+  traceparent?: string;
+  baggage?: string;
 }): WireCommandPayload | null {
   const params = parseJsonObject(operation.params) ?? {};
   const request = parseJsonObject(params.request) ?? {};
@@ -259,6 +268,11 @@ export function toWireCommandFromRelayOperation(operation: {
       typeof params.publicKeyFingerprint === "string"
         ? params.publicKeyFingerprint
         : undefined,
+    traceparent:
+      typeof operation.traceparent === "string"
+        ? operation.traceparent
+        : undefined,
+    baggage: toWireBaggage(operation.baggage),
   };
 }
 
@@ -354,4 +368,12 @@ export function resolveOperationId(pathname: string): string | null {
   }
 
   return null;
+}
+
+const MAX_WIRE_BAGGAGE_LENGTH = 512;
+
+function toWireBaggage(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= MAX_WIRE_BAGGAGE_LENGTH
+    ? value
+    : undefined;
 }

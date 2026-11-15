@@ -1,0 +1,33 @@
+{
+  "alert": "AgentFlow: API telemetry silent",
+  "alertType": "TRACES_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "version": "v4",
+  "evalWindow": "5m0s",
+  "frequency": "1m0s",
+  "condition": {
+    "compositeQuery": {
+      "queryType": "clickhouse_sql",
+      "panelType": "graph",
+      "chQueries": {
+        "A": {
+          "name": "A",
+          "query": "SELECT toStartOfInterval(timestamp, INTERVAL 15 MINUTE) AS ts, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts",
+          "disabled": false
+        }
+      }
+    },
+    "op": "2",
+    "target": 1,
+    "matchType": "2",
+    "selectedQueryName": "A"
+  },
+  "labels": {
+    "severity": "critical"
+  },
+  "annotations": {
+    "summary": "No af-api spans in 15 minutes",
+    "description": "The API is down or its OTLP export is broken; check OTEL_EXPORTER_OTLP_ENDPOINT and the collector."
+  },
+  "preferredChannels": []
+}

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import type { ProcessManager } from "../process-manager.js";
 import { assertPathAllowed, DirectoryNotAllowedError } from "../security.js";
@@ -69,6 +70,10 @@ export function registerGitBranchesRoutes(
         branches,
       });
     } catch (error) {
+      gatewayLog.error(LOG_TAG, "listing git branches failed", {
+        reason: "git_branches_failed",
+        error,
+      });
       const message = error instanceof Error ? error.message : "Unknown error";
       json(context, 500, { error: message });
     }
@@ -229,3 +234,5 @@ async function runGit(
     timeoutMs: GIT_GATEWAY_EXEC_TIMEOUT_MS,
   });
 }
+
+const LOG_TAG = "git-branches";

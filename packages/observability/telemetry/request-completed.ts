@@ -29,7 +29,7 @@ export type RequestCompletedSpanInput = {
  * log call is ingested twice — once via the Vercel Log Drain (`source:vercel`)
  * and once via the agentless HTTP intake in `log.ts` (`source:nodejs`) — so a
  * second line cost two more billed events per request, measured at 500,580
- * events over three days on `af-api` alone. Nothing consumed it: Datadog's
+ * events over three days on `af-api` alone. Nothing consumed it: the telemetry backend's
  * phrase query `"request_completed"` does not match the token sequence in
  * `request_completed.contract`, so the `api.requests.*` log-based metrics and
  * the `af-api` log monitors all matched only the plain line.

@@ -54,6 +54,7 @@ export function registerLearningsRoutes(
       const content = await fs.readFile(filePath, "utf-8");
       json(context, 200, { patterns: parseToon(content) });
     } catch (error) {
+      gatewayLog.error(LOG_TAG, "read learnings failed", { error });
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
         json(context, 200, { patterns: [] });
@@ -196,6 +197,7 @@ export function registerLearningsRoutes(
         const content = await fs.readFile(statusPath, "utf-8");
         json(context, 200, JSON.parse(content));
       } catch {
+        // observability: a — parse fallback, the fallback is the handling
         json(context, 200, { status: "none" });
       }
     }
@@ -381,6 +383,7 @@ export function registerLearningsRoutes(
         const content = await fs.readFile(statusPath, "utf-8");
         json(context, 200, JSON.parse(content));
       } catch {
+        // observability: a — parse fallback, the fallback is the handling
         json(context, 200, { status: "none", count: 0 });
       }
     }
@@ -507,6 +510,7 @@ export function registerLearningsRoutes(
                 worktreeCount += 1;
               }
             } catch {
+              // observability: c — skip worktrees that cannot be read
               // Best-effort — skip worktrees we cannot read
             }
           }
@@ -514,6 +518,7 @@ export function registerLearningsRoutes(
 
         json(context, 200, { totalCount, worktreeCount });
       } catch (error) {
+        gatewayLog.error(LOG_TAG, "scan pending learnings failed", { error });
         const message =
           error instanceof Error ? error.message : "Unknown error";
         json(context, 500, {
@@ -543,6 +548,7 @@ export function registerLearningsRoutes(
         const content = await fs.readFile(statusPath, "utf-8");
         json(context, 200, JSON.parse(content));
       } catch {
+        // observability: a — parse fallback, the fallback is the handling
         json(context, 200, { status: "none" });
       }
     }
@@ -568,6 +574,7 @@ export function registerLearningsRoutes(
             return;
           }
         } catch {
+          // observability: a — corrupt status file, start a new batch
           // Corrupt status file — fall through and start a new batch
         }
       }
@@ -610,6 +617,7 @@ export function registerLearningsRoutes(
                 worktrees.push({ worktreeDir, claudeWorkDir, pendingCount });
               }
             } catch {
+              // observability: c — skip worktrees that cannot be read
               // Best-effort
             }
           }
@@ -699,6 +707,9 @@ export function registerLearningsRoutes(
             pid: child.pid,
           });
         } catch (err) {
+          gatewayLog.error(LOG_TAG, "spawn batch process failed", {
+            error: err,
+          });
           closeSync(logFd);
           const message = err instanceof Error ? err.message : "Unknown error";
           await fs.writeFile(
@@ -715,6 +726,7 @@ export function registerLearningsRoutes(
           });
         }
       } catch (error) {
+        gatewayLog.error(LOG_TAG, "start batch process failed", { error });
         const message =
           error instanceof Error ? error.message : "Unknown error";
         json(context, 500, {
@@ -788,3 +800,5 @@ async function triggerSuccessRateComputation(workDir: string): Promise<void> {
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
+
+const LOG_TAG = "learnings";

@@ -950,7 +950,7 @@ async function findArtifactForRoom(
       latestVersion: artifact.document?.latestVersion ?? null,
     };
   } catch {
-    // Non-artifact room format — expected, not an error
+    // observability: (a) parse fallback — a non-artifact room format is expected
     return null;
   }
 }

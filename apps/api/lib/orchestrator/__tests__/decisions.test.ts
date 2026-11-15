@@ -22,6 +22,11 @@ const mocks = vi.hoisted(() => ({
   decisions: [] as Row[],
   messages: [] as Row[],
   wakes: [] as Row[],
+  mailDecision: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock("@/lib/orchestrator/needs-person-mail", () => ({
+  mailDecisionRequested: mocks.mailDecision,
 }));
 
 vi.mock("@repo/database", () => {
@@ -78,6 +83,7 @@ vi.mock("@repo/database", () => {
 });
 
 beforeEach(() => {
+  mocks.mailDecision.mockClear();
   mocks.decisions = [];
   mocks.messages = [];
   mocks.wakes = [];
@@ -295,6 +301,13 @@ describe("decide", () => {
 });
 
 describe("requestDecision", () => {
+  it("notifies the Agent's contacts once, with the new id", async () => {
+    const id = await ask();
+
+    expect(mocks.mailDecision).toHaveBeenCalledTimes(1);
+    expect(mocks.mailDecision).toHaveBeenCalledWith({ decisionId: id });
+  });
+
   it("stores the draft", async () => {
     await ask(DRAFT);
 

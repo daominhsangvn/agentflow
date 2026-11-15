@@ -258,6 +258,11 @@ async function resolveInlineImagesForMcp(
         );
       } catch (error) {
         const reason = getInlineImageResolveFailureReason(error);
+        log.warn("mcp.get_document.inline_image_resolve_failed", {
+          reason: "inline_image_resolve_failed",
+          documentId,
+          error,
+        });
         skipped.push(
           ...chunk.map((attachmentId) => ({
             attachmentId,
@@ -311,6 +316,7 @@ function describeInlineImageUrl(rawUrl: string): string {
     const parsed = new URL(rawUrl);
     return `${parsed.origin}${parsed.pathname}`;
   } catch {
+    // observability: parse fallback — the placeholder is the handling
     return "<unparseable-url>";
   }
 }

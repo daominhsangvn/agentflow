@@ -207,6 +207,7 @@ async function probeAndCacheTargetCapability(
   try {
     await runTargetProbe(context.client, context.input.target);
   } catch (error) {
+    // observability: (b) probe — mapTargetProbeFailure maps the error and logs unavailable targets
     return await mapTargetProbeFailure(context, error);
   }
   await persistTargetVerdictBestEffort(

@@ -1,0 +1,236 @@
+{
+  "title": "AgentFlow — Loops",
+  "description": "Loop launch, dispatch, failure and status spans.",
+  "tags": ["agentflow"],
+  "version": "v4",
+  "variables": {},
+  "layout": [
+    {
+      "i": "90d753fa-87da-454c-a87e-25c9ade48d18",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "b12938a5-090b-4745-aae6-2d495a9c28b7",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "ed1d05ed-dfbd-4ca0-afe9-4fd8a1bf3438",
+      "x": 0,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "ec05eb19-1904-47ba-a656-dbe6c35ca5bb",
+      "x": 6,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "76c61b26-44e7-4dfd-abab-d04bcb655f2a",
+      "x": 0,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    }
+  ],
+  "widgets": [
+    {
+      "id": "90d753fa-87da-454c-a87e-25c9ade48d18",
+      "panelTypes": "graph",
+      "title": "loop.launch / loop.dispatch outcomes",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "3c0db87b-bb0a-4930-a74a-6bc9ecdd9890",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, concat(name, ':', attributes_string['af.outcome']) AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name IN ('loop.launch', 'loop.dispatch') AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "b12938a5-090b-4745-aae6-2d495a9c28b7",
+      "panelTypes": "graph",
+      "title": "loop.fail by kind",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "7b35dd80-3ff3-41fd-a266-d38f1bf8aa49",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.loop.fail_kind'] AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'loop.fail' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "ed1d05ed-dfbd-4ca0-afe9-4fd8a1bf3438",
+      "panelTypes": "graph",
+      "title": "loop.update_status by status",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "6423cd69-94c0-4a4a-aef2-abdb7c4e476a",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.loop.status'] AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'loop.update_status' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "ec05eb19-1904-47ba-a656-dbe6c35ca5bb",
+      "panelTypes": "graph",
+      "title": "loop.event by type",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "a2e7fa1a-dc0c-4631-a7f3-18316f9057ef",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.loop.event_type'] AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'loop.event' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "76c61b26-44e7-4dfd-abab-d04bcb655f2a",
+      "panelTypes": "graph",
+      "title": "dispatch target_offline",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "025bb82f-1a18-45bf-a969-fdef159985c5",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'loop.dispatch' AND attributes_string['af.error.reason'] LIKE '%target_offline%' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    }
+  ]
+}

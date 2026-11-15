@@ -4,7 +4,7 @@ import { projectAgentsError } from "../workflow-project-agents";
 const withAgents = (id: string, name: string, ids: string[]) => ({
   id,
   name,
-  settings: { runnerIds: ids },
+  agents: ids.map((computeTargetId) => ({ computeTargetId })),
 });
 const names = new Map([
   ["a1", "alpha"],
@@ -15,7 +15,7 @@ describe("projectAgentsError", () => {
   it("passes any Agent for a project without Agents", () => {
     expect(
       projectAgentsError({
-        projects: [{ id: "p", name: "P", settings: {} }],
+        projects: [{ id: "p", name: "P", agents: [] }],
         agents: [{ label: "The workflow's Agent", computeTargetId: "a1" }],
         agentNames: names,
       })
@@ -56,7 +56,7 @@ describe("projectAgentsError", () => {
   it("names a trigger project whose Agents exclude the Agent", () => {
     const error = projectAgentsError({
       projects: [
-        { id: "p1", name: "One", settings: {} },
+        { id: "p1", name: "One", agents: [] },
         withAgents("p2", "Two", ["a2"]),
       ],
       agents: [{ label: "The workflow's Agent", computeTargetId: "a1" }],

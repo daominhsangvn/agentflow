@@ -84,8 +84,6 @@ export default authMiddleware(
               env.NEXT_PUBLIC_API_URL!,
               "https://api.liveblocks.io",
               "wss://api.liveblocks.io",
-              "https://browser-intake-datadoghq.com",
-              "https://*.browser-intake-datadoghq.com",
               "https://*.posthog.com",
               // Include Google Analytics only when the measurement ID is
               // configured. Without it, browser extension injections and
@@ -102,7 +100,12 @@ export default authMiddleware(
                 : []),
               ...ELECTRON_HOSTNAMES,
             ],
-            "img-src": ["data:"],
+            // The self-hosted file viewer (task file preview) runs Workers and
+            // WASM from /file-viewer/ and renders blob: images/media.
+            "img-src": ["data:", "blob:"],
+            "media-src": ["blob:"],
+            "script-src": ["'unsafe-inline'", "'wasm-unsafe-eval'"],
+            "worker-src": ["blob:"],
           },
           reportTo: env.CSP_REPORT_URI,
         }
@@ -114,7 +117,7 @@ export const config = {
   matcher: [
     // Skip Next.js internals and all static files, unless found in search params
     // Do not use String.raw here! Next.js can't statically analyze String.raw, so this breaks the build.
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/((?!_next|file-viewer/|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     // Always run for API routes
     "/(api|trpc)(.*)",
   ],

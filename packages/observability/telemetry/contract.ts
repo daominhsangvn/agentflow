@@ -11,8 +11,6 @@ export const ReservedLoggerMetadataKey = {
   Level: "level",
   Status: "status",
   Service: "service",
-  Ddsource: "ddsource",
-  Ddtags: "ddtags",
   Timestamp: "timestamp",
 } as const;
 

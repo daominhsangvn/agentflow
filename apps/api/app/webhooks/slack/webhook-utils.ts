@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { log } from "@repo/observability/log";
 
 export const WHITESPACE_REGEX = /\s+/;
 
@@ -49,7 +50,8 @@ export function slackVerifyWebhookSignature(
     }
 
     return timingSafeEqual(expectedBuffer, actualBuffer);
-  } catch {
+  } catch (error) {
+    log.info("webhooks.slack.signature_compare_failed", { error });
     return false;
   }
 }

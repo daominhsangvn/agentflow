@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Tracing configuration (ISS-4659).
+// Telemetry configuration.
 //
 // Pure env resolution — deliberately free of any OpenTelemetry import so it can
 // be unit-tested, and read from, without pulling the Node SDK in. The SDK lives
@@ -12,146 +12,115 @@
 
 import { keys } from "../keys";
 
-/** Why tracing is inert. Surfaced in diagnostics so a silent no-op is explainable. */
-export const TracingDisabledReason = {
-  /** `DD_TRACING_DISABLED` was set truthy. */
+/** Why telemetry is inert. Surfaced in diagnostics so a silent no-op is explainable. */
+export const TelemetryDisabledReason = {
+  /** `OTEL_SDK_DISABLED` was set truthy. */
   ExplicitlyDisabled: "explicitly_disabled",
-  /** No `DD_API_KEY` — nothing to authenticate an export with. */
-  MissingApiKey: "missing_api_key",
-  /** No OTLP endpoint configured. See `resolveTracesEndpoint`. */
+  /** No `OTEL_EXPORTER_OTLP_ENDPOINT` — nowhere to export to. */
   MissingEndpoint: "missing_endpoint",
-  /** Not a deployed runtime, and tracing was not explicitly opted into. */
-  NotDeployed: "not_deployed",
   /** The SDK bootstrap threw. The process stays untraced rather than broken. */
   InitFailed: "init_failed",
 } as const;
-export type TracingDisabledReason =
-  (typeof TracingDisabledReason)[keyof typeof TracingDisabledReason];
+export type TelemetryDisabledReason =
+  (typeof TelemetryDisabledReason)[keyof typeof TelemetryDisabledReason];
 
-export type TracingConfig =
+export type TelemetryConfig =
   | {
       enabled: true;
       endpoint: string;
-      apiKey: string;
       service: string;
-      env: string;
-      sampleRate: number;
+      sampleRatio: number;
     }
-  | { enabled: false; reason: TracingDisabledReason };
+  | { enabled: false; reason: TelemetryDisabledReason };
 
-/**
- * Conservative default head-sampling rate. APM ingest is billed, and `af-api`
- * serves a high-volume desktop-sync surface, so the default deliberately
- * under-samples; raise it per environment via `DD_TRACE_SAMPLE_RATE`.
- */
-const DEFAULT_SAMPLE_RATE = 0.1;
-const MIN_SAMPLE_RATE = 0;
-const MAX_SAMPLE_RATE = 1;
+const DEFAULT_SAMPLE_RATIO = 1;
+const MIN_SAMPLE_RATIO = 0;
+const MAX_SAMPLE_RATIO = 1;
+const DEFAULT_SERVICE = "af-unknown";
+const SAMPLER_ALWAYS_OFF = "always_off";
 
 const TRUTHY_FLAG_VALUES = new Set(["1", "true"]);
+
+type OtelEnv = {
+  OTEL_EXPORTER_OTLP_ENDPOINT: string | undefined;
+  OTEL_SERVICE_NAME: string | undefined;
+  OTEL_TRACES_SAMPLER: string | undefined;
+  OTEL_TRACES_SAMPLER_ARG: string | undefined;
+  OTEL_SDK_DISABLED: string | undefined;
+};
 
 function readEnv(name: string): string | undefined {
   const value = process.env[name];
   return value !== undefined && value.length > 0 ? value : undefined;
 }
 
-/** Datadog identity, resolved the same way the logger resolves it. */
-function loadDatadogIdentity(): {
-  apiKey: string | undefined;
-  service: string;
-  env: string;
-} {
+function loadOtelEnv(): OtelEnv {
   try {
     const env = keys();
     return {
-      apiKey: env.DD_API_KEY,
-      service: env.DD_SERVICE ?? "af-unknown",
-      env: env.DD_ENV ?? process.env.NODE_ENV ?? "development",
+      OTEL_EXPORTER_OTLP_ENDPOINT: env.OTEL_EXPORTER_OTLP_ENDPOINT,
+      OTEL_SERVICE_NAME: env.OTEL_SERVICE_NAME,
+      OTEL_TRACES_SAMPLER: env.OTEL_TRACES_SAMPLER,
+      OTEL_TRACES_SAMPLER_ARG: env.OTEL_TRACES_SAMPLER_ARG,
+      OTEL_SDK_DISABLED: env.OTEL_SDK_DISABLED,
     };
   } catch {
-    // keys() throws outside Next.js (standalone relay, container, test worker).
+    // keys() throws outside Next.js (standalone relay, container, test worker),
+    // and on a malformed value such as a non-URL endpoint.
     return {
-      apiKey: readEnv("DD_API_KEY"),
-      service: readEnv("DD_SERVICE") ?? "af-unknown",
-      env: readEnv("DD_ENV") ?? process.env.NODE_ENV ?? "development",
+      OTEL_EXPORTER_OTLP_ENDPOINT: readEnv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+      OTEL_SERVICE_NAME: readEnv("OTEL_SERVICE_NAME"),
+      OTEL_TRACES_SAMPLER: readEnv("OTEL_TRACES_SAMPLER"),
+      OTEL_TRACES_SAMPLER_ARG: readEnv("OTEL_TRACES_SAMPLER_ARG"),
+      OTEL_SDK_DISABLED: readEnv("OTEL_SDK_DISABLED"),
     };
   }
 }
 
 /**
- * The OTLP traces endpoint, e.g. `https://<datadog-otlp-intake>/v1/traces`.
- *
- * Intentionally has **no implicit default**. A wrong endpoint does not fail
- * loudly — it black-holes every span while the service looks instrumented — so
- * the host is explicit deployment configuration rather than something this code
- * guesses from `DD_SITE`. Unset means tracing stays off, which is the safe
- * direction.
- */
-export function resolveTracesEndpoint(): string | undefined {
-  return readEnv("DD_OTLP_TRACES_ENDPOINT");
-}
-
-/**
- * Head-sampling rate in [0, 1]. A malformed or out-of-range value falls back to
- * the default rather than disabling tracing or sampling everything: both of
- * those turn a typo into either blindness or an unbounded bill.
+ * Head-sampling ratio in [0, 1]. A malformed value falls back to the default
+ * (sample everything) and out-of-range values are clamped.
  *
  * Parsed with `Number`, not `Number.parseFloat`: `parseFloat` accepts a numeric
- * PREFIX, so `"1oops"` would parse as `1` and silently switch the service to
- * 100% sampling — the exact opposite of the documented malformed-value
- * fallback, and an expensive way to learn about a typo. `Number` rejects the
- * whole string.
+ * PREFIX, so `"1oops"` would parse as `1`. `Number` rejects the whole string,
+ * which keeps a typo on the documented fallback path instead of silently
+ * passing as a valid value.
  */
-export function resolveSampleRate(): number {
-  const raw = readEnv("DD_TRACE_SAMPLE_RATE");
+export function resolveSampleRatio(): number {
+  const env = loadOtelEnv();
+  if (env.OTEL_TRACES_SAMPLER === SAMPLER_ALWAYS_OFF) {
+    return MIN_SAMPLE_RATIO;
+  }
+  const raw = env.OTEL_TRACES_SAMPLER_ARG;
   if (raw === undefined) {
-    return DEFAULT_SAMPLE_RATE;
+    return DEFAULT_SAMPLE_RATIO;
   }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
-    return DEFAULT_SAMPLE_RATE;
+    return DEFAULT_SAMPLE_RATIO;
   }
-  return Math.min(MAX_SAMPLE_RATE, Math.max(MIN_SAMPLE_RATE, parsed));
+  return Math.min(MAX_SAMPLE_RATIO, Math.max(MIN_SAMPLE_RATIO, parsed));
 }
 
 /**
- * Whether this runtime should trace at all.
- *
- * Defaults **off** outside a deployed runtime. `DD_API_KEY` is dual-purpose —
- * CI sets it on every instrumented test lane to feed dd-trace's Test
- * Optimization reporter (see the note at the top of log.ts) — so keying purely
- * off its presence would turn every CI worker into a span exporter. `VERCEL`
- * is the same deployed-runtime signal `resolveStructuredConsole()` already
- * uses. `DD_TRACING_ENABLED=1` opts a non-Vercel runtime in deliberately.
+ * Whether this runtime should export telemetry. `OTEL_EXPORTER_OTLP_ENDPOINT`
+ * is the on/off switch: unset means off, which is the safe direction.
  */
-export function resolveTracingConfig(): TracingConfig {
-  if (TRUTHY_FLAG_VALUES.has(process.env.DD_TRACING_DISABLED ?? "")) {
-    return { enabled: false, reason: TracingDisabledReason.ExplicitlyDisabled };
+export function resolveTelemetryConfig(): TelemetryConfig {
+  const env = loadOtelEnv();
+  if (TRUTHY_FLAG_VALUES.has((env.OTEL_SDK_DISABLED ?? "").toLowerCase())) {
+    return {
+      enabled: false,
+      reason: TelemetryDisabledReason.ExplicitlyDisabled,
+    };
   }
-
-  const deployed =
-    Boolean(process.env.VERCEL) ||
-    TRUTHY_FLAG_VALUES.has(process.env.DD_TRACING_ENABLED ?? "");
-  if (!deployed) {
-    return { enabled: false, reason: TracingDisabledReason.NotDeployed };
+  if (!env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+    return { enabled: false, reason: TelemetryDisabledReason.MissingEndpoint };
   }
-
-  const identity = loadDatadogIdentity();
-  if (!identity.apiKey) {
-    return { enabled: false, reason: TracingDisabledReason.MissingApiKey };
-  }
-
-  const endpoint = resolveTracesEndpoint();
-  if (!endpoint) {
-    return { enabled: false, reason: TracingDisabledReason.MissingEndpoint };
-  }
-
   return {
     enabled: true,
-    endpoint,
-    apiKey: identity.apiKey,
-    service: identity.service,
-    env: identity.env,
-    sampleRate: resolveSampleRate(),
+    endpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    service: env.OTEL_SERVICE_NAME ?? DEFAULT_SERVICE,
+    sampleRatio: resolveSampleRatio(),
   };
 }

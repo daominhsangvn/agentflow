@@ -125,6 +125,7 @@ async function readAgentFlowModelProvider(
   try {
     return await lookup();
   } catch {
+    // observability: b — probe, absence is a normal state
     return null;
   }
 }

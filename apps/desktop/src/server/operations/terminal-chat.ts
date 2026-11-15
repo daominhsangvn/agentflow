@@ -215,7 +215,7 @@ async function streamClaude(
               response.write(`${msg}\n`)
             );
           } catch {
-            // Ignore malformed JSON lines from CLI output.
+            // observability: parse fallback — malformed CLI output lines are ignored (per line)
           }
         },
         onError: (error) => {
@@ -309,6 +309,7 @@ async function streamCodex(
             const parsed = JSON.parse(line) as { type?: string };
             return parsed.type === "done";
           } catch {
+            // observability: parse fallback — a non-JSON line is not the result event (per line)
             return false;
           }
         },
@@ -360,7 +361,7 @@ async function resolveTerminalWorkingDirectory(
         return candidate;
       }
     } catch {
-      // Ignore missing/inaccessible candidates.
+      // observability: probe — missing or inaccessible candidates are skipped
     }
   }
   return null;
@@ -382,6 +383,7 @@ function extractCodexText(line: string): string {
     }
     return "";
   } catch {
+    // observability: parse fallback — a non-JSON line is used as text (per line)
     return line;
   }
 }

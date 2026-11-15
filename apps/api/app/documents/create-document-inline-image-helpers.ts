@@ -6,6 +6,7 @@ import {
 } from "@repo/api/src/types/document";
 import type { CreatedDocumentVersionInlineImage } from "@repo/api/src/types/document-version";
 import { withDb } from "@repo/database";
+import { log } from "@repo/observability/log";
 import { cleanupCreatedInlineImages } from "./document-inline-image-helpers";
 import { sanitizeAndLog } from "./sanitize-content";
 
@@ -76,7 +77,11 @@ export async function updateInitialDocumentVersionContent(
       });
       return updated.count === 1 ? sanitizedContent : null;
     });
-  } catch {
+  } catch (error) {
+    log.warn("documents.inline_image_content_update_failed", {
+      error,
+      documentId,
+    });
     return null;
   }
 }

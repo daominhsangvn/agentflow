@@ -1,13 +1,7 @@
 import type { ApiResult, JsonObject } from "@repo/api/src/types/common";
 import { failure, success } from "@repo/api/src/types/common";
 import { log } from "@repo/observability/log";
-import { buildRequestCompletedContractAttributes } from "@repo/observability/telemetry/request-completed";
-// `tracing/hooks` deliberately, NOT `tracing/provider`: this module is imported
-// by ~40 routes, and importing the provider would make the OpenTelemetry Node
-// SDK statically reachable from all of them — breaking the first route that
-// ever opts into the edge runtime.
-import { flushSpans, isTracingActive } from "@repo/observability/tracing/hooks";
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import type { z } from "zod";
 import { waitUntil } from "@/lib/wait-until";
 
@@ -66,6 +60,10 @@ export type ParseBodyOptions = {
 
 export type CappedRequestTextResult =
   | { ok: true; value: string }
+  | { ok: false };
+
+export type CappedRequestBytesResult =
+  | { ok: true; value: Uint8Array }
   | { ok: false };
 
 /**
@@ -158,6 +156,43 @@ export async function readCappedRequestText(
     }
     chunks.push(decoder.decode(value, { stream: true }));
   }
+}
+
+/**
+ * Read a request body as bytes while enforcing a streaming byte limit.
+ */
+export async function readCappedRequestBytes(
+  request: Request,
+  maxBytes: number
+): Promise<CappedRequestBytesResult> {
+  const reader = request.body?.getReader();
+  if (!reader) {
+    return { ok: true, value: new Uint8Array(0) };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let bytesRead = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    bytesRead += value.byteLength;
+    if (bytesRead > maxBytes) {
+      await reader.cancel();
+      return { ok: false };
+    }
+    chunks.push(value);
+  }
+
+  const result = new Uint8Array(bytesRead);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, value: result };
 }
 
 /**
@@ -340,117 +375,22 @@ export function formatZodErrors(issues: z.core.$ZodIssue[]): string {
     .join(", ");
 }
 
+/**
+ * Kept for the ~70 call sites. The long-lived server exports logs and spans on
+ * the batch processors' own schedule, so there is nothing to flush per request.
+ */
 export function scheduleLogFlush(): void {
-  waitUntil(log.flush().catch(() => {}));
-  scheduleSpanFlush();
+  // Intentionally empty.
 }
 
 export function scheduleLogFlushAfter(promise: Promise<unknown>): void {
-  waitUntil(promise.finally(() => log.flush().catch(() => {})));
-  // The supplied promise is chained into the span flush too. Callers use this
-  // form precisely because work is still running past the response (launchLoop,
-  // the heartbeat drains) — and that work produces spans. Flushing without
-  // waiting for it would export the buffer as it stands and let the deferred
-  // work's spans freeze with the function.
-  scheduleSpanFlush(promise);
-}
-
-/**
- * ISS-4659: flush buffered spans before the serverless function freezes. The
- * tracer batches spans, so without this the request's trace is dropped on
- * Vercel exactly as an unflushed log line would be.
- *
- * Two details are load-bearing:
- *
- * 1. **`after()`, not `waitUntil()`.** Next closes the route's own span *after*
- *    the handler promise resolves, but `logRequestCompleted` runs inside the
- *    auth wrapper's `finally` — i.e. while that span is still open. A
- *    `waitUntil(flushSpans())` would start the export immediately and miss the
- *    root span. `after()` runs past the response, once the span has ended.
- * 2. **Attached to every log-flush site, not just the request-completed one.**
- *    Routes that bypass the auth wrappers — `/health`, the GitHub webhook, the
- *    cron drains — never call `logRequestCompleted`, so hanging the span flush
- *    there alone would silently drop their traces. A `forceFlush()` on an
- *    already-drained buffer is a cheap no-op, so covering every terminal flush
- *    site costs far less than the spans it saves.
- * 3. **`pending` is awaited before flushing.** `scheduleLogFlushAfter` passes
- *    the caller's still-running work; that work emits spans of its own, so
- *    flushing ahead of it would export the buffer as it stands and lose them.
- *    A rejection is swallowed — the flush must happen either way.
- */
-function scheduleSpanFlush(pending?: Promise<unknown>): void {
-  // Schedule nothing when no tracer is installed — every local run, every CI
-  // worker, and any deploy with the kill switch set. `flushSpans()` would be a
-  // no-op anyway, but scheduling it still consumes a `waitUntil` slot, and
-  // route tests legitimately assert on how much deferred work a request
-  // schedules (with-api-key-auth and branch-artifact-flows both pin the count).
-  if (!isTracingActive()) {
-    return;
-  }
-  const flush = pending
-    ? () => pending.catch(() => undefined).then(() => flushSpans())
-    : () => flushSpans();
-  try {
-    after(flush);
-  } catch {
-    // `after()` throws outside a request scope (unit tests, module init, the
-    // containerized custom-server path). There is no route span to wait on in
-    // that case, so flushing immediately is both safe and correct.
-    waitUntil(flush());
-  }
-}
-
-/**
- * Emit a single `request_completed` log line for the given request/response
- * pair. Field names are the snake_case attributes the Datadog log-based
- * generators (api.requests.count, api.errors.count, api.requests.latency)
- * group on. `scheduleLogFlush()` is invoked so the log — and, via
- * `scheduleSpanFlush()`, the request's buffered spans — reach Datadog before
- * the serverless function freezes.
- *
- * ISS-5039: "a single log line" is now literal. The OTel-named contract
- * attributes ride along on this same line instead of a second
- * `request_completed.contract` line, because every deployed log call is
- * already billed twice — once through the Vercel Log Drain (`source:vercel`)
- * and once through the agentless intake (`source:nodejs`) — so a second line
- * cost two more billed events per request for values this line already
- * carried, and nothing queried it by name.
- *
- * The snake_case fields are spread AFTER the contract attributes so the keys
- * the metrics and monitors group on always win a collision. `duration_ms` is
- * the only overlap and both sides carry the same value.
- *
- * The `dd.trace_id`/`dd.span_id` correlation fields are NOT set here: the
- * logger stamps them onto every entry from the active span (ISS-4659).
- *
- * Call this from a `finally` block in the auth wrappers so it fires whether
- * the handler returned normally or threw.
- */
-export function logRequestCompleted(
-  request: Request,
-  startMs: number,
-  statusCode: number
-): void {
-  const durationMs = Math.round(globalThis.performance.now() - startMs);
-  log.info("request_completed", {
-    ...buildRequestCompletedContractAttributes({
-      requestUrl: request.url,
-      method: request.method,
-      statusCode,
-      durationMs,
-    }),
-    path: new URL(request.url).pathname,
-    method: request.method,
-    status_code: statusCode,
-    duration_ms: durationMs,
-  });
-  scheduleLogFlush();
+  waitUntil(promise);
 }
 
 /**
  * Emit the correlated ingest-failure log line shared by the loop event-ingest
  * routes (`/loops/[id]/events` and `/loops/[id]/manual-events`). Both stitch
- * the failure to its loop/org in Datadog with the same field shape; centralizing
+ * the failure to its loop/org in SigNoz with the same field shape; centralizing
  * it here keeps that shape defined once. `eventName` is the route-specific
  * metric name (e.g. `loop.event_ingest_failed`, `loop.manual_event_ingest_failed`).
  */

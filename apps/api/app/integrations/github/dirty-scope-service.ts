@@ -232,6 +232,10 @@ async function dispatchDueGitHubDirtyScopeNudges({
         dispatched += 1;
         pageProgress += 1;
       } catch (error) {
+        log.warn("github.dirty_scope_dispatch_failed", {
+          reason: "dispatch_failed",
+          error,
+        });
         await releaseDirtyScopeClaim(row, error);
       }
     }

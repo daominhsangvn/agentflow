@@ -1,10 +1,12 @@
 import { LoopStatus } from "@repo/api/src/types/loop";
-import {
-  readPersonalAgentProjectKey,
-  readProjectRunnerIds,
-} from "@repo/api/src/types/project-runners";
+import { readPersonalAgentProjectKey } from "@repo/api/src/types/project-runners";
 import { withDb } from "@repo/database";
 import { z } from "zod";
+import {
+  type ProjectAgentIdsRow,
+  projectAgentIds,
+  projectAgentIdsSelect,
+} from "./project-agent-ids";
 
 /**
  * Which of a project's runners (Project → Repositories → Runners) a new loop
@@ -71,7 +73,7 @@ export async function chooseProjectRunner(
 ): Promise<ProjectRunnerChoice> {
   const { organizationId, userId } = input;
   const project = await readProject(organizationId, input);
-  const runnerIds = readProjectRunnerIds(project?.settings);
+  const runnerIds = projectAgentIds(project);
   if (runnerIds.length === 0) {
     return { kind: ProjectRunnerChoiceKind.None };
   }
@@ -183,24 +185,26 @@ export function capacityOf(capabilities: unknown): number {
   return parsed.success ? parsed.data.maxInFlightCommands : 1;
 }
 
-/** The project in scope: its name and settings (they list its Agents). */
+/** The project in scope: its name and Agents (project_agents). */
 async function readProject(
   organizationId: string,
   scope: ProjectRunnerScope
-): Promise<{ name: string; settings: unknown } | null> {
+): Promise<({ name: string } & ProjectAgentIdsRow) | null> {
   const { projectId } = scope;
   if (projectId !== undefined) {
     return await withDb((db) =>
       db.project.findFirst({
         where: { id: projectId, organizationId },
-        select: { name: true, settings: true },
+        select: { name: true, ...projectAgentIdsSelect },
       })
     );
   }
   const document = await withDb((db) =>
     db.artifact.findFirst({
       where: { id: scope.documentId, organizationId },
-      select: { project: { select: { name: true, settings: true } } },
+      select: {
+        project: { select: { name: true, ...projectAgentIdsSelect } },
+      },
     })
   );
   return document?.project ?? null;
@@ -225,7 +229,7 @@ async function readNamedAgent(
 }
 
 /**
- * Ids of the Agents of the project in scope (settings.runnerIds); empty when
+ * Ids of the Agents of the project in scope (project_agents); empty when
  * the project has none.
  */
 export async function loadProjectRunnerIds(
@@ -233,7 +237,7 @@ export async function loadProjectRunnerIds(
   scope: ProjectRunnerScope
 ): Promise<string[]> {
   const project = await readProject(organizationId, scope);
-  return readProjectRunnerIds(project?.settings);
+  return projectAgentIds(project);
 }
 
 function personalOfflineMessage(name: string): string {

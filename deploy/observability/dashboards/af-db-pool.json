@@ -1,0 +1,326 @@
+{
+  "title": "AgentFlow — DB pool",
+  "description": "Postgres pool gauges and query latency.",
+  "tags": ["agentflow"],
+  "version": "v4",
+  "variables": {},
+  "layout": [
+    {
+      "i": "7cc75886-a6e0-4aa5-a842-cf06d00a1258",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "bd3f2c0f-11b3-46c3-aad9-d7480a15cff6",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "46a6f688-8cb0-446d-a3d6-a4816280ca86",
+      "x": 0,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "70e88171-3bb5-4694-a5e5-c4c7e121f795",
+      "x": 6,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "5826fb8a-8fe0-4283-ac51-7a00b2a0a6d1",
+      "x": 0,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "8eaf7267-dafe-473a-a3de-bc42613b15f8",
+      "x": 6,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "648e5fa9-dd2f-4b07-aa7f-b10c15e20cfd",
+      "x": 0,
+      "y": 18,
+      "w": 6,
+      "h": 6
+    }
+  ],
+  "widgets": [
+    {
+      "id": "7cc75886-a6e0-4aa5-a842-cf06d00a1258",
+      "panelTypes": "graph",
+      "title": "Connections in use (max)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "376dd2de-393b-40bc-a88e-3fb6e915c6b8",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(toDateTime(intDiv(unix_milli, 1000)), INTERVAL 1 MINUTE) AS ts, max(value) AS value FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'db_pool_in_use' AND unix_milli >= {{.start_timestamp_ms}} AND unix_milli < {{.end_timestamp_ms}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "bd3f2c0f-11b3-46c3-aad9-d7480a15cff6",
+      "panelTypes": "graph",
+      "title": "Connections idle (max)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "447478a3-ef09-40b5-a6ba-0f0c942d4187",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(toDateTime(intDiv(unix_milli, 1000)), INTERVAL 1 MINUTE) AS ts, max(value) AS value FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'db_pool_idle' AND unix_milli >= {{.start_timestamp_ms}} AND unix_milli < {{.end_timestamp_ms}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "46a6f688-8cb0-446d-a3d6-a4816280ca86",
+      "panelTypes": "graph",
+      "title": "Connections total (max)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "b5a9c150-a6ee-48c3-a086-bb39ff312446",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(toDateTime(intDiv(unix_milli, 1000)), INTERVAL 1 MINUTE) AS ts, max(value) AS value FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'db_pool_total' AND unix_milli >= {{.start_timestamp_ms}} AND unix_milli < {{.end_timestamp_ms}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "70e88171-3bb5-4694-a5e5-c4c7e121f795",
+      "panelTypes": "graph",
+      "title": "Wait queue depth (max)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "b83d86cc-d5c8-4511-a8d4-ed0bb3acf78c",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(toDateTime(intDiv(unix_milli, 1000)), INTERVAL 1 MINUTE) AS ts, max(value) AS value FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'db_pool_wait_queue_depth' AND unix_milli >= {{.start_timestamp_ms}} AND unix_milli < {{.end_timestamp_ms}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "5826fb8a-8fe0-4283-ac51-7a00b2a0a6d1",
+      "panelTypes": "graph",
+      "title": "Acquire timeouts (sum)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "f9e8590a-3ebb-43db-ab0b-7367b8e4df67",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(toDateTime(intDiv(unix_milli, 1000)), INTERVAL 1 MINUTE) AS ts, sum(value) AS value FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'db_pool_acquire_timeout' AND unix_milli >= {{.start_timestamp_ms}} AND unix_milli < {{.end_timestamp_ms}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "8eaf7267-dafe-473a-a3de-bc42613b15f8",
+      "panelTypes": "graph",
+      "title": "Acquire wait (p95 ms)",
+      "description": "Average of the recorded wait samples.",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "ms",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "ce50ea6c-87e7-480a-aa16-02f340d5c930",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(toDateTime(intDiv(unix_milli, 1000)), INTERVAL 1 MINUTE) AS ts, quantile(0.95)(value) AS value FROM signoz_metrics.distributed_samples_v4 WHERE metric_name = 'db_pool_acquire_wait' AND unix_milli >= {{.start_timestamp_ms}} AND unix_milli < {{.end_timestamp_ms}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "648e5fa9-dd2f-4b07-aa7f-b10c15e20cfd",
+      "panelTypes": "graph",
+      "title": "Postgres span p95 (ms)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "ms",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "0361412f-dec7-448b-a8dc-f54f7291e0f8",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, quantile(0.95)(duration_nano) / 1e6 AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE attributes_string['db.system'] = 'postgresql' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    }
+  ]
+}

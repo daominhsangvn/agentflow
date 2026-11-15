@@ -9,7 +9,6 @@ import {
 } from "@repo/api/src/types/orchestrator-grants";
 import type { ProjectProcess } from "@repo/api/src/types/project-process";
 import { ProcessStepType } from "@repo/api/src/types/project-process";
-import { readProjectRunnerIds } from "@repo/api/src/types/project-runners";
 import { Result } from "@repo/api/src/types/result";
 import {
   type SaveWorkflowInput,
@@ -32,6 +31,11 @@ import {
 import { withDb } from "@repo/database";
 import type { z } from "zod";
 import { computeTargetsService } from "@/app/compute-targets/service";
+import {
+  type ProjectAgentIdsRow,
+  projectAgentIds,
+  projectAgentIdsSelect,
+} from "@/app/projects/project-agent-ids";
 import { checkProcessToolkit } from "@/app/projects/project-process-service";
 import { listProjectRepositoryCheckouts } from "@/app/projects/project-repository-checkouts";
 import {
@@ -322,7 +326,7 @@ async function checkScope(
     withDb((db) =>
       db.project.findMany({
         where: { id: { in: [...projectIds] }, organizationId },
-        select: { id: true, name: true, settings: true },
+        select: { id: true, name: true, ...projectAgentIdsSelect },
       })
     ),
     withDb((db) =>
@@ -344,7 +348,7 @@ async function checkScope(
   return { error: null, projects };
 }
 
-type ScopeProject = { id: string; name: string; settings: unknown };
+type ScopeProject = { id: string; name: string } & ProjectAgentIdsRow;
 
 /**
  * The default Agent and every rule's Agent must be Agents of each project
@@ -355,7 +359,7 @@ async function checkProjectAgents(
   input: SaveWorkflowInput,
   projects: ScopeProject[]
 ): Promise<string | null> {
-  if (!projects.some((p) => readProjectRunnerIds(p.settings).length > 0)) {
+  if (!projects.some((p) => projectAgentIds(p).length > 0)) {
     return null;
   }
   const agents = workflowAgentRefs(input);

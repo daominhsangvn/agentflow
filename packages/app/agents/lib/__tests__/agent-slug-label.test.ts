@@ -52,7 +52,7 @@ describe("agentBreadcrumbLabel (FEA-3977)", () => {
   // (a router hop double-encoded the segment), the crumb must decode it and
   // never leak `%3A%3A`/`%2F` into the UI.
   describe("percent-encoded slug (ISS-4776)", () => {
-    const ENCODED_SLUG = "command%3A%3A%2F%2Fcl-ci-babysit";
+    const ENCODED_SLUG = "command%3A%3A%2F%2Faf-ci-babysit";
 
     it("decodes the mangled slug and shows the identity key, no percent-encoding", () => {
       const label = agentBreadcrumbLabel(ENCODED_SLUG);
@@ -290,7 +290,7 @@ describe("normalizeAgentSlug (ISS-4776)", () => {
     // must resolve to the same literal `::`-bearing value the breadcrumb shows —
     // not stay `%3A%3A%2F%2F`-encoded (which the API lookup would miss, 404ing
     // the body under a crumb that already decoded).
-    expect(normalizeAgentSlug("command%3A%3A%2F%2Fcl-ci-babysit")).toBe(
+    expect(normalizeAgentSlug("command%3A%3A%2F%2Faf-ci-babysit")).toBe(
       "command:://af-ci-babysit"
     );
   });

@@ -69,11 +69,6 @@ coupled to) an `engineer/` tree into `@repo/app`.
   **but** consumed only by the web app's Desktop onboarding/provisioning flows,
   so there is nothing to share them with.
 
-### Deferred — portable, but each needs a deliberate decision (tackle last)
-
-- `lib/datadog-rum/*` — couples to `@/env` + `@/lib/environment`; needs an env
-  port/seam in `shared/` before it can move.
-
 ### Org-slug routing seam — a navigation port, NOT an auth-adapter gap
 
 The injected auth adapter (`shared/auth`) exposes only identity: `userId`,

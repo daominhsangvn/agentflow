@@ -22,6 +22,7 @@ function parsePayload(rawBody: string): DesktopSecurityUpgradePayload | null {
   try {
     value = JSON.parse(rawBody);
   } catch {
+    // observability: a — parse fallback, the fallback is the handling
     return null;
   }
   if (!isRecord(value)) {

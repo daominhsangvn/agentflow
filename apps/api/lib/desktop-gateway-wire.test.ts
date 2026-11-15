@@ -353,3 +353,21 @@ describe("toWireCommandFromRelayOperation — mapping", () => {
     expect(withoutStreaming?.streaming).toBeUndefined();
   });
 });
+
+describe("wire baggage", () => {
+  it("copies baggage from a relay operation within the length limit", () => {
+    const wire = toWireCommandFromRelayOperation({
+      ...relayOperation({ commandId: "c1", request: request() }),
+      baggage: "af.case_id=c1",
+    });
+    expect(wire?.baggage).toBe("af.case_id=c1");
+  });
+
+  it("drops oversized baggage", () => {
+    const wire = toWireCommandFromRelayOperation({
+      ...relayOperation({ commandId: "c1", request: request() }),
+      baggage: "a".repeat(513),
+    });
+    expect(wire?.baggage).toBeUndefined();
+  });
+});

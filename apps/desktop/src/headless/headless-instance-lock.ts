@@ -63,6 +63,7 @@ function readHolder(file: string): number | null {
     const text = fs.readFileSync(file, "utf8").trim();
     return PID_RE.test(text) ? Number(text) : null;
   } catch {
+    // observability: parse fallback — a missing or invalid lock file has no holder
     return null;
   }
 }
@@ -72,6 +73,7 @@ function isProcessRunning(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
+    // observability: kill probe result is the answer; EPERM means alive
     // EPERM: it runs under another account.
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }

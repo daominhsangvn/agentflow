@@ -5,6 +5,7 @@ import {
   GitGatewayErrorCategory,
   GitHookType,
 } from "@agentflow-ai/loops-api/friendly-error";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type {
   OperationDispatcher,
   OperationRequestContext,
@@ -128,9 +129,17 @@ export function registerGitActionRoutes(
       }
       if (error instanceof GitActionError) {
         const classified = classifyGitActionError(error);
+        gatewayLog.error(LOG_TAG, "git action failed", {
+          reason: "git_action_failed",
+          error,
+        });
         jsonError(context, 500, classified);
         return;
       }
+      gatewayLog.error(LOG_TAG, "git action failed", {
+        reason: "git_action_unexpected_error",
+        error,
+      });
       const messageText =
         error instanceof Error ? error.message : "Unknown error";
       jsonError(context, 500, { error: messageText });
@@ -768,3 +777,5 @@ function parseNameStatusLine(line: string): NameStatusEntry | null {
 function sanitizeBranchName(branchName: string): string {
   return branchName.replaceAll(BRANCH_NAME_DISALLOWED_REGEX, "-");
 }
+
+const LOG_TAG = "git-action";

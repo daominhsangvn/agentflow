@@ -166,6 +166,7 @@ function lexMarkdown(markdown: string): Token[] | null {
   try {
     return marked.lexer(markdown);
   } catch {
+    // observability: (a) parse fallback — plain paragraphs are the safety net
     return null;
   }
 }

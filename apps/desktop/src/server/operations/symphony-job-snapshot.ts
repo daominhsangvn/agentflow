@@ -11,6 +11,7 @@ import {
   type LocalJobStatus,
   type TaskProgress,
 } from "../../main/jobs/job-store.js";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type {
   ActivityJobSnapshot,
   AssertAssignable,
@@ -73,7 +74,12 @@ export async function readEffectiveStatusFromState(statePath: string): Promise<{
     }
 
     return { status, phase };
-  } catch {
+  } catch (error) {
+    gatewayLog.debug(
+      JOB_SNAPSHOT_TAG,
+      () => "state.json unreadable; no status from snapshot",
+      { reason: "state_file_unreadable", error }
+    );
     return { status: null, phase: null };
   }
 }
@@ -111,7 +117,12 @@ export async function readLogTail(
     const content = await readFile(logPath, "utf-8");
     const lines = content.split("\n");
     return lines.slice(-maxLines).join("\n");
-  } catch {
+  } catch (error) {
+    gatewayLog.debug(
+      JOB_SNAPSHOT_TAG,
+      () => "log tail unreadable; no output from snapshot",
+      { reason: "log_tail_unreadable", error }
+    );
     return null;
   }
 }
@@ -370,3 +381,5 @@ async function readStreamTailForSentinel(job: LocalJob): Promise<boolean> {
   }
   return false;
 }
+
+const JOB_SNAPSHOT_TAG = "symphony-job-snapshot";

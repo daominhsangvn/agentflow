@@ -230,7 +230,11 @@ function isTraceDetailProjectable(detail: AgentSessionDetail): boolean {
     return buildMergedTrace([toMergedTraceSessionInput(detail)]).every(
       (item) => mergedTraceItemSchema.safeParse(item).success
     );
-  } catch {
+  } catch (error) {
+    log.debug("branch_trace.projection_check_failed", {
+      reason: "trace_build_failed",
+      error,
+    });
     return false;
   }
 }

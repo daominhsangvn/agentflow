@@ -2,6 +2,7 @@ import {
   assertRunnerSecretConfigured,
   RUNNER_JWT_SECRET_ENV,
 } from "@repo/auth/runner-jwt-base";
+import type { Instrumentation } from "next";
 
 /** The only Next.js runtime that can host the API's Node instrumentation. */
 const NODE_RUNTIME = "nodejs";
@@ -18,5 +19,24 @@ export const register = async () => {
       "./instrumentation.node"
     );
     await registerNodeInstrumentation();
+  }
+};
+
+/** Reports errors Next.js caught outside any route wrapper. */
+export const onRequestError: Instrumentation.onRequestError = async (
+  error,
+  request,
+  context
+) => {
+  if (process.env.NEXT_RUNTIME !== NODE_RUNTIME) {
+    return;
+  }
+  try {
+    const { reportRequestError } = await import(
+      "./lib/observability/request-error"
+    );
+    reportRequestError(error, request, context);
+  } catch {
+    // observability: fail-open — error reporting must never affect the response
   }
 };

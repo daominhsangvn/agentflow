@@ -231,6 +231,7 @@ export function extractTextFromNdjsonLog(
         }
       }
     } catch {
+      // observability: parse fallback — a non-JSON line is kept as plain text (per line)
       const content = stripCodexNonUserDiagnostics(line);
       if (content) {
         parts.push(content);
@@ -258,7 +259,7 @@ function tryKillRunningReview(state: ReviewState): void {
     try {
       process.kill(state.pid, "SIGTERM");
     } catch {
-      // Process already dead.
+      // observability: best-effort cleanup — the process is already dead
     }
   }
 }
@@ -279,7 +280,7 @@ async function stopAndCleanProvider(
       ) as ReviewState;
       tryKillRunningReview(state);
     } catch {
-      // Ignore corrupted state.
+      // observability: best-effort cleanup — a corrupted state file is ignored
     }
   }
 
@@ -322,6 +323,10 @@ async function handleMarkCommented(
     json(context, 200, { success: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
+    gatewayLog.error(CODEX_TAG, "failed to update findings", {
+      reason: "findings_update_failed",
+      error,
+    });
     json(context, 500, { error: `Failed to update findings: ${message}` });
   }
 }
@@ -347,6 +352,10 @@ async function handleDeclineFindings(
     json(context, 200, { success: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
+    gatewayLog.error(CODEX_TAG, "failed to mark findings declined", {
+      reason: "findings_decline_failed",
+      error,
+    });
     json(context, 500, { error: `Failed to mark declined: ${message}` });
   }
 }
@@ -401,6 +410,7 @@ export function registerCodexRoutes(
           version: match?.[1] ?? "unknown",
         });
       } catch {
+        // observability: probe — codex not installed is a normal state
         json(context, 200, { available: false });
       }
     }
@@ -501,6 +511,10 @@ export function registerCodexRoutes(
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
+        gatewayLog.warn(CODEX_TAG, "failed to read review status", {
+          reason: "review_status_read_failed",
+          error,
+        });
         json(context, 500, { error: `Failed to read status: ${message}` });
       }
     }
@@ -613,7 +627,7 @@ export function registerCodexRoutes(
         try {
           process.kill(state.pid, "SIGTERM");
         } catch {
-          // Process may have already exited.
+          // observability: best-effort cleanup — the process may have already exited
         }
 
         await fs.mkdir(path.dirname(statePath), { recursive: true });
@@ -632,6 +646,10 @@ export function registerCodexRoutes(
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
+        gatewayLog.error(CODEX_TAG, "failed to stop review", {
+          reason: "review_stop_failed",
+          error,
+        });
         json(context, 500, { error: `Failed to stop review: ${message}` });
       }
     }
@@ -706,7 +724,11 @@ export function registerCodexRoutes(
       try {
         const content = await fs.readFile(findingsPath, "utf-8");
         json(context, 200, JSON.parse(content));
-      } catch {
+      } catch (error) {
+        gatewayLog.warn(CODEX_TAG, "review findings file unreadable", {
+          reason: "findings_unreadable",
+          error,
+        });
         json(context, 200, { findings: [] });
       }
     }
@@ -1162,6 +1184,10 @@ export function registerCodexRoutes(
         }
         context.response.end();
       } catch (error) {
+        gatewayLog.error(CODEX_TAG, "codex stream request failed", {
+          reason: "codex_stream_failed",
+          error,
+        });
         writeErrorAndEnd(context.response, error);
       }
     }
@@ -1517,7 +1543,7 @@ export function registerCodexRoutes(
                 context.response.write(`${msg}\n`)
               );
             } catch {
-              // Ignore malformed lines.
+              // observability: parse fallback — malformed stream lines are ignored (per line)
             }
           }
         });
@@ -1566,6 +1592,10 @@ export function registerCodexRoutes(
         writeEvent(context.response, { type: "done" });
         context.response.end();
       } catch (error) {
+        gatewayLog.error(CODEX_TAG, "chat turn failed", {
+          reason: "codex_chat_failed",
+          error,
+        });
         writeEvent(context.response, {
           type: "error",
           error: error instanceof Error ? error.message : "Unknown error",
@@ -1723,6 +1753,7 @@ function isProcessRunning(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch {
+    // observability: probe — kill(pid, 0) throws when the process is gone
     return false;
   }
 }
@@ -1755,6 +1786,7 @@ function parseFindingsFromText(text: string): PersistedFinding[] {
       };
     });
   } catch {
+    // observability: parse fallback — unparseable findings text yields no findings
     return [];
   }
 }
@@ -1978,7 +2010,7 @@ async function resolveClaudeReviewProcess(
             return;
           }
         } catch {
-          // Non-JSON output = real content
+          // observability: parse fallback — non-JSON output is real content (per line)
           settle({ type: "working" });
           return;
         }
@@ -2210,6 +2242,7 @@ async function streamClaudeReview(
           logStream.write(`${message}\n`);
         });
       } catch {
+        // observability: parse fallback — a non-JSON line is forwarded as text (per line)
         const fallback = JSON.stringify({ type: "text", content: line });
         response.write(`${fallback}\n`);
         logStream.write(`${fallback}\n`);
@@ -2371,6 +2404,10 @@ async function streamCodexConversation(
     writeEvent(response, { type: "done" });
     response.end();
   } catch (error) {
+    gatewayLog.error(CODEX_TAG, "codex run failed", {
+      reason: "codex_run_failed",
+      error,
+    });
     writeEvent(response, {
       type: "error",
       error: error instanceof Error ? error.message : "Unknown error",
@@ -2399,6 +2436,7 @@ function extractCodexText(line: string): string {
 
     return "";
   } catch {
+    // observability: parse fallback — a non-JSON line is used as text (per line)
     return line;
   }
 }
@@ -2419,6 +2457,7 @@ function extractCodexSessionId(line: string): string | null {
       }
     }
   } catch {
+    // observability: parse fallback — a non-JSON line is matched by regex (per line)
     const match = CODEX_SESSION_ID_REGEX.exec(line);
     if (match?.[1]) {
       return match[1];
@@ -2601,6 +2640,7 @@ export function extractVerdictTag(
       reason: parsed.reason,
     };
   } catch {
+    // observability: parse fallback — an unparseable verdict is treated as absent
     return undefined;
   }
 }
@@ -2748,7 +2788,7 @@ function extractCodexVerdictLine(trimmedLine: string): string | null {
     }
     return null;
   } catch {
-    // Not JSON — accumulate raw text as fallback
+    // observability: parse fallback — not JSON, accumulate raw text (per line)
     return trimmedLine;
   }
 }
@@ -2758,6 +2798,7 @@ function extractClaudeVerdictLine(trimmedLine: string): string | null {
     const event = JSON.parse(trimmedLine);
     return extractClaudeText(event);
   } catch {
+    // observability: parse fallback — a non-JSON line has no verdict text (per line)
     return null;
   }
 }
@@ -2812,3 +2853,5 @@ async function runClaudeVerdict(
     extractClaudeVerdictLine
   );
 }
+
+const CODEX_TAG = "codex";

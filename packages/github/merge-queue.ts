@@ -11,6 +11,7 @@
 
 import "server-only";
 import type { Octokit } from "@octokit/rest";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 
 /**
@@ -288,6 +289,12 @@ export async function getMergeQueueState(
       rollupFirst: ROLLUP_PAGE_SIZE,
     });
   } catch (error) {
+    log.warn("github.merge_queue_read_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return {
       status: MergeQueueReadStatus.Failed,
       detail: error instanceof Error ? error.message : String(error),
@@ -492,6 +499,12 @@ export async function getRequiredContexts(
       );
       rules = response.data;
     } catch (error) {
+      log.warn("github.required_contexts_read_failed", {
+        reason: "github_api_failed",
+        owner,
+        repo,
+        error,
+      });
       return {
         status: RequiredContextsReadStatus.Failed,
         detail: error instanceof Error ? error.message : String(error),

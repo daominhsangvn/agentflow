@@ -288,7 +288,7 @@ describe("POST /documents/:id/context-attachments/gdrive — content byte cap", 
     await postGdriveImport();
 
     // `buildEntry` in @repo/observability/log puts this first argument in the
-    // Datadog `message` attribute, which is what a log monitor matches on — so
+    // SigNoz `message` attribute, which is what a log monitor matches on — so
     // the text is pinned verbatim rather than reworded. The cap travels in
     // `maxBytes`, sourced from the exported constant, so the value cannot drift
     // from what the route actually enforces.

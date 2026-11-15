@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import "./copy-file-viewer-assets.mjs";
 
 const require = createRequire(import.meta.url);
 const nextBin = require.resolve("next/dist/bin/next");

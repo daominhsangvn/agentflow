@@ -1,22 +1,9 @@
-import { log } from "@repo/observability/log";
-import {
-  buildRequestCompletedContractAttributes,
-  REQUEST_COMPLETED_CONTRACT_EVENT_NAME,
-} from "@repo/observability/telemetry/request-completed";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
-  badRequestResponse,
-  deleteResponse,
-  errorResponse,
-  forbiddenResponse,
-  logRequestCompleted,
-  notFoundResponse,
   parseBody,
   parseQueryParams,
   parseSequenceCursor,
-  successResponse,
-  unauthorizedResponse,
 } from "@/lib/route-utils";
 
 afterEach(() => {
@@ -128,124 +115,5 @@ describe("parseQueryParams", () => {
       targetIds: ["a", "b"],
       mode: "direct",
     });
-  });
-});
-
-describe("logRequestCompleted", () => {
-  // ISS-5039: exactly ONE log line per request. Every deployed log call is
-  // billed twice in Datadog (Vercel Log Drain + agentless intake), so a second
-  // line here is two more billed events per request. The contract attributes
-  // must ride on the same line, not a `request_completed.contract` sibling.
-  it("emits one log line carrying both the snake_case and contract fields", () => {
-    const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
-    vi.spyOn(globalThis.performance, "now").mockReturnValue(150);
-
-    logRequestCompleted(
-      new Request("https://api.test/loops?secret=redacted", {
-        method: "POST",
-      }),
-      125,
-      201
-    );
-
-    expect(info).toHaveBeenCalledTimes(1);
-    expect(info).toHaveBeenCalledWith("request_completed", {
-      ...buildRequestCompletedContractAttributes({
-        requestUrl: "https://api.test/loops?secret=redacted",
-        method: "POST",
-        statusCode: 201,
-        durationMs: 25,
-      }),
-      path: "/loops",
-      method: "POST",
-      status_code: 201,
-      duration_ms: 25,
-    });
-    expect(info).not.toHaveBeenCalledWith(
-      REQUEST_COMPLETED_CONTRACT_EVENT_NAME,
-      expect.anything()
-    );
-  });
-});
-
-describe("successResponse", () => {
-  it("returns 200 status with success data", async () => {
-    const response = successResponse({ id: "123", name: "Test" });
-    expect(response.status).toBe(200);
-    const json = await response.json();
-    expect(json.success).toBe(true);
-    expect(json.data).toEqual({ id: "123", name: "Test" });
-  });
-});
-
-describe("errorResponse", () => {
-  it("returns 500 status with error message", async () => {
-    const response = errorResponse(
-      "Something failed",
-      new Error("Internal error")
-    );
-    expect(response.status).toBe(500);
-    const json = await response.json();
-    expect(json.success).toBe(false);
-    expect(json.error).toBe("Something failed");
-  });
-
-  it("accepts custom status code", () => {
-    const response = errorResponse(
-      "Bad request",
-      new Error("Validation error"),
-      400
-    );
-    expect(response.status).toBe(400);
-  });
-});
-
-describe("badRequestResponse", () => {
-  it("returns 400 status", async () => {
-    const response = badRequestResponse("Invalid input");
-    expect(response.status).toBe(400);
-    const json = await response.json();
-    expect(json.success).toBe(false);
-    expect(json.error).toBe("Invalid input");
-  });
-});
-
-describe("notFoundResponse", () => {
-  it("returns 404 status with entity name", async () => {
-    const response = notFoundResponse("User");
-    expect(response.status).toBe(404);
-    const json = await response.json();
-    expect(json.success).toBe(false);
-    expect(json.error).toBe("User not found");
-  });
-});
-
-describe("unauthorizedResponse", () => {
-  it("returns 401 status", async () => {
-    const response = unauthorizedResponse();
-    expect(response.status).toBe(401);
-    const json = await response.json();
-    expect(json.success).toBe(false);
-    expect(json.error).toBe("Unauthorized");
-  });
-});
-
-describe("forbiddenResponse", () => {
-  it("returns 403 status", async () => {
-    const response = forbiddenResponse();
-    expect(response.status).toBe(403);
-    const json = await response.json();
-    expect(json.success).toBe(false);
-    expect(json.error).toBe("Forbidden");
-  });
-});
-
-describe("deleteResponse", () => {
-  it("returns success with deleted flag", async () => {
-    const response = deleteResponse();
-    expect(response.status).toBe(200);
-    const json = await response.json();
-    expect(json.success).toBe(true);
-    expect(json.data).toEqual({ deleted: true });
   });
 });

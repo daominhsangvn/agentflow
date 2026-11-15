@@ -94,8 +94,7 @@ export const PUT = withAnyAuth<
  *
  * A stable snake_case name, not prose: a raw `log.warn` string nobody queries is
  * not an alert, and would disappear into exactly the void ISS-5811 sat in for
- * days. This is the name the Datadog monitor keys on (monitors themselves are
- * Terraform in `af-tofu-aws-live`, not this repo), so it must not be reworded
+ * days. This is the name the alert rule keys on, so it must not be reworded
  * casually — the same contract `assigned_artifact_tree_truncated` carries.
  */
 const HEALTH_CHECK_FIELDS_DROPPED_EVENT =

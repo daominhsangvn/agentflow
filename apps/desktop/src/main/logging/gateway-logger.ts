@@ -4,7 +4,9 @@
  * buffered in-memory so the UI can display recent entries.
  */
 
+import { SECRET_VALUE_REPLACE_PATTERN } from "@agentflow-ai/loops-api/secret-value-pattern";
 import { isBrokenPipeError } from "../../shared/broken-pipe.js";
+import { EMAIL_VALUE_PATTERN } from "../../shared/exception-sanitizer.js";
 import { writeGatewayLogEntry } from "./persistent-log.js";
 
 export type LogLevel = "info" | "warn" | "error";
@@ -71,11 +73,28 @@ export class GatewayLogger {
    * below is emitted once rather than per entry.
    */
   private persistentSinkFailed = false;
+  private threshold: GatewayLogSeverity;
+  private recordSink?: GatewayLogRecordSink;
+  private recordSinkFailed = false;
 
   constructor(
     private readonly persistentSink = writeGatewayLogEntry,
-    private readonly consoleSink: ConsoleSink = console
-  ) {}
+    private readonly consoleSink: ConsoleSink = console,
+    env: NodeJS.ProcessEnv = process.env
+  ) {
+    this.threshold = resolveGatewayLogThreshold(env);
+  }
+
+  /** Minimum severity that reaches the console and the record sink. */
+  setThreshold(severity: GatewayLogSeverity): void {
+    this.threshold = severity;
+  }
+
+  /** Receives every record that passed the threshold, with its real severity and meta. */
+  setRecordSink(sink: GatewayLogRecordSink | undefined): void {
+    this.recordSink = sink;
+    this.recordSinkFailed = false;
+  }
 
   /**
    * ISS-5089: stop teeing to one console channel (or both, by default). Called
@@ -121,24 +140,30 @@ export class GatewayLogger {
     this.onChange = cb;
   }
 
-  info(tag: string, message: string): void {
-    this.log("info", tag, message);
+  info(tag: string, message: string, meta?: GatewayLogMeta): void {
+    this.log("info", GatewayLogSeverity.Info, tag, message, meta);
   }
 
-  warn(tag: string, message: string): void {
-    this.log("warn", tag, message);
+  warn(tag: string, message: string, meta?: GatewayLogMeta): void {
+    this.log("warn", GatewayLogSeverity.Warn, tag, message, meta);
   }
 
-  error(tag: string, message: string): void {
-    this.log("error", tag, message);
+  error(tag: string, message: string, meta?: GatewayLogMeta): void {
+    this.log("error", GatewayLogSeverity.Error, tag, message, meta);
   }
 
-  /** Verbose-only log -- skipped without invoking lazy formatting when off. */
-  debug(tag: string, message: LogMessageFactory): void {
-    if (!this.verbose) {
+  /** Verbose or LOG_LEVEL=debug only -- skipped without invoking lazy formatting when off. */
+  debug(tag: string, message: LogMessageFactory, meta?: GatewayLogMeta): void {
+    if (!this.verbose && this.threshold !== GatewayLogSeverity.Debug) {
       return;
     }
-    this.log("info", tag, typeof message === "function" ? message() : message);
+    this.log(
+      "info",
+      GatewayLogSeverity.Debug,
+      tag,
+      typeof message === "function" ? message() : message,
+      meta
+    );
   }
 
   getEntries(): LogEntry[] {
@@ -167,7 +192,13 @@ export class GatewayLogger {
     this.notifyChange([...this.buffer]);
   }
 
-  private log(level: LogLevel, tag: string, message: string): void {
+  private log(
+    level: LogLevel,
+    severity: GatewayLogSeverity,
+    tag: string,
+    message: string,
+    meta?: GatewayLogMeta
+  ): void {
     const key = `${level}:${tag}:${message}`;
     if (key === this.lastMessage) {
       return;
@@ -197,7 +228,20 @@ export class GatewayLogger {
       fractionalSecondDigits: 3,
     });
     const prefix = `[${tag}][${short}]`;
-    this.writeToConsole(level, prefix, message);
+    const rank = GATEWAY_LOG_SEVERITY_RANK[severity];
+    if (
+      (this.verbose && severity === GatewayLogSeverity.Debug) ||
+      rank >= GATEWAY_LOG_SEVERITY_RANK[this.threshold]
+    ) {
+      this.writeToConsole(level, prefix, message, meta);
+      this.writeToRecordSink({
+        severity,
+        tag,
+        message,
+        meta,
+        timestampMs: now.getTime(),
+      });
+    }
 
     this.writeToPersistentSink(entry);
     this.notifyChange([...this.buffer]);
@@ -228,6 +272,27 @@ export class GatewayLogger {
     }
   }
 
+  private writeToRecordSink(record: GatewayLogRecord): void {
+    if (!this.recordSink) {
+      return;
+    }
+    try {
+      this.recordSink(record);
+    } catch (error: unknown) {
+      if (this.recordSinkFailed) {
+        return;
+      }
+      this.recordSinkFailed = true;
+      // observability: logger cannot log its own sink failure
+      const reason = error instanceof Error ? error.message : String(error);
+      this.writeToConsole(
+        "error",
+        "[logger]",
+        `log record sink failed; records are not exported: ${reason}`
+      );
+    }
+  }
+
   /** Notify the renderer. A failing callback is not the logging caller's problem. */
   private notifyChange(entries: LogEntry[]): void {
     try {
@@ -250,20 +315,22 @@ export class GatewayLogger {
   private writeToConsole(
     level: LogLevel,
     prefix: string,
-    message: string
+    message: string,
+    meta?: GatewayLogMeta
   ): void {
     const channel =
       level === "info" ? ConsoleChannel.Stdout : ConsoleChannel.Stderr;
     if (this.closedChannels.has(channel)) {
       return;
     }
+    const line = meta ? `${message}${summarizeMeta(meta)}` : message;
     try {
       if (level === "error") {
-        this.consoleSink.error(prefix, message);
+        this.consoleSink.error(prefix, line);
       } else if (level === "warn") {
-        this.consoleSink.warn(prefix, message);
+        this.consoleSink.warn(prefix, line);
       } else {
-        this.consoleSink.log(prefix, message);
+        this.consoleSink.log(prefix, line);
       }
     } catch (error: unknown) {
       if (isBrokenPipeError(error)) {
@@ -274,6 +341,23 @@ export class GatewayLogger {
     }
   }
 }
+
+// Declared before the singleton below, whose constructor reads them.
+export const GatewayLogSeverity = {
+  Debug: "debug",
+  Info: "info",
+  Warn: "warn",
+  Error: "error",
+} as const;
+export type GatewayLogSeverity =
+  (typeof GatewayLogSeverity)[keyof typeof GatewayLogSeverity];
+
+const GATEWAY_LOG_SEVERITY_RANK: Record<GatewayLogSeverity, number> = {
+  [GatewayLogSeverity.Debug]: 0,
+  [GatewayLogSeverity.Info]: 1,
+  [GatewayLogSeverity.Warn]: 2,
+  [GatewayLogSeverity.Error]: 3,
+};
 
 /** Singleton instance shared across the app. */
 export const gatewayLog = new GatewayLogger();
@@ -331,3 +415,62 @@ export function installConsoleStreamErrorGuard(
 
 /** Streams already carrying the ISS-5089 guard, so wiring stays idempotent. */
 const guardedStreams = new WeakSet<ConsoleStream>();
+
+export type GatewayLogMeta = Record<string, unknown>;
+
+export type GatewayLogRecord = {
+  severity: GatewayLogSeverity;
+  tag: string;
+  message: string;
+  meta?: GatewayLogMeta;
+  timestampMs: number;
+};
+
+export type GatewayLogRecordSink = (record: GatewayLogRecord) => void;
+
+/** A valid `LOG_LEVEL` (case-insensitive), else info: the runner has no NODE_ENV. */
+export function resolveGatewayLogThreshold(
+  env: NodeJS.ProcessEnv
+): GatewayLogSeverity {
+  const value = env.LOG_LEVEL?.trim().toLowerCase();
+  const match = Object.values(GatewayLogSeverity).find(
+    (severity) => severity === value
+  );
+  return match ?? GatewayLogSeverity.Info;
+}
+
+const CONSOLE_REDACTED_TEXT = "[REDACTED]";
+// Global twin of the sanitizer's email pattern (it is declared non-global).
+const CONSOLE_EMAIL_PATTERN = new RegExp(EMAIL_VALUE_PATTERN.source, "g");
+
+function redactConsoleText(text: string): string {
+  return text
+    .replaceAll(SECRET_VALUE_REPLACE_PATTERN, CONSOLE_REDACTED_TEXT)
+    .replaceAll(CONSOLE_EMAIL_PATTERN, `$1${CONSOLE_REDACTED_TEXT}`);
+}
+
+/** Console suffix: `...Id` string values, `reason`, and `error` as "name: message". */
+function summarizeMeta(meta: GatewayLogMeta): string {
+  const summary: Record<string, string> = {};
+  for (const [key, value] of Object.entries(meta)) {
+    if (value instanceof Error) {
+      if (key === "error") {
+        summary.error = redactConsoleText(`${value.name}: ${value.message}`);
+      }
+    } else if (
+      typeof value === "string" &&
+      (key.endsWith("Id") || key === "reason")
+    ) {
+      summary[key] = value;
+    }
+  }
+  if (Object.keys(summary).length === 0) {
+    return "";
+  }
+  try {
+    return ` ${JSON.stringify(summary)}`;
+  } catch {
+    // observability: logger cannot log its own meta serialization failure
+    return "";
+  }
+}

@@ -70,7 +70,7 @@ export function isBuildMigrateEnabled(
 /**
  * One structured line naming why the build did not migrate. This is what the
  * Phase-4 verification gate reads out of the build log to prove a build made no
- * `:5432` traffic, and it reaches Datadog through the existing Vercel log drain.
+ * `:5432` traffic, and it reaches SigNoz through the existing Vercel log drain.
  *
  * Deliberately NOT a `migrate_deploy` telemetry event: that contract's `outcome`
  * is the terminal state of a run that actually happened, and its rows are what

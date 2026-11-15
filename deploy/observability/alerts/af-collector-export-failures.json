@@ -1,0 +1,33 @@
+{
+  "alert": "AgentFlow: collector export failures",
+  "alertType": "METRIC_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "version": "v4",
+  "evalWindow": "5m0s",
+  "frequency": "1m0s",
+  "condition": {
+    "compositeQuery": {
+      "queryType": "clickhouse_sql",
+      "panelType": "graph",
+      "chQueries": {
+        "A": {
+          "name": "A",
+          "query": "SELECT toStartOfInterval(toDateTime(intDiv(unix_milli, 1000)), INTERVAL 10 MINUTE) AS ts, max(value) - min(value) AS value FROM signoz_metrics.distributed_samples_v4 WHERE metric_name IN ('otelcol_exporter_send_failed_spans', 'otelcol_exporter_send_failed_spans_total', 'otelcol_exporter_send_failed_log_records', 'otelcol_exporter_send_failed_log_records_total', 'otelcol_exporter_send_failed_metric_points', 'otelcol_exporter_send_failed_metric_points_total') AND unix_milli >= {{.start_timestamp_ms}} AND unix_milli < {{.end_timestamp_ms}} GROUP BY ts ORDER BY ts",
+          "disabled": false
+        }
+      }
+    },
+    "op": "1",
+    "target": 0,
+    "matchType": "1",
+    "selectedQueryName": "A"
+  },
+  "labels": {
+    "severity": "warning"
+  },
+  "annotations": {
+    "summary": "The OTel collector failed to export telemetry",
+    "description": "Check the signoz-otel-collector logs and ClickHouse health."
+  },
+  "preferredChannels": []
+}

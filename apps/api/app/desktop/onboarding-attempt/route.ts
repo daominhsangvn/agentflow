@@ -1,3 +1,4 @@
+import { log } from "@repo/observability/log";
 import "server-only";
 
 /**
@@ -31,7 +32,8 @@ export async function POST(request: Request) {
   let session: Awaited<ReturnType<typeof resolveSessionUser>>;
   try {
     session = await resolveSessionUser();
-  } catch {
+  } catch (error) {
+    log.error("desktop.onboarding_attempt.session_resolve_failed", { error });
     // The contract exposes a single retryable 503 bucket for server-side failures.
     return desktopContractError(503, "ONBOARDING_ATTEMPT_PERSIST_FAILED", true);
   }
@@ -44,6 +46,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
+    // observability: unparsable body is answered 400, request_completed captures it
     return invalidRequestResponse();
   }
 
@@ -73,7 +76,8 @@ export async function POST(request: Request) {
       onboardingAttemptId: attempt.onboardingAttemptId,
       expiresAt: attempt.expiresAt.toISOString(),
     });
-  } catch {
+  } catch (error) {
+    log.error("desktop.onboarding_attempt.persist_failed", { error });
     return desktopContractError(503, "ONBOARDING_ATTEMPT_PERSIST_FAILED", true);
   }
 }

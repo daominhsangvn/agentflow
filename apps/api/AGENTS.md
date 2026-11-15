@@ -3,6 +3,8 @@
 ## Routes and State
 `apps/api` runs as a long-lived Node process (`server.ts`: the Next.js request handler, the desktop gateway socket and the in-process cron runner `lib/self-hosted-cron.ts`; see `docs/self-hosting.md`). There is no Vercel. Route code must still not rely on process-local memory, singleton state, or long-lived in-process caches for correctness: the process restarts, and a deployment may run more than one instance.
 
+- Wrap new service operations in `withSpan` (`@repo/observability/span`) with `AfAttribute` ids (`@repo/observability/af-attributes`); failures that are caught or returned as values call `setSpanOutcome(AfOutcome.Error, reason)`. See `packages/observability/README.md`.
+- `request_completed` is logged by `server.ts`, not route code; `waitUntil(() => work())` runs the work in a background span linked to the request.
 - Process-local maps used only for best-effort abuse control or caching, such as rate limiters, must use stable principal/resource keys rather than ephemeral connection IDs and must include TTL eviction or a hard maximum size.
 - For API routes with fixed request/response/error contracts, wrap auth/session and other precondition helpers that can throw so the route still returns the declared contract shape instead of leaking a generic 500.
 - API routes consumed by relay clients must preserve their declared JSON error envelope for non-SSE responses. If the same authorization branch feeds SSE, translate the structured denial into an SSE error event explicitly instead of changing the non-stream response to plain text.

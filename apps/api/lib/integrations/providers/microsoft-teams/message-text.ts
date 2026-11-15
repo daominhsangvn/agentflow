@@ -106,6 +106,7 @@ function cardText(content: string | null): string {
   try {
     root = JSON.parse(content);
   } catch {
+    // observability: (a) parse fallback — a card that is not JSON has no text
     return "";
   }
   const lines: string[] = [];

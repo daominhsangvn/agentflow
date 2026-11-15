@@ -10,6 +10,12 @@ import {
   type UploadRunnerCapabilitiesInput,
 } from "@repo/api/src/types/runner-capabilities";
 import { Prisma, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import {
+  type SpanAttributes,
+  setSpanOutcome,
+  withSpan,
+} from "@repo/observability/span";
 import { z } from "zod";
 import { serverCapabilityWarnings } from "@/app/compute-targets/capabilities-warnings";
 import { loadProjectRunnerIds } from "@/app/projects/project-runner-selection";
@@ -44,48 +50,66 @@ export const computeTargetCapabilitiesService = {
    * (the runner calls with its owner's API key), and the project must be one
    * of the organization's.
    */
-  async upload(
+  upload(
     organizationId: string,
     userId: string,
     computeTargetId: string,
     input: UploadRunnerCapabilitiesInput
   ): Promise<Result<ComputeTargetCapabilities, StatusCode>> {
-    const projectId = await resolveOrgProjectId(input.project, organizationId);
-    if (!projectId) {
-      return Result.err(Status.NotFound);
-    }
-    const parsed = parseRunnerCapabilitiesMarkdown(input.content);
-    const columns = {
-      organizationId,
-      source: input.source,
-      content: input.content,
-      capabilities: storedCapabilities(parsed, input),
-      problems: parsed.ok ? [] : parsed.problems,
-      warnings: [
-        ...new Set([
-          ...serverCapabilityWarnings(input.content, parsed, input.source),
-          ...input.warnings,
-        ]),
-      ].slice(0, RUNNER_CAPABILITIES_MAX_WARNINGS),
-      contentHash: createHash("sha256").update(input.content).digest("hex"),
-      uploadedAt: new Date(),
-    };
-    const row = await withDb.tx(async (tx) => {
-      const target = await tx.computeTarget.findFirst({
-        where: { id: computeTargetId, organizationId, userId },
-        select: { id: true },
-      });
-      if (!target) {
-        return null;
-      }
-      return tx.computeTargetCapabilities.upsert({
-        where: { computeTargetId_projectId: { computeTargetId, projectId } },
-        create: { ...columns, computeTargetId, projectId },
-        update: columns,
-        include: WITH_RUNNER,
-      });
-    });
-    return row ? Result.ok(toCapabilities(row)) : Result.err(Status.NotFound);
+    return withResultSpan(
+      "compute_target.capabilities_upload",
+      {
+        [AfAttribute.OrgId]: organizationId,
+        [AfAttribute.UserId]: userId,
+        [AfAttribute.ComputeTargetId]: computeTargetId,
+      },
+      async () => {
+        const projectId = await resolveOrgProjectId(
+          input.project,
+          organizationId
+        );
+        if (!projectId) {
+          return Result.err(Status.NotFound);
+        }
+        const parsed = parseRunnerCapabilitiesMarkdown(input.content);
+        const columns = {
+          organizationId,
+          source: input.source,
+          content: input.content,
+          capabilities: storedCapabilities(parsed, input),
+          problems: parsed.ok ? [] : parsed.problems,
+          warnings: [
+            ...new Set([
+              ...serverCapabilityWarnings(input.content, parsed, input.source),
+              ...input.warnings,
+            ]),
+          ].slice(0, RUNNER_CAPABILITIES_MAX_WARNINGS),
+          contentHash: createHash("sha256").update(input.content).digest("hex"),
+          uploadedAt: new Date(),
+        };
+        const row = await withDb.tx(async (tx) => {
+          const target = await tx.computeTarget.findFirst({
+            where: { id: computeTargetId, organizationId, userId },
+            select: { id: true },
+          });
+          if (!target) {
+            return null;
+          }
+          return tx.computeTargetCapabilities.upsert({
+            where: {
+              computeTargetId_projectId: { computeTargetId, projectId },
+            },
+            create: { ...columns, computeTargetId, projectId },
+            update: columns,
+            include: WITH_RUNNER,
+          });
+        });
+        return row
+          ? Result.ok(toCapabilities(row))
+          : Result.err(Status.NotFound);
+      },
+      (error) => `HTTP ${error}`
+    );
   },
 
   /** A runner's files (one per project), for anyone who can see the runner. */
@@ -192,4 +216,20 @@ function storedCapabilities(
   const role =
     input.source === RunnerCapabilitiesSource.Personal ? input.role : undefined;
   return { ...parsed.value, runner: role ?? parsed.value.runner };
+}
+
+/** Runs `fn` in a span and marks the span failed when it returns a failure Result. */
+function withResultSpan<T, E>(
+  name: string,
+  attributes: SpanAttributes,
+  fn: () => Promise<Result<T, E>>,
+  describeError: (error: E) => string
+): Promise<Result<T, E>> {
+  return withSpan(name, attributes, async () => {
+    const result = await fn();
+    if (!result.ok) {
+      setSpanOutcome(AfOutcome.Error, describeError(result.error));
+    }
+    return result;
+  });
 }

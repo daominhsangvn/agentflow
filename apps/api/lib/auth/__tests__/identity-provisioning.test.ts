@@ -15,10 +15,23 @@ const { db, withDbMock } = vi.hoisted(() => {
   };
 });
 
+const services = vi.hoisted(() => ({
+  findOrganization: vi.fn(),
+  deactivate: vi.fn(),
+  removeContacts: vi.fn(),
+}));
+
 vi.mock("@repo/database", () => ({ withDb: withDbMock }));
 vi.mock("@repo/observability/log", () => ({ log: { info: vi.fn() } }));
-vi.mock("@/app/organizations/service", () => ({ organizationsService: {} }));
-vi.mock("@/app/users/service", () => ({ usersService: {} }));
+vi.mock("@/app/organizations/service", () => ({
+  organizationsService: { findByClerkId: services.findOrganization },
+}));
+vi.mock("@/app/users/service", () => ({
+  usersService: { deactivateByClerkIdAndOrg: services.deactivate },
+}));
+vi.mock("@/app/projects/project-agent-contacts-service", () => ({
+  projectAgentContactsService: { removeMember: services.removeContacts },
+}));
 vi.mock("@/lib/db-utils", () => ({
   getPrismaErrorCode: (error: { code?: string }) => error?.code,
 }));
@@ -29,6 +42,7 @@ import {
   hasPendingInvitation,
   markEmailVerified,
   provisionNewUser,
+  syncMemberRemoved,
 } from "@/lib/auth/identity-provisioning";
 
 const PERSONAL_SLUG = /^ada-[a-z0-9]{4}$/;
@@ -197,5 +211,32 @@ describe("hasPendingInvitation", () => {
     await expect(hasPendingInvitation("other@example.test")).resolves.toBe(
       false
     );
+  });
+});
+
+describe("syncMemberRemoved", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    services.findOrganization.mockResolvedValue({ id: "local-org" });
+  });
+
+  it("removes the member's Agent contacts after deactivating them", async () => {
+    services.deactivate.mockResolvedValue({ id: "local-user" });
+
+    await syncMemberRemoved("auth-user", "auth-org");
+
+    expect(services.deactivate).toHaveBeenCalledWith("auth-user", "local-org");
+    expect(services.removeContacts).toHaveBeenCalledWith(
+      "local-org",
+      "local-user"
+    );
+  });
+
+  it("removes nothing when the member had no application user", async () => {
+    services.deactivate.mockRejectedValue({ code: "P2025" });
+
+    await syncMemberRemoved("auth-user", "auth-org");
+
+    expect(services.removeContacts).not.toHaveBeenCalled();
   });
 });

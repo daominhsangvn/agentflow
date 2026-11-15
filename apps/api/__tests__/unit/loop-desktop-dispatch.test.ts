@@ -753,7 +753,7 @@ describe("launch dispatch replay (ISS-5811)", () => {
   });
 
   it("leaves no error-level log behind when the launch recovers on replay", async () => {
-    // Error logs on this path feed a Datadog monitor. A miss that the next
+    // Error logs on this path feed a alert rule. A miss that the next
     // attempt recovers is now an expected transient, so it must not leave an
     // error: an alert that fires on every recovered launch is one people learn
     // to scroll past, and the exhausted-budget error below is the signal that

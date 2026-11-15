@@ -745,6 +745,10 @@ export function registerSymphonyInteractiveRoutes(
           parentTicketId: mergedMeta?.parentTicketId,
         });
       } catch (error) {
+        gatewayLog.error(INTERACTIVE_TAG, "failed to launch Symphony", {
+          reason: "interactive_launch_failed",
+          error,
+        });
         json(context, 500, {
           error: `Failed to launch Symphony: ${error instanceof Error ? error.message : "Unknown error"}`,
         });
@@ -826,7 +830,7 @@ async function streamClaudeChat(options: {
             response.write(`${msg}\n`)
           );
         } catch {
-          // Ignore malformed stream lines.
+          // observability: parse fallback — malformed stream lines are ignored (per line)
         }
       }
     });
@@ -865,6 +869,10 @@ async function streamClaudeChat(options: {
     writeEvent(response, { type: "done" });
     response.end();
   } catch (error) {
+    gatewayLog.error(INTERACTIVE_TAG, "interactive chat turn failed", {
+      reason: "interactive_chat_failed",
+      error,
+    });
     writeEvent(response, {
       type: "error",
       error: error instanceof Error ? error.message : "Unknown error",
@@ -992,7 +1000,12 @@ function getGitDiff(worktreeDir: string): string {
     }
 
     return raw;
-  } catch {
+  } catch (error) {
+    gatewayLog.debug(
+      INTERACTIVE_TAG,
+      () => "commit diff unavailable; continuing without it",
+      { reason: "commit_diff_failed", error }
+    );
     return "";
   }
 }
@@ -1084,7 +1097,7 @@ async function generateCommitWithClaude(
               });
               return;
             } catch {
-              // JSON parse failed, fall through
+              // observability: parse fallback — unusable JSON falls through to the error below
             }
           }
 
@@ -1125,8 +1138,12 @@ async function createWorktree(
       cwd: expandedRepoPath,
       stdio: "pipe",
     });
-  } catch {
-    // non-fatal
+  } catch (error) {
+    gatewayLog.warn(
+      INTERACTIVE_TAG,
+      "git fetch origin failed; continuing with local refs",
+      { reason: "git_fetch_failed", error }
+    );
   }
 
   const resolvedBaseRef = resolveBaseRef(expandedRepoPath, baseBranch);
@@ -1159,6 +1176,7 @@ function resolveBaseRef(
         );
         return candidate;
       } catch {
+        // observability: probe — the candidate branch may not exist locally
         try {
           const originRef = `origin/${candidate}`;
           execSync(
@@ -1170,7 +1188,7 @@ function resolveBaseRef(
           );
           return originRef;
         } catch {
-          // continue to default
+          // observability: probe — the candidate branch may not exist on origin
         }
       }
     }
@@ -1186,7 +1204,12 @@ function resolveBaseRef(
       }
     ).trim();
     return ref.replace("refs/remotes/", "");
-  } catch {
+  } catch (error) {
+    gatewayLog.debug(
+      INTERACTIVE_TAG,
+      () => "default base ref not resolved; using HEAD",
+      { reason: "base_ref_unresolved", error }
+    );
     return "HEAD";
   }
 }
@@ -1284,3 +1307,5 @@ function writeEvent(
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
+
+const INTERACTIVE_TAG = "symphony-interactive";

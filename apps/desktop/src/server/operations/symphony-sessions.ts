@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import { assertPathAllowed, DirectoryNotAllowedError } from "../security.js";
 import { parseBody } from "./parse-body.js";
@@ -147,8 +148,12 @@ export function registerSymphonySessionRoutes(
           if (history.messages?.at(-1)?.role === "assistant") {
             count++;
           }
-        } catch {
-          // Corrupt or unreadable chat history — skip
+        } catch (error) {
+          gatewayLog.debug(
+            SESSIONS_TAG,
+            () => "chat history unreadable; skipped in the count",
+            { reason: "chat_history_unreadable", error }
+          );
         }
       }
 
@@ -285,7 +290,15 @@ async function loadSessions(symphonyDir: string): Promise<SessionsConfig> {
       return { sessions: [] };
     }
     return parsed;
-  } catch {
+  } catch (error) {
+    gatewayLog.warn(
+      SESSIONS_TAG,
+      "sessions file unreadable; using an empty list",
+      {
+        reason: "sessions_file_unreadable",
+        error,
+      }
+    );
     return { sessions: [] };
   }
 }
@@ -305,3 +318,5 @@ async function saveSessions(
 function getSessionsFile(symphonyDir: string): string {
   return path.join(symphonyDir, "sessions.json");
 }
+
+const SESSIONS_TAG = "symphony-sessions";

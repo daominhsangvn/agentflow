@@ -91,6 +91,7 @@ export function registerSymphonyUploadRoutes(
       try {
         files = await parseMultipartFiles(contentType, context.rawBody);
       } catch {
+        // observability: a 4xx response returned from the catch — captured by request_completed
         json(context, 400, { error: "Invalid form data" });
         return;
       }

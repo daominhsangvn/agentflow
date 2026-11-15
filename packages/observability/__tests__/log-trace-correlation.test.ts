@@ -1,96 +1,73 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deleteEnvForTest, importModuleWithFetch } from "./test-helpers";
+import { importLogWithSink } from "./test-helpers";
 
 // ---------------------------------------------------------------------------
-// log.ts × trace-context.ts — trace/log correlation (ISS-4659).
-//
-// The load-bearing detail: enrichment happens in makeLogFn, NOT buildEntry().
-// buildEntry() only feeds the agentless DD_API_KEY intake, so ids added there
-// would be absent on the Vercel Log Drain path — the same asymmetry that forced
-// `origin` to be stamped at the emit site. Both sinks are asserted here so a
-// refactor that moves enrichment into buildEntry() fails loudly.
+// log.ts x trace-context.ts — trace/log correlation, plus the OTel record
+// contract. Stdout JSON carries trace ids from the registered provider; the
+// emitted record does NOT (the SDK sink attaches them from the active context).
 //
 // Console spies are installed BEFORE the dynamic import because makeLogFn binds
-// console.info/warn/error at module-init time; a spy installed afterwards is
-// never called.
+// console.info/warn/error at module-init time.
 // ---------------------------------------------------------------------------
 
 const SAMPLE_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
 const SAMPLE_SPAN_ID = "00f067aa0ba902b7";
 
-type LogModule = typeof import("../log");
-type TraceContextModule = typeof import("../trace-context");
-
 afterEach(() => {
   vi.unstubAllEnvs();
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.resetModules();
 });
 
-/**
- * Import log + trace-context from the same fresh module registry, so a provider
- * registered here is the one the logger reads.
- */
-async function importLogAndTraceContext(
-  fetchMock: ReturnType<typeof vi.fn>
-): Promise<{ log: LogModule["log"]; traceContext: TraceContextModule }> {
-  const logModule = await importModuleWithFetch(
-    fetchMock,
-    () => import("../log")
-  );
+async function importLogAndTraceContext() {
+  const { log, records } = await importLogWithSink();
   const traceContext = await import("../trace-context");
-  return { log: logModule.log, traceContext };
+  return { log, records, traceContext };
 }
 
-describe("structured console sink (Vercel Log Drain path)", () => {
-  it("stamps the active trace ids onto the emitted JSON line", async () => {
-    deleteEnvForTest("DD_API_KEY");
-    vi.stubEnv("DD_LOGS_JSON", "1");
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {
-      // silence
-    });
+describe("stdout JSON line", () => {
+  it("stamps the active trace ids and keeps them out of the record attributes", async () => {
+    vi.stubEnv("LOG_FORMAT", "json");
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
-    const { log, traceContext } = await importLogAndTraceContext(vi.fn());
+    const { log, records, traceContext } = await importLogAndTraceContext();
     traceContext.setTraceContextProvider(() => ({
       traceId: SAMPLE_TRACE_ID,
       spanId: SAMPLE_SPAN_ID,
     }));
     infoSpy.mockClear();
+    records.length = 0;
 
     log.info("request_completed", { path: "/branches" });
 
     const parsed = JSON.parse(infoSpy.mock.calls[0][0] as string);
-    expect(parsed["dd.trace_id"]).toBe(SAMPLE_TRACE_ID);
-    expect(parsed["dd.span_id"]).toBe(SAMPLE_SPAN_ID);
+    expect(parsed.trace_id).toBe(SAMPLE_TRACE_ID);
+    expect(parsed.span_id).toBe(SAMPLE_SPAN_ID);
     expect(parsed.path).toBe("/branches");
+    expect(records).toHaveLength(1);
+    expect(records[0].attributes).not.toHaveProperty("trace_id");
+    expect(records[0].attributes).not.toHaveProperty("span_id");
   });
 
-  it("emits no correlation keys at all when nothing is traced", async () => {
-    deleteEnvForTest("DD_API_KEY");
-    vi.stubEnv("DD_LOGS_JSON", "1");
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {
-      // silence
-    });
+  it("emits no correlation keys when nothing is traced", async () => {
+    vi.stubEnv("LOG_FORMAT", "json");
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
-    const { log } = await importLogAndTraceContext(vi.fn());
+    const { log } = await importLogAndTraceContext();
     infoSpy.mockClear();
 
     log.info("request_completed", { path: "/branches" });
 
     const parsed = JSON.parse(infoSpy.mock.calls[0][0] as string);
-    expect(parsed).not.toHaveProperty("dd.trace_id");
-    expect(parsed).not.toHaveProperty("dd.span_id");
+    expect(parsed).not.toHaveProperty("trace_id");
+    expect(parsed).not.toHaveProperty("span_id");
   });
 
   it("ignores caller-supplied trace ids so meta cannot spoof a trace", async () => {
-    deleteEnvForTest("DD_API_KEY");
-    vi.stubEnv("DD_LOGS_JSON", "1");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {
-      // silence
-    });
+    vi.stubEnv("LOG_FORMAT", "json");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const { log, traceContext } = await importLogAndTraceContext(vi.fn());
+    const { log, traceContext } = await importLogAndTraceContext();
     traceContext.setTraceContextProvider(() => ({
       traceId: SAMPLE_TRACE_ID,
       spanId: SAMPLE_SPAN_ID,
@@ -98,42 +75,84 @@ describe("structured console sink (Vercel Log Drain path)", () => {
     warnSpy.mockClear();
 
     log.warn("suspicious", {
-      "dd.trace_id": "attacker-supplied",
-      "dd.span_id": "attacker-supplied",
+      trace_id: "attacker-supplied",
+      span_id: "attacker-supplied",
     });
 
     const parsed = JSON.parse(warnSpy.mock.calls[0][0] as string);
-    expect(parsed["dd.trace_id"]).toBe(SAMPLE_TRACE_ID);
-    expect(parsed["dd.span_id"]).toBe(SAMPLE_SPAN_ID);
+    expect(parsed.trace_id).toBe(SAMPLE_TRACE_ID);
+    expect(parsed.span_id).toBe(SAMPLE_SPAN_ID);
   });
 });
 
-describe("agentless Datadog intake sink", () => {
-  it("carries the trace ids in the flushed intake payload", async () => {
-    vi.stubEnv("DD_API_KEY", "dd-test-key");
-    vi.stubEnv("DD_SITE", "datadoghq.com");
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 202 });
+describe("OTel log records", () => {
+  it("carry level, message, redacted flattened attributes and origin", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const { log, traceContext } = await importLogAndTraceContext(fetchMock);
-    traceContext.setTraceContextProvider(() => ({
-      traceId: SAMPLE_TRACE_ID,
-      spanId: SAMPLE_SPAN_ID,
-    }));
+    const { log, records } = await importLogAndTraceContext();
+    records.length = 0;
 
-    log.info("request_completed", { path: "/branches" });
+    log.error("sync failed", {
+      apiKey: "super-secret",
+      inputTokens: 42,
+      nested: { a: 1 },
+    });
+
+    expect(records).toHaveLength(1);
+    const [record] = records;
+    expect(record.level).toBe("error");
+    expect(record.message).toBe("sync failed");
+    expect(record.attributes.apiKey).toBe("[redacted]");
+    expect(record.attributes.inputTokens).toBe(42);
+    expect(record.attributes["nested.a"]).toBe(1);
+    expect(typeof record.attributes.origin).toBe("string");
+    expect(typeof record.timestampMs).toBe("number");
+  });
+
+  it("redacts secret-shaped text in the message and drops spoofed correlation keys", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const { log, records } = await importLogAndTraceContext();
+    records.length = 0;
+
+    log.info("token ghp_abcdefghijklmnopqrstuvwxyz0123 for a@b.com", {
+      trace_id: "spoofed",
+      span_id: "spoofed",
+    });
+
+    const [record] = records;
+    expect(record.message).not.toContain("ghp_");
+    expect(record.message).not.toContain("a@b.com");
+    expect(record.attributes.trace_id).toBeUndefined();
+    expect(record.attributes.span_id).toBeUndefined();
+  });
+
+  it("emits nothing and does not throw without a sink", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.resetModules();
+    const { log } = await import("../log");
+
+    expect(() => log.info("no sink", { a: 1 })).not.toThrow();
+  });
+});
+
+describe("log.flush", () => {
+  it("resolves without a flush hook", async () => {
+    vi.resetModules();
+    const { log } = await import("../log");
+    await expect(log.flush()).resolves.toBeUndefined();
+  });
+
+  it("runs the registered flush hook", async () => {
+    vi.resetModules();
+    const hooks = await import("../tracing/hooks");
+    const hook = vi.fn().mockResolvedValue(undefined);
+    hooks.setTelemetryFlushHook(hook);
+    const { log } = await import("../log");
+
     await log.flush();
 
-    // Select by message: the batch also carries module-init diagnostics
-    // (telemetry.git_sha_fallback) that are enqueued before this call, so a
-    // positional index would assert against the wrong entry.
-    const entries = JSON.parse(
-      fetchMock.mock.calls[0][1].body as string
-    ) as Record<string, unknown>[];
-    const entry = entries.find(
-      (candidate) => candidate.message === "request_completed"
-    );
-    expect(entry).toBeDefined();
-    expect(entry?.["dd.trace_id"]).toBe(SAMPLE_TRACE_ID);
-    expect(entry?.["dd.span_id"]).toBe(SAMPLE_SPAN_ID);
+    expect(hook).toHaveBeenCalledOnce();
+    hooks.resetTelemetryFlushHook();
   });
 });

@@ -86,9 +86,9 @@ describe("ownerName", () => {
 
 describe("agentProjectIds", () => {
   const projects = [
-    { id: "p1", settings: { runnerIds: [T1] } },
-    { id: "p2", settings: {} },
-    { id: "p3", settings: { runnerIds: [T1] } },
+    { id: "p1", agents: [{ computeTargetId: T1 }] },
+    { id: "p2", agents: [] },
+    { id: "p3", agents: [{ computeTargetId: T1 }] },
   ];
 
   it("counts only the projects that list the Agent", () => {
@@ -179,8 +179,8 @@ describe("computeTargetFleetService.list", () => {
       },
     ]);
     mocks.projectFindMany.mockResolvedValue([
-      { id: "p1", name: "Proj", settings: { runnerIds: [T1] } },
-      { id: "p2", name: "Other", settings: {} },
+      { id: "p1", name: "Proj", agents: [{ computeTargetId: T1 }] },
+      { id: "p2", name: "Other", agents: [] },
     ]);
     mocks.workflowFindMany.mockResolvedValue([
       {

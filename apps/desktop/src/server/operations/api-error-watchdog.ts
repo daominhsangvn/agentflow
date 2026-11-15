@@ -130,6 +130,7 @@ function parseJsonLine(line: string): unknown {
   try {
     return JSON.parse(line);
   } catch {
+    // observability: a — parse fallback, the fallback is the handling
     return null;
   }
 }
@@ -171,6 +172,7 @@ function readNewOutput(
   try {
     size = statSync(outputPath).size;
   } catch {
+    // observability: b — polled log read, the next poll retries
     return { text: "", offset };
   }
   if (size <= offset) {
@@ -187,6 +189,7 @@ function readNewOutput(
       offset: offset + read,
     };
   } catch {
+    // observability: b — polled log read, the next poll retries
     return { text: "", offset };
   } finally {
     if (fd !== null) {

@@ -1,0 +1,33 @@
+{
+  "alert": "AgentFlow: stuck case or workflow run",
+  "alertType": "TRACES_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "version": "v4",
+  "evalWindow": "5m0s",
+  "frequency": "1m0s",
+  "condition": {
+    "compositeQuery": {
+      "queryType": "clickhouse_sql",
+      "panelType": "graph",
+      "chQueries": {
+        "A": {
+          "name": "A",
+          "query": "SELECT toStartOfInterval(timestamp, INTERVAL 15 MINUTE) AS ts, countIf(name = 'orchestrator.advance_conversation' AND attributes_string['af.outcome'] = 'error') * 6 + greatest(countIf(name = 'workflow.advance_run' AND attributes_string['af.outcome'] = 'error') - 5, 0) AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name IN ('orchestrator.advance_conversation', 'workflow.advance_run') AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts",
+          "disabled": false
+        }
+      }
+    },
+    "op": "1",
+    "target": 0,
+    "matchType": "1",
+    "selectedQueryName": "A"
+  },
+  "labels": {
+    "severity": "warning"
+  },
+  "annotations": {
+    "summary": "Orchestrator conversation errors, or more than 5 workflow.advance_run errors in 15 minutes",
+    "description": "Open the Orchestrator and Workflows & integrations dashboards, then Journeys with the case id or workflow run id."
+  },
+  "preferredChannels": []
+}

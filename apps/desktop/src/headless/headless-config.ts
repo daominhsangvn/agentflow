@@ -37,6 +37,8 @@ export type HeadlessRunnerConfig = {
   gatewayPort: number | null;
   rewriteCallbackUrl: boolean;
   reportSessions: boolean;
+  /** Export runner telemetry through the API's OTLP proxy; on unless AGENTFLOW_RUNNER_TELEMETRY=false. */
+  telemetry: boolean;
   /** Set in personal mode; the workspace is then the project folder. */
   personal: PersonalRunnerSettings | null;
 };
@@ -105,6 +107,7 @@ const envSchema = z.object({
     .optional(),
   [HeadlessRunnerEnv.RewriteCallbackUrl]: booleanFlagSchema.optional(),
   [HeadlessRunnerEnv.ReportSessions]: booleanFlagSchema.optional(),
+  [HeadlessRunnerEnv.Telemetry]: booleanFlagSchema.optional(),
   [HeadlessRunnerEnv.Mode]: z
     .string()
     .trim()
@@ -180,6 +183,7 @@ export function loadHeadlessConfig(
       gatewayPort: values[HeadlessRunnerEnv.GatewayPort] ?? null,
       rewriteCallbackUrl: values[HeadlessRunnerEnv.RewriteCallbackUrl] ?? true,
       reportSessions: values[HeadlessRunnerEnv.ReportSessions] ?? true,
+      telemetry: values[HeadlessRunnerEnv.Telemetry] ?? true,
       personal: personal.value,
     },
   };
@@ -253,6 +257,7 @@ function isDirectory(dir: string): boolean {
   try {
     return fs.statSync(dir).isDirectory();
   } catch {
+    // observability: probe — a missing directory is a normal state
     return false;
   }
 }
@@ -273,6 +278,7 @@ function validateTransportOrigin(origin: string): string | null {
     normalizeAndValidateOrigin(origin);
     return null;
   } catch (error) {
+    // observability: validation message is returned to the caller
     return error instanceof Error ? error.message : String(error);
   }
 }

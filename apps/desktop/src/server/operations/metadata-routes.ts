@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import {
   assertPathAllowed,
@@ -77,7 +78,8 @@ export function registerMetadataRoutes(
         });
 
       json(context, 200, { version, commits });
-    } catch {
+    } catch (error) {
+      gatewayLog.error(LOG_TAG, "get version info failed", { error });
       json(context, 500, { error: "Failed to get version info" });
     }
   });
@@ -145,6 +147,7 @@ export function registerMetadataRoutes(
           lastUpdate: state.timestamp,
         });
       } catch (error) {
+        gatewayLog.error(LOG_TAG, "read symphony status failed", { error });
         json(context, 500, {
           isRunning: false,
           error: error instanceof Error ? error.message : "Unknown error",
@@ -195,6 +198,7 @@ export function registerMetadataRoutes(
             }
           }
         } catch {
+          // observability: a — parse fallback, the fallback is the handling
           // Ignore parse errors and continue to config scan.
         }
       }
@@ -274,6 +278,7 @@ function checkPendingClaudeMd(worktreePath: string): string | null {
     ).trim();
     return status ? claudeMdPath : null;
   } catch {
+    // observability: b — probe, absence is a normal state
     return null;
   }
 }
@@ -322,9 +327,13 @@ function checkBranchStatus(worktreePath: string): {
         remoteMissing: true,
       };
     } catch {
+      // observability: b — probe, absence is a normal state
       return { merged: false, remoteMissing: true };
     }
   } catch {
+    // observability: b — probe, absence is a normal state
     return null;
   }
 }
+
+const LOG_TAG = "metadata";

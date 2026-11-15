@@ -30,7 +30,7 @@ vi.mock("@repo/database", () => {
     project: {
       findMany: (args: { where: { id: { in: string[] } } }) =>
         Promise.resolve(
-          args.where.id.in.map((id) => ({ id, name: "Billing" }))
+          args.where.id.in.map((id) => ({ id, name: "Billing", agents: [] }))
         ),
     },
     user: {

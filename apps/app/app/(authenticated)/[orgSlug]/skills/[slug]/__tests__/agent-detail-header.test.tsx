@@ -126,7 +126,7 @@ describe("ISS-5518: agent detail identity", () => {
     render(
       <AgentDetailHeader
         orgSlug="acme"
-        slug="command%3A%3A%2F%2Fcl-ci-babysit"
+        slug="command%3A%3A%2F%2Faf-ci-babysit"
       />
     );
 

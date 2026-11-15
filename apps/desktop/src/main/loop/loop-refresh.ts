@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { gatewayTraceHeaders } from "../../server/gateway-trace-context.js";
 import type { LoopHttpResult } from "../../server/operations/loop-http.js";
 import { parseJwtExpiry } from "../auth/jwt-utils.js";
 import { gatewayLog } from "../logging/gateway-logger.js";
@@ -102,6 +103,7 @@ async function attemptRefresh(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "Idempotency-Key": idempotencyKey,
+        ...gatewayTraceHeaders(),
       },
       signal: AbortSignal.timeout(REFRESH_REQUEST_TIMEOUT_MS),
     });

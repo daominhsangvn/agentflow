@@ -244,6 +244,7 @@ function parseReturnToCookie(value: string | undefined): {
     }
     return { mac, payload: parsed.data };
   } catch {
+    // observability: parse fallback — an invalid return-to cookie is treated as absent
     return null;
   }
 }
@@ -299,6 +300,7 @@ function isSafeBranchDetailPathSegment(value: string | undefined): boolean {
       !decoded.split("/").some((segment) => segment === "." || segment === "..")
     );
   } catch {
+    // observability: parse fallback — an undecodable path segment is unsafe
     return false;
   }
 }

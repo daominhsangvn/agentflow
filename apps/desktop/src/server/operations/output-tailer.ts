@@ -323,6 +323,7 @@ export function startOutputTailer(
       }
       return `${stats.dev}:${stats.ino}`;
     } catch {
+      // observability: probe — the file may not exist yet
       return null;
     }
   }
@@ -469,7 +470,12 @@ export function startOutputTailer(
           chunk.subarray(0, bytesRead),
         ]);
       }
-    } catch {
+    } catch (error) {
+      gatewayLog.debug(
+        "output-tailer",
+        () => `Reading the output file failed for loopId=${loopId}`,
+        { reason: "output_read_failed", loopId, error }
+      );
       return;
     } finally {
       if (fd !== null) {
@@ -503,6 +509,7 @@ export function startOutputTailer(
         try {
           parsed = JSON.parse(trimmed);
         } catch {
+          // observability: parse fallback — a non-JSON line is skipped
           continue;
         }
         if (!isRecord(parsed)) {
@@ -556,7 +563,7 @@ export function startOutputTailer(
                   tokenDelta.cacheReadInputTokens;
               }
             } catch {
-              // Observability is best-effort; never block output streaming.
+              // observability: telemetry code itself — best-effort; never block output streaming.
             }
           }
         }

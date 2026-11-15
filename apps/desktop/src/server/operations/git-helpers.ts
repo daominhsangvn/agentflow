@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { access } from "node:fs/promises";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import { getResolvedGitPath } from "./symphony-loop.js";
 
 /**
@@ -25,6 +26,7 @@ export function resolveRepoFullName(repoPath: string): string | null {
     }
     return null;
   } catch {
+    // observability: probe — a repo without an origin remote is a normal state
     return null;
   }
 }
@@ -67,7 +69,7 @@ export function findWorktreeForBranch(
       }
     }
   } catch {
-    // fall through
+    // observability: probe — no worktree for the branch is a normal state
   }
   return null;
 }
@@ -97,6 +99,7 @@ export function listAllWorktrees(expandedRepoPath: string): string[] {
     }
     return worktrees;
   } catch {
+    // observability: probe — not a git repository is a normal state
     return [];
   }
 }
@@ -177,6 +180,10 @@ export async function resolveRepoFullNameOutcomeAsync(
       { cwd: repoPath, timeout: 10_000 }
     );
   } catch (error) {
+    gatewayLog.debug(LOG_TAG, "git remote get-url origin failed", {
+      reason: "git_remote_lookup_failed",
+      error,
+    });
     return classifyExecFileFailure(error);
   }
   const sshMatch = ORIGIN_REMOTE_FULL_NAME_PATTERN.exec(stdout.trim());
@@ -228,6 +235,9 @@ async function pathExists(target: string): Promise<boolean> {
     await access(target);
     return true;
   } catch {
+    // observability: probe — absence is the answer
     return false;
   }
 }
+
+const LOG_TAG = "git-helpers";

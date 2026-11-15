@@ -18,12 +18,16 @@
 // of a dependency it must not carry.
 // ---------------------------------------------------------------------------
 
+import { globalSlot } from "./global-slot";
+
 /** The active span's identifiers, as OpenTelemetry reports them (lowercase hex). */
 export type TraceContext = {
   /** 128-bit trace id, 32 lowercase hex characters. */
   traceId: string;
   /** 64-bit span id, 16 lowercase hex characters. */
   spanId: string;
+  /** Active `af.*` ids (e.g. `af.loop_id`), when any are known. */
+  afIds?: Record<string, string>;
 };
 
 /** Returns the currently-active trace context, or `undefined` when untraced. */
@@ -31,19 +35,22 @@ export type TraceContextProvider = () => TraceContext | undefined;
 
 const noTraceContext: TraceContextProvider = () => undefined;
 
-let traceContextProvider: TraceContextProvider = noTraceContext;
+const providerSlot = globalSlot<TraceContextProvider>(
+  "trace-context",
+  () => noTraceContext
+);
 
 /**
  * Register the process-wide trace-context provider. Called once by the tracer
  * bootstrap in `@repo/observability/tracing`; never by application code.
  */
 export function setTraceContextProvider(provider: TraceContextProvider): void {
-  traceContextProvider = provider;
+  providerSlot.value = provider;
 }
 
 /** Restore the default no-op provider. Used by tests and by tracer shutdown. */
 export function resetTraceContextProvider(): void {
-  traceContextProvider = noTraceContext;
+  providerSlot.value = noTraceContext;
 }
 
 /**
@@ -52,26 +59,24 @@ export function resetTraceContextProvider(): void {
  */
 export function getTraceContext(): TraceContext | undefined {
   try {
-    return traceContextProvider();
+    return providerSlot.value();
   } catch {
     return undefined;
   }
 }
 
 /**
- * Map a trace context onto the log attributes Datadog joins traces on.
+ * Map a trace context onto the log attributes backends join traces on.
  *
- * Kept as a single pure function because the correct encoding for
- * OTLP-ingested traces is the one thing here that rollout has to confirm:
- * Datadog's classic (dd-trace) correlation expects decimal ids, while OTLP
- * ingestion carries the W3C hex form. If verification shows Datadog wants a
- * different encoding, this function is the only thing that changes.
+ * Uses the OpenTelemetry log data-model names (`trace_id`, `span_id`) with the
+ * W3C lowercase hex encoding.
  */
 export function toLogCorrelationFields(
   context: TraceContext
 ): Record<string, string> {
   return {
-    "dd.trace_id": context.traceId,
-    "dd.span_id": context.spanId,
+    trace_id: context.traceId,
+    span_id: context.spanId,
+    ...context.afIds,
   };
 }

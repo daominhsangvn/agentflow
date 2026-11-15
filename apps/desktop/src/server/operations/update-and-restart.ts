@@ -48,6 +48,7 @@ export function registerUpdateAndRestartRoutes(
       try {
         updateResult = await options.checkForUpdate();
       } catch (err) {
+        gatewayLog.warn(LOG_TAG, "check for update failed", { error: err });
         updateInProgress = false;
         const message = err instanceof Error ? err.message : String(err);
         json(context, 502, { error: message });
@@ -104,3 +105,5 @@ export function registerUpdateAndRestartRoutes(
     }
   );
 }
+
+const LOG_TAG = "update-and-restart";

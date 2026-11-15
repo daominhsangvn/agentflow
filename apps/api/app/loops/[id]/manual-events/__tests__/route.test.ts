@@ -3,7 +3,7 @@
  *
  * Verifies that when the manual-event ingest path throws an unmapped error,
  * the outer catch emits `loop.manual_event_ingest_failed` carrying loopId and
- * organizationId so an operator can stitch the Datadog failure back to its
+ * organizationId so an operator can stitch the SigNoz failure back to its
  * loop, before delegating the 500 response to `errorResponse`.
  */
 

@@ -84,6 +84,11 @@ vi.mock("@/lib/orchestrator/case-render", async () =>
   ).caseRenderModule()
 );
 
+const mailQuestions = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+vi.mock("@/lib/orchestrator/needs-person-mail", () => ({
+  mailTaskQuestions: mailQuestions,
+}));
+
 const recordAsked = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 vi.mock("@/lib/orchestrator/task-asked", () => ({
   recordAskedQuestions: recordAsked,
@@ -92,6 +97,7 @@ vi.mock("@/lib/orchestrator/task-asked", () => ({
 beforeEach(() => {
   resetTaskMocks();
   recordAsked.mockClear();
+  mailQuestions.mockClear();
 });
 
 describe("startTask", () => {
@@ -842,6 +848,7 @@ describe("advanceTasks", () => {
     await advanceTasks(new Date());
 
     expect(mocks.tasks[0]?.openQuestionCount).toBe(0);
+    expect(mailQuestions).not.toHaveBeenCalled();
   });
 
   it("keeps a question's commentId and records it as asked on the item", async () => {
@@ -866,6 +873,11 @@ describe("advanceTasks", () => {
     expect(mocks.tasks[0]?.result).toMatchObject({ questions });
     expect(recordAsked).toHaveBeenCalledTimes(1);
     expect(recordAsked).toHaveBeenCalledWith("task-1", questions);
+    expect(mailQuestions).toHaveBeenCalledTimes(1);
+    expect(mailQuestions).toHaveBeenCalledWith({
+      taskId: "task-1",
+      questionCount: questions.length,
+    });
   });
 
   it("does not record asked questions when the task was cancelled before it settled", async () => {
@@ -902,6 +914,7 @@ describe("advanceTasks", () => {
 
     expect(mocks.tasks[0]?.status).toBe(OrchestratorTaskStatus.Cancelled);
     expect(recordAsked).not.toHaveBeenCalled();
+    expect(mailQuestions).not.toHaveBeenCalled();
   });
 
   it("fails a task whose loop failed, with the loop's error", async () => {

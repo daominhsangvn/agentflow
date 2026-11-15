@@ -126,10 +126,10 @@ export function handleTelemetryEvent(
 
   // Drift detection: warn when the desktop emits a loopPerf payload whose
   // event variant we don't recognize OR is missing entirely, while still
-  // forwarding the payload to Datadog. Producer additivity (PRD-254 §FR-6)
+  // forwarding the payload to SigNoz. Producer additivity (PRD-254 §FR-6)
   // requires unknown/skewed variants to flow through rather than be rejected;
   // the warning makes desktop-version skew observable. Missing `event` is
-  // surfaced as `loopPerfEvent: null` so a Datadog query can isolate it.
+  // surfaced as `loopPerfEvent: null` so a SigNoz query can isolate it.
   const loopPerf = event.diagnostics?.loopPerf;
   if (loopPerf !== undefined) {
     const loopPerfEvent = loopPerf.event;

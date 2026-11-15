@@ -1,3 +1,4 @@
+import { log } from "@repo/observability/log";
 import "server-only";
 
 import { DesktopProvisioningPlatform } from "@repo/api/src/types/electron";
@@ -42,7 +43,11 @@ export async function isDesktopManagedPopProvisioningEnabled(
       provisioningEnabled &&
       (await isDesktopManagedPopEnforcementEnabled(identity))
     );
-  } catch {
+  } catch (error) {
+    log.warn("desktop.pop_provisioning_check_failed", {
+      reason: "flag_lookup_failed",
+      error,
+    });
     return false;
   }
 }

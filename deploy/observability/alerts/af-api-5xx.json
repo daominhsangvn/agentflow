@@ -1,0 +1,33 @@
+{
+  "alert": "AgentFlow: API 5xx rate",
+  "alertType": "TRACES_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "version": "v4",
+  "evalWindow": "5m0s",
+  "frequency": "1m0s",
+  "condition": {
+    "compositeQuery": {
+      "queryType": "clickhouse_sql",
+      "panelType": "graph",
+      "chQueries": {
+        "A": {
+          "name": "A",
+          "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND kind = 2 AND toUInt16OrZero(response_status_code) >= 500 AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts",
+          "disabled": false
+        }
+      }
+    },
+    "op": "1",
+    "target": 5,
+    "matchType": "1",
+    "selectedQueryName": "A"
+  },
+  "labels": {
+    "severity": "warning"
+  },
+  "annotations": {
+    "summary": "More than 5 API 5xx responses per minute",
+    "description": "Open the AgentFlow - API dashboard (Top errors), then the Journeys dashboard with the trace_id of a failing span."
+  },
+  "preferredChannels": []
+}

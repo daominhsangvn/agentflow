@@ -15,7 +15,7 @@
  *
  * Added on review (wongk, PR #4708): the desktop-side suite stopped at the
  * emitter, so nothing pinned either boundary and a schema/producer drift would
- * have surfaced only as missing Datadog data.
+ * have surfaced only as missing SigNoz data.
  */
 import { describe, expect, it } from "vitest";
 import { sanitizeDesktopTelemetryDiagnostics } from "../telemetry/emitter";
@@ -60,7 +60,7 @@ describe("dbHostExit diagnostics wire schema (ISS-5715)", () => {
     );
     expect(parsed.success).toBe(true);
     const event = parsed.success ? parsed.data : undefined;
-    // The facet a Datadog log monitor keys on must survive verbatim.
+    // The facet a SigNoz log monitor keys on must survive verbatim.
     expect(event?.category).toBe("desktop.db_host.exited_unexpectedly");
     expect(event?.severity).toBe("error");
     expect(event?.diagnostics?.dbHostExit).toEqual(VALID_DB_HOST_EXIT);

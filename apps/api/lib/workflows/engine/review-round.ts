@@ -17,6 +17,7 @@ import {
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
 import { parseError } from "@repo/observability/error";
+import { log } from "@repo/observability/log";
 import {
   renderStepInstruction,
   runIssueVariables,
@@ -207,6 +208,12 @@ async function goOn(
     try {
       await approvePlanDocument(run.planDocumentId, run.organizationId);
     } catch (error) {
+      log.warn("workflow.plan_approval_failed", {
+        workflowRunId: run.id,
+        organizationId: run.organizationId,
+        reason: "plan_approval_failed",
+        error,
+      });
       return failRun(
         runError(
           WorkflowRunErrorCode.PlanStateUnavailable,

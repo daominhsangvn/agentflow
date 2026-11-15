@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import { isRecord } from "../../shared/type-guards.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import type { ProcessManager } from "../process-manager.js";
@@ -210,6 +211,10 @@ async function runUpsert(
       sourceGatewayId: gatewayId,
     });
   } catch (err) {
+    gatewayLog.error(CHAT_SESSION_TAG, "chat turn upsert failed", {
+      reason: "chat_upsert_failed",
+      error: err,
+    });
     return {
       kind: "error",
       error: {
@@ -517,3 +522,5 @@ function writeDone(response: ServerResponse): void {
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+const CHAT_SESSION_TAG = "chat-session";

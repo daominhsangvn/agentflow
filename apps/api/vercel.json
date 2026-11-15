@@ -19,10 +19,6 @@
       "schedule": "*/15 * * * *"
     },
     {
-      "path": "/cron/sample-merge-queue-stall",
-      "schedule": "*/5 * * * *"
-    },
-    {
       "path": "/cron/cleanup-preview-schemas",
       "schedule": "17 6 * * *"
     },

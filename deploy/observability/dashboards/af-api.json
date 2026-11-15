@@ -1,0 +1,371 @@
+{
+  "title": "AgentFlow — API",
+  "description": "af-api server spans: traffic, errors and latency.",
+  "tags": ["agentflow"],
+  "version": "v4",
+  "variables": {},
+  "layout": [
+    {
+      "i": "93f1dc4d-1604-4ec7-a098-f6f32ff7b7d3",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "0b2b7d96-bd8e-4232-a55b-6b36a4e195f9",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "e02b9c07-1e81-43eb-a1e5-cf6efe35e500",
+      "x": 0,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "dc54392f-1201-4a71-a1c8-c5c1e0150881",
+      "x": 6,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "9d771f02-9522-422e-aefa-8b61609208fd",
+      "x": 0,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "29093cb6-32c4-4e9c-aaad-cb400ff2901b",
+      "x": 6,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "541eda7d-356b-48f9-a757-be18447bcb60",
+      "x": 0,
+      "y": 18,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "bc705781-45c9-4c43-ab82-dfea698acaee",
+      "x": 6,
+      "y": 18,
+      "w": 6,
+      "h": 6
+    }
+  ],
+  "widgets": [
+    {
+      "id": "93f1dc4d-1604-4ec7-a098-f6f32ff7b7d3",
+      "panelTypes": "graph",
+      "title": "Requests/min by route",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "70b5c499-6123-41d0-afe8-572013b58dab",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, if(`attribute_string_http$$route` != '', `attribute_string_http$$route`, name) AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND kind = 2 AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "0b2b7d96-bd8e-4232-a55b-6b36a4e195f9",
+      "panelTypes": "graph",
+      "title": "5xx per minute",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "e46fa154-642e-40b6-a45a-76baef77d683",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND kind = 2 AND toUInt16OrZero(response_status_code) >= 500 AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "e02b9c07-1e81-43eb-a1e5-cf6efe35e500",
+      "panelTypes": "graph",
+      "title": "Error rate (%)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "percent",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "319872cc-b2bd-4dcb-ab2c-12464fce7fdf",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, 100 * countIf(has_error) / count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND kind = 2 AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "dc54392f-1201-4a71-a1c8-c5c1e0150881",
+      "panelTypes": "graph",
+      "title": "Latency p50 (ms)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "ms",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "575e82ab-411d-49f5-abf0-51916e4c6820",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, quantile(0.5)(duration_nano) / 1e6 AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND kind = 2 AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "9d771f02-9522-422e-aefa-8b61609208fd",
+      "panelTypes": "graph",
+      "title": "Latency p95 (ms)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "ms",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "f1c72d97-902a-497e-ab8d-5d93a97cab2b",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, quantile(0.95)(duration_nano) / 1e6 AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND kind = 2 AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "29093cb6-32c4-4e9c-aaad-cb400ff2901b",
+      "panelTypes": "graph",
+      "title": "Latency p99 (ms)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "ms",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "4abd7566-b15d-40bb-ad5a-07db99184506",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, quantile(0.99)(duration_nano) / 1e6 AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND kind = 2 AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "541eda7d-356b-48f9-a757-be18447bcb60",
+      "panelTypes": "table",
+      "title": "Top 20 slowest routes",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "50bc5ed2-fc9a-447b-a4d3-00019bf96786",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT if(`attribute_string_http$$route` != '', `attribute_string_http$$route`, name) AS route, count() AS calls, round(quantile(0.95)(duration_nano) / 1e6, 1) AS p95_ms FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND kind = 2 AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY route ORDER BY p95_ms DESC LIMIT 20"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "bc705781-45c9-4c43-ab82-dfea698acaee",
+      "panelTypes": "table",
+      "title": "Top errors",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "a411db5a-62e1-4db5-acb1-3f52e4cfdde2",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT name, status_message, count() AS errors FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-api' AND kind = 2 AND has_error = true AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY name, status_message ORDER BY errors DESC LIMIT 20"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    }
+  ]
+}

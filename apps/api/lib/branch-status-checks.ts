@@ -377,6 +377,7 @@ export function sanitizeProjectedUrl(value: string | null): string | null {
       ? url.toString()
       : null;
   } catch {
+    // observability: (a) parse fallback — an invalid URL is dropped
     return null;
   }
 }

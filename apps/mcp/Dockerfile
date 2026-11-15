@@ -143,9 +143,8 @@ ENV MCP_PORT=3010
 # Emit structured single-line JSON to stdout so @repo/observability/log runs its
 # meta through redactLogValue on the console path too (util.inspect on a plain
 # console line would print meta unredacted), and so a stdout drain parses fields
-# into first-class facets. The agentless Datadog intake (DD_API_KEY) already
-# redacts; this covers the CloudWatch/console path for the OAuth-table reader.
-ENV DD_LOGS_JSON=1
+# into first-class attributes. The OTel log export (when configured) redacts too.
+ENV LOG_FORMAT=json
 # Disable pnpm's pre-run deps-status check. Deps are fully baked into this image
 # at build time (stage 2 `pnpm install --frozen-lockfile --filter mcp... --prod`),
 # so the check is pointless at runtime — and harmful: the `pnpm exec` CMD below
@@ -162,4 +161,4 @@ EXPOSE 3010
 # pnpm --filter mcp exec sets CWD to /app/apps/mcp/, so paths are relative to that.
 # --require needs ./ prefix for CWD-relative resolution (not node_modules lookup).
 # preload.cjs (not .ts/.js) because --require only loads CJS modules.
-CMD ["pnpm", "--filter", "mcp", "exec", "tsx", "--require", "./src/preload.cjs", "src/index.ts"]
+CMD ["pnpm", "--filter", "mcp", "exec", "tsx", "--require", "./src/preload.cjs", "src/server-main.ts"]

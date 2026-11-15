@@ -26,7 +26,15 @@ export type SelfHostedCronLogger = {
   warn(message: string): void;
 };
 
+/** Outcome of one job run, handed back to `runInSpan` so it can mark errors. */
+export type SelfHostedCronResult = { ok: boolean; reason?: string };
+
 export type SelfHostedCronOptions = {
+  /** Wraps one job run (server.ts passes a tracing root span). */
+  runInSpan?: <T extends SelfHostedCronResult>(
+    job: SelfHostedCronJob,
+    fn: () => Promise<T>
+  ) => Promise<T>;
   port: number;
   /** The address the server listens on; wildcard addresses map to 127.0.0.1. */
   hostname?: string;
@@ -48,6 +56,7 @@ export const RUNNER_CAPABILITIES_INTERVAL_MS = 24 * 60 * 60_000;
 /** Daily: workflow events and inbound deliveries older than 30 days are deleted. */
 export const INBOUND_HISTORY_PRUNE_INTERVAL_MS = 24 * 60 * 60_000;
 
+const CRON_PATH_PREFIX = /^\/cron\//;
 const LOG_PREFIX = "[self-hosted-cron]";
 
 /** Starts the runner and returns a function that stops it. */
@@ -76,22 +85,30 @@ export function startSelfHostedCronRunner(
     if (env.CRON_SECRET !== secret) {
       env.CRON_SECRET = secret;
     }
-    try {
-      const response = await fetchImpl(`${baseUrl}${job.path}`, {
-        method: "GET",
-        headers: { authorization: `Bearer ${secret}` },
-        signal: AbortSignal.timeout(SELF_HOSTED_CRON_REQUEST_TIMEOUT_MS),
-      });
-      // Drain the body so the connection is released.
-      await response.text();
-      if (!response.ok) {
+    const run = options.runInSpan ?? ((_job, fn) => fn());
+    await run(job, async (): Promise<SelfHostedCronResult> => {
+      try {
+        const response = await fetchImpl(`${baseUrl}${job.path}`, {
+          method: "GET",
+          headers: { authorization: `Bearer ${secret}` },
+          signal: AbortSignal.timeout(SELF_HOSTED_CRON_REQUEST_TIMEOUT_MS),
+        });
+        // Drain the body so the connection is released.
+        await response.text();
+        if (!response.ok) {
+          logger.warn(
+            `${LOG_PREFIX} ${job.path} answered HTTP ${response.status}`
+          );
+          return { ok: false, reason: `HTTP ${response.status}` };
+        }
+        return { ok: true };
+      } catch (error) {
         logger.warn(
-          `${LOG_PREFIX} ${job.path} answered HTTP ${response.status}`
+          `${LOG_PREFIX} ${job.path} failed: ${describeError(error)}`
         );
+        return { ok: false, reason: describeError(error) };
       }
-    } catch (error) {
-      logger.warn(`${LOG_PREFIX} ${job.path} failed: ${describeError(error)}`);
-    }
+    });
   };
 
   const schedule = (job: SelfHostedCronJob, delayMs: number): void => {
@@ -150,6 +167,11 @@ export function resolveSelfHostedCronJobs(
       intervalMs: INBOUND_HISTORY_PRUNE_INTERVAL_MS,
     },
   ];
+}
+
+/** `/cron/timeout-loops` -> `timeout_loops` (span name suffix). */
+export function cronJobName(path: string): string {
+  return path.replace(CRON_PATH_PREFIX, "").replaceAll("-", "_");
 }
 
 /** Loopback address that reaches a server listening on `hostname`. */

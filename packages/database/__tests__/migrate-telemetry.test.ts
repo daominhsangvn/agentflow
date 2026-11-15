@@ -140,7 +140,7 @@ describe("recordMigrateEvent (ISS-4392) — Vercel-gated stdout", () => {
     const parsed = JSON.parse(logImpl.mock.calls[0][0]);
     expect(parsed.message).toBe("migrate_deploy");
     expect(parsed.event).toBe("migrate_deploy");
-    expect(parsed.ddsource).toBe("migrate");
+    expect(parsed.source).toBe("migrate");
   });
 });
 
@@ -205,112 +205,11 @@ describe("createMigrateRunRecorder (ISS-4392)", () => {
   });
 });
 
-const VERCEL_KEYED_ENV = {
-  VERCEL: "1",
-  DD_API_KEY: "dd-key",
-  DD_SITE: "datadoghq.eu",
-} as NodeJS.ProcessEnv;
-
-function bufferOneEvent(overrides: Partial<BuildMigrateEventInput> = {}): void {
-  recordMigrateEvent(buildMigrateEvent(makeBuildInput(overrides)), {
-    env: VERCEL_KEYED_ENV,
-    logImpl: vi.fn(),
-  });
-}
-
-describe("flushMigrateTelemetry (ISS-4392) — batched, bounded, fail-safe", () => {
-  it("posts ONE batched body for a multi-event (walk) buffer and clears it", async () => {
-    bufferOneEvent({ schema: "preview_a" });
-    bufferOneEvent({ schema: "preview_b" });
-    const fetchImpl = vi.fn((_url: string, _init: RequestInit) =>
-      Promise.resolve(new Response(null))
-    );
-
-    await flushMigrateTelemetry({ env: VERCEL_KEYED_ENV, fetchImpl });
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchImpl.mock.calls[0];
-    expect(url).toBe("https://http-intake.logs.datadoghq.eu/api/v2/logs");
-    expect(init.headers).toMatchObject({ "DD-API-KEY": "dd-key" });
-    const body = JSON.parse(init.body as string);
-    expect(body).toHaveLength(2);
-    expect(body[0].message).toBe("migrate_deploy");
-
-    // Buffer cleared: a second flush sends nothing.
-    fetchImpl.mockClear();
-    await flushMigrateTelemetry({ env: VERCEL_KEYED_ENV, fetchImpl });
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it("does NOT post when DD_API_KEY is absent (stdout-only), and CLEARS the buffer", async () => {
-    bufferOneEvent();
-    const fetchImpl = vi.fn((_url: string, _init: RequestInit) =>
-      Promise.resolve(new Response(null))
-    );
-    // No key → no POST.
-    await flushMigrateTelemetry({
-      env: { VERCEL: "1" } as NodeJS.ProcessEnv,
-      fetchImpl,
-    });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    // Proves the buffer was cleared: a subsequent KEYED flush must send nothing.
-    // (If the no-key branch had left the event buffered, this would POST it.)
-    await flushMigrateTelemetry({ env: VERCEL_KEYED_ENV, fetchImpl });
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it("does NOT post to a userinfo-style DD_SITE that is not on the allowlist (no key exfiltration)", async () => {
-    bufferOneEvent();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const fetchImpl = vi.fn((_url: string, _init: RequestInit) =>
-      Promise.resolve(new Response(null))
-    );
-    await flushMigrateTelemetry({
-      env: {
-        VERCEL: "1",
-        DD_API_KEY: "dd-key",
-        DD_SITE: "datadoghq.com@attacker.example",
-      } as NodeJS.ProcessEnv,
-      fetchImpl,
-    });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledTimes(1);
-  });
-
-  it("never logs the DD_API_KEY when a malformed key throws during header construction", async () => {
-    bufferOneEvent();
-    const secret = "bad\nkey-SUPERSECRET";
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const fetchImpl = vi.fn(
-      (_url: string, _init: RequestInit): Promise<Response> => {
-        // Mirrors Undici's "invalid header value \"<value>\"" throw.
-        throw new Error(
-          `Headers.append: "${secret}" is an invalid header value`
-        );
-      }
-    );
-    await flushMigrateTelemetry({
-      env: {
-        VERCEL: "1",
-        DD_API_KEY: secret,
-        DD_SITE: "datadoghq.eu",
-      } as NodeJS.ProcessEnv,
-      fetchImpl,
-    });
-    for (const call of warn.mock.calls) {
-      expect(String(call[0])).not.toContain("SUPERSECRET");
-    }
-  });
-
-  it("resolves via the SINGLE deadline when BOTH the POST and stdout drain are stuck", async () => {
-    bufferOneEvent();
-    const fetchImpl = vi.fn(
-      (_url: string, _init: RequestInit) =>
-        new Promise<Response>(() => undefined)
-    );
+describe("flushMigrateTelemetry (ISS-4392) — bounded, fail-safe", () => {
+  it("resolves via the deadline when the stdout drain is stuck", async () => {
     const stdoutImpl = {
       writableLength: 5,
-      // A write that never invokes its callback → drain would hang without the deadline.
+      // A write that never invokes its callback: drain would hang without the deadline.
       write: (_chunk: string, _cb: () => void) => undefined,
     };
     let scheduleCalls = 0;
@@ -319,19 +218,12 @@ describe("flushMigrateTelemetry (ISS-4392) — batched, bounded, fail-safe", () 
       onFire();
     };
     await expect(
-      flushMigrateTelemetry({
-        env: VERCEL_KEYED_ENV,
-        fetchImpl,
-        stdoutImpl,
-        scheduleDeadline,
-      })
+      flushMigrateTelemetry({ stdoutImpl, scheduleDeadline })
     ).resolves.toBeUndefined();
-    // ONE deadline for the whole flush (not one per sink).
     expect(scheduleCalls).toBe(1);
   });
 
   it("does not reject when the stdout drain write throws synchronously", async () => {
-    bufferOneEvent();
     const stdoutImpl = {
       writableLength: 5,
       write: (_chunk: string, _cb: () => void) => {
@@ -339,64 +231,8 @@ describe("flushMigrateTelemetry (ISS-4392) — batched, bounded, fail-safe", () 
       },
     };
     await expect(
-      flushMigrateTelemetry({
-        env: { VERCEL: "1" } as NodeJS.ProcessEnv,
-        stdoutImpl,
-      })
+      flushMigrateTelemetry({ stdoutImpl })
     ).resolves.toBeUndefined();
-  });
-
-  it("swallows a throwing transport (never fails the deploy)", async () => {
-    bufferOneEvent();
-    const fetchImpl = vi.fn(
-      (_url: string, _init: RequestInit): Promise<Response> => {
-        throw new Error("intake down");
-      }
-    );
-    await expect(
-      flushMigrateTelemetry({ env: VERCEL_KEYED_ENV, fetchImpl })
-    ).resolves.toBeUndefined();
-  });
-
-  it("resolves via the deadline when the transport never settles (no hang)", async () => {
-    bufferOneEvent();
-    // A fetch that never resolves would hang the build; the injected deadline
-    // fires immediately so flush returns. No wall-clock timing is asserted.
-    const fetchImpl = vi.fn(
-      (_url: string, _init: RequestInit) =>
-        new Promise<Response>(() => undefined)
-    );
-    const scheduleDeadline = (_ms: number, onFire: () => void) => onFire();
-
-    await expect(
-      flushMigrateTelemetry({
-        env: VERCEL_KEYED_ENV,
-        fetchImpl,
-        scheduleDeadline,
-      })
-    ).resolves.toBeUndefined();
-  });
-
-  it("warns once when the intake returns a non-2xx (a dead sink is not silent success)", async () => {
-    bufferOneEvent();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const fetchImpl = vi.fn((_url: string, _init: RequestInit) =>
-      Promise.resolve(new Response(null, { status: 503 }))
-    );
-    await flushMigrateTelemetry({ env: VERCEL_KEYED_ENV, fetchImpl });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain("503");
-  });
-
-  it("warns once when the intake POST rejects", async () => {
-    bufferOneEvent();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const fetchImpl = vi.fn((_url: string, _init: RequestInit) =>
-      Promise.reject(new Error("intake unreachable"))
-    );
-    await flushMigrateTelemetry({ env: VERCEL_KEYED_ENV, fetchImpl });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain("intake POST failed");
   });
 
   it("drains buffered stdout before returning (no truncation on the forced exit)", async () => {
@@ -408,10 +244,7 @@ describe("flushMigrateTelemetry (ISS-4392) — batched, bounded, fail-safe", () 
         cb();
       },
     };
-    await flushMigrateTelemetry({
-      env: { VERCEL: "1" } as NodeJS.ProcessEnv,
-      stdoutImpl,
-    });
+    await flushMigrateTelemetry({ stdoutImpl });
     expect(drained).toBe(true);
   });
 });

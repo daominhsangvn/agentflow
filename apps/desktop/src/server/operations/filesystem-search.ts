@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { glob } from "glob";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import {
   pathsEqualIgnoreCase,
   TCC_PROTECTED_HOME_SUBDIRS,
@@ -125,6 +126,7 @@ export function registerFilesystemSearchRoutes(
 
       json(context, 200, { files: limitedFiles, truncated });
     } catch (error) {
+      gatewayLog.error(LOG_TAG, "search files failed", { error });
       const message = error instanceof Error ? error.message : "Unknown error";
       json(context, 500, { error: `Failed to search files: ${message}` });
     }
@@ -167,3 +169,5 @@ function sortByRelevance(a: string, b: string, query: string): number {
 
   return a.localeCompare(b);
 }
+
+const LOG_TAG = "filesystem";

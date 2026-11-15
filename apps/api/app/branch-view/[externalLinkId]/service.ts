@@ -462,6 +462,7 @@ function matchesCanonicalGitHubPullRequestUrl(
       pullNumber === String(identity.pullNumber)
     );
   } catch {
+    // observability: parse fallback — an unparsable URL does not match
     return false;
   }
 }

@@ -14,6 +14,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { withDb } from "@repo/database";
+import { AfAttribute } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
 import {
   flushLogsWithDeadline,
@@ -75,6 +76,7 @@ import {
 } from "./oauth-scopes.js";
 import { createSessionUrlBuilder } from "./session-urls.js";
 import { TOOL_NAMES, TOOL_REGISTRATIONS } from "./tool-registrations.js";
+import { instrumentToolRegistration } from "./tool-span.js";
 
 const BEARER_API_KEY_REGEX = /^Bearer\s+(sk_live_\S+)$/;
 const BEARER_OAUTH_TOKEN_REGEX = /^Bearer\s+(mcp_at_[A-Za-z0-9._-]+)$/;
@@ -213,6 +215,7 @@ function isRedirectUriAllowedByEntry(
       entryUrl = new URL(allowlistEntry.slice(0, -1));
       uriUrl = new URL(uri);
     } catch {
+      // observability: parse fallback — an unparseable allowlist entry or URI never matches
       return false;
     }
     if (uriUrl.origin !== entryUrl.origin) {
@@ -320,6 +323,11 @@ async function createMcpServer(
       instructions: SERVER_INSTRUCTIONS,
     }
   );
+
+  instrumentToolRegistration(server, {
+    [AfAttribute.OrgId]: context.organizationId,
+    [AfAttribute.UserId]: context.userId,
+  });
 
   const apiClient = createApiClient(context, plaintextKey);
   const allowWriteTools = hasWriteScope(grantedScopes);
@@ -1386,7 +1394,11 @@ function decryptApiKey(encrypted: string, keyId: string): string | null {
       decipher.update(ciphertext),
       decipher.final(),
     ]).toString("utf8");
-  } catch {
+  } catch (error) {
+    log.debug("mcp.oauth_token_decrypt_failed", {
+      reason: "token_decrypt_failed",
+      error,
+    });
     return null;
   }
 }
@@ -1473,7 +1485,11 @@ function parseSignedOAuthAccessToken(
       iat: typeof payload.iat === "number" ? payload.iat : now,
       exp: payload.exp,
     };
-  } catch {
+  } catch (error) {
+    log.debug("mcp.oauth_token_payload_invalid", {
+      reason: "token_payload_invalid",
+      error,
+    });
     return null;
   }
 }
@@ -1544,7 +1560,11 @@ async function checkDbReachable(): Promise<boolean> {
       }
     );
     return true;
-  } catch {
+  } catch (error) {
+    log.warn("mcp.readiness_db_check_failed", {
+      reason: "database_unreachable",
+      error,
+    });
     return false;
   }
 }
@@ -1715,6 +1735,7 @@ async function handleMcpExistingSession(
   try {
     parsedBody = JSON.parse(rawBody);
   } catch {
+    // observability: 4xx — the 400 is captured by request_completed
     sendJson(res, 400, {
       error: "invalid_request",
       error_description: "Malformed JSON request body",
@@ -1746,6 +1767,7 @@ async function parseMcpJsonBody(
   try {
     return JSON.parse(rawBody);
   } catch {
+    // observability: 4xx — the 400 is captured by request_completed
     sendJson(res, 400, {
       error: "invalid_request",
       error_description: "Malformed JSON request body",
@@ -1886,6 +1908,7 @@ async function connectMcpTransportOrCleanup(
     try {
       await server.close();
     } catch {
+      // observability: best-effort cleanup — the original error is rethrown
       // best-effort cleanup — original error is more important
     }
     throw error;
@@ -2086,6 +2109,7 @@ async function readJsonBody<T>(
   try {
     return JSON.parse(raw) as T;
   } catch {
+    // observability: parse fallback — a non-JSON body is treated as absent
     return null;
   }
 }
@@ -2127,7 +2151,11 @@ function isValidRedirectUri(uri: string): boolean {
 
     // No allowlist and not loopback — deny in non-local envs, allow in local
     return isLocalOauthEnvironment();
-  } catch {
+  } catch (error) {
+    log.debug("mcp.oauth_redirect_uri_check_failed", {
+      reason: "redirect_uri_unparseable",
+      error,
+    });
     return false;
   }
 }
@@ -2154,6 +2182,7 @@ async function handleOAuthRegister(
         ? (parsedBody as Record<string, unknown>)
         : null;
   } catch {
+    // observability: parse fallback — an unreadable client metadata body is answered with a 400
     body = null;
   }
   if (!body) {
@@ -2313,7 +2342,11 @@ async function extractApiKeyFromRequest(
     const body = await readFormBody(req);
     const formKey = body.api_key;
     return formKey?.startsWith("sk_live_") ? formKey : null;
-  } catch {
+  } catch (error) {
+    log.debug("mcp.oauth_form_api_key_unreadable", {
+      reason: "form_body_unreadable",
+      error,
+    });
     return null;
   }
 }
@@ -3519,7 +3552,7 @@ async function dispatchHttpRequest(
       method: req.method ?? "",
       path: pathname,
       // `requestOrigin`, not `origin`: `origin` is a reserved logger meta key
-      // that overrides the service's Datadog origin facet when it matches a
+      // that overrides the service's SigNoz origin facet when it matches a
       // known origin, so the untrusted request Origin header must not use it.
       requestOrigin: req.headers.origin ?? "",
       host: req.headers.host ?? "",
@@ -3636,7 +3669,7 @@ export function createHttpServer(): import("node:http").Server {
     if (req.headers.origin && !corsAllowed) {
       log.warn("[mcp] cors-blocked", {
         // `requestOrigin`, not `origin`: `origin` is a reserved logger meta key
-        // that would let this untrusted Origin header spoof the Datadog origin facet.
+        // that would let this untrusted Origin header spoof the SigNoz origin facet.
         requestOrigin: req.headers.origin,
         host: req.headers.host ?? "",
         method: req.method ?? "",
@@ -3715,9 +3748,9 @@ export function startHttpServer(port = PORT): import("node:http").Server {
   });
 
   httpServer.on("error", (error) => {
-    // Flush the fatal startup diagnostic (e.g. EADDRINUSE/EACCES) to Datadog
+    // Flush the fatal startup diagnostic (e.g. EADDRINUSE/EACCES) to SigNoz
     // before exiting — otherwise the buffered log.error entry is dropped on
-    // exit and the reason the task never started is invisible in Datadog.
+    // exit and the reason the task never started is invisible in SigNoz.
     log.error("HTTP server error", { error });
     shutdownAndExit({ exitCode: 1 }).catch(() => {
       process.exit(1);

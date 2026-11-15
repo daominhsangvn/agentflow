@@ -80,6 +80,7 @@ function resolveWithNearestRealpath(absolutePath: string): string {
   try {
     return fs.realpathSync.native(absolutePath);
   } catch {
+    // observability: probe — the path may not exist yet; the nearest existing ancestor is resolved
     const remainder: string[] = [];
     let probe = absolutePath;
     while (true) {
@@ -98,6 +99,7 @@ function resolveWithNearestRealpath(absolutePath: string): string {
       const canonicalBase = fs.realpathSync.native(probe);
       return path.join(canonicalBase, ...remainder);
     } catch {
+      // observability: probe — falls back to the unresolved absolute path
       return absolutePath;
     }
   }

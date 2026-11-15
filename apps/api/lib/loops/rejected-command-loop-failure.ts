@@ -2,9 +2,16 @@ import { createHash } from "node:crypto";
 import type { JsonObject } from "@repo/api/src/types/common";
 import { LoopErrorCode, LoopStatus } from "@repo/api/src/types/loop";
 import { withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import {
+  setActiveSpanAttributes,
+  setSpanOutcome,
+  withSpan,
+} from "@repo/observability/span";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import { isRecord } from "@/lib/type-guards";
+import { LOOP_FAIL_KIND_ATTRIBUTE, LoopFailKind } from "./loop-fail-kind";
 
 const SYMPHONY_LOOP_OPERATION_ID = "symphony_loop";
 const DEFAULT_DESKTOP_LOOP_COMMAND_FAILURE_MESSAGE =
@@ -163,87 +170,102 @@ async function addSystemLoopErrorEvent(input: {
  * Fails a loop only for Desktop command-signing key authorization rejections
  * that can be bound to the exact target-scoped symphony_loop command body.
  */
-export async function failLoopFromRejectedCommand(input: {
+export function failLoopFromRejectedCommand(input: {
   commandId: string;
   targetId: string;
   reason: string | undefined;
 }): Promise<RejectedLoopFailureResult> {
-  const reason = input.reason;
-  if (!isCommandSigningKeyAuthorizationRejectionReason(reason)) {
-    return { failed: false, reason: "non_key_authorization_reason" };
-  }
+  return withSpan(
+    "loop.fail",
+    {
+      [AfAttribute.CommandId]: input.commandId,
+      [AfAttribute.ComputeTargetId]: input.targetId,
+      [LOOP_FAIL_KIND_ATTRIBUTE]: LoopFailKind.RejectedCommand,
+    },
+    async (span) => {
+      const reason = input.reason;
+      if (!isCommandSigningKeyAuthorizationRejectionReason(reason)) {
+        return { failed: false, reason: "non_key_authorization_reason" };
+      }
 
-  const command = await withDb((db) =>
-    db.desktopCommand.findUnique({
-      where: { id: input.commandId },
-      select: {
-        computeTargetId: true,
-        operationId: true,
-        requestPayload: true,
-      },
-    })
+      const command = await withDb((db) =>
+        db.desktopCommand.findUnique({
+          where: { id: input.commandId },
+          select: {
+            computeTargetId: true,
+            operationId: true,
+            requestPayload: true,
+          },
+        })
+      );
+      if (!command) {
+        return { failed: false, reason: "command_not_found" };
+      }
+      if (
+        command.computeTargetId !== input.targetId ||
+        command.operationId !== SYMPHONY_LOOP_OPERATION_ID
+      ) {
+        return { failed: false, reason: "command_not_loop_scoped_to_target" };
+      }
+
+      const loopId = readLoopIdFromRequestPayload(command.requestPayload);
+      if (!loopId) {
+        return { failed: false, reason: "missing_loop_id" };
+      }
+
+      const loop = await withDb((db) =>
+        db.loop.findFirst({
+          where: {
+            id: loopId,
+            computeTargetId: input.targetId,
+          },
+          select: {
+            organizationId: true,
+            status: true,
+          },
+        })
+      );
+      if (!loop) {
+        return { failed: false, reason: "loop_not_found_for_target" };
+      }
+      setActiveSpanAttributes({
+        [AfAttribute.LoopId]: loopId,
+        [AfAttribute.OrgId]: loop.organizationId,
+      });
+      if (TERMINAL_LOOP_STATUSES.has(loop.status)) {
+        return { failed: false, reason: "loop_already_terminal" };
+      }
+
+      const message = buildSigningAuthorizationMessage(reason);
+      const failureResult = await markLoopFailedForCommandError({
+        loopId,
+        organizationId: loop.organizationId,
+        code: LoopErrorCode.AuthChallenge,
+        message,
+      });
+      if (!failureResult.failed) {
+        return failureResult;
+      }
+      setSpanOutcome(AfOutcome.Error, message, span);
+
+      await addSystemLoopErrorEvent({
+        loopId,
+        data: {
+          type: "error",
+          code: LoopErrorCode.AuthChallenge,
+          message,
+          timestamp: new Date().toISOString(),
+          result: {
+            commandId: input.commandId,
+            computeTargetId: input.targetId,
+            reason,
+          },
+        } satisfies JsonObject,
+      });
+
+      return failureResult;
+    }
   );
-  if (!command) {
-    return { failed: false, reason: "command_not_found" };
-  }
-  if (
-    command.computeTargetId !== input.targetId ||
-    command.operationId !== SYMPHONY_LOOP_OPERATION_ID
-  ) {
-    return { failed: false, reason: "command_not_loop_scoped_to_target" };
-  }
-
-  const loopId = readLoopIdFromRequestPayload(command.requestPayload);
-  if (!loopId) {
-    return { failed: false, reason: "missing_loop_id" };
-  }
-
-  const loop = await withDb((db) =>
-    db.loop.findFirst({
-      where: {
-        id: loopId,
-        computeTargetId: input.targetId,
-      },
-      select: {
-        organizationId: true,
-        status: true,
-      },
-    })
-  );
-  if (!loop) {
-    return { failed: false, reason: "loop_not_found_for_target" };
-  }
-  if (TERMINAL_LOOP_STATUSES.has(loop.status)) {
-    return { failed: false, reason: "loop_already_terminal" };
-  }
-
-  const message = buildSigningAuthorizationMessage(reason);
-  const failureResult = await markLoopFailedForCommandError({
-    loopId,
-    organizationId: loop.organizationId,
-    code: LoopErrorCode.AuthChallenge,
-    message,
-  });
-  if (!failureResult.failed) {
-    return failureResult;
-  }
-
-  await addSystemLoopErrorEvent({
-    loopId,
-    data: {
-      type: "error",
-      code: LoopErrorCode.AuthChallenge,
-      message,
-      timestamp: new Date().toISOString(),
-      result: {
-        commandId: input.commandId,
-        computeTargetId: input.targetId,
-        reason,
-      },
-    } satisfies JsonObject,
-  });
-
-  return failureResult;
 }
 
 /**
@@ -251,81 +273,96 @@ export async function failLoopFromRejectedCommand(input: {
  * reports a terminal execution error. This preserves actionable desktop
  * fail-fast messages in the web loop failure UI.
  */
-export async function failLoopFromTerminalCommandError(input: {
+export function failLoopFromTerminalCommandError(input: {
   commandId: string;
   targetId: string;
   error: string | undefined;
 }): Promise<RejectedLoopFailureResult> {
-  const message = normalizeDesktopLoopCommandErrorMessage(input.error);
-  const command = await withDb((db) =>
-    db.desktopCommand.findUnique({
-      where: { id: input.commandId },
-      select: {
-        computeTargetId: true,
-        computeTarget: { select: { organizationId: true } },
-        operationId: true,
-        requestPayload: true,
-      },
-    })
+  return withSpan(
+    "loop.fail",
+    {
+      [AfAttribute.CommandId]: input.commandId,
+      [AfAttribute.ComputeTargetId]: input.targetId,
+      [LOOP_FAIL_KIND_ATTRIBUTE]: LoopFailKind.TerminalCommandError,
+    },
+    async (span) => {
+      const message = normalizeDesktopLoopCommandErrorMessage(input.error);
+      const command = await withDb((db) =>
+        db.desktopCommand.findUnique({
+          where: { id: input.commandId },
+          select: {
+            computeTargetId: true,
+            computeTarget: { select: { organizationId: true } },
+            operationId: true,
+            requestPayload: true,
+          },
+        })
+      );
+      if (!command) {
+        return { failed: false, reason: "command_not_found" };
+      }
+      if (
+        command.computeTargetId !== input.targetId ||
+        command.operationId !== SYMPHONY_LOOP_OPERATION_ID
+      ) {
+        return { failed: false, reason: "command_not_loop_scoped_to_target" };
+      }
+
+      const loopId = readLoopIdFromRequestPayload(command.requestPayload);
+      if (!loopId) {
+        return { failed: false, reason: "missing_loop_id" };
+      }
+
+      const loop = await withDb((db) =>
+        db.loop.findFirst({
+          where: {
+            id: loopId,
+            organizationId: command.computeTarget.organizationId,
+            computeTargetId: input.targetId,
+          },
+          select: {
+            organizationId: true,
+            status: true,
+          },
+        })
+      );
+      if (!loop) {
+        return { failed: false, reason: "loop_not_found_for_target" };
+      }
+      setActiveSpanAttributes({
+        [AfAttribute.LoopId]: loopId,
+        [AfAttribute.OrgId]: loop.organizationId,
+      });
+      if (TERMINAL_LOOP_STATUSES.has(loop.status)) {
+        return { failed: false, reason: "loop_already_terminal" };
+      }
+
+      const failureResult = await markLoopFailedForCommandError({
+        loopId,
+        organizationId: loop.organizationId,
+        code: LoopErrorCode.ProcessFailed,
+        message,
+      });
+      if (!failureResult.failed) {
+        return failureResult;
+      }
+      setSpanOutcome(AfOutcome.Error, message, span);
+
+      await addSystemLoopErrorEvent({
+        loopId,
+        data: {
+          type: "error",
+          code: LoopErrorCode.ProcessFailed,
+          message,
+          timestamp: new Date().toISOString(),
+          result: {
+            commandId: input.commandId,
+            computeTargetId: input.targetId,
+          },
+        } satisfies JsonObject,
+      });
+
+      return failureResult;
+    }
   );
-  if (!command) {
-    return { failed: false, reason: "command_not_found" };
-  }
-  if (
-    command.computeTargetId !== input.targetId ||
-    command.operationId !== SYMPHONY_LOOP_OPERATION_ID
-  ) {
-    return { failed: false, reason: "command_not_loop_scoped_to_target" };
-  }
-
-  const loopId = readLoopIdFromRequestPayload(command.requestPayload);
-  if (!loopId) {
-    return { failed: false, reason: "missing_loop_id" };
-  }
-
-  const loop = await withDb((db) =>
-    db.loop.findFirst({
-      where: {
-        id: loopId,
-        organizationId: command.computeTarget.organizationId,
-        computeTargetId: input.targetId,
-      },
-      select: {
-        organizationId: true,
-        status: true,
-      },
-    })
-  );
-  if (!loop) {
-    return { failed: false, reason: "loop_not_found_for_target" };
-  }
-  if (TERMINAL_LOOP_STATUSES.has(loop.status)) {
-    return { failed: false, reason: "loop_already_terminal" };
-  }
-
-  const failureResult = await markLoopFailedForCommandError({
-    loopId,
-    organizationId: loop.organizationId,
-    code: LoopErrorCode.ProcessFailed,
-    message,
-  });
-  if (!failureResult.failed) {
-    return failureResult;
-  }
-
-  await addSystemLoopErrorEvent({
-    loopId,
-    data: {
-      type: "error",
-      code: LoopErrorCode.ProcessFailed,
-      message,
-      timestamp: new Date().toISOString(),
-      result: {
-        commandId: input.commandId,
-        computeTargetId: input.targetId,
-      },
-    } satisfies JsonObject,
-  });
-
-  return failureResult;
 }

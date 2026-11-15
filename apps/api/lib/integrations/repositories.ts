@@ -92,6 +92,7 @@ export async function listConnectionRepositories(
     );
     return Result.ok(found.slice(0, options.limit).map(toPublicRepository));
   } catch (error) {
+    // observability: (a) provider error handled — providerFailure logs it with the connection
     return providerFailure(connection.value, "list repositories", error);
   }
 }
@@ -139,6 +140,7 @@ export async function createConnectionRepository(
     });
     return Result.ok(toPublicRepository(created.value));
   } catch (error) {
+    // observability: (a) provider error handled — providerFailure logs it with the connection
     return providerFailure(connection.value, "create the repository", error);
   }
 }
@@ -161,6 +163,7 @@ export async function getConnectionRepository(
     }
     return Result.ok(repository);
   } catch (error) {
+    // observability: (a) provider error handled — providerFailure logs it with the connection
     return providerFailure(connection, "read the repository", error);
   }
 }
@@ -186,6 +189,7 @@ function providerFailure<T>(
   log.warn(`${LOG_PREFIX} Could not ${operation}`, {
     connectionId: connection.loaded.record.id,
     provider: connection.loaded.record.provider,
+    reason: "provider_call_failed",
     error: detail,
   });
   return accessError(

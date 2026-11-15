@@ -3,6 +3,8 @@ import {
   OrchestratorMessageOrigin,
 } from "@repo/api/src/types/orchestrator";
 import { withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { z } from "zod";
 import { loadOrchestratorWorkflows } from "./workflow-settings";
 
@@ -23,54 +25,77 @@ export function supersedeRequested(usage: unknown): boolean {
 }
 
 /** An external message no turn took yet. */
-export async function newerMessageWaiting(
-  conversationId: string
-): Promise<boolean> {
-  const newer = await withDb((db) =>
-    db.orchestratorMessage.findFirst({
-      where: {
-        conversationId,
-        turnId: null,
-        origin: OrchestratorMessageOrigin.External,
-      },
-      select: { id: true },
-    })
+export function newerMessageWaiting(conversationId: string): Promise<boolean> {
+  return withSpan(
+    "orchestrator.supersede_check",
+    { [AfAttribute.ConversationId]: conversationId },
+    async (span) => {
+      const newer = await withDb((db) =>
+        db.orchestratorMessage.findFirst({
+          where: {
+            conversationId,
+            turnId: null,
+            origin: OrchestratorMessageOrigin.External,
+          },
+          select: { id: true },
+        })
+      );
+      if (newer !== null) {
+        setSpanOutcome(AfOutcome.Skipped, undefined, span);
+      }
+      return newer !== null;
+    }
   );
-  return newer !== null;
 }
 
 /** Whether the turn must stop writing: a newer message waits (or was asked). */
-export async function turnSuperseded(turn: {
+export function turnSuperseded(turn: {
   turnId: string;
   organizationId: string;
   conversationId: string;
 }): Promise<boolean> {
-  const stored = await withDb((db) =>
-    db.orchestratorTurn.findUnique({
-      where: { id: turn.turnId },
-      select: { usage: true },
-    })
+  return withSpan(
+    "orchestrator.supersede_check",
+    {
+      [AfAttribute.OrgId]: turn.organizationId,
+      [AfAttribute.ConversationId]: turn.conversationId,
+      [AfAttribute.TurnId]: turn.turnId,
+    },
+    async (span) => {
+      const stored = await withDb((db) =>
+        db.orchestratorTurn.findUnique({
+          where: { id: turn.turnId },
+          select: { usage: true },
+        })
+      );
+      if (supersedeRequested(stored?.usage)) {
+        setSpanOutcome(AfOutcome.Skipped, undefined, span);
+        return true;
+      }
+      const conversation = await withDb((db) =>
+        db.orchestratorConversation.findUnique({
+          where: { id: turn.conversationId },
+          select: { case: { select: { workflowId: true } } },
+        })
+      );
+      if (!conversation) {
+        return false;
+      }
+      const workflowId = conversation.case.workflowId;
+      const workflows = await loadOrchestratorWorkflows(turn.organizationId, [
+        workflowId,
+      ]);
+      if (
+        workflows.get(workflowId)?.concurrency !==
+        OrchestratorConcurrency.Supersede
+      ) {
+        return false;
+      }
+      const newer = await newerMessageWaiting(turn.conversationId);
+      if (newer) {
+        setSpanOutcome(AfOutcome.Skipped, undefined, span);
+      }
+      return newer;
+    }
   );
-  if (supersedeRequested(stored?.usage)) {
-    return true;
-  }
-  const conversation = await withDb((db) =>
-    db.orchestratorConversation.findUnique({
-      where: { id: turn.conversationId },
-      select: { case: { select: { workflowId: true } } },
-    })
-  );
-  if (!conversation) {
-    return false;
-  }
-  const workflowId = conversation.case.workflowId;
-  const workflows = await loadOrchestratorWorkflows(turn.organizationId, [
-    workflowId,
-  ]);
-  if (
-    workflows.get(workflowId)?.concurrency !== OrchestratorConcurrency.Supersede
-  ) {
-    return false;
-  }
-  return newerMessageWaiting(turn.conversationId);
 }

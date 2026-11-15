@@ -6,7 +6,6 @@ import { appEnvironment, envIconPath } from "@/lib/environment";
 import { AppNavigationProvider } from "@/lib/navigation/next-adapter";
 import { QueryProvider } from "@/lib/query-client";
 import "./styles.css";
-import { DatadogAppRouter } from "@datadog/browser-rum-nextjs";
 import { AnalyticsProvider } from "@repo/analytics/provider";
 import { AuthProvider } from "@repo/auth/provider";
 import { DesignSystemProvider } from "@repo/design-system";
@@ -59,7 +58,6 @@ const RootLayout = async ({ children }: RootLayoutProperties) => {
       suppressHydrationWarning
     >
       <body className="overflow-hidden">
-        <DatadogAppRouter />
         <QueryProvider>
           <AnalyticsProvider bootstrapFeatureFlags nonce={nonce} trackPageViews>
             <AppSurfaceAnalyticsProvider>

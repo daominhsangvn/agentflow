@@ -133,6 +133,10 @@ vi.mock("@/lib/loops/loop-desktop", async (importActual) => {
 });
 
 const mockRunEcsTask = vi.fn().mockResolvedValue("ecs-task-arn");
+vi.mock("@/lib/loops/loop-telemetry-ids", () => ({
+  resolveLoopTelemetryIds: vi.fn().mockResolvedValue({}),
+}));
+
 vi.mock("@/lib/loops/loop-ecs", () => ({
   runEcsTask: (...args: unknown[]) => mockRunEcsTask(...args),
   stopLoopTask: vi.fn().mockResolvedValue(undefined),

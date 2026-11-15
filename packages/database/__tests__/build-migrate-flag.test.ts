@@ -39,8 +39,11 @@ const MIGRATE_SCRIPT = "scripts/migrate.ts";
 const SUBPROCESS_TEST_TIMEOUT_MS = 120_000;
 
 const SKIP_MESSAGE = "build_migrate_skipped";
-/** Printed by migrate.ts immediately before it mints an IAM token. */
-const TOKEN_MARKER = "Generating IAM authentication token";
+/**
+ * Printed by migrate.ts when no `DATABASE_URL` is set, after the guard (IAM auth
+ * was removed for self-hosting; `readIamAuthConfig` returns null).
+ */
+const NO_CREDENTIALS_MARKER = "Database credentials not configured";
 /** Non-null so the skip line names a schema and `ensureSchemaExists` connects. */
 const TARGET_SCHEMA = "preview_iss4489_killswitch";
 
@@ -245,15 +248,13 @@ describe("migrate.ts kill-switch, executed (ISS-4489)", () => {
   );
 
   it(
-    "mints no IAM credential when disabled",
+    "skips before the credential check when disabled",
     async () => {
       const database = await startFakeDatabase();
       try {
-        // No DATABASE_URL, so the run takes the IAM branch: sign a token, then
-        // connect. Both are past the guard.
-        const iamAuthEnv: NodeJS.ProcessEnv = {
-          AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/iss4489-test",
-          AWS_REGION: "us-east-1",
+        // No DATABASE_URL, so an enabled run stops at the credential check,
+        // which sits past the guard.
+        const noCredentialsEnv: NodeJS.ProcessEnv = {
           PGHOST: "127.0.0.1",
           PGPORT: String(database.port),
           PGUSER: "migrator",
@@ -262,11 +263,11 @@ describe("migrate.ts kill-switch, executed (ISS-4489)", () => {
         };
 
         const disabled = await runMigrateScript({
-          ...iamAuthEnv,
+          ...noCredentialsEnv,
           BUILD_MIGRATE_ENABLED: "0",
         });
 
-        expect(disabled.output).not.toContain(TOKEN_MARKER);
+        expect(disabled.output).not.toContain(NO_CREDENTIALS_MARKER);
         expect(database.connections).toBe(0);
         expect(disabled.exitCode).toBe(0);
         expect(parseSkipLine(disabled.output)).toMatchObject({
@@ -274,13 +275,14 @@ describe("migrate.ts kill-switch, executed (ISS-4489)", () => {
           schema: TARGET_SCHEMA,
         });
 
-        // Control: identical env, switch ON. The run reaches credential
-        // acquisition and fails there (no OIDC token outside a Vercel build),
-        // which is what makes the silence above evidence of the guard.
-        const enabled = await runMigrateScript(iamAuthEnv);
+        // Control: identical env, switch ON. The run reaches the credential
+        // check, which proves the disabled run's silence came from the guard.
+        const enabled = await runMigrateScript(noCredentialsEnv);
 
-        expect(enabled.output).toContain(TOKEN_MARKER);
-        expect(enabled.exitCode).not.toBe(0);
+        expect(enabled.output).toContain(NO_CREDENTIALS_MARKER);
+        expect(enabled.output).not.toContain(SKIP_MESSAGE);
+        expect(enabled.exitCode).toBe(0);
+        expect(database.connections).toBe(0);
       } finally {
         await database.close();
       }

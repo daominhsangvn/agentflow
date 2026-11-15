@@ -302,6 +302,7 @@ function isExistingFile(file: string): boolean {
     accessSync(file, constants.F_OK);
     return true;
   } catch {
+    // observability: probe — a missing file is a normal state
     return false;
   }
 }

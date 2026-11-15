@@ -40,6 +40,7 @@ export function readRunnerStatus(dataDir: string): RunnerStatus | null {
     const parsed = runnerStatusSchema.safeParse(JSON.parse(raw));
     return parsed.success ? parsed.data : null;
   } catch {
+    // observability: parse fallback — a missing or invalid status file reads as null
     return null;
   }
 }

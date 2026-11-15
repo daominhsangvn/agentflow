@@ -164,7 +164,7 @@ export async function GET(
               encoder.encode(`data: ${JSON.stringify(terminalEvent)}\n\n`)
             );
           } catch {
-            // Controller already errored/closed — nothing more to do.
+            // observability: stream teardown — the controller is already closed
           }
           controller.close();
         }
@@ -223,7 +223,7 @@ export async function GET(
           const line = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(line));
         } catch {
-          // Controller closed (client disconnected) - trigger cleanup
+          // observability: stream teardown — the controller is already closed
           cleanup();
         }
       }
@@ -236,7 +236,7 @@ export async function GET(
         try {
           controller.enqueue(encoder.encode(": keepalive\n\n"));
         } catch {
-          // Controller closed - trigger cleanup
+          // observability: stream teardown — the controller is already closed
           cleanup();
         }
       }
@@ -255,7 +255,7 @@ export async function GET(
           try {
             controller.close();
           } catch {
-            // Already closed
+            // observability: stream teardown — the controller is already closed
           }
         }
       });
@@ -272,7 +272,7 @@ export async function GET(
         try {
           controller.close();
         } catch {
-          // Already closed
+          // observability: stream teardown — the controller is already closed
         }
       }, MAX_STREAM_DURATION_MS);
     },

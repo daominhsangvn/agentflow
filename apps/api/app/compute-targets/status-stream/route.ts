@@ -1,3 +1,4 @@
+import { log } from "@repo/observability/log";
 import { authContextFailureResponse } from "@/lib/auth/auth-context-failure";
 import { resolveAnyAuthContext } from "@/lib/auth/resolve-any-auth-context";
 import { createSseResponse, createSseStream } from "@/lib/sse-stream";
@@ -48,7 +49,10 @@ export async function GET(request: Request): Promise<Response> {
     lastSnapshot = await computeTargetsService.getStatusSnapshot(
       authContext.organizationId
     );
-  } catch {
+  } catch (error) {
+    log.error("compute_targets.status_stream.initial_snapshot_failed", {
+      error,
+    });
     return new Response("Failed to load initial status", { status: 500 });
   }
 
@@ -89,7 +93,8 @@ export async function GET(request: Request): Promise<Response> {
             lastActivityAt = Date.now();
           }
           lastSnapshot = current;
-        } catch {
+        } catch (error) {
+          log.debug("compute_targets.status_stream.poll_failed", { error });
           // Swallow transient DB errors; keepalive will maintain connection.
           // A failed read is not a quiet stream, so hold the base cadence — a
           // lane that cannot reach the database must not be rewarded with a

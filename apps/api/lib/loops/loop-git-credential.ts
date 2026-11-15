@@ -121,6 +121,7 @@ export function matchesGitCredentialRequest(
   try {
     url = new URL(cloneUrl);
   } catch {
+    // observability: (a) parse fallback — an invalid clone URL never matches
     return false;
   }
   if (
@@ -140,6 +141,7 @@ function normalizePath(value: string): string {
   try {
     decoded = decodeURIComponent(value);
   } catch {
+    // observability: (a) parse fallback — an undecodable path is kept raw
     // Keep the raw path; it then only matches an identical one.
   }
   return decoded

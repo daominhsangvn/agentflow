@@ -436,7 +436,7 @@ function readNewLines(job: LocalJob, state: LoopState, at: string): void {
       }
     }
   } catch {
-    // The loop has not written its stream yet, or it was cleaned up.
+    // observability: probe — the loop has not written its stream yet, or it was cleaned up
   } finally {
     if (handle !== null) {
       fs.closeSync(handle);
@@ -631,6 +631,7 @@ function markdownFiles(dir: string): string[] {
       .map((entry) => path.join(dir, entry.name))
       .sort();
   } catch {
+    // observability: probe — a missing directory has no files
     return [];
   }
 }
@@ -643,6 +644,7 @@ function subdirectories(dir: string): string[] {
       .map((entry) => path.join(dir, entry.name))
       .sort();
   } catch {
+    // observability: probe — a missing directory has no subdirectories
     return [];
   }
 }
@@ -657,6 +659,7 @@ function readText(file: string): string {
   try {
     return fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
   } catch {
+    // observability: probe — an unreadable file reads as empty
     return "";
   }
 }
@@ -668,6 +671,7 @@ function readJson(file: string): Record<string, unknown> | null {
       ? (parsed as Record<string, unknown>)
       : null;
   } catch {
+    // observability: parse fallback — an invalid JSON file reads as null
     return null;
   }
 }
@@ -757,6 +761,7 @@ function inoOf(file: string): number | null {
   try {
     return fs.statSync(file).ino;
   } catch {
+    // observability: probe — a missing file has no inode
     return null;
   }
 }
@@ -765,6 +770,7 @@ function mtimeOf(file: string): number | null {
   try {
     return fs.statSync(file).mtimeMs;
   } catch {
+    // observability: probe — a missing file has no mtime
     return null;
   }
 }
@@ -773,6 +779,7 @@ function safeReaddir(dir: string): string[] {
   try {
     return fs.readdirSync(dir);
   } catch {
+    // observability: probe — a missing directory is empty
     return [];
   }
 }
@@ -798,6 +805,7 @@ export function worktreeBranch(worktreeDir: string | undefined): string | null {
     const head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8");
     return HEAD_BRANCH_RE.exec(head)?.[1]?.trim() ?? null;
   } catch {
+    // observability: probe — a missing or unreadable git HEAD means no branch
     return null;
   }
 }

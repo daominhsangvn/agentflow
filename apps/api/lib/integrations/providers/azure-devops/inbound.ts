@@ -190,6 +190,7 @@ function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
+    // observability: (a) parse fallback — an unparseable webhook body is rejected by the caller
     return undefined;
   }
 }

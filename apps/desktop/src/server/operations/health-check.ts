@@ -472,6 +472,7 @@ async function defaultRunPluginMarketplaceUpdateCommand(
       elapsedMs: Date.now() - startedAt,
     };
   } catch (err) {
+    // observability: b — probe, the failed check result carries the error to the caller
     const error = err as NodeJS.ErrnoException & {
       stderr?: string | Buffer;
       stdout?: string | Buffer;
@@ -526,6 +527,7 @@ async function defaultRunPluginUpdateCommand(
       elapsedMs: Date.now() - startedAt,
     };
   } catch (err) {
+    // observability: b — probe, the failed check result carries the error to the caller
     const error = err as NodeJS.ErrnoException & {
       stderr?: string | Buffer;
       stdout?: string | Buffer;
@@ -580,6 +582,7 @@ async function defaultRunPluginEnableCommand(
       elapsedMs: Date.now() - startedAt,
     };
   } catch (err) {
+    // observability: b — probe, the failed check result carries the error to the caller
     const error = err as NodeJS.ErrnoException & {
       stderr?: string | Buffer;
       stdout?: string | Buffer;
@@ -827,12 +830,14 @@ async function collectBinaryDebug(
     try {
       await fs.access(candidate, constants.F_OK);
     } catch {
+      // observability: b — probe, absence is a normal state
       continue; // does not exist
     }
     try {
       await fs.access(candidate, constants.X_OK);
       knownHits.push(candidate);
     } catch {
+      // observability: b — probe, absence is a normal state
       nonExecutableHits.push(candidate);
     }
   }
@@ -951,6 +956,7 @@ async function checkGit(
       version: parseVersion(stdout),
     };
   } catch (err) {
+    // observability: b — probe, the failed check result carries the error to the caller
     const spawnError = err as CommandError;
     const debug = await collectBinaryDebug(
       "git",
@@ -1003,6 +1009,7 @@ async function checkClaudeCli(
       version: parseVersion(stdout),
     };
   } catch (err) {
+    // observability: b — probe, the failed check result carries the error to the caller
     const spawnError = err as CommandError;
     const debug = await collectBinaryDebug(
       "claude",
@@ -1086,6 +1093,7 @@ async function checkPython3(
       version,
     };
   } catch (err) {
+    // observability: b — probe, the failed check result carries the error to the caller
     const spawnError = err as CommandError;
     const debug = await collectBinaryDebug(
       "python3",

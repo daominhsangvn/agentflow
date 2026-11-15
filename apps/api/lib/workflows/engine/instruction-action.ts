@@ -16,6 +16,7 @@ import {
 } from "@repo/api/src/types/workflow-instruction";
 import { withDb } from "@repo/database";
 import { parseError } from "@repo/observability/error";
+import { log } from "@repo/observability/log";
 import { computeTargetsService } from "@/app/compute-targets/service";
 import { integrationToolSessionService } from "@/app/integration-tools/integration-tool-session-service";
 import {
@@ -133,6 +134,12 @@ export async function startInstruction(input: {
     });
     return { kind: "dispatched", commandId };
   } catch (error) {
+    log.warn("workflow.instruction_dispatch_failed", {
+      organizationId: input.organizationId,
+      workflowRunId: input.runId,
+      reason: "dispatch_failed",
+      error,
+    });
     return {
       kind: "failed",
       error: `The run's computer could not be asked to run the instruction: ${parseError(error)}`,

@@ -14,6 +14,7 @@ import { FeatureFlagAdapterProvider } from "@repo/app/shared/feature-flags/provi
 import { useAuth } from "@repo/auth/client";
 import { type ReactNode, useMemo } from "react";
 import { resolveApiOrigin } from "@/lib/api-origin";
+import { traceparentFetch } from "@/lib/trace-propagation/traceparent-fetch";
 
 /**
  * Web-shell adapters for the shared app-core ports (FEA-1510). The Clerk and
@@ -77,6 +78,7 @@ export function AppCoreAdapterProvider({
     () => ({
       resolveApiOrigin: () => resolveApiOrigin(),
       deploymentId: apiDeploymentId ?? null,
+      fetch: traceparentFetch,
     }),
     [apiDeploymentId]
   );

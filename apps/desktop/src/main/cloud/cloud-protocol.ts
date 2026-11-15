@@ -64,6 +64,9 @@ export interface DesktopCommandEvent extends ProtocolEnvelope {
   signature?: string;
   signaturePayload?: string;
   publicKeyFingerprint?: string;
+  traceparent?: string;
+  /** W3C baggage carrying af.* ids (telemetry labels only). */
+  baggage?: string;
 }
 
 export interface DesktopCommandAckEvent extends ProtocolEnvelope {
@@ -71,6 +74,7 @@ export interface DesktopCommandAckEvent extends ProtocolEnvelope {
   accepted: boolean;
   state?: "accepted" | "failed";
   reason?: string;
+  traceparent?: string;
 }
 
 export type CommandStreamEventType =
@@ -85,6 +89,7 @@ export interface DesktopCommandStreamEvent extends ProtocolEnvelope {
   sequence: number;
   eventType: CommandStreamEventType;
   data: unknown;
+  traceparent?: string;
 }
 
 export interface DesktopCommandStreamAckEvent extends ProtocolEnvelope {

@@ -36,6 +36,7 @@ import {
 } from "@repo/api/src/types/workflow";
 import { withDb } from "@repo/database";
 import { parseError } from "@repo/observability/error";
+import { log } from "@repo/observability/log";
 import { documentVersionService } from "@/app/documents/document-version-service";
 import { readStepResult } from "@/lib/loops/loop-commands/step-handler";
 import { renderTemplate } from "@/lib/workflows/template";
@@ -622,6 +623,11 @@ async function approveRunPlan(
     await approvePlanDocument(planDocumentId, organizationId);
     return null;
   } catch (error) {
+    log.warn("workflow.plan_approval_failed", {
+      organizationId,
+      reason: "plan_approval_failed",
+      error,
+    });
     return runError(
       WorkflowRunErrorCode.PlanStateUnavailable,
       `The implementation plan could not be approved: ${parseError(error)}`

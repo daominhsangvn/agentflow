@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // FEA-3661: on ECS task stop (SIGTERM) the MCP process must drain the
-// observability buffer before exiting so the final Datadog log batch isn't lost.
+// observability buffer before exiting so the final SigNoz log batch isn't lost.
 // This guards both halves: the signal handlers are actually registered, and the
 // drain is bounded (a wedged intake can't hang task stop).
 
@@ -25,8 +25,11 @@ vi.mock("@repo/observability/log", () => ({
     info: vi.fn(),
     warn,
     error: vi.fn(),
-    flush,
   },
+}));
+
+vi.mock("@repo/observability/tracing/hooks", () => ({
+  flushTelemetry: flush,
 }));
 
 vi.mock("@repo/redis", () => ({

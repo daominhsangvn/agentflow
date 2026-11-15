@@ -25,6 +25,7 @@ import {
   FLEET_TARGET_SELECT,
   workflowRolesForTarget,
 } from "@/app/compute-targets/fleet-service";
+import { projectAgentIdsSelect } from "@/app/projects/project-agent-ids";
 import { loadLoopUsage } from "@/lib/usage/loop-usage";
 import { loadWindowedUsage } from "@/lib/usage/usage-windows";
 
@@ -95,7 +96,7 @@ export const agentDetailService = {
             organizationId,
             status: { not: ProjectStatus.Archived },
           },
-          select: { id: true, name: true, settings: true },
+          select: { id: true, name: true, ...projectAgentIdsSelect },
         })
       ),
       withDb((db) =>

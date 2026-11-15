@@ -23,7 +23,7 @@ import {
   telemetryDiagnosticsSchema,
   telemetryTraceContextSchema,
 } from "../telemetry/schema";
-import { importModuleWithFetch, parseFlushedBody } from "./test-helpers";
+import { importModuleWithSink } from "./test-helpers";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -1591,61 +1591,46 @@ describe("emitCommandLifecycleEvent() validation failure paths", () => {
     vi.unstubAllGlobals();
   });
 
-  // Observe the validation-failed emission at the Datadog HTTP boundary. This
-  // exercises the full pipeline — emitter → log.warn → buildEntry → flush —
-  // and verifies severity routing (`level: "warn"`) alongside payload content.
-  // emitter.ts binds `log` at module load, so each test re-imports both
-  // emitter and log via importModuleWithFetch so they share the same fresh
-  // module graph.
+  // Observe the validation-failed emission at the log-record boundary. This
+  // exercises the full pipeline — emitter -> log.warn -> OTel record — and
+  // verifies severity routing (`level: "warn"`) alongside payload content.
+  // emitter.ts binds `log` at module load, so each test re-imports the emitter
+  // via importModuleWithSink so it shares the fresh module graph with the sink.
 
-  it("(a) invalid trace — flushes validation_failed with level=warn and no secrets", async () => {
-    vi.stubEnv("DD_API_KEY", "test-key");
-    // Populate version + git_sha so log.ts's module-load fallback warnings
-    // do not enqueue and displace the validation_failed entry at body[0].
-    vi.stubEnv("RELEASE_VERSION", "1.0.0");
-    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const emitter = await importModuleWithFetch(
-      fetchMock,
+  it("(a) invalid trace — emits validation_failed with level=warn and no secrets", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { mod: emitter, records } = await importModuleWithSink(
       () => import("../telemetry/emitter")
     );
-    const { log: freshLog } = await import("../log");
+    records.length = 0;
 
     emitter.emitCommandLifecycleEvent(
       TelemetryCategory.CommandQueued,
       {} as TelemetryTraceContext
     );
-    await freshLog.flush();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const body = parseFlushedBody<{ level: string; message: string }>(
-      fetchMock
-    );
-    expect(body[0].level).toBe("warn");
+    expect(records).toHaveLength(1);
+    expect(records[0].level).toBe("warn");
 
-    const parsed = JSON.parse(body[0].message) as Record<string, unknown>;
+    const parsed = JSON.parse(records[0].message) as Record<string, unknown>;
     expect(parsed.category).toBe(TelemetryCategory.TelemetryValidationFailed);
     expect(parsed.failedCategory).toBe(TelemetryCategory.CommandQueued);
 
-    const serialized = JSON.stringify(body[0]);
+    const serialized = JSON.stringify(records[0]);
     expect(serialized).not.toContain("sk_");
     expect(serialized).not.toContain("password");
     expect(serialized).not.toContain("token=");
     expect(serialized).not.toContain("authorization");
   });
 
-  it("(b) valid trace + invalid diagnostics — flushes validation_failed with failedCategory", async () => {
-    vi.stubEnv("DD_API_KEY", "test-key");
-    // Populate version + git_sha so log.ts's module-load fallback warnings
-    // do not enqueue and displace the validation_failed entry at body[0].
-    vi.stubEnv("RELEASE_VERSION", "1.0.0");
-    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "testsha");
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    const emitter = await importModuleWithFetch(
-      fetchMock,
+  it("(b) valid trace + invalid diagnostics — emits validation_failed with failedCategory", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { mod: emitter, records } = await importModuleWithSink(
       () => import("../telemetry/emitter")
     );
-    const { log: freshLog } = await import("../log");
+    records.length = 0;
 
     emitter.emitCommandLifecycleEvent(
       TelemetryCategory.CommandQueued,
@@ -1654,15 +1639,11 @@ describe("emitCommandLifecycleEvent() validation failure paths", () => {
         diagnostics: null as any,
       }
     );
-    await freshLog.flush();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const body = parseFlushedBody<{ level: string; message: string }>(
-      fetchMock
-    );
-    expect(body[0].level).toBe("warn");
+    expect(records).toHaveLength(1);
+    expect(records[0].level).toBe("warn");
 
-    const parsed = JSON.parse(body[0].message) as Record<string, unknown>;
+    const parsed = JSON.parse(records[0].message) as Record<string, unknown>;
     expect(parsed.category).toBe(TelemetryCategory.TelemetryValidationFailed);
     expect(parsed.failedCategory).toBe(TelemetryCategory.CommandQueued);
   });

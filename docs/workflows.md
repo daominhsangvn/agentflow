@@ -1522,7 +1522,8 @@ create/update responses are admin-only and always full).
 | POST | `/projects/{id}/connections` | `CreateProjectConnectionsInput` (`{connections: [{connectionId, key, name}] (1-10, one provider), settings}`) → `ProjectConnectionsResponse` (admin; all or none; 409 when a key is taken in the project, a connection is already in the project, or a source item scope such as a Jira project key belongs to a project connection of another project) |
 | PATCH | `/projects/{id}/connections/{projectConnectionId}` | `UpdateProjectConnectionInput` (`{name?, settings?}`; the connection and the key never change) → `ProjectConnection` (admin) |
 | DELETE | `/projects/{id}/connections/{projectConnectionId}` | → `{deleted: true}` (admin; 409 while a workflow or the project's current process uses the key; the organization connection stays) |
-| GET / PUT | `/projects/{id}/runners` | → `ProjectRunners` (adds `projectKey`, `waiting`); PUT `{runnerIds}` replaces them (admin; empty for none) |
+| GET / PUT | `/projects/{id}/runners` | → `ProjectRunners` (adds `projectKey`, `waiting`; `contacts` on each runner); PUT `{runnerIds}` replaces them (admin; empty for none) |
+| PUT | `/projects/{id}/runners/{computeTargetId}/contacts` | `{contacts: [{userId} \| {email}]}` (at most 20) → `ProjectRunners` (admin) |
 | GET | `/projects/{id}/repositories` | → `ProjectRepositoriesResponse` (oldest first) |
 | GET / PUT | `/projects/{id}/agent-instructions` | → `{instructions}`; PUT `{instructions}` (admin, max 32 000 characters; blank removes them) |
 | POST | `/projects/{id}/repositories` | `AddProjectRepositoryInput` (`{connectionId, externalId, isPrimary?}`) → `ProjectRepository` (admin; the connection must offer repositories and see the repository; 409 when already added or at 20 repositories) |
@@ -2108,8 +2109,11 @@ those repositories, as equals (`apps/api/app/projects/project-repository-checkou
   (`apps/api/lib/loops/loop-git-credential.ts`,
   `apps/desktop/src/server/operations/loop-git-access.ts`).
 - **Runners.** Project → Agents → Agents lists the computers the
-  project's loops run on (`settings.runnerIds`, `GET/PUT
-  /projects/{id}/runners`, org admins). Every runner of a project needs the
+  project's loops run on (table `project_agents`, `GET/PUT
+  /projects/{id}/runners`, org admins). Each Agent has Contacts: org members
+  (email read at send time; removed when they leave the org) and external
+  emails, used only by the orchestrator notifications (see
+  orchestrator.md, "Email to the Agent's contacts"). Every runner of a project needs the
   toolchains of all its repositories; headless runners report the ones they
   find (`toolchains` capability: node, dotnet, cargo, java, ...), shown on
   each runner. A new loop on a project with runners always runs on one of

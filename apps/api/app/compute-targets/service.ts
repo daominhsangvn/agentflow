@@ -22,7 +22,14 @@ import {
   Result,
 } from "@repo/api/src/types/result";
 import { type Prisma, type TransactionClient, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import {
+  type SpanAttributes,
+  setActiveSpanAttributes,
+  setSpanOutcome,
+  withSpan,
+} from "@repo/observability/span";
 import { loadProtectedGateways } from "@/app/compute-targets/protected-gateways";
 import { isDesktopManagedPopEnforcementEnabled } from "@/lib/auth/desktop-managed-pop";
 import {
@@ -572,207 +579,18 @@ async function updateOwnedComputeTargetInTransaction({
 }
 
 export const computeTargetsService = {
-  async register(
+  register(
     organizationId: string,
     userId: string,
     payload: RegisterComputeTargetInput
   ): Promise<DomainResult<ComputeTarget, ComputeTargetGatewayConflict>> {
-    const now = new Date();
-    const capabilities = buildCapabilitiesPayload(payload);
-
-    if (payload.gatewayId) {
-      let target: DomainResult<
-        ComputeTargetRecord,
-        ComputeTargetGatewayConflict
-      >;
-      try {
-        target = await withDb.tx(async (db) => {
-          const conflictingGateway = await db.computeTarget.findFirst({
-            where: {
-              gatewayId: payload.gatewayId,
-              OR: [
-                { organizationId: { not: organizationId } },
-                { userId: { not: userId } },
-              ],
-            },
-            select: { id: true },
-          });
-          if (conflictingGateway) {
-            return computeTargetGatewayConflictResult<ComputeTargetRecord>();
-          }
-
-          const gatewayTarget = await db.computeTarget.findFirst({
-            where: {
-              organizationId,
-              userId,
-              gatewayId: payload.gatewayId,
-            },
-          });
-          if (gatewayTarget) {
-            const nextFields = {
-              machineName: payload.machineName,
-              platform: payload.platform,
-              capabilities,
-              supportedOperations: payload.supportedOperations,
-            };
-            const shouldInvalidateHealthCheck =
-              hasMaterialHealthCheckFieldChanged(gatewayTarget, nextFields);
-            const updated = await db.computeTarget.update({
-              where: { id: gatewayTarget.id },
-              data: {
-                ...nextFields,
-                isOnline: true,
-                lastSeenAt: now,
-              },
-            });
-            if (shouldInvalidateHealthCheck) {
-              await db.computeTargetHealthCheck.deleteMany({
-                where: { computeTargetId: gatewayTarget.id },
-              });
-            }
-            return Result.ok<ComputeTargetRecord, ComputeTargetGatewayConflict>(
-              updated
-            );
-          }
-
-          const machineTarget = await db.computeTarget.findFirst({
-            where: {
-              organizationId,
-              userId,
-              machineName: payload.machineName,
-            },
-          });
-          if (machineTarget) {
-            const nextFields = {
-              gatewayId: payload.gatewayId,
-              platform: payload.platform,
-              capabilities,
-              supportedOperations: payload.supportedOperations,
-            };
-            const shouldInvalidateHealthCheck =
-              hasMaterialHealthCheckFieldChanged(machineTarget, nextFields);
-            const updated = await db.computeTarget.update({
-              where: { id: machineTarget.id },
-              data: {
-                ...nextFields,
-                isOnline: true,
-                lastSeenAt: now,
-              },
-            });
-            if (shouldInvalidateHealthCheck) {
-              await db.computeTargetHealthCheck.deleteMany({
-                where: { computeTargetId: machineTarget.id },
-              });
-            }
-            return Result.ok<ComputeTargetRecord, ComputeTargetGatewayConflict>(
-              updated
-            );
-          }
-
-          await db.computeTargetHealthCheck.deleteMany({
-            where: {
-              computeTarget: {
-                userId,
-                machineName: payload.machineName,
-              },
-            },
-          });
-          const upserted = await db.computeTarget.upsert({
-            where: {
-              userId_machineName: {
-                userId,
-                machineName: payload.machineName,
-              },
-            },
-            update: {
-              gatewayId: payload.gatewayId,
-              platform: payload.platform,
-              capabilities,
-              supportedOperations: payload.supportedOperations,
-              isOnline: true,
-              lastSeenAt: now,
-            },
-            create: {
-              organizationId,
-              userId,
-              gatewayId: payload.gatewayId,
-              machineName: payload.machineName,
-              platform: payload.platform,
-              capabilities,
-              supportedOperations: payload.supportedOperations,
-              isOnline: true,
-              lastSeenAt: now,
-            },
-          });
-          return Result.ok<ComputeTargetRecord, ComputeTargetGatewayConflict>(
-            upserted
-          );
-        });
-      } catch (error) {
-        if (isGatewayUniqueConstraintViolation(error)) {
-          return computeTargetGatewayConflictResult<ComputeTarget>();
-        }
-        throw error;
-      }
-
-      if (isComputeTargetGatewayConflictResult(target)) {
-        return target;
-      }
-
-      return Result.ok(toRequiredComputeTarget(target.value));
-    }
-
-    const target = await withDb.tx(async (db) => {
-      const existing = await db.computeTarget.findUnique({
-        where: {
-          userId_machineName: {
-            userId,
-            machineName: payload.machineName,
-          },
-        },
-      });
-      const nextFields = {
-        platform: payload.platform,
-        capabilities,
-        supportedOperations: payload.supportedOperations,
-      };
-      if (
-        existing &&
-        hasMaterialHealthCheckFieldChanged(existing, nextFields)
-      ) {
-        await db.computeTargetHealthCheck.deleteMany({
-          where: { computeTargetId: existing.id },
-        });
-      }
-
-      return db.computeTarget.upsert({
-        where: {
-          userId_machineName: {
-            userId,
-            machineName: payload.machineName,
-          },
-        },
-        update: {
-          platform: payload.platform,
-          capabilities,
-          supportedOperations: payload.supportedOperations,
-          isOnline: true,
-          lastSeenAt: now,
-        },
-        create: {
-          organizationId,
-          userId,
-          machineName: payload.machineName,
-          platform: payload.platform,
-          capabilities,
-          supportedOperations: payload.supportedOperations,
-          isOnline: true,
-          lastSeenAt: now,
-        },
-      });
-    });
-
-    return Result.ok(toRequiredComputeTarget(target));
+    return withResultSpan(
+      "compute_target.register",
+      { [AfAttribute.OrgId]: organizationId, [AfAttribute.UserId]: userId },
+      () => registerComputeTarget(organizationId, userId, payload),
+      (error) => error,
+      (value) => ({ [AfAttribute.ComputeTargetId]: value.id })
+    );
   },
 
   async listByOwner(
@@ -1024,50 +842,75 @@ export const computeTargetsService = {
     return updated.count > 0;
   },
 
-  async setOnlineState(
+  setOnlineState(
     id: string,
     organizationId: string,
     userId: string,
     isOnline: boolean
   ): Promise<boolean> {
-    const updated = await withDb((db) =>
-      db.computeTarget.updateMany({
-        where: { id, organizationId, userId },
-        data: isOnline
-          ? {
-              isOnline: true,
-              lastSeenAt: new Date(),
-            }
-          : {
-              isOnline: false,
-            },
-      })
+    return withSpan(
+      "compute_target.set_online",
+      {
+        [AfAttribute.ComputeTargetId]: id,
+        [AfAttribute.OrgId]: organizationId,
+        [COMPUTE_TARGET_ONLINE_ATTRIBUTE]: isOnline,
+      },
+      async () => {
+        const updated = await withDb((db) =>
+          db.computeTarget.updateMany({
+            where: { id, organizationId, userId },
+            data: isOnline
+              ? {
+                  isOnline: true,
+                  lastSeenAt: new Date(),
+                }
+              : {
+                  isOnline: false,
+                },
+          })
+        );
+        if (!isOnline && updated.count > 0) {
+          log.warn("compute_target.offline", {
+            computeTargetId: id,
+            organizationId,
+            reason: "set_offline",
+          });
+        }
+        return updated.count > 0;
+      }
     );
-    return updated.count > 0;
   },
 
-  async markStaleTargetsOffline(scope?: {
+  markStaleTargetsOffline(scope?: {
     organizationId?: string;
     userId?: string;
   }): Promise<number> {
-    const cutoff = new Date(Date.now() - COMPUTE_TARGET_STALE_MS);
-    const updated = await withDb((db) =>
-      db.computeTarget.updateMany({
-        where: {
-          isOnline: true,
-          lastSeenAt: { lt: cutoff },
-          ...(scope?.organizationId
-            ? { organizationId: scope.organizationId }
-            : {}),
-          ...(scope?.userId ? { userId: scope.userId } : {}),
-        },
-        data: {
-          isOnline: false,
-        },
-      })
-    );
+    return withSpan("compute_target.mark_stale_offline", {}, async () => {
+      const cutoff = new Date(Date.now() - COMPUTE_TARGET_STALE_MS);
+      const updated = await withDb((db) =>
+        db.computeTarget.updateMany({
+          where: {
+            isOnline: true,
+            lastSeenAt: { lt: cutoff },
+            ...(scope?.organizationId
+              ? { organizationId: scope.organizationId }
+              : {}),
+            ...(scope?.userId ? { userId: scope.userId } : {}),
+          },
+          data: {
+            isOnline: false,
+          },
+        })
+      );
 
-    return updated.count;
+      if (updated.count > 0) {
+        log.warn("compute_target.offline", {
+          count: updated.count,
+          reason: "stale_heartbeat",
+        });
+      }
+      return updated.count;
+    });
   },
 
   async hasAnyForOwner(
@@ -1193,80 +1036,93 @@ export const computeTargetsService = {
     return toHealthCheckSnapshot(snapshot);
   },
 
-  async upsertHealthCheckSnapshot(
+  upsertHealthCheckSnapshot(
     organizationId: string,
     userId: string,
     targetId: string,
     payload: UpsertComputeTargetHealthCheckSnapshotInput
   ): Promise<ComputeTargetHealthCheckSnapshot | null> {
-    const {
-      result: normalizedResult,
-      requiredFailureIds,
-      allRequiredPassed,
-    } = buildHealthCheckSnapshotWrite(payload.result);
-    const checkedAt = new Date();
-    const availableHarnesses = deriveAvailableHarnesses(payload.result);
-    const snapshot = await withDb.tx(async (tx) => {
-      const target = await findAccessibleTargetRecord(
-        tx,
-        targetId,
-        organizationId,
-        userId
-      );
-      if (!target) {
-        return null;
-      }
-      const pluginAutoUpdateEnabled =
-        (payload.pluginAutoUpdateEnabled ?? false) && target.userId === userId;
-      const selectedHarness = parseSelectedHarness(target.selectedHarness);
+    return withSpan(
+      "compute_target.health_check",
+      {
+        [AfAttribute.ComputeTargetId]: targetId,
+        [AfAttribute.OrgId]: organizationId,
+      },
+      async () => {
+        const {
+          result: normalizedResult,
+          requiredFailureIds,
+          allRequiredPassed,
+        } = buildHealthCheckSnapshotWrite(payload.result);
+        if (!allRequiredPassed) {
+          setSpanOutcome(AfOutcome.Error, "required_check_failed");
+        }
+        const checkedAt = new Date();
+        const availableHarnesses = deriveAvailableHarnesses(payload.result);
+        const snapshot = await withDb.tx(async (tx) => {
+          const target = await findAccessibleTargetRecord(
+            tx,
+            targetId,
+            organizationId,
+            userId
+          );
+          if (!target) {
+            return null;
+          }
+          const pluginAutoUpdateEnabled =
+            (payload.pluginAutoUpdateEnabled ?? false) &&
+            target.userId === userId;
+          const selectedHarness = parseSelectedHarness(target.selectedHarness);
 
-      if (
-        target.userId === userId &&
-        availableHarnesses.length > 0 &&
-        !availableHarnesses.includes(selectedHarness)
-      ) {
-        const nextHarness = availableHarnesses.includes(HarnessType.Claude)
-          ? HarnessType.Claude
-          : availableHarnesses[0];
-        await tx.computeTarget.update({
-          where: { id: targetId },
-          data: { selectedHarness: nextHarness },
+          if (
+            target.userId === userId &&
+            availableHarnesses.length > 0 &&
+            !availableHarnesses.includes(selectedHarness)
+          ) {
+            const nextHarness = availableHarnesses.includes(HarnessType.Claude)
+              ? HarnessType.Claude
+              : availableHarnesses[0];
+            await tx.computeTarget.update({
+              where: { id: targetId },
+              data: { selectedHarness: nextHarness },
+            });
+          }
+
+          // ONE set of column values, spread into both branches, so a `create` and
+          // an `update` of the same payload cannot diverge (ISS-5868 — that is how
+          // `schemaVersion` was once stamped on one branch only, and how
+          // `normalizedResult` could have reached one branch and not the other).
+          // `normalizedResult` is `payload.result` — already shape-validated by
+          // healthCheckSnapshotValidator, which has no top-level passthrough — with
+          // `allRequiredPassed` replaced by the derivation the sibling column also
+          // uses, so the JSON blob and the boolean column can never disagree. The
+          // casts only bridge that Zod-typed value into Prisma's JSON column type;
+          // they don't widen an unvalidated shape.
+          const snapshotColumns = {
+            organizationId,
+            checkedAt,
+            expectedMcpUrl: payload.expectedMcpUrl ?? null,
+            latestVersion: payload.latestVersion ?? null,
+            pluginAutoUpdateEnabled,
+            result: normalizedResult as unknown as Prisma.InputJsonValue,
+            allRequiredPassed,
+            requiredFailureIds:
+              requiredFailureIds as unknown as Prisma.InputJsonValue,
+            // The column defaults to 1, so a `create` that left it to the default
+            // would stamp every brand-new snapshot as the version consumers now
+            // reject (ISS-5811).
+            schemaVersion: HEALTH_CHECK_SNAPSHOT_SCHEMA_VERSION,
+          };
+          return tx.computeTargetHealthCheck.upsert({
+            where: { computeTargetId: targetId },
+            create: { ...snapshotColumns, computeTargetId: targetId },
+            update: snapshotColumns,
+          });
         });
+
+        return toHealthCheckSnapshot(snapshot);
       }
-
-      // ONE set of column values, spread into both branches, so a `create` and
-      // an `update` of the same payload cannot diverge (ISS-5868 — that is how
-      // `schemaVersion` was once stamped on one branch only, and how
-      // `normalizedResult` could have reached one branch and not the other).
-      // `normalizedResult` is `payload.result` — already shape-validated by
-      // healthCheckSnapshotValidator, which has no top-level passthrough — with
-      // `allRequiredPassed` replaced by the derivation the sibling column also
-      // uses, so the JSON blob and the boolean column can never disagree. The
-      // casts only bridge that Zod-typed value into Prisma's JSON column type;
-      // they don't widen an unvalidated shape.
-      const snapshotColumns = {
-        organizationId,
-        checkedAt,
-        expectedMcpUrl: payload.expectedMcpUrl ?? null,
-        latestVersion: payload.latestVersion ?? null,
-        pluginAutoUpdateEnabled,
-        result: normalizedResult as unknown as Prisma.InputJsonValue,
-        allRequiredPassed,
-        requiredFailureIds:
-          requiredFailureIds as unknown as Prisma.InputJsonValue,
-        // The column defaults to 1, so a `create` that left it to the default
-        // would stamp every brand-new snapshot as the version consumers now
-        // reject (ISS-5811).
-        schemaVersion: HEALTH_CHECK_SNAPSHOT_SCHEMA_VERSION,
-      };
-      return tx.computeTargetHealthCheck.upsert({
-        where: { computeTargetId: targetId },
-        create: { ...snapshotColumns, computeTargetId: targetId },
-        update: snapshotColumns,
-      });
-    });
-
-    return toHealthCheckSnapshot(snapshot);
+    );
   },
 
   async setSharing(
@@ -1314,4 +1170,221 @@ function isGatewayUniqueConstraintTarget(target: unknown): boolean {
     return target.some(isGatewayUniqueConstraintTarget);
   }
   return false;
+}
+
+const COMPUTE_TARGET_ONLINE_ATTRIBUTE = "af.compute_target.online";
+/** Runs `fn` in a span and marks the span failed when it returns a failure Result. */
+function withResultSpan<T, E>(
+  name: string,
+  attributes: SpanAttributes,
+  fn: () => Promise<DomainResult<T, E>>,
+  describeError: (error: E) => string,
+  okAttributes?: (value: T) => SpanAttributes
+): Promise<DomainResult<T, E>> {
+  return withSpan(name, attributes, async () => {
+    const result = await fn();
+    if (!result.ok) {
+      setSpanOutcome(AfOutcome.Error, describeError(result.error));
+    } else if (okAttributes) {
+      setActiveSpanAttributes(okAttributes(result.value));
+    }
+    return result;
+  });
+}
+
+async function registerComputeTarget(
+  organizationId: string,
+  userId: string,
+  payload: RegisterComputeTargetInput
+): Promise<DomainResult<ComputeTarget, ComputeTargetGatewayConflict>> {
+  const now = new Date();
+  const capabilities = buildCapabilitiesPayload(payload);
+
+  if (payload.gatewayId) {
+    let target: DomainResult<ComputeTargetRecord, ComputeTargetGatewayConflict>;
+    try {
+      target = await withDb.tx(async (db) => {
+        const conflictingGateway = await db.computeTarget.findFirst({
+          where: {
+            gatewayId: payload.gatewayId,
+            OR: [
+              { organizationId: { not: organizationId } },
+              { userId: { not: userId } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (conflictingGateway) {
+          return computeTargetGatewayConflictResult<ComputeTargetRecord>();
+        }
+
+        const gatewayTarget = await db.computeTarget.findFirst({
+          where: {
+            organizationId,
+            userId,
+            gatewayId: payload.gatewayId,
+          },
+        });
+        if (gatewayTarget) {
+          const nextFields = {
+            machineName: payload.machineName,
+            platform: payload.platform,
+            capabilities,
+            supportedOperations: payload.supportedOperations,
+          };
+          const shouldInvalidateHealthCheck =
+            hasMaterialHealthCheckFieldChanged(gatewayTarget, nextFields);
+          const updated = await db.computeTarget.update({
+            where: { id: gatewayTarget.id },
+            data: {
+              ...nextFields,
+              isOnline: true,
+              lastSeenAt: now,
+            },
+          });
+          if (shouldInvalidateHealthCheck) {
+            await db.computeTargetHealthCheck.deleteMany({
+              where: { computeTargetId: gatewayTarget.id },
+            });
+          }
+          return Result.ok<ComputeTargetRecord, ComputeTargetGatewayConflict>(
+            updated
+          );
+        }
+
+        const machineTarget = await db.computeTarget.findFirst({
+          where: {
+            organizationId,
+            userId,
+            machineName: payload.machineName,
+          },
+        });
+        if (machineTarget) {
+          const nextFields = {
+            gatewayId: payload.gatewayId,
+            platform: payload.platform,
+            capabilities,
+            supportedOperations: payload.supportedOperations,
+          };
+          const shouldInvalidateHealthCheck =
+            hasMaterialHealthCheckFieldChanged(machineTarget, nextFields);
+          const updated = await db.computeTarget.update({
+            where: { id: machineTarget.id },
+            data: {
+              ...nextFields,
+              isOnline: true,
+              lastSeenAt: now,
+            },
+          });
+          if (shouldInvalidateHealthCheck) {
+            await db.computeTargetHealthCheck.deleteMany({
+              where: { computeTargetId: machineTarget.id },
+            });
+          }
+          return Result.ok<ComputeTargetRecord, ComputeTargetGatewayConflict>(
+            updated
+          );
+        }
+
+        await db.computeTargetHealthCheck.deleteMany({
+          where: {
+            computeTarget: {
+              userId,
+              machineName: payload.machineName,
+            },
+          },
+        });
+        const upserted = await db.computeTarget.upsert({
+          where: {
+            userId_machineName: {
+              userId,
+              machineName: payload.machineName,
+            },
+          },
+          update: {
+            gatewayId: payload.gatewayId,
+            platform: payload.platform,
+            capabilities,
+            supportedOperations: payload.supportedOperations,
+            isOnline: true,
+            lastSeenAt: now,
+          },
+          create: {
+            organizationId,
+            userId,
+            gatewayId: payload.gatewayId,
+            machineName: payload.machineName,
+            platform: payload.platform,
+            capabilities,
+            supportedOperations: payload.supportedOperations,
+            isOnline: true,
+            lastSeenAt: now,
+          },
+        });
+        return Result.ok<ComputeTargetRecord, ComputeTargetGatewayConflict>(
+          upserted
+        );
+      });
+    } catch (error) {
+      if (isGatewayUniqueConstraintViolation(error)) {
+        return computeTargetGatewayConflictResult<ComputeTarget>();
+      }
+      throw error;
+    }
+
+    if (isComputeTargetGatewayConflictResult(target)) {
+      return target;
+    }
+
+    return Result.ok(toRequiredComputeTarget(target.value));
+  }
+
+  const target = await withDb.tx(async (db) => {
+    const existing = await db.computeTarget.findUnique({
+      where: {
+        userId_machineName: {
+          userId,
+          machineName: payload.machineName,
+        },
+      },
+    });
+    const nextFields = {
+      platform: payload.platform,
+      capabilities,
+      supportedOperations: payload.supportedOperations,
+    };
+    if (existing && hasMaterialHealthCheckFieldChanged(existing, nextFields)) {
+      await db.computeTargetHealthCheck.deleteMany({
+        where: { computeTargetId: existing.id },
+      });
+    }
+
+    return db.computeTarget.upsert({
+      where: {
+        userId_machineName: {
+          userId,
+          machineName: payload.machineName,
+        },
+      },
+      update: {
+        platform: payload.platform,
+        capabilities,
+        supportedOperations: payload.supportedOperations,
+        isOnline: true,
+        lastSeenAt: now,
+      },
+      create: {
+        organizationId,
+        userId,
+        machineName: payload.machineName,
+        platform: payload.platform,
+        capabilities,
+        supportedOperations: payload.supportedOperations,
+        isOnline: true,
+        lastSeenAt: now,
+      },
+    });
+  });
+
+  return Result.ok(toRequiredComputeTarget(target));
 }
