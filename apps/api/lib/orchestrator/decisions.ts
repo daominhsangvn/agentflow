@@ -8,6 +8,9 @@ import {
 } from "@repo/api/src/types/orchestrator";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import {
   draftResultNote,
   readStoredDraft,
@@ -27,27 +30,37 @@ import { waitUntil } from "@/lib/wait-until";
 const QUESTION_MAX = 4000;
 const COMMENT_MAX = 4000;
 
-export async function requestDecision(input: {
+export function requestDecision(input: {
   organizationId: string;
   caseId: string;
   conversationId: string;
   question: string;
   draft: StoredDecisionDraft | null;
 }): Promise<string> {
-  const decision = await withDb((db) =>
-    db.orchestratorDecision.create({
-      data: {
-        organizationId: input.organizationId,
-        caseId: input.caseId,
-        conversationId: input.conversationId,
-        question: input.question.slice(0, QUESTION_MAX),
-        ...(input.draft ? { draft: input.draft } : {}),
-      },
-      select: { id: true },
-    })
+  return withSpan(
+    "orchestrator.request_decision",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [AfAttribute.CaseId]: input.caseId,
+      [AfAttribute.ConversationId]: input.conversationId,
+    },
+    async () => {
+      const decision = await withDb((db) =>
+        db.orchestratorDecision.create({
+          data: {
+            organizationId: input.organizationId,
+            caseId: input.caseId,
+            conversationId: input.conversationId,
+            question: input.question.slice(0, QUESTION_MAX),
+            ...(input.draft ? { draft: input.draft } : {}),
+          },
+          select: { id: true },
+        })
+      );
+      waitUntil(mailDecisionRequested({ decisionId: decision.id }));
+      return decision.id;
+    }
   );
-  waitUntil(mailDecisionRequested({ decisionId: decision.id }));
-  return decision.id;
 }
 
 export type DecideInput = {
@@ -84,7 +97,28 @@ export type DecideOutcome = {
 };
 
 /** Takes the decision once; NotFound for a decision that is not pending. */
-export async function decide(
+export function decide(
+  input: DecideInput,
+  now: Date = new Date()
+): Promise<Result<DecideOutcome, StatusCode>> {
+  return withSpan(
+    "orchestrator.decide",
+    { [AfAttribute.OrgId]: input.organizationId },
+    async (span) => {
+      const result = await runDecide(input, now);
+      if (!result.ok) {
+        setSpanOutcome(
+          AfOutcome.Error,
+          `decision refused: ${result.error}`,
+          span
+        );
+      }
+      return result;
+    }
+  );
+}
+
+async function runDecide(
   input: DecideInput,
   now: Date = new Date()
 ): Promise<Result<DecideOutcome, StatusCode>> {
@@ -215,6 +249,11 @@ async function runCarryOut(
       draft,
     });
   } catch (error) {
+    log.warn("orchestrator.decision_carry_out_failed", {
+      caseId: decision.caseId,
+      reason: "carry_out_threw",
+      error,
+    });
     return {
       outcome: OrchestratorDraftOutcome.Failed,
       commentRef: null,

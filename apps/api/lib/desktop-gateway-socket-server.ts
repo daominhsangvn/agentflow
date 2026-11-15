@@ -7,8 +7,11 @@ import {
   DesktopAgentSessionsAckReason,
 } from "@repo/api/src/types/agent-session";
 import { DesktopHelloNackReason } from "@repo/api/src/types/compute-target";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import { parseError } from "@repo/observability/error";
 import { log } from "@repo/observability/log";
 import { redactGatewaySessionId } from "@repo/observability/redact-correlation";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { buildTelemetryTraceContext } from "@repo/observability/telemetry/context";
 import { Server, type Socket } from "socket.io";
 import { apiKeysService } from "../app/api-keys/service";
@@ -107,7 +110,26 @@ function enqueueEventIngestion(
   });
 }
 
-async function ingestDesktopCommandEventForSocket(input: {
+function ingestDesktopCommandEventForSocket(input: {
+  socket: Socket;
+  context: SocketConnectionContext;
+  payload: CommandEventPayload;
+}): Promise<void> {
+  const { context, payload } = input;
+  return withSpan(
+    "gateway.command_event",
+    {
+      [AfAttribute.ComputeTargetId]: context.targetId,
+      [AfAttribute.CommandId]: payload.commandId,
+      [AfAttribute.OrgId]: context.organizationId,
+      "af.command.event_type": payload.eventType,
+    },
+    () => ingestDesktopCommandEventBody(input),
+    { parent: payload.traceparent }
+  );
+}
+
+async function ingestDesktopCommandEventBody(input: {
   socket: Socket;
   context: SocketConnectionContext;
   payload: CommandEventPayload;
@@ -166,6 +188,7 @@ async function ingestDesktopCommandEventForSocket(input: {
       }
     }
   } catch (error) {
+    setSpanOutcome(AfOutcome.Error, parseError(error));
     log.error("Failed handling desktop.command.event", {
       socketId: socket.id,
       commandId: payload.commandId,
@@ -798,11 +821,20 @@ export function handleSocketConnection(socket: Socket): void {
 
     helloInFlight.add(socket.id);
     const socketData = getSocketData(socket);
-    handleSocketHello(socket, authContext, payload, {
-      connectStartedAt: socketData.connectStartedAt,
-      authDurationMs: socketData.authDurationMs,
-      helloStartedAt,
-    })
+    withSpan(
+      "gateway.hello",
+      {
+        [AfAttribute.ComputeTargetId]: payload.computeTargetId,
+        [AfAttribute.OrgId]: authContext.organizationId,
+        [AfAttribute.UserId]: authContext.userId,
+      },
+      () =>
+        handleSocketHello(socket, authContext, payload, {
+          connectStartedAt: socketData.connectStartedAt,
+          authDurationMs: socketData.authDurationMs,
+          helloStartedAt,
+        })
+    )
       .catch((error) => {
         log.error(
           "Failed processing desktop.hello after authenticated connect",
@@ -860,13 +892,23 @@ export function handleSocketConnection(socket: Socket): void {
     });
     const commandContext = getRealDesktopCommandTelemetryContext(ackCtx);
 
-    acknowledgeDesktopCommand({
-      commandId: payload.commandId,
-      accepted: payload.accepted,
-      reason: payload.reason,
-      targetId: context.targetId,
-      ...(commandContext ? { context: commandContext } : {}),
-    }).catch((error) => {
+    withSpan(
+      "gateway.command_ack",
+      {
+        [AfAttribute.ComputeTargetId]: context.targetId,
+        [AfAttribute.CommandId]: payload.commandId,
+        [AfAttribute.OrgId]: context.organizationId,
+      },
+      () =>
+        acknowledgeDesktopCommand({
+          commandId: payload.commandId,
+          accepted: payload.accepted,
+          reason: payload.reason,
+          targetId: context.targetId,
+          ...(commandContext ? { context: commandContext } : {}),
+        }),
+      { parent: payload.traceparent }
+    ).catch((error) => {
       log.error("Failed handling desktop.command.ack", {
         socketId: socket.id,
         commandId: payload.commandId,

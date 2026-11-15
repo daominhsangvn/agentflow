@@ -350,7 +350,7 @@ function rateLimited(): KeylessTelemetryExportAck {
 
 /**
  * Fleet-capacity metrics (FEA-1994), emitted through the generic telemetry-
- * metric pipeline so the Datadog log-to-metric processor and the load test can
+ * metric pipeline so the SigNoz log-to-metric processor and the load test can
  * observe shedding/rejection without a `@repo/observability` schema change.
  */
 type KeylessCapacityMetric = {

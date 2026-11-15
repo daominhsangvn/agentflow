@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { statSync } from "node:fs";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import {
   type ClaudeCodeShellEnvProvider,
   getClaudeCodeShellEnv,
@@ -79,7 +80,7 @@ function resolveSpawnCwd(requested: string | undefined): string | undefined {
       return requested;
     }
   } catch {
-    // Path does not exist or is not accessible — fall through.
+    // observability: probe — the path may not exist or be accessible; fall through
   }
   return undefined;
 }
@@ -191,7 +192,7 @@ export class ClaudeProvider implements ChatProvider {
           }
           onEvent(parsed as StreamEvent);
         } catch {
-          // Skip lines that are not valid JSON — they carry no structured data.
+          // observability: parse fallback — non-JSON lines carry no structured data (per line)
         }
       };
 
@@ -211,7 +212,7 @@ export class ClaudeProvider implements ChatProvider {
                 forwardFromStreamEvents
               );
             } catch {
-              // Non-JSON chatter from the CLI — ignore.
+              // observability: parse fallback — non-JSON CLI chatter is ignored (per line)
             }
           },
           onError: (error) => {
@@ -272,6 +273,7 @@ function extractCodexText(line: string): string {
     }
     return "";
   } catch {
+    // observability: parse fallback — a non-JSON line has no text (per line)
     return "";
   }
 }
@@ -290,6 +292,7 @@ function extractCodexSessionId(line: string): string | null {
       }
     }
   } catch {
+    // observability: parse fallback — a non-JSON line is matched by regex (per line)
     const match = CODEX_SESSION_ID_REGEX.exec(line);
     if (match?.[1]) {
       return match[1];
@@ -348,6 +351,14 @@ export class CodexProvider implements ChatProvider {
             : error instanceof Error
               ? error.message
               : String(error);
+        gatewayLog.warn(
+          CHAT_PROVIDERS_TAG,
+          "codex working directory rejected",
+          {
+            reason: "codex_cwd_not_allowed",
+            error,
+          }
+        );
         onEvent({ type: "error", error: message });
         return {
           sessionId: undefined,
@@ -389,6 +400,10 @@ export class CodexProvider implements ChatProvider {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        gatewayLog.error(CHAT_PROVIDERS_TAG, "failed to spawn codex", {
+          reason: "codex_spawn_failed",
+          error,
+        });
         onEvent({ type: "error", error: message });
         settle({
           sessionId: undefined,
@@ -465,3 +480,5 @@ export class CodexProvider implements ChatProvider {
     });
   }
 }
+
+const CHAT_PROVIDERS_TAG = "chat-providers";

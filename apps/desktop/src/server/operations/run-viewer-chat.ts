@@ -176,7 +176,7 @@ export function registerRunViewerChatRoutes(
                   context.response.write(`${msg}\n`)
                 );
               } catch {
-                // Skip malformed JSON lines.
+                // observability: parse fallback — per-line stream noise, malformed lines are skipped
               }
             },
             onError: (error) => {

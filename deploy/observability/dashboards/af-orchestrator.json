@@ -1,0 +1,236 @@
+{
+  "title": "AgentFlow — Orchestrator",
+  "description": "orchestrator.* spans and conversation health.",
+  "tags": ["agentflow"],
+  "version": "v4",
+  "variables": {},
+  "layout": [
+    {
+      "i": "97c5fdd8-ec36-4912-abcf-56390dd409de",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "69ab7edf-99e4-4f38-a83f-051c9efefa41",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "07a392fd-a4f2-45e4-a7e9-4ee393baa59c",
+      "x": 0,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "3d35c6f1-21bb-45ba-a631-4ce530da331c",
+      "x": 6,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "eb6dbd79-1285-4aa4-ac73-84cdda8e6ef6",
+      "x": 0,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    }
+  ],
+  "widgets": [
+    {
+      "id": "97c5fdd8-ec36-4912-abcf-56390dd409de",
+      "panelTypes": "graph",
+      "title": "orchestrator spans by name",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "d2272cdb-bc55-4fb1-ae55-d3d56e126727",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, name AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name LIKE 'orchestrator.%' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "69ab7edf-99e4-4f38-a83f-051c9efefa41",
+      "panelTypes": "graph",
+      "title": "orchestrator error rate by name (%)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "percent",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "0ca9ffd4-c57a-49cb-a535-2d5361aa6d3c",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, name AS label, 100 * countIf(has_error) / count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name LIKE 'orchestrator.%' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "07a392fd-a4f2-45e4-a7e9-4ee393baa59c",
+      "panelTypes": "graph",
+      "title": "route_inbound outcomes",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "ffe6a2c7-bb06-4388-a7c0-42434f4bbbb2",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.outcome'] AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'orchestrator.route_inbound' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "3d35c6f1-21bb-45ba-a631-4ce530da331c",
+      "panelTypes": "graph",
+      "title": "teams_ask_ignored events",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "a6c45054-7038-4c0f-aefe-4a45b0914c1e",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, count() AS value FROM signoz_traces.distributed_signoz_index_v3 ARRAY JOIN events AS event WHERE name LIKE 'orchestrator.%' AND JSONExtractString(event, 'name') = 'orchestrator.teams_ask_ignored' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "eb6dbd79-1285-4aa4-ac73-84cdda8e6ef6",
+      "panelTypes": "graph",
+      "title": "advance_conversation skipped per minute",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "5a023d9e-1ed1-4e18-a94c-0b2255f83cfa",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name = 'orchestrator.advance_conversation' AND attributes_string['af.outcome'] = 'skipped' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    }
+  ]
+}

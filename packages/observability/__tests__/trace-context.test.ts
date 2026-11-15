@@ -66,15 +66,15 @@ describe("getTraceContext", () => {
 });
 
 describe("toLogCorrelationFields", () => {
-  it("maps the span identifiers onto the attributes Datadog joins traces on", () => {
+  it("maps the span identifiers onto the attributes SigNoz joins traces on", () => {
     expect(
       toLogCorrelationFields({
         traceId: SAMPLE_TRACE_ID,
         spanId: SAMPLE_SPAN_ID,
       })
     ).toEqual({
-      "dd.trace_id": SAMPLE_TRACE_ID,
-      "dd.span_id": SAMPLE_SPAN_ID,
+      trace_id: SAMPLE_TRACE_ID,
+      span_id: SAMPLE_SPAN_ID,
     });
   });
 });

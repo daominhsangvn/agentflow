@@ -18,7 +18,14 @@ import {
   type TransactionClient,
   withDb,
 } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import {
+  type SpanAttributes,
+  setActiveSpanAttributes,
+  setSpanOutcome,
+  withSpan,
+} from "@repo/observability/span";
 import {
   CatalogAssetTooLargeError,
   catalogAssetKey,
@@ -243,7 +250,19 @@ type BulkIngestCatalogItemsResult = {
  */
 const MAX_INGEST_ATTEMPTS = 5;
 
-export async function bulkIngestAgents(
+export function bulkIngestAgents(
+  organizationId: string,
+  userId: string,
+  input: BulkIngestInput
+): Promise<BulkIngestCatalogItemsResult> {
+  return withSpan(
+    "catalog.bulk_ingest_agents",
+    { [AfAttribute.OrgId]: organizationId, [AfAttribute.UserId]: userId },
+    () => bulkIngestAgentsInner(organizationId, userId, input)
+  );
+}
+
+async function bulkIngestAgentsInner(
   organizationId: string,
   userId: string,
   input: BulkIngestInput
@@ -1329,7 +1348,21 @@ async function createCatalogItemInTx(
  * parent is missing / not visible to the org, 403 if it exists but is not an
  * org-owned Pack the caller may attach to.
  */
-export async function createCatalogItem(
+export function createCatalogItem(
+  input: CreateCatalogInput
+): Promise<Result<CatalogItemDto, CreateCatalogError>> {
+  return withResultSpan(
+    "catalog.create_item",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [AfAttribute.UserId]: input.userId,
+    },
+    () => createCatalogItemInner(input),
+    (value) => ({ [CatalogSpanAttribute.CatalogItemId]: value.id })
+  );
+}
+
+async function createCatalogItemInner(
   input: CreateCatalogInput
 ): Promise<Result<CatalogItemDto, CreateCatalogError>> {
   // Runs in a transaction so that, for agent items, the agent_components
@@ -1379,7 +1412,21 @@ type UpdateCatalogError = 404 | 403;
  * bearing target kinds. Read-only sources, archived rows, and foreign-org items
  * fail closed.
  */
-export async function updateCatalogItem(
+export function updateCatalogItem(
+  input: UpdateCatalogInput
+): Promise<Result<CatalogItemDto, UpdateCatalogError>> {
+  return withResultSpan(
+    "catalog.update_item",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [AfAttribute.UserId]: input.userId,
+      [CatalogSpanAttribute.CatalogItemId]: input.id,
+    },
+    () => updateCatalogItemInner(input)
+  );
+}
+
+async function updateCatalogItemInner(
   input: UpdateCatalogInput
 ): Promise<Result<CatalogItemDto, UpdateCatalogError>> {
   // Look up through the visible catalog predicate so readable read-only
@@ -1587,7 +1634,20 @@ type ArchiveCatalogError = 404 | 403;
  * Soft-archive a CatalogItem (sets archived=true).
  * Curated items cannot be archived by orgs (403).
  */
-export async function archiveCatalogItem(
+export function archiveCatalogItem(
+  input: ArchiveCatalogInput
+): Promise<Result<{ archived: true }, ArchiveCatalogError>> {
+  return withResultSpan(
+    "catalog.archive_item",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [CatalogSpanAttribute.CatalogItemId]: input.id,
+    },
+    () => archiveCatalogItemInner(input)
+  );
+}
+
+async function archiveCatalogItemInner(
   input: ArchiveCatalogInput
 ): Promise<Result<{ archived: true }, ArchiveCatalogError>> {
   const existing = await withDb((db) =>
@@ -1876,7 +1936,21 @@ async function createPackComponents(
  * container upfront here so the shared helper can skip the redundant per-child
  * parent lookup.
  */
-export async function importPackZipComponents(
+export function importPackZipComponents(
+  input: ImportPackZipInput
+): Promise<Result<ImportPackZipResponse, ImportPackZipError>> {
+  return withResultSpan(
+    "catalog.import_pack_zip",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [AfAttribute.UserId]: input.userId,
+      [CatalogSpanAttribute.CatalogItemId]: input.id,
+    },
+    () => importPackZipComponentsInner(input)
+  );
+}
+
+async function importPackZipComponentsInner(
   input: ImportPackZipInput
 ): Promise<Result<ImportPackZipResponse, ImportPackZipError>> {
   const pack = await withDb((db) =>
@@ -1956,7 +2030,21 @@ type ImportPackRepoError = 404 | 403 | 400;
  * shared-asset repo. Reuses `createPackComponents` so imports inherit the same
  * validation, atomicity, and cross-org guards as the zip path.
  */
-export async function importPackRepoComponents(
+export function importPackRepoComponents(
+  input: ImportPackRepoInput
+): Promise<Result<ImportPackZipResponse, ImportPackRepoError>> {
+  return withResultSpan(
+    "catalog.import_pack_repo",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [AfAttribute.UserId]: input.userId,
+      [CatalogSpanAttribute.CatalogItemId]: input.id,
+    },
+    () => importPackRepoComponentsInner(input)
+  );
+}
+
+async function importPackRepoComponentsInner(
   input: ImportPackRepoInput
 ): Promise<Result<ImportPackZipResponse, ImportPackRepoError>> {
   const pack = await withDb((db) =>
@@ -2063,7 +2151,20 @@ type UploadIntentError = 404 | 403 | 413 | 415;
  * Returns the upload URL and the S3 key; the caller PUTs bytes to the URL
  * and then calls confirmUpload to record the key in DB.
  */
-export async function getUploadIntent(
+export function getUploadIntent(
+  input: UploadIntentInput
+): Promise<Result<{ presignedUrl: string; s3Key: string }, UploadIntentError>> {
+  return withResultSpan(
+    "catalog.upload_intent",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [CatalogSpanAttribute.CatalogItemId]: input.catalogItemId,
+    },
+    () => getUploadIntentInner(input)
+  );
+}
+
+async function getUploadIntentInner(
   input: UploadIntentInput
 ): Promise<Result<{ presignedUrl: string; s3Key: string }, UploadIntentError>> {
   const maxBytes = input.fileType === "zip" ? ZIP_MAX_BYTES : LOGO_MAX_BYTES;
@@ -2126,7 +2227,20 @@ type ConfirmUploadError = 404 | 403 | "asset_not_found";
  * Verify a previously-PUT catalog asset exists in S3 (HeadObject) and record
  * its key in the CatalogItem row. Returns the updated CatalogItemDto on success.
  */
-export async function confirmAssetUpload(
+export function confirmAssetUpload(
+  input: ConfirmUploadInput
+): Promise<Result<CatalogItemDto, ConfirmUploadError>> {
+  return withResultSpan(
+    "catalog.confirm_asset_upload",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [CatalogSpanAttribute.CatalogItemId]: input.catalogItemId,
+    },
+    () => confirmAssetUploadInner(input)
+  );
+}
+
+async function confirmAssetUploadInner(
   input: ConfirmUploadInput
 ): Promise<Result<CatalogItemDto, ConfirmUploadError>> {
   const existing = await withDb((db) =>
@@ -2250,4 +2364,25 @@ function isLinkableDefinitionContent(
   content: string | null
 ): content is string {
   return content != null && content.length > 0;
+}
+
+/** Span attribute key local to catalog writes. */
+const CatalogSpanAttribute = { CatalogItemId: "af.catalog_item_id" } as const;
+
+/** Runs `fn` in a span and marks the span failed when it returns a failure Result. */
+function withResultSpan<T, E>(
+  name: string,
+  attributes: SpanAttributes,
+  fn: () => Promise<Result<T, E>>,
+  okAttributes?: (value: T) => SpanAttributes
+): Promise<Result<T, E>> {
+  return withSpan(name, attributes, async () => {
+    const result = await fn();
+    if (!result.ok) {
+      setSpanOutcome(AfOutcome.Error, String(result.error));
+    } else if (okAttributes) {
+      setActiveSpanAttributes(okAttributes(result.value));
+    }
+    return result;
+  });
 }

@@ -3,7 +3,9 @@ import {
   WorkflowRunEvent,
 } from "@repo/api/src/types/workflow";
 import { workflowEmailConfigSchema } from "@repo/api/src/types/workflow-email";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import type {
   ActionResult,
   WorkflowRunSnapshot,
@@ -27,12 +29,31 @@ const LOG_PREFIX = "[workflows/email-action]";
 export const MAIL_NOT_CONFIGURED_REASON =
   "the server sends no email: set SMTP_URL (and EMAIL_FROM) in the API's environment";
 
-export async function executeEmailAction(input: {
+export function executeEmailAction(input: {
   config: unknown;
   snapshot: WorkflowRunSnapshot;
   render: (template: string) => string;
   actionRunId: string;
 }): Promise<ActionResult> {
+  return withSpan(
+    "workflow.email_action",
+    {
+      [AfAttribute.ActionRunId]: input.actionRunId,
+      [AfAttribute.WorkflowRunId]: input.snapshot.id,
+    },
+    (span) => sendEmailAction(input, span)
+  );
+}
+
+async function sendEmailAction(
+  input: {
+    config: unknown;
+    snapshot: WorkflowRunSnapshot;
+    render: (template: string) => string;
+    actionRunId: string;
+  },
+  span: EmailSpan
+): Promise<ActionResult> {
   const config = workflowEmailConfigSchema.safeParse(input.config);
   if (!config.success) {
     return {
@@ -60,6 +81,7 @@ export async function executeEmailAction(input: {
     });
   } catch (error) {
     const failure = describeMailFailure(error);
+    setSpanOutcome(AfOutcome.Error, failure.message, span);
     log.warn(`${LOG_PREFIX} Email action failed`, {
       runId: input.snapshot.id,
       event: input.snapshot.event,
@@ -119,3 +141,5 @@ function subjectAsk(snapshot: WorkflowRunSnapshot): string {
   }
   return "Your answer is needed";
 }
+
+type EmailSpan = NonNullable<Parameters<typeof setSpanOutcome>[2]>;

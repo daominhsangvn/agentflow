@@ -200,6 +200,7 @@ async function readToolVersion(executable: string): Promise<string | null> {
     });
     return FIRST_LINE_RE.exec(stdout.trim())?.[0] ?? null;
   } catch {
+    // observability: probe — the preflight check reports a missing version
     return null;
   }
 }
@@ -209,6 +210,7 @@ function isWritableDirectory(directory: string): boolean {
     fs.accessSync(directory, fs.constants.W_OK);
     return fs.statSync(directory).isDirectory();
   } catch {
+    // observability: probe — the preflight check reports a non-writable directory
     return false;
   }
 }

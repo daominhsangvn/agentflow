@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import type { JobStore, LocalJob } from "../../main/jobs/job-store.js";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import { killProcessTree } from "../platform-shell.js";
 import { assertPathAllowed, DirectoryNotAllowedError } from "../security.js";
@@ -97,6 +98,7 @@ export function registerSymphonyKillRoutes(
       try {
         process.kill(pid, 0);
       } catch {
+        // observability: probe — signal 0 fails when the process is already gone
         deletePidFile(pidFilePath);
         if (worktreeDir) {
           markStateAsStopped(worktreeDir);
@@ -118,6 +120,7 @@ export function registerSymphonyKillRoutes(
           process.kill(pid, 0);
           killProcessTree(pid, "SIGKILL");
         } catch {
+          // observability: best-effort cleanup — the process is already gone
           // Process already gone
         }
 
@@ -160,11 +163,19 @@ export function registerSymphonyKillRoutes(
           return;
         }
 
+        gatewayLog.error("symphony-kill", "kill failed", {
+          reason: "kill_failed",
+          error,
+        });
         json(context, 500, {
           error: `Failed to kill process: ${errorMessage}`,
         });
       }
     } catch (error) {
+      gatewayLog.error("symphony-kill", "kill request failed", {
+        reason: "kill_request_failed",
+        error,
+      });
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
       json(context, 500, {
@@ -217,7 +228,11 @@ function resolvePid(
       }
 
       return { pid: resolvedPid, pidFilePath, worktreeDir };
-    } catch {
+    } catch (error) {
+      gatewayLog.warn("symphony-kill", "process.pid read failed", {
+        reason: "pid_file_unreadable",
+        error,
+      });
       return { error: "Failed to read process.pid file", status: 500 };
     }
   }
@@ -240,6 +255,7 @@ function cancelLoop(worktreeDir: string): boolean {
       return true;
     }
   } catch {
+    // observability: best-effort cleanup — the state file removal failure returns false
     return false;
   }
   return false;
@@ -261,6 +277,7 @@ function clearAgentTypes(worktreeDir: string): void {
       unlinkSync(path.join(agentTypesDir, file));
     }
   } catch {
+    // observability: best-effort cleanup — agent type files
     // Best effort
   }
 }
@@ -286,6 +303,7 @@ function markStateAsStopped(worktreeDir: string): void {
     mkdirSync(path.dirname(statePath), { recursive: true });
     writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
   } catch {
+    // observability: best-effort cleanup — the state file update
     // Best effort only
   }
 
@@ -302,6 +320,7 @@ function deletePidFile(pidFilePath: string | null): void {
       unlinkSync(pidFilePath);
     }
   } catch {
+    // observability: best-effort cleanup — the pid file
     // Best effort only
   }
 }

@@ -205,6 +205,7 @@ chmod 600 ~/.agentflow/runner-1.env
 
 docker run -d --name agentflow-runner-1 --restart unless-stopped \
   --env-file ~/.agentflow/runner-1.env \
+  -e AGENTFLOW_RUNNER_TELEMETRY=true \
   -v agentflow-runner-1-workspace:/workspace \
   -v agentflow-runner-1-data:/home/runner/.agentflow-runner \
   -v agentflow-runner-1-claude:/home/runner/.claude \
@@ -286,6 +287,7 @@ Start the runner. The five volumes keep its repositories, its identity (so it st
 ```bash
 docker run -d --name agentflow-runner-1 --restart unless-stopped \
   --env-file runner-1.env \
+  -e AGENTFLOW_RUNNER_TELEMETRY=true \
   -v agentflow-runner-1-workspace:/workspace \
   -v agentflow-runner-1-data:/home/runner/.agentflow-runner \
   -v agentflow-runner-1-claude:/home/runner/.claude \

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { trace } from "@opentelemetry/api";
 import { SymphonyDirNotConfiguredError } from "./operations/symphony-utils.js";
 
 export type OperationRequestContext = {
@@ -46,6 +47,11 @@ export class OperationDispatcher {
       if (!match) {
         continue;
       }
+
+      // Low-cardinality route pattern; the span name stays fixed.
+      trace
+        .getActiveSpan()
+        ?.setAttribute("af.gateway.route", route.pathnamePattern);
 
       const params: Record<string, string> = {};
       for (let index = 0; index < route.parameterNames.length; index += 1) {

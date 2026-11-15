@@ -519,9 +519,8 @@ function summarizeOrgIngestionRows(
   // SAME payload shape and an operator drilling into an aggregate
   // `stalled_orgs` page could not tell which org was actually stalled and which
   // was merely idle (wongk, PR #4187). Carrying the classification as a metric
-  // LABEL would need a paired `datadog_logs_metric` + monitor change in
-  // `agentflow-ai/af-tofu-aws-live` (PRD-159) that cannot be made from this
-  // repo, so the emission is narrowed instead: every org named by this metric is
+  // LABEL would change the alert rule's grouping (PRD-159), so the
+  // emission is narrowed instead: every org named by this metric is
   // one the page is about. The quiet population stays visible as
   // `SessionIngestionHealthSummary.quietOrgCount` and in the cron's log line.
   const reportableRows: ClassifiedOrgIngestionRow[] = [];

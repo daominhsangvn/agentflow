@@ -841,6 +841,37 @@ test("sends x-desktop-command-id and x-desktop-operation-id headers in gateway r
   assert.equal(receivedOperationId, operationId);
 });
 
+test("forwards af.* baggage to the gateway only when the command carries it", async () => {
+  const received: (string | undefined)[] = [];
+  await startGateway(async (request, response) => {
+    received.push(request.headers.baggage as string | undefined);
+    response.statusCode = 200;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ ok: true }));
+  });
+  const events: Omit<
+    DesktopCommandStreamEvent,
+    "protocolVersion" | "messageId" | "timestamp"
+  >[] = [];
+  executor = createExecutor({
+    maxInFlightCommands: 1,
+    onEvent: (event) => events.push(event),
+  });
+  executor.setConnected(true);
+
+  executor.enqueue({
+    ...buildCommand("with-baggage", {}),
+    baggage: "af.case_id=c1,af.task_id=t1",
+  });
+  await waitFor(() => countDone(events, "with-baggage") === 1);
+  executor.enqueue(buildCommand("no-baggage", {}));
+  await waitFor(() => countDone(events, "no-baggage") === 1);
+
+  assert.ok(received[0]?.includes("af.case_id=c1"));
+  assert.ok(received[0]?.includes("af.task_id=t1"));
+  assert.equal(received[1], undefined);
+});
+
 test("omits x-desktop-command-id header when commandId is not a valid UUID", async () => {
   let receivedHeaders: http.IncomingHttpHeaders | undefined;
 

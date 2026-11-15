@@ -169,7 +169,7 @@ export async function dispatchAndClassify(
       loopId,
       commandId: options?.desktopUserIntentSignature?.commandId,
       // Pass the raw error so jsonReplacer preserves name/message/stack for
-      // Datadog; loop launch is a critical dispatch step and the stack tells
+      // SigNoz; loop launch is a critical dispatch step and the stack tells
       // an operator which downstream call actually threw.
       error,
       dispatchReason:
@@ -197,7 +197,7 @@ export async function dispatchAndClassify(
  * way out. `dispatchAndClassify` has already logged this exact failure with the
  * loopId, the raw error and the `dispatchReason` — the detail an operator
  * actually needs. A second, detail-free `log.error` per failure would only
- * double the Datadog volume for what is most often "the desktop app is not
+ * double the SigNoz volume for what is most often "the desktop app is not
  * running", drowning the entry that can be acted on.
  */
 export function dispatchFailureResponse(

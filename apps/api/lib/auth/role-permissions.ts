@@ -6,6 +6,7 @@ import {
   type OrgPermission,
   splitOrgRoleNames,
 } from "@repo/api/src/types/org-permissions";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 
 /**
@@ -46,11 +47,21 @@ export function parseStoredPermissions(raw: string): OrgPermission[] {
   let json: unknown;
   try {
     json = JSON.parse(raw);
-  } catch {
+  } catch (error) {
+    log.warn("auth.custom_role_permissions_invalid", {
+      reason: "permission_json_unparseable",
+      error,
+    });
     return [];
   }
   const parsed = permissionRecordSchema.safeParse(json);
-  return parsed.success ? fromPermissionStatements(parsed.data) : [];
+  if (!parsed.success) {
+    log.warn("auth.custom_role_permissions_invalid", {
+      reason: "permission_json_shape_invalid",
+    });
+    return [];
+  }
+  return fromPermissionStatements(parsed.data);
 }
 
 function addAll(target: Set<OrgPermission>, items: readonly OrgPermission[]) {

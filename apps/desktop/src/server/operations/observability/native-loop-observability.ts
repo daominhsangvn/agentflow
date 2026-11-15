@@ -108,6 +108,7 @@ export class NativeLoopObservabilitySession {
     try {
       this.emitRaw(this.envelope.runStarted());
     } catch {
+      // observability: telemetry code itself — non-fatal
       // best-effort (AC-008)
     }
   }
@@ -138,7 +139,7 @@ export class NativeLoopObservabilitySession {
         };
       }
     } catch {
-      // best-effort: stream drift / parse issues must never stall the loop.
+      // observability: telemetry code itself — best-effort: stream drift / parse issues must never stall the loop.
     }
     return undefined;
   }
@@ -161,7 +162,7 @@ export class NativeLoopObservabilitySession {
       }
       this.emitRaw(this.envelope.runFinished(outcome));
     } catch {
-      // best-effort (AC-008)
+      // observability: telemetry code itself — best-effort (AC-008)
     } finally {
       // Always release registry state so an abnormal exit cannot leak entries.
       clearActiveAgents(this.loopId);
@@ -177,12 +178,12 @@ export class NativeLoopObservabilitySession {
         traceContext: this.traceContext,
       });
     } catch {
-      // telemetry emit failure is non-fatal (AC-008)
+      // observability: telemetry code itself — telemetry emit failure is non-fatal (AC-008)
     }
     try {
       appendFileSync(this.perfJsonlPath, `${JSON.stringify(raw)}\n`);
     } catch {
-      // perf.jsonl sink failure is non-fatal; the in-process emit is authoritative.
+      // observability: telemetry code itself — perf.jsonl sink failure is non-fatal; the in-process emit is authoritative.
     }
   }
 }

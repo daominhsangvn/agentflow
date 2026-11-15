@@ -58,6 +58,7 @@ async function readCreateAttachmentDiagnostics(
   try {
     return getCreateAttachmentDiagnostics(await request.clone().json());
   } catch {
+    // observability: parse fallback — diagnostics are optional
     return {};
   }
 }

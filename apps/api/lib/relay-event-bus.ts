@@ -1,6 +1,8 @@
 import type { JsonValue } from "@repo/api/src/types/common";
 import type { RelayOperationDispatchRequest } from "@repo/api/src/types/compute-target";
+import { buildAfBaggage } from "@repo/observability/af-baggage";
 import { log } from "@repo/observability/log";
+import { getActiveAfIds, getActiveTraceparent } from "@repo/observability/span";
 import { FilterToken } from "@repo/observability/telemetry/filter-tokens";
 import {
   emitProtocolMetric,
@@ -206,8 +208,22 @@ export const relayEventBus = {
 
   publishOperation(
     targetId: string,
-    operation: RelayOperationDispatchRequest
+    rawOperation: RelayOperationDispatchRequest
   ): { deliveredToSubscriber: boolean } {
+    const activeTraceparent = rawOperation.traceparent
+      ? undefined
+      : getActiveTraceparent();
+    const activeBaggage = rawOperation.baggage
+      ? undefined
+      : buildAfBaggage(getActiveAfIds());
+    const operation =
+      activeTraceparent || activeBaggage
+        ? {
+            ...rawOperation,
+            ...(activeTraceparent ? { traceparent: activeTraceparent } : {}),
+            ...(activeBaggage ? { baggage: activeBaggage } : {}),
+          }
+        : rawOperation;
     const handlers = operationSubscribers.get(targetId);
     if (!handlers || handlers.size === 0) {
       const pending = operationBacklog.get(targetId) ?? [];

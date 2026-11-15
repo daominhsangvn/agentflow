@@ -34,6 +34,7 @@ export function validateOutboundUrlForSurface(
   try {
     parsed = new URL(rawUrl);
   } catch {
+    // observability: parse fallback — the deny decision carries the invalid_url reason
     return deny(surface, "invalid_url", "invalid", {});
   }
 

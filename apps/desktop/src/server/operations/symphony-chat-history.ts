@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import { assertPathAllowed, DirectoryNotAllowedError } from "../security.js";
 import { parseBody } from "./parse-body.js";
@@ -88,6 +89,10 @@ export function registerSymphonyChatHistoryRoutes(
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
+        gatewayLog.error(CHAT_HISTORY_TAG, "failed to read chat history", {
+          reason: "chat_history_read_failed",
+          error,
+        });
         json(context, 500, {
           error: `Failed to read chat history: ${message}`,
         });
@@ -160,6 +165,7 @@ export function registerSymphonyChatHistoryRoutes(
           const content = await fs.readFile(historyReadPath, "utf-8");
           history = JSON.parse(content) as ChatHistory;
         } catch {
+          // observability: parse fallback — a corrupt chat history starts a new one
           history = { messages: [], ticketId, repoPath };
         }
       } else {
@@ -178,6 +184,10 @@ export function registerSymphonyChatHistoryRoutes(
         } catch (error) {
           const messageText =
             error instanceof Error ? error.message : "Unknown error";
+          gatewayLog.error(CHAT_HISTORY_TAG, "failed to save session ID", {
+            reason: "chat_session_id_save_failed",
+            error,
+          });
           json(context, 500, {
             error: `Failed to save session ID: ${messageText}`,
           });
@@ -204,6 +214,10 @@ export function registerSymphonyChatHistoryRoutes(
       } catch (error) {
         const messageText =
           error instanceof Error ? error.message : "Unknown error";
+        gatewayLog.error(CHAT_HISTORY_TAG, "failed to save chat history", {
+          reason: "chat_history_save_failed",
+          error,
+        });
         json(context, 500, {
           error: `Failed to save chat history: ${messageText}`,
         });
@@ -308,6 +322,10 @@ export function registerSymphonyChatHistoryRoutes(
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
+        gatewayLog.error(CHAT_HISTORY_TAG, "failed to delete chat history", {
+          reason: "chat_history_delete_failed",
+          error,
+        });
         json(context, 500, { error: `Failed to delete: ${message}` });
       }
     }
@@ -359,3 +377,5 @@ function parseMessage(value: unknown): ChatMessage | undefined {
 
   return parsed;
 }
+
+const CHAT_HISTORY_TAG = "symphony-chat-history";

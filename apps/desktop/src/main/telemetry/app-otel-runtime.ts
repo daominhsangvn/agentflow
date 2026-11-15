@@ -198,6 +198,8 @@ export type CreateDesktopOtelRuntimeOptions = {
    * FEA-1983 behavior retained for tests/dev and the renderer bridge).
    */
   telemetryTransport?: DesktopTelemetryTransport;
+  /** Overrides the OTel `service.name` resource attribute (headless runner: `af-runner`). */
+  serviceName?: string;
 };
 
 const DEFAULT_BUFFER_LIMIT = 1000;
@@ -552,7 +554,7 @@ export function createDesktopOtelRuntime(
       : UNRESOLVED_DESKTOP_SERVICE_VERSION;
     const resource = defaultResource().merge(
       resourceFromAttributes({
-        [TelemetryAttribute.ServiceName]: SERVICE_NAME,
+        [TelemetryAttribute.ServiceName]: options.serviceName ?? SERVICE_NAME,
         [TelemetryAttribute.ServiceVersion]: serviceVersion,
         [TelemetryAttribute.AppInstallationId]: appInstallationId,
         ...(deviceIdSnapshot

@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { constructed, env } = vi.hoisted(() => ({
+const { constructed, env, middlewares } = vi.hoisted(() => ({
   constructed: [] as Record<string, unknown>[],
+  middlewares: [] as ((next: unknown, context: unknown) => unknown)[],
   env: {} as Record<string, unknown>,
 }));
 
 vi.mock("@aws-sdk/client-s3", () => ({
   S3Client: class S3Client {
+    middlewareStack = {
+      add: (middleware: (next: unknown, context: unknown) => unknown) => {
+        middlewares.push(middleware);
+      },
+    };
     constructor(config: Record<string, unknown>) {
       constructed.push(config);
     }
@@ -22,11 +28,14 @@ import {
   getPresignClient,
   getStorageClient,
   resetStorageClientsForTests,
+  setStorageCommandObserver,
 } from "./client";
 
 describe("storage clients", () => {
   beforeEach(() => {
     constructed.length = 0;
+    middlewares.length = 0;
+    setStorageCommandObserver(null);
     for (const key of Object.keys(env)) {
       delete env[key];
     }
@@ -38,6 +47,32 @@ describe("storage clients", () => {
       S3_SECRET_ACCESS_KEY: "secret",
     });
     resetStorageClientsForTests();
+  });
+
+  it("routes commands through the observer and passes through without one", async () => {
+    getStorageClient();
+    const next = vi.fn((args: unknown) => Promise.resolve(args));
+    const handler = middlewares[0]?.(next, {
+      commandName: "HeadObjectCommand",
+    }) as (args: unknown) => Promise<unknown>;
+    const args = { input: { Bucket: "b1", Key: "k" } };
+
+    await handler(args);
+    expect(next).toHaveBeenCalledTimes(1);
+
+    const observer = vi.fn(
+      (
+        _command: { name: string; bucket?: string },
+        run: () => Promise<unknown>
+      ) => run()
+    );
+    setStorageCommandObserver(observer as never);
+    await handler(args);
+    expect(observer.mock.calls[0]?.[0]).toEqual({
+      name: "HeadObjectCommand",
+      bucket: "b1",
+    });
+    expect(next).toHaveBeenCalledTimes(2);
   });
 
   it("configures the internal client for an S3-compatible endpoint", () => {

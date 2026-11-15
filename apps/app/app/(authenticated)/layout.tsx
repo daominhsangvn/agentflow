@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import { EngineerTransportBootstrap } from "@/components/engineer/engineer-transport-bootstrap";
 import { env } from "@/env";
 import { FrontendCaptureController } from "@/lib/frontend-capture/frontend-capture-controller";
+import { ClientErrorReporter } from "@/lib/observability/client-error-reporter";
 import { PreLoopSystemCheckProvider } from "@/lib/system-check/pre-loop-system-check-provider";
 import { CollaborationProviderWrapper } from "./components/collaboration-provider-wrapper";
 import { CommandPalette } from "./components/command-palette";
@@ -61,6 +62,7 @@ const AppLayout = async ({ children }: AppLayoutProperties) => {
             <UserIdentifier />
             <CommandPalette />
             <EngineerTransportBootstrap />
+            <ClientErrorReporter />
             <PreLoopSystemCheckProvider>
               {/* Reserve the bottom-nav's rendered height (+ safe-area) below
                   `md` so fixed-bar overlap never clips the last row of content;

@@ -44,6 +44,7 @@ export function decodeCommandPublicKeyBase64(value: string): Buffer | null {
     const decoded = Buffer.from(trimmed, "base64");
     return decoded.length === ED25519_RAW_PUBLIC_KEY_LENGTH ? decoded : null;
   } catch {
+    // observability: parse fallback — an undecodable or invalid key yields null
     return null;
   }
 }
@@ -61,6 +62,7 @@ export function createEd25519PublicKeyFromRaw(
       type: "spki",
     });
   } catch {
+    // observability: parse fallback — an undecodable or invalid key yields null
     return null;
   }
 }

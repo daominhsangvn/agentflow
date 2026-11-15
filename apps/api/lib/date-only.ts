@@ -31,6 +31,7 @@ export function getDateOnlyFormatter(
       day: "2-digit",
     });
   } catch {
+    // observability: (a) validation fallback — an unknown time zone has no formatter
     formatter = null;
   }
   dateOnlyFormatters.set(timeZone, formatter);

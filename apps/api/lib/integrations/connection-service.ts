@@ -17,7 +17,9 @@ import {
   Prisma,
   withDb,
 } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { v7 as uuidv7 } from "uuid";
 import { z } from "zod";
 import { checkCredentialOrigin } from "./connection/credential-origin";
@@ -268,40 +270,53 @@ export const integrationConnectionService = {
     return Result.ok({ deleted: true });
   },
 
-  async test(
+  test(
     organizationId: string,
     id: string
   ): Promise<IntegrationConnectionTestResult | null> {
-    const record = await findConnectionRecord(organizationId, id);
-    if (!record) {
-      return null;
-    }
-    const loaded = buildLoadedConnection(record);
-    if (!loaded.ok) {
-      await recordValidationFailure(record, loaded.error);
-      return {
-        ok: false,
-        account: toAccountSummary(parseStoredAccount(record.account)),
-        error: loaded.error,
-      };
-    }
+    return withSpan(
+      "integration.connection_test",
+      { [AfAttribute.ConnectionId]: id, [AfAttribute.OrgId]: organizationId },
+      async (span) => {
+        const record = await findConnectionRecord(organizationId, id);
+        if (!record) {
+          return null;
+        }
+        const loaded = buildLoadedConnection(record);
+        if (!loaded.ok) {
+          setSpanOutcome(AfOutcome.Error, loaded.error, span);
+          await recordValidationFailure(record, loaded.error);
+          return {
+            ok: false,
+            account: toAccountSummary(parseStoredAccount(record.account)),
+            error: loaded.error,
+          };
+        }
 
-    const { provider, runtime } = loaded.value;
-    const result = await runProviderValidation(
-      provider,
-      createProviderContext(runtime, LOG_PREFIX),
-      ValidateConnectionReason.Test
+        const { provider, runtime } = loaded.value;
+        span.setAttribute(AfAttribute.IntegrationProvider, provider.key);
+        const result = await runProviderValidation(
+          provider,
+          createProviderContext(runtime, LOG_PREFIX),
+          ValidateConnectionReason.Test
+        );
+        if (!result.ok) {
+          setSpanOutcome(AfOutcome.Error, result.error, span);
+          await recordValidationFailure(record, result.error);
+          return {
+            ok: false,
+            account: toAccountSummary(runtime.account),
+            error: result.error,
+          };
+        }
+        await recordValidationSuccess(record, result.account);
+        return {
+          ok: true,
+          account: toAccountSummary(result.account),
+          error: null,
+        };
+      }
     );
-    if (!result.ok) {
-      await recordValidationFailure(record, result.error);
-      return {
-        ok: false,
-        account: toAccountSummary(runtime.account),
-        error: result.error,
-      };
-    }
-    await recordValidationSuccess(record, result.account);
-    return { ok: true, account: toAccountSummary(result.account), error: null };
   },
 
   async getInboundDetails(
@@ -429,7 +444,7 @@ export function createProviderContext(
 ): ProviderContext {
   return {
     connection: runtime,
-    http: createProviderHttp(),
+    http: createProviderHttp(fetch, { provider: runtime.provider }),
     log: createProviderLogger(runtime, logPrefix),
     now: () => new Date(),
   };
@@ -463,6 +478,9 @@ export async function recordConnectionPollResult(
   }
   if (data.error !== undefined) {
     update.lastError = data.error === null ? null : trimError(data.error);
+  }
+  if (data.error) {
+    setSpanOutcome(AfOutcome.Error, data.error);
   }
   await withDb((db) =>
     db.integrationConnection.updateMany({

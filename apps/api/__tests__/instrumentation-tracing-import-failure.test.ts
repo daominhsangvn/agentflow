@@ -1,11 +1,11 @@
-import { TracingDisabledReason } from "@repo/observability/tracing/config";
+import { TelemetryDisabledReason } from "@repo/observability/tracing/config";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // apps/api register() — the tracing import is inside the fail-open boundary
 // (ISS-4659).
 //
-// `initTracing()` catches its own bootstrap failures, but module resolution and
+// `initTelemetry()` catches its own bootstrap failures, but module resolution and
 // evaluation happen before it is ever called. An unresolvable OTel dependency,
 // or a throw at module scope, would reject `register()` — and Next awaits
 // `register()`, so the API cold start would fail over a telemetry problem.
@@ -69,8 +69,8 @@ describe("register() when the tracing module fails to load", () => {
 
     await register();
 
-    expect(mocks.logWarn).toHaveBeenCalledWith("telemetry.tracing_disabled", {
-      reason: TracingDisabledReason.InitFailed,
+    expect(mocks.logWarn).toHaveBeenCalledWith("telemetry.disabled", {
+      reason: TelemetryDisabledReason.InitFailed,
     });
   });
 

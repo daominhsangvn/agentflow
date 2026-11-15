@@ -171,7 +171,7 @@ Worked versioning examples:
 ## Collector tail-sampling fragment
 
 The keyless-telemetry OTel Collector (PRD-481 C2 / FEA-1990, deployed from
-af-tofu) controls Datadog trace-ingest cost with a `tail_sampling` processor.
+af-tofu) controls trace-ingest volume with a `tail_sampling` processor.
 That policy is a single source of truth here (FEA-1992):
 
 - `collector-tail-sampling-policy.ts` holds the typed
@@ -228,7 +228,7 @@ Two guards turn silent telemetry-drop into a red build:
 
 ## Collector PostHog routing (generated SSOT + drift guard)
 
-The same Collector fans *product signals* out to PostHog alongside the Datadog
+The same Collector fans *product signals* out to PostHog alongside the SigNoz
 ops leg (PRD-481 C3 / FEA-1991). PostHog's OTLP ingestion is traces-only and
 AI-observability-shaped, so the product signal is the GenAI span, marked by the
 `gen_ai.request.model` discriminator. Which markers designate a product signal
@@ -251,7 +251,7 @@ two committed artifacts:
   otelcol `transform/posthog_identity` processor fragment. The af-tofu
   collector config vendors it only into the `traces/posthog` pipeline after
   `redaction` and `filter/product_signals`, so missing installation ids keep the
-  current PostHog fallback and Datadog pipelines remain unchanged.
+  current PostHog fallback and SigNoz pipelines remain unchanged.
 
 Regenerate them whenever the marker set changes and commit the result:
 

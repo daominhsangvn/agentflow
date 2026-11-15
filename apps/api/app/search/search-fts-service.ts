@@ -981,6 +981,7 @@ export function decodeCursor(raw: string): UnifiedSearchCursor | null {
     }
     return null;
   } catch {
+    // observability: (a) parse fallback — an invalid cursor restarts the search
     return null;
   }
 }

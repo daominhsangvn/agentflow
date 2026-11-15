@@ -1,0 +1,236 @@
+{
+  "title": "AgentFlow — Runners",
+  "description": "Gateway command spans, runner command spans and offline events.",
+  "tags": ["agentflow"],
+  "version": "v4",
+  "variables": {},
+  "layout": [
+    {
+      "i": "83b15fb2-a1d7-4757-ac88-aefcbf7ba13e",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "98ac2ab7-6f39-42b6-a30a-d732d2ee89be",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "2d223a44-fe22-4aae-a8fb-138d1916729d",
+      "x": 0,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "5ae1602d-596c-48a2-aafd-990e315b4a29",
+      "x": 6,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "78bdba5a-7523-40e5-a637-9968a4df0814",
+      "x": 0,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    }
+  ],
+  "widgets": [
+    {
+      "id": "83b15fb2-a1d7-4757-ac88-aefcbf7ba13e",
+      "panelTypes": "graph",
+      "title": "Gateway command spans by compute target",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "a827ff24-7849-47df-a096-9d24eed3ad57",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.compute_target_id'] AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name IN ('gateway.command_event', 'gateway.command_ack') AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "98ac2ab7-6f39-42b6-a30a-d732d2ee89be",
+      "panelTypes": "graph",
+      "title": "Gateway command errors by compute target",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "f42c5e72-5b5b-4289-a42f-f294f8a0f3cb",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.compute_target_id'] AS label, count() AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE name IN ('gateway.command_event', 'gateway.command_ack') AND has_error = true AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "2d223a44-fe22-4aae-a8fb-138d1916729d",
+      "panelTypes": "table",
+      "title": "Runner commands by operation",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "7203a7d6-0e8e-4351-af89-f19c4990d1bc",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT attributes_string['af.operation_id'] AS operation, count() AS calls, countIf(has_error) AS errors, round(quantile(0.95)(duration_nano) / 1e6, 1) AS p95_ms FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-runner' AND name LIKE 'runner.command%' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY operation ORDER BY calls DESC LIMIT 100"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "5ae1602d-596c-48a2-aafd-990e315b4a29",
+      "panelTypes": "graph",
+      "title": "Runner command p95 by operation (ms)",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "ms",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "73371b07-a10d-43e7-a001-d03ae9bd50da",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "{{label}}",
+            "disabled": false,
+            "query": "SELECT toStartOfInterval(timestamp, INTERVAL 1 MINUTE) AS ts, attributes_string['af.operation_id'] AS label, quantile(0.95)(duration_nano) / 1e6 AS value FROM signoz_traces.distributed_signoz_index_v3 WHERE serviceName = 'af-runner' AND name LIKE 'runner.command%' AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY ts, label ORDER BY ts"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "78bdba5a-7523-40e5-a637-9968a4df0814",
+      "panelTypes": "table",
+      "title": "compute_target.offline events",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "f750d708-0fb0-4566-a83e-3b032caad071",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT fromUnixTimestamp64Nano(toInt64(timestamp)) AS time, attributes_string['af.compute_target_id'] AS compute_target_id, trace_id FROM signoz_logs.distributed_logs_v2 WHERE body = 'compute_target.offline' AND timestamp BETWEEN {{.start_timestamp_nano}} AND {{.end_timestamp_nano}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} ORDER BY timestamp DESC LIMIT 200"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    }
+  ]
+}

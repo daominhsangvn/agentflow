@@ -90,6 +90,7 @@ async function hasMacKeychainCredential(): Promise<boolean> {
     );
     return true;
   } catch {
+    // observability: b — probe, absence is a normal state
     return false;
   }
 }

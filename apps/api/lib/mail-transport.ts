@@ -1,5 +1,7 @@
 import "server-only";
 
+import { AfOutcome } from "@repo/observability/af-attributes";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { createTransport, type Transporter } from "nodemailer";
 import { z } from "zod";
 
@@ -31,20 +33,35 @@ export function isMailConfigured(): boolean {
 }
 
 /** Sends the mail; throws when `SMTP_URL` is unset or the relay refuses it. */
-export async function sendMail(mail: OutgoingMail): Promise<void> {
-  const smtpUrl = readSmtpUrl();
-  if (!smtpUrl) {
-    throw new Error("SMTP_URL is not set");
-  }
-  transporter ??= createTransport(smtpUrl);
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM?.trim() || DEFAULT_EMAIL_FROM,
-    to: [mail.to].flat(),
-    cc: mail.cc && mail.cc.length > 0 ? [...mail.cc] : undefined,
-    subject: mail.subject,
-    text: mail.text,
-    messageId: mail.messageId,
-  });
+export function sendMail(mail: OutgoingMail): Promise<void> {
+  return withSpan(
+    "email.send",
+    {
+      "af.mail.recipient_count":
+        [mail.to].flat().length + (mail.cc?.length ?? 0),
+    },
+    async () => {
+      const smtpUrl = readSmtpUrl();
+      if (!smtpUrl) {
+        setSpanOutcome(AfOutcome.Error, "SMTP_URL is not set");
+        throw new Error("SMTP_URL is not set");
+      }
+      transporter ??= createTransport(smtpUrl);
+      try {
+        await transporter.sendMail({
+          from: process.env.EMAIL_FROM?.trim() || DEFAULT_EMAIL_FROM,
+          to: [mail.to].flat(),
+          cc: mail.cc && mail.cc.length > 0 ? [...mail.cc] : undefined,
+          subject: mail.subject,
+          text: mail.text,
+          messageId: mail.messageId,
+        });
+      } catch (error) {
+        setSpanOutcome(AfOutcome.Error, describeMailFailure(error).message);
+        throw error;
+      }
+    }
+  );
 }
 
 /**

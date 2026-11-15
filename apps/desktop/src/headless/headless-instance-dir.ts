@@ -42,6 +42,7 @@ export function serverSlug(apiUrl: string): string | null {
   try {
     url = new URL(apiUrl.trim());
   } catch {
+    // observability: parse fallback — an invalid API URL has no slug
     return null;
   }
   const host = url.hostname
@@ -133,6 +134,7 @@ export function defaultInstanceDirFs(): InstanceDirFs {
       try {
         return fs.readdirSync(dir);
       } catch {
+        // observability: probe — a missing directory is empty
         return [];
       }
     },
@@ -141,6 +143,7 @@ export function defaultInstanceDirFs(): InstanceDirFs {
         const config = readRunnerConfigFile(runnerConfigFile(dir));
         return config[HeadlessRunnerEnv.ApiUrl]?.trim() || null;
       } catch {
+        // observability: parse fallback — an unreadable config has no API URL
         return null;
       }
     },

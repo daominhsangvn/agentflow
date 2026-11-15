@@ -178,6 +178,11 @@ image or a systemd service on Ubuntu/Debian): see [runner.md](runner.md).
 Workflows and the desktop app talk to compute targets through the desktop
 gateway socket hosted by `apps/api/server.ts`.
 
+Runner telemetry (on by default, opt out with `AGENTFLOW_RUNNER_TELEMETRY=false`, see
+Observability) starts
+asynchronously with the runner. Log records emitted before that OTel runtime
+finishes starting are dropped and never exported.
+
 ## Feature flags without PostHog
 
 Features still being rolled out sit behind PostHog flags, which are all off
@@ -210,9 +215,154 @@ live Active Runs view of Sessions.
 | Vercel preview schemas (`/preview-schemas/ensure`) | Removed |
 | `/plugin install` of claude-plugins | `agent-plugins/` + `--plugin-dir` |
 | Clerk (auth, organizations, webhooks) | Better Auth in `apps/api` + `@repo/auth` facade |
+| Datadog (logs, APM) | OpenTelemetry → self-hosted SigNoz (default stack) |
 
 Still to port: Microsoft Entra ID sign-in, Liveblocks → Hocuspocus, Linear →
 disabled.
+
+## Observability (SigNoz)
+
+SigNoz starts by default in production (`deploy/compose/docker-compose.prod.yml`). In
+development it is opt-in through the compose profile `observability`; plain
+`docker compose up -d` starts only Postgres, RustFS, Mailpit and Local Git. The SigNoz
+services are ClickHouse, ZooKeeper, the schema migrators, `signoz` (UI and query service),
+`signoz-otel-collector` and the one-shot `signoz-init`.
+Config files are in `deploy/observability/` (mounted read-only). Every published port is
+bound to `127.0.0.1`.
+
+```bash
+# development (UI http://localhost:8080, OTLP http on :4318)
+docker compose --profile observability up -d
+# production
+docker compose -f deploy/compose/docker-compose.prod.yml up -d --build
+```
+
+In development, to send telemetry, start the profile and uncomment
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` in `apps/{api,app,mcp}/.env.local`;
+without it logs go to the console only.
+
+On a server, reach the UI through an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 host`)
+or your HTTPS reverse proxy.
+
+### Admin account, JWT secret and `signoz-init`
+
+| Variable | Purpose |
+|---|---|
+| `SIGNOZ_ADMIN_EMAIL` | SigNoz admin email (dev default `admin@agentflow.local`; required in prod) |
+| `SIGNOZ_ADMIN_PASSWORD` | Admin password, at least 8 characters with upper, lower, digit and symbol. In dev, empty skips provisioning; required in prod |
+| `SIGNOZ_ADMIN_NAME`, `SIGNOZ_ORG_NAME` | Display name and org (`Admin`, `AgentFlow`) |
+| `SIGNOZ_JWT_SECRET` | Signs SigNoz sessions. Dev has a fixed default; prod requires one (`openssl rand -hex 32`). Keep it stable: changing it logs everyone out |
+| `SIGNOZ_ALERT_EMAIL_TO`, `SIGNOZ_ALERT_WEBHOOK_URL` | Alert channels (below) |
+| `SIGNOZ_SMTP_SMARTHOST`, `_FROM`, `_USERNAME`, `_PASSWORD`, `_REQUIRE_TLS` | SMTP for alert email (dev default: Mailpit) |
+| `SIGNOZ_PORT`, `OTEL_GRPC_PORT`, `OTEL_HTTP_PORT` | Host ports (8080, 4317, 4318) |
+
+`signoz-init` waits for SigNoz health, creates the admin through the register endpoint
+(a second run reports "already initialised"), logs in, then upserts the notification
+channels, dashboards and alert rules by title, so it is idempotent. A password that
+differs from the existing admin's fails with "admin login failed". It never prints
+secrets. Re-run it after editing `deploy/observability/dashboards/` or `alerts/`:
+
+```bash
+docker compose --profile observability run --rm signoz-init
+# production
+docker compose -f deploy/compose/docker-compose.prod.yml run --rm signoz-init
+```
+
+### Dashboards and alerts
+
+Eight dashboards (`deploy/observability/dashboards/`): API, Orchestrator, Loops, Runners,
+DB pool, External calls, Workflows & integrations, and Journeys. Six alert rules
+(`deploy/observability/alerts/`): API 5xx rate, API telemetry silent, loop failures,
+collector export failures, runner offline, stuck case or workflow run. Alerts go to the
+channels that are configured: `af-email` when `SIGNOZ_ALERT_EMAIL_TO` is set, `af-webhook`
+(Slack, Teams or any webhook) when `SIGNOZ_ALERT_WEBHOOK_URL` is set.
+
+### Sending telemetry
+
+Apps export with the standard OpenTelemetry variables (compose already sets them):
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: on/off switch. Unset means no export
+  (`http://localhost:4318` from the host, `http://signoz-otel-collector:4318` in compose).
+- `OTEL_SERVICE_NAME` (`af-api`, `af-app`, `af-mcp`, `af-runner`), `OTEL_RESOURCE_ATTRIBUTES`
+  (`deployment.environment.name=production`).
+- `OTEL_TRACES_SAMPLER_ARG`: head sampling ratio, default `1`.
+- `OTEL_SDK_DISABLED=true`: off even when an endpoint is set.
+- `LOG_FORMAT=json|pretty`: stdout format. Default is JSON in production.
+- `LOG_LEVEL=debug|info|warn|error`: minimum level. Production writes stdout and SigNoz
+  (default `info`); development writes the console (default `debug`). Level convention:
+  [packages/observability/README.md](../packages/observability/README.md).
+
+Known gap: with browser RUM removed, client render errors (`apps/app` `error.tsx` and
+`global-error.tsx`) only reach the browser console; they are not in SigNoz.
+
+Telemetry is fail-open: a missing or unreachable collector never breaks a request or
+stops an app from starting. The browser sends only a `traceparent` header. The api and mcp
+flush pending telemetry within 5 s of shutdown; the app may lose its last batch because
+Next's own SIGTERM handler exits first. `apps/api/server.ts` logs `request_completed`
+once per request.
+
+Redaction has two layers: `packages/observability/redact.ts` in process (sensitive keys,
+secret-shaped and email values) and the collector's `redaction` processor, which repeats
+the key and value patterns. Tail sampling in the collector keeps every trace with an
+error status, an HTTP 5xx or a duration over 2 s, and a baseline share of the rest
+(`TAIL_SAMPLING_BASELINE_PERCENT`, 100 in dev, 25 in production). Span metrics are
+computed before sampling, so RED metrics count every span.
+
+Retention is not set by `signoz-init`. In the SigNoz UI open Settings > General and set
+traces and logs to 15 days and metrics to 30 days.
+
+### Runner telemetry and Claude Code forwarding
+
+Runner telemetry is on by default; opt out with `AGENTFLOW_RUNNER_TELEMETRY=false`. The
+Agent exports traces, logs and metrics (service `af-runner`) through
+`POST /otel/v1/{traces,logs,metrics}` on the api: API key, protobuf only, 512 KiB per
+request, rate limited. The api forwards only to its own `OTEL_EXPORTER_OTLP_ENDPOINT`
+and answers 404 when that is unset; the Agent then stops exporting, so a dev stack without
+SigNoz stays quiet and runners never need the collector. Agent logs reach SigNoz as service
+`af-runner` with `trace_id` and `af.*` ids; Claude Code gets all known `af.*` ids in
+`OTEL_RESOURCE_ATTRIBUTES`.
+
+For loops the gateway hands the spawned Claude Code the current trace: `TRACEPARENT` and
+`af.loop_id` in `OTEL_RESOURCE_ATTRIBUTES`. When the runner's local OTLP receiver
+(127.0.0.1) is ready, Claude Code is also started with `CLAUDE_CODE_ENABLE_TELEMETRY=1`
+and OTLP `http/protobuf` metrics and logs pointed at that receiver, which forwards them
+through the api proxy. If the receiver is unavailable the env is skipped and the loop
+runs normally.
+
+### Find a journey and its reason
+
+1. Open SigNoz and the dashboard "AgentFlow — Journeys".
+2. Paste the case id, loop id or workflow run id into the matching variable.
+3. The Failures panel lists spans with `status_message` and `af.error.reason`: the
+   redacted reason a step failed.
+4. Click a `trace_id` to open the trace view: the path across api, app, mcp and runner
+   (inbound webhook, workflow, orchestrator, loop, runner command).
+5. In the trace view, open the Logs tab for the log lines written inside those spans.
+
+Without the dashboard, use Traces Explorer or Logs Explorer and filter on the attribute,
+for example `af.loop_id = <id>` or `af.case_id = <id>`, then add `af.outcome = error` or
+`hasError = true`. Logs carry the same `af.*` keys (aliased from `caseId`, `loopId`, ...)
+plus `trace_id`.
+
+### `af.*` attributes
+
+| Attribute | Meaning |
+|---|---|
+| `af.org_id`, `af.project_id`, `af.user_id`, `af.auth_method` | Tenant, project and caller |
+| `af.case_id`, `af.task_id` | Case and orchestrator task |
+| `af.conversation_id`, `af.turn_id` | Orchestrator conversation and turn |
+| `af.loop_id`, `af.command_id`, `af.operation_id` | Loop, runner command, gateway operation |
+| `af.workflow_run_id`, `af.action_run_id` | Workflow run and its action run |
+| `af.compute_target_id` | Runner (compute target) |
+| `af.connection_id`, `af.delivery_id`, `af.integration.provider` | Integration connection, webhook delivery, provider |
+| `af.cron.job` | Self-hosted cron job name |
+| `af.outcome` | `ok`, `error`, `skipped`, `ignored`, `duplicate`, `retry` |
+| `af.error.reason` | Redacted failure reason, set with `setSpanOutcome(AfOutcome.Error, reason)` |
+
+Defined in `packages/observability/af-attributes.ts`; how to add spans is in
+[packages/observability/README.md](../packages/observability/README.md).
+
+Datadog is no longer supported; the former `DD_*` variables are ignored.
 
 ## Known limitations
 

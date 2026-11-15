@@ -746,6 +746,7 @@ async function readWorkingFile(
       content: buffer.toString("utf-8"),
     };
   } catch {
+    // observability: parse fallback — an unreadable untracked file shows as empty
     return { isBinary: false, content: "" };
   }
 }
@@ -768,6 +769,7 @@ async function readUntrackedTextStats(
       : content.split("\n").length;
     return { additions, deletions: 0 };
   } catch {
+    // observability: parse fallback — stats are optional
     return null;
   }
 }
@@ -818,6 +820,7 @@ function parseRemoteDestination(remoteUrl: string): RemoteDestination | null {
       return fullName ? { fullName, host: null } : null;
     }
   } catch {
+    // observability: parse fallback — not a URL, try scp-style
     // Fall through to scp-style SSH or local path parsing.
   }
 

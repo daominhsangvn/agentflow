@@ -1,4 +1,10 @@
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import {
+  setActiveSpanAttributes,
+  setSpanOutcome,
+  withSpan,
+} from "@repo/observability/span";
 import { loadConnectionByInboundKey } from "@/lib/integrations/connection-service";
 import type { InboundRequest } from "@/lib/integrations/types";
 import { readCappedRequestText } from "@/lib/route-utils";
@@ -7,7 +13,11 @@ import {
   inboundIgnoredReason,
   verifyInboundRequest,
 } from "../handlers/inbound-delivery-handler";
-import { completeIngress, IngressOutcome } from "../ingress-response";
+import {
+  completeIngress as completeIngressLogged,
+  type IngressCompletion,
+  IngressOutcome,
+} from "../ingress-response";
 
 /**
  * POST /webhooks/integrations/{inboundKey} — public ingress for integration
@@ -30,70 +40,102 @@ export async function POST(
   context: { params: Promise<{ inboundKey?: string }> }
 ): Promise<Response> {
   try {
-    const { inboundKey } = await context.params;
-    const connection = inboundKey
-      ? await loadConnectionByInboundKey(inboundKey)
-      : null;
-    if (!connection) {
-      return completeIngress({
-        status: 404,
-        outcome: IngressOutcome.UnknownInboundKey,
-      });
-    }
-    const ignored = inboundIgnoredReason(connection);
-    if (ignored) {
-      return completeIngress({
-        status: 200,
-        outcome: IngressOutcome.Ignored,
-        connection,
-        fields: { reason: ignored },
-      });
-    }
-
-    const body = await readCappedRequestText(request, MAX_BODY_BYTES);
-    if (!body.ok) {
-      return completeIngress({
-        status: 413,
-        outcome: IngressOutcome.PayloadTooLarge,
-        connection,
-      });
-    }
-    const inboundRequest: InboundRequest = {
-      rawBody: body.value,
-      headers: request.headers,
-      url: new URL(request.url),
-    };
-    const verification = await verifyInboundRequest(connection, inboundRequest);
-    if (!verification.ok) {
-      return completeIngress({
-        status: 401,
-        outcome: IngressOutcome.Unauthorized,
-        connection,
-        fields: { reason: verification.reason },
-      });
-    }
-
-    const result = await handleInboundDelivery(connection, inboundRequest);
-    if (!result.ok) {
-      return completeIngress({
-        status: 400,
-        outcome: result.reason,
-        connection,
-      });
-    }
-    return completeIngress({
-      status: 200,
-      outcome: result.ingest.outcome,
-      connection,
-      fields: {
-        deliveryId: result.deliveryId,
-        eventType: result.eventType,
-        runCount: result.ingest.runCount,
-        detail: result.ingest.detail,
-      },
-    });
+    return await withSpan("webhook.integration", {}, () =>
+      handleIngress(request, context)
+    );
   } catch (error) {
     log.error("[webhook/integrations] Webhook handling failed", { error });
     return completeIngress({ status: 500, outcome: IngressOutcome.Error });
+  }
+}
+
+async function handleIngress(
+  request: Request,
+  context: { params: Promise<{ inboundKey?: string }> }
+): Promise<Response> {
+  const { inboundKey } = await context.params;
+  const connection = inboundKey
+    ? await loadConnectionByInboundKey(inboundKey)
+    : null;
+  if (connection) {
+    setActiveSpanAttributes({
+      [AfAttribute.ConnectionId]: connection.record.id,
+      [AfAttribute.OrgId]: connection.record.organizationId,
+      [AfAttribute.IntegrationProvider]: connection.record.provider,
+    });
+  }
+  if (!connection) {
+    return completeIngress({
+      status: 404,
+      outcome: IngressOutcome.UnknownInboundKey,
+    });
+  }
+  const ignored = inboundIgnoredReason(connection);
+  if (ignored) {
+    return completeIngress({
+      status: 200,
+      outcome: IngressOutcome.Ignored,
+      connection,
+      fields: { reason: ignored },
+    });
+  }
+
+  const body = await readCappedRequestText(request, MAX_BODY_BYTES);
+  if (!body.ok) {
+    return completeIngress({
+      status: 413,
+      outcome: IngressOutcome.PayloadTooLarge,
+      connection,
+    });
+  }
+  const inboundRequest: InboundRequest = {
+    rawBody: body.value,
+    headers: request.headers,
+    url: new URL(request.url),
+  };
+  const verification = await verifyInboundRequest(connection, inboundRequest);
+  if (!verification.ok) {
+    return completeIngress({
+      status: 401,
+      outcome: IngressOutcome.Unauthorized,
+      connection,
+      fields: { reason: verification.reason },
+    });
+  }
+
+  const result = await handleInboundDelivery(connection, inboundRequest);
+  if (!result.ok) {
+    return completeIngress({
+      status: 400,
+      outcome: result.reason,
+      connection,
+    });
+  }
+  return completeIngress({
+    status: 200,
+    outcome: result.ingest.outcome,
+    connection,
+    fields: {
+      deliveryId: result.deliveryId,
+      eventType: result.eventType,
+      runCount: result.ingest.runCount,
+      detail: result.ingest.detail,
+    },
+  });
+}
+
+/** Records the span outcome, then logs and builds the response. */
+function completeIngress(entry: IngressCompletion): Response {
+  recordIngressOutcome(entry);
+  return completeIngressLogged(entry);
+}
+
+function recordIngressOutcome(entry: IngressCompletion): void {
+  if (entry.status >= 400) {
+    setSpanOutcome(AfOutcome.Error, entry.outcome);
+  } else if (entry.outcome === IngressOutcome.Ignored) {
+    setSpanOutcome(AfOutcome.Ignored);
+  } else {
+    setSpanOutcome(AfOutcome.Ok);
   }
 }

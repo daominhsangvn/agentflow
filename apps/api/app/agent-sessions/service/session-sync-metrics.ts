@@ -11,9 +11,9 @@
  * inside the per-session write path, and the tests that assert them should not
  * have to pull in the sync runtime to name a metric.
  *
- * NOTE: `emitTelemetryMetric` writes a structured log; turning one of these into
- * an alertable metric additionally requires a Datadog log-metric generator,
- * which lives out-of-repo. Adding a name here does not create a monitor.
+ * NOTE: `emitTelemetryMetric` records an OTel metric; alerting on one of these
+ * additionally requires an alert rule under deploy/observability/alerts.
+ * Adding a name here does not create an alert.
  */
 /*
  * ISS-5592 removed `RetiredStatusFolded` ("agent_sessions.sync.retired_status_folded")
@@ -79,10 +79,9 @@ export const SessionSyncMetric = {
    *
    * NOT YET ALERTABLE (wongk, #5047), and worth stating plainly because the root `AGENTS.md`
    * bad-data rule asks for a monitor rather than a log: per this module's header,
-   * `emitTelemetryMetric` writes a structured log and nothing more. Making this
-   * queryable needs a paired `datadog_logs_metric` generator and a
-   * `datadog_monitor` in `agentflow-ai/af-tofu-aws-live` (PRD-159), which is not
-   * declarable from this repo and does not ship with this change. There is also
+   * `emitTelemetryMetric` records a metric and nothing more. Alerting on this
+   * needs an alert rule under deploy/observability/alerts (PRD-159), which does
+   * not ship with this change. There is also
    * no already-monitored event in this family to point at instead — the whole
    * `SessionSyncMetric` set carries the same gap.
    *

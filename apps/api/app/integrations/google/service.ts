@@ -553,7 +553,7 @@ export const googleService = {
         const truncation = truncateToUtf8Bytes(markdown, MAX_CONTENT_BYTES);
         const content = truncation.text;
         if (truncation.truncated) {
-          // Message text is a Datadog query key, not prose — the first arg
+          // Message text is a SigNoz query key, not prose — the first arg
           // becomes the `message` attribute monitors match on. Cap goes in
           // `maxBytes`, so the value stays sourced from the constant.
           log.warn("[google/import] Truncated doc to 1MB", {

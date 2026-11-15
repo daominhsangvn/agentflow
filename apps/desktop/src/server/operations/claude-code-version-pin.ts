@@ -9,6 +9,7 @@
  */
 
 import { LoopHarness } from "@agentflow-ai/loops-api/desktop-request";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import {
   type BinaryName,
   type BinaryResolveResult,
@@ -54,6 +55,7 @@ export async function resolveLoopHarnessBinary(args: {
       const ensured = await installer.ensure(claudeCodeVersion);
       override = ensured?.binaryPath ?? override;
     } catch (error) {
+      gatewayLog.warn(LOG_TAG, "Claude Code version pin failed", { error });
       let message: string;
       if (error instanceof ClaudeCodeVersionMismatchError) {
         message = error.message;
@@ -85,3 +87,5 @@ function errorMessage(error: unknown): string {
 
 /** The machine's Claude Code is not the version set in AgentFlow; the message says what to run. */
 export class ClaudeCodeVersionMismatchError extends Error {}
+
+const LOG_TAG = "claude-code-version-pin";

@@ -260,7 +260,8 @@ async function isElectronRemoteUpdateEnabled(userId: string): Promise<boolean> {
       userId
     );
     return result !== false;
-  } catch {
+  } catch (error) {
+    log.warn("compute_targets.remote_update_flag_failed", { error });
     return true;
   }
 }

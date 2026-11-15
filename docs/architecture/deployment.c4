@@ -11,6 +11,9 @@ deployment {
       instanceOf agentflow.mcp
       instanceOf agentflow.database
       instanceOf agentflow.objectStorage
+      instanceOf agentflow.otelCollector
+      instanceOf agentflow.clickhouse
+      instanceOf agentflow.signozUi
     }
 
     runner orchestratorRunner "Orchestrator runner" {

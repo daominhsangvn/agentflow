@@ -6,6 +6,8 @@ import {
   OrchestratorWaitKind,
 } from "@repo/api/src/types/orchestrator";
 import { withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { z } from "zod";
 import { askedOnItem, askedQuestionNote } from "./asked-questions";
 import { describeTaskFiles } from "./task-files";
@@ -32,7 +34,7 @@ const FINISHED: ReadonlySet<string> = new Set<string>([
   OrchestratorTaskStatus.Cancelled,
 ]);
 
-export async function createWait(
+export function createWait(
   input: {
     organizationId: string;
     conversationId: string;
@@ -43,73 +45,88 @@ export async function createWait(
   },
   now: Date
 ): Promise<string> {
-  const wait = await withDb((db) =>
-    db.orchestratorWait.create({
-      data: {
-        organizationId: input.organizationId,
-        conversationId: input.conversationId,
-        kind: input.kind,
-        taskIds: input.taskIds,
-        deadline: input.timeoutMinutes
-          ? new Date(now.getTime() + input.timeoutMinutes * 60_000)
-          : null,
-        wakeOnFailure: input.wakeOnFailure,
-      },
-      select: { id: true },
-    })
+  return withSpan(
+    "orchestrator.create_wait",
+    { [AfAttribute.ConversationId]: input.conversationId },
+    async () => {
+      const wait = await withDb((db) =>
+        db.orchestratorWait.create({
+          data: {
+            organizationId: input.organizationId,
+            conversationId: input.conversationId,
+            kind: input.kind,
+            taskIds: input.taskIds,
+            deadline: input.timeoutMinutes
+              ? new Date(now.getTime() + input.timeoutMinutes * 60_000)
+              : null,
+            wakeOnFailure: input.wakeOnFailure,
+          },
+          select: { id: true },
+        })
+      );
+      return wait.id;
+    }
   );
-  return wait.id;
 }
 
 /** Fires the conversation's waits whose condition holds; true when one did. */
-export async function evaluateWaits(
+export function evaluateWaits(
   conversationId: string,
   now: Date
 ): Promise<boolean> {
-  const waits = await withDb((db) =>
-    db.orchestratorWait.findMany({
-      where: { conversationId, firedAt: null },
-      orderBy: { createdAt: "asc" },
-    })
-  );
-  const fired: FiredWait[] = [];
-  for (const wait of waits) {
-    const claimed = await claimWait(wait, now);
-    if (claimed) {
-      fired.push(claimed);
+  return withSpan(
+    "orchestrator.evaluate_waits",
+    { [AfAttribute.ConversationId]: conversationId },
+    async (span) => {
+      const waits = await withDb((db) =>
+        db.orchestratorWait.findMany({
+          where: { conversationId, firedAt: null },
+          orderBy: { createdAt: "asc" },
+        })
+      );
+      const fired: FiredWait[] = [];
+      for (const wait of waits) {
+        const claimed = await claimWait(wait, now);
+        if (claimed) {
+          fired.push(claimed);
+        }
+      }
+      if (fired.length === 0) {
+        setSpanOutcome(AfOutcome.Skipped, undefined, span);
+        return false;
+      }
+      await postFiredWaits(fired, now);
+      return true;
     }
-  }
-  if (fired.length === 0) {
-    return false;
-  }
-  await postFiredWaits(fired, now);
-  return true;
+  );
 }
 
 /** The tick: waits whose deadline passed. */
-export async function fireDueDeadlines(now: Date): Promise<number> {
-  const due = await withDb((db) =>
-    db.orchestratorWait.findMany({
-      where: { firedAt: null, deadline: { lte: now } },
-      orderBy: { deadline: "asc" },
-      take: DEADLINE_LIMIT,
-    })
-  );
-  const byConversation = new Map<string, FiredWait[]>();
-  let count = 0;
-  for (const wait of due) {
-    const claimed = await claimWait(wait, now);
-    if (claimed) {
-      count += 1;
-      const group = byConversation.get(wait.conversationId) ?? [];
-      group.push(claimed);
-      byConversation.set(wait.conversationId, group);
+export function fireDueDeadlines(now: Date): Promise<number> {
+  return withSpan("orchestrator.fire_deadlines", {}, async () => {
+    const due = await withDb((db) =>
+      db.orchestratorWait.findMany({
+        where: { firedAt: null, deadline: { lte: now } },
+        orderBy: { deadline: "asc" },
+        take: DEADLINE_LIMIT,
+      })
+    );
+    const byConversation = new Map<string, FiredWait[]>();
+    let count = 0;
+    for (const wait of due) {
+      const claimed = await claimWait(wait, now);
+      if (claimed) {
+        count += 1;
+        const group = byConversation.get(wait.conversationId) ?? [];
+        group.push(claimed);
+        byConversation.set(wait.conversationId, group);
+      }
     }
-  }
-  for (const group of byConversation.values()) {
-    await postFiredWaits(group, now);
-  }
-  return count;
+    for (const group of byConversation.values()) {
+      await postFiredWaits(group, now);
+    }
+    return count;
+  });
 }
 
 type WaitRow = {

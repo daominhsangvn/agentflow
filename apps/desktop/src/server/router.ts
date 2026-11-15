@@ -16,6 +16,11 @@ import type {
   HealthResponse,
 } from "../shared/contracts.js";
 import { isOriginAllowed } from "./gateway-cors-policy.js";
+import {
+  BAGGAGE_HEADER,
+  parseAfBaggage,
+  runWithGatewayTrace,
+} from "./gateway-trace-context.js";
 import { OperationDispatcher } from "./operation-dispatcher.js";
 import type { BinaryPathKey, BinaryPaths } from "./operations/binary-paths.js";
 import { registerCapabilitiesRefreshRoutes } from "./operations/capabilities-refresh.js";
@@ -115,6 +120,7 @@ export type GatewayRouterOptions = {
   onLoopCompleted?: LoopCompletedHook;
   retrySpawnDeps?: RetrySpawnDeps;
   getClaudeCodeOtelReceiverStatus?: () => unknown;
+  claudeCodeOtelEnvOverrides?: Record<string, string>;
   getGatewayId: () => string;
   getComputeTargetId?: () => string | null;
   handleSecurityUpgrade?: (
@@ -243,6 +249,7 @@ export class GatewayRouter {
         this.options.getClaudeCodeOtelReceiverStatus ??
         getDefaultClaudeCodeOtelReceiverStatus,
       diagnostics: gatewayLog,
+      envOverrides: this.options.claudeCodeOtelEnvOverrides,
     });
     const getSymphonyDir =
       this.options.getSymphonyDir ??
@@ -627,16 +634,23 @@ export class GatewayRouter {
         return;
       }
 
-      const handled = await this.operationDispatcher.dispatch({
-        method,
-        pathname: url.pathname,
-        params: {},
-        query: url.searchParams,
-        rawBody,
-        body,
-        request,
-        response,
-      });
+      const handled = await runWithGatewayTrace(
+        "gateway.request",
+        firstHeaderValue(request.headers.traceparent),
+        {},
+        () =>
+          this.operationDispatcher.dispatch({
+            method,
+            pathname: url.pathname,
+            params: {},
+            query: url.searchParams,
+            rawBody,
+            body,
+            request,
+            response,
+          }),
+        parseAfBaggage(firstHeaderValue(request.headers[BAGGAGE_HEADER]))
+      );
       if (handled) {
         return;
       }
@@ -913,6 +927,7 @@ export class GatewayRouter {
       }
       challengeToken = parsed.challengeToken;
     } catch {
+      // observability: 4xx response — the reason is captured by request_completed
       response.statusCode = 400;
       response.setHeader("content-type", "application/json");
       response.setHeader("Cache-Control", "no-store");
@@ -1195,6 +1210,7 @@ function parseStrictContentLength(value: string | null): bigint | null {
   try {
     return BigInt(value);
   } catch {
+    // observability: parse fallback — an invalid content-length yields null
     return null;
   }
 }

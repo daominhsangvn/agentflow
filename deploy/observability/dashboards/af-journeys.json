@@ -1,0 +1,330 @@
+{
+  "title": "AgentFlow — Journeys",
+  "description": "Paste a case/loop/run id; open a trace_id in Traces.",
+  "tags": ["agentflow"],
+  "version": "v4",
+  "variables": {
+    "case_id": {
+      "id": "20912270-d7cf-4cbb-aa2e-47694885b1c4",
+      "name": "case_id",
+      "description": "",
+      "type": "TEXTBOX",
+      "textboxValue": "",
+      "sort": "DISABLED",
+      "multiSelect": false,
+      "showALLOption": false,
+      "selectedValue": "",
+      "order": 0
+    },
+    "loop_id": {
+      "id": "685c1028-d3ed-4658-a621-e5bfe9582fbf",
+      "name": "loop_id",
+      "description": "",
+      "type": "TEXTBOX",
+      "textboxValue": "",
+      "sort": "DISABLED",
+      "multiSelect": false,
+      "showALLOption": false,
+      "selectedValue": "",
+      "order": 1
+    },
+    "workflow_run_id": {
+      "id": "95e27686-b5c0-40e2-a25f-82cd52bc37af",
+      "name": "workflow_run_id",
+      "description": "",
+      "type": "TEXTBOX",
+      "textboxValue": "",
+      "sort": "DISABLED",
+      "multiSelect": false,
+      "showALLOption": false,
+      "selectedValue": "",
+      "order": 2
+    },
+    "trace_id": {
+      "id": "15f268ed-3df2-480a-a5c7-27140ffc83f6",
+      "name": "trace_id",
+      "description": "",
+      "type": "TEXTBOX",
+      "textboxValue": "",
+      "sort": "DISABLED",
+      "multiSelect": false,
+      "showALLOption": false,
+      "selectedValue": "",
+      "order": 3
+    }
+  },
+  "layout": [
+    {
+      "i": "68b8efa8-f954-4354-a322-e0c245bd771a",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "34aad942-7008-4ae6-aa86-005ec26d4c4d",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "bafe49ed-2c32-4666-ac98-c269e4c3693b",
+      "x": 0,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "4c7c8e09-d569-400c-ae5a-9f65ef78d7a7",
+      "x": 6,
+      "y": 6,
+      "w": 6,
+      "h": 6
+    },
+    {
+      "i": "db42a26d-295b-4a36-883b-ec5516c0c418",
+      "x": 0,
+      "y": 12,
+      "w": 12,
+      "h": 8
+    },
+    {
+      "i": "638a8010-8a7c-4a61-a158-e09f7dd37a55",
+      "x": 0,
+      "y": 20,
+      "w": 12,
+      "h": 8
+    }
+  ],
+  "widgets": [
+    {
+      "id": "68b8efa8-f954-4354-a322-e0c245bd771a",
+      "panelTypes": "table",
+      "title": "Spans",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "fed9d7cc-8539-4ecf-ade0-b2f415ebf061",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT timestamp, serviceName, name, round(duration_nano / 1e6, 2) AS duration_ms, has_error, status_message, attributes_string['af.error.reason'] AS error_reason, trace_id FROM signoz_traces.distributed_signoz_index_v3 WHERE (attributes_string['af.case_id'] = {{.case_id}} OR resources_string['af.case_id'] = {{.case_id}} OR {{.case_id}} = '') AND (attributes_string['af.loop_id'] = {{.loop_id}} OR resources_string['af.loop_id'] = {{.loop_id}} OR {{.loop_id}} = '') AND (attributes_string['af.workflow_run_id'] = {{.workflow_run_id}} OR resources_string['af.workflow_run_id'] = {{.workflow_run_id}} OR {{.workflow_run_id}} = '') AND (trace_id = {{.trace_id}} OR {{.trace_id}} = '') AND ({{.case_id}} != '' OR {{.loop_id}} != '' OR {{.workflow_run_id}} != '' OR {{.trace_id}} != '') AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} ORDER BY timestamp LIMIT 500"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "34aad942-7008-4ae6-aa86-005ec26d4c4d",
+      "panelTypes": "table",
+      "title": "Logs",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "75cf57b1-703e-4c80-a10c-4b06565638e6",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT fromUnixTimestamp64Nano(toInt64(timestamp)) AS time, resources_string['service.name'] AS service, attributes_string['event.name'] AS event, severity_text, body, trace_id FROM signoz_logs.distributed_logs_v2 WHERE (attributes_string['af.case_id'] = {{.case_id}} OR resources_string['af.case_id'] = {{.case_id}} OR {{.case_id}} = '') AND (attributes_string['af.loop_id'] = {{.loop_id}} OR resources_string['af.loop_id'] = {{.loop_id}} OR {{.loop_id}} = '') AND (attributes_string['af.workflow_run_id'] = {{.workflow_run_id}} OR resources_string['af.workflow_run_id'] = {{.workflow_run_id}} OR {{.workflow_run_id}} = '') AND (trace_id = {{.trace_id}} OR {{.trace_id}} = '') AND ({{.case_id}} != '' OR {{.loop_id}} != '' OR {{.workflow_run_id}} != '' OR {{.trace_id}} != '') AND timestamp BETWEEN {{.start_timestamp_nano}} AND {{.end_timestamp_nano}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} ORDER BY timestamp LIMIT 500"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "bafe49ed-2c32-4666-ac98-c269e4c3693b",
+      "panelTypes": "table",
+      "title": "Failures",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "13f12e11-b126-4102-ae66-f09253fcbbd7",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT timestamp, serviceName, name, status_message, attributes_string['af.error.reason'] AS error_reason, trace_id FROM signoz_traces.distributed_signoz_index_v3 WHERE has_error = true AND (attributes_string['af.case_id'] = {{.case_id}} OR resources_string['af.case_id'] = {{.case_id}} OR {{.case_id}} = '') AND (attributes_string['af.loop_id'] = {{.loop_id}} OR resources_string['af.loop_id'] = {{.loop_id}} OR {{.loop_id}} = '') AND (attributes_string['af.workflow_run_id'] = {{.workflow_run_id}} OR resources_string['af.workflow_run_id'] = {{.workflow_run_id}} OR {{.workflow_run_id}} = '') AND (trace_id = {{.trace_id}} OR {{.trace_id}} = '') AND ({{.case_id}} != '' OR {{.loop_id}} != '' OR {{.workflow_run_id}} != '' OR {{.trace_id}} != '') AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} ORDER BY timestamp LIMIT 500"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "4c7c8e09-d569-400c-ae5a-9f65ef78d7a7",
+      "panelTypes": "table",
+      "title": "Traces",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "75526d86-1b37-4e2e-a008-ea38c3e14a2d",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT trace_id, min(timestamp) AS first_seen, argMin(name, timestamp) AS root_span FROM signoz_traces.distributed_signoz_index_v3 WHERE (attributes_string['af.case_id'] = {{.case_id}} OR resources_string['af.case_id'] = {{.case_id}} OR {{.case_id}} = '') AND (attributes_string['af.loop_id'] = {{.loop_id}} OR resources_string['af.loop_id'] = {{.loop_id}} OR {{.loop_id}} = '') AND (attributes_string['af.workflow_run_id'] = {{.workflow_run_id}} OR resources_string['af.workflow_run_id'] = {{.workflow_run_id}} OR {{.workflow_run_id}} = '') AND (trace_id = {{.trace_id}} OR {{.trace_id}} = '') AND ({{.case_id}} != '' OR {{.loop_id}} != '' OR {{.workflow_run_id}} != '' OR {{.trace_id}} != '') AND timestamp BETWEEN {{.start_datetime}} AND {{.end_datetime}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} GROUP BY trace_id ORDER BY first_seen LIMIT 100"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "db42a26d-295b-4a36-883b-ec5516c0c418",
+      "panelTypes": "table",
+      "title": "Claude Code",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "e0de315e-ce22-49a1-94e3-433be85ab606",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT fromUnixTimestamp64Nano(toInt64(timestamp)) AS time, resources_string['af.case_id'] AS case_id, resources_string['af.loop_id'] AS loop_id, replaceOne(attributes_string['event.name'], 'claude_code.', '') AS event, attributes_string['tool_name'] AS tool_name, attributes_string['success'] AS success, coalesce(nullIf(attributes_string['error'], ''), attributes_string['status_code']) AS reason, attributes_string['model'] AS model, attributes_number['cost_usd'] AS cost_usd, attributes_number['input_tokens'] AS input_tokens, attributes_number['output_tokens'] AS output_tokens, trace_id FROM signoz_logs.distributed_logs_v2 WHERE resources_string['service.name'] = 'af-claude-code' AND replaceOne(attributes_string['event.name'], 'claude_code.', '') IN ('api_error', 'tool_result', 'api_request') AND (resources_string['af.case_id'] = {{.case_id}} OR {{.case_id}} = '') AND (resources_string['af.loop_id'] = {{.loop_id}} OR {{.loop_id}} = '') AND (resources_string['af.workflow_run_id'] = {{.workflow_run_id}} OR {{.workflow_run_id}} = '') AND (trace_id = {{.trace_id}} OR {{.trace_id}} = '') AND timestamp BETWEEN {{.start_timestamp_nano}} AND {{.end_timestamp_nano}} AND ts_bucket_start BETWEEN {{.start_timestamp}} - 1800 AND {{.end_timestamp}} ORDER BY (replaceOne(attributes_string['event.name'], 'claude_code.', '') = 'api_error' OR (replaceOne(attributes_string['event.name'], 'claude_code.', '') = 'tool_result' AND attributes_string['success'] = 'false')) DESC, timestamp DESC LIMIT 500"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    },
+    {
+      "id": "638a8010-8a7c-4a61-a158-e09f7dd37a55",
+      "panelTypes": "table",
+      "title": "Claude Code tokens / cost per case",
+      "description": "",
+      "opacity": "1",
+      "nullZeroValues": "zero",
+      "timePreferance": "GLOBAL_TIME",
+      "softMin": null,
+      "softMax": null,
+      "selectedLogFields": null,
+      "selectedTracesFields": null,
+      "yAxisUnit": "none",
+      "query": {
+        "queryType": "clickhouse_sql",
+        "id": "5b889792-1752-48d2-a4ee-708c68022018",
+        "clickhouse_sql": [
+          {
+            "name": "A",
+            "legend": "",
+            "disabled": false,
+            "query": "SELECT JSONExtractString(ts.labels, 'af.case_id') AS case_id, JSONExtractString(ts.labels, 'af.loop_id') AS loop_id, sumIf(s.value, ts.metric_name LIKE 'claude_code%cost%') AS cost_usd, sumIf(s.value, ts.metric_name LIKE 'claude_code%token%') AS tokens FROM signoz_metrics.distributed_samples_v4 AS s INNER JOIN (SELECT DISTINCT fingerprint, metric_name, labels FROM signoz_metrics.distributed_time_series_v4 WHERE (metric_name LIKE 'claude_code%cost%' OR metric_name LIKE 'claude_code%token%') AND unix_milli >= {{.start_timestamp_ms}} - 3600000 AND unix_milli <= {{.end_timestamp_ms}}) AS ts ON s.fingerprint = ts.fingerprint WHERE s.unix_milli BETWEEN {{.start_timestamp_ms}} AND {{.end_timestamp_ms}} AND (JSONExtractString(ts.labels, 'af.case_id') = {{.case_id}} OR {{.case_id}} = '') GROUP BY case_id, loop_id ORDER BY cost_usd DESC LIMIT 200"
+          }
+        ],
+        "promql": [
+          {
+            "name": "A",
+            "query": "",
+            "legend": "",
+            "disabled": false
+          }
+        ],
+        "builder": {
+          "queryData": [],
+          "queryFormulas": []
+        }
+      }
+    }
+  ]
+}

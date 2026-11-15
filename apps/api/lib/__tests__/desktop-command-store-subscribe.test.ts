@@ -110,7 +110,7 @@ function replayedChunk(sequence: number) {
 // The store keeps module-level state (the subscriber map and the operation-id
 // cache) that outlives a single test. Reset it before EVERY test so a case is
 // hermetic even when the runner executes it more than once in the same module —
-// which is exactly what Datadog's Early Flake Detection does to new tests.
+// which is exactly what a flake-detection tool does to new tests.
 beforeEach(() => {
   desktopCommandStore.__resetForTests();
 });

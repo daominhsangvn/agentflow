@@ -98,6 +98,7 @@ const remediationLinkUrlValidator = z.url().refine(
     try {
       return new URL(value).protocol === "https:";
     } catch {
+      // observability: parse fallback — an unparsable URL fails validation
       return false;
     }
   },

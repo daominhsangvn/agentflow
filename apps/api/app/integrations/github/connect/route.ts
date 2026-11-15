@@ -1,5 +1,6 @@
 import type { ConnectGitHubResponse } from "@repo/api/src/types/github";
 import { GitHubBackfillStatus } from "@repo/api/src/types/github";
+import { log } from "@repo/observability/log";
 import { organizationsService } from "@/app/organizations/service";
 import { env } from "@/env";
 import { withAuth } from "@/lib/auth/with-auth";
@@ -92,7 +93,12 @@ async function runBoundedFirstSlice(
     return summary.status === GitHubBackfillStatus.Degraded
       ? GitHubBackfillStatus.Degraded
       : GitHubBackfillStatus.FirstSliceStarted;
-  } catch {
+  } catch (error) {
+    log.warn("github.first_slice_backfill_failed", {
+      organizationId,
+      reason: "first_slice_failed",
+      error,
+    });
     return GitHubBackfillStatus.Degraded;
   }
 }

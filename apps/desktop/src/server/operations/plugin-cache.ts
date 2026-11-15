@@ -130,6 +130,7 @@ export function findPluginVersions(pluginDir: string): string[] {
       .filter((entry) => /^\d+\.\d+\.\d+/.test(entry))
       .sort((a, b) => compareSemverDescending(a, b));
   } catch {
+    // observability: b — probe, absence is a normal state
     return [];
   }
 }
@@ -196,6 +197,7 @@ function readInstalledPluginsFile(
       readFileSync(registryPath ?? getDefaultRegistryPath(), "utf-8")
     ) as InstalledPluginsFile;
   } catch {
+    // observability: b — probe, absence is a normal state
     return null;
   }
 }
@@ -422,6 +424,7 @@ function parsePluginListEntries(
   try {
     return decodePluginListContainer(JSON.parse(listJson) as unknown);
   } catch {
+    // observability: b — probe, absence is a normal state
     return null;
   }
 }
@@ -487,6 +490,7 @@ export function getInstalledPluginVersions(
     }
     return result;
   } catch {
+    // observability: a — parse fallback, the fallback is the handling
     return {};
   }
 }
@@ -526,6 +530,7 @@ export function getCodePluginVersion(cacheRoot?: string): string {
     }
     return version;
   } catch {
+    // observability: b — probe, absence is a normal state
     return "unknown";
   }
 }

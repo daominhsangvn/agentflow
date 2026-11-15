@@ -221,6 +221,7 @@ async function safeReadText(response: Response): Promise<string> {
   try {
     return await response.text();
   } catch {
+    // observability: best-effort — the error body text is optional
     return "";
   }
 }

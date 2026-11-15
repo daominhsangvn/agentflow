@@ -159,7 +159,7 @@ export function buildBranchAnalytics({
   // card renders as "No data", but collapsing SILENTLY would make corrupt data
   // indistinguishable from an unpriced corpus (chatgpt-codex, #4244), so the
   // anomaly is reported first — with the org and the offending value, the
-  // dimensions needed to find the rows. `log.warn` is the Datadog-exported
+  // dimensions needed to find the rows. `log.warn` is the telemetry-exported
   // logger every other bad-data signal in this directory uses (see
   // `session-branch-divisor.ts`'s branch-count drift warning).
   if (isAnomalousSpendTotal(totalSpend)) {

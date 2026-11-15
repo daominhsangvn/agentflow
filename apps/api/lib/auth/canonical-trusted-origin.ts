@@ -11,6 +11,7 @@ export function canonicalizeTrustedOrigin(origin: string): string | null {
   try {
     parsed = new URL(origin);
   } catch {
+    // observability: parse fallback — an unparsable origin is untrusted
     return null;
   }
 

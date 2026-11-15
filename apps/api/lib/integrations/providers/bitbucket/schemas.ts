@@ -108,6 +108,7 @@ export function normalizeApiUrl(raw: string): string | null {
   try {
     url = new URL(raw.trim());
   } catch {
+    // observability: (a) parse fallback — an invalid URL is null
     return null;
   }
   const local = LOCAL_HOSTS.has(url.hostname.toLowerCase());

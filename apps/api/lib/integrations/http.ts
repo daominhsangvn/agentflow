@@ -1,4 +1,6 @@
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { parseError } from "@repo/observability/error";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import type {
   ProviderHttp,
   ProviderHttpRequest,
@@ -18,10 +20,32 @@ const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
  * webhooks, are bearer secrets). `fetchImpl` is injectable for tests.
  */
 export function createProviderHttp(
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  options: { provider?: string } = {}
 ): ProviderHttp {
   return {
-    request: (request) => sendRequest(fetchImpl, request),
+    request: (request) =>
+      withSpan(
+        "integration.http",
+        {
+          [AfAttribute.IntegrationProvider]: options.provider,
+          "http.request.method": request.method,
+        },
+        async (span) => {
+          const response = await sendRequest(fetchImpl, request);
+          span.setAttribute("http.response.status_code", response.status);
+          if (!response.ok) {
+            setSpanOutcome(
+              isTransientHttpFailure(response)
+                ? AfOutcome.Retry
+                : AfOutcome.Error,
+              response.error ?? "failed",
+              span
+            );
+          }
+          return response;
+        }
+      ),
   };
 }
 
@@ -90,6 +114,7 @@ function isAllowedUrl(url: string): boolean {
   try {
     return ALLOWED_PROTOCOLS.has(new URL(url).protocol);
   } catch {
+    // observability: (a) parse fallback — an invalid URL is not allowed
     return false;
   }
 }
@@ -129,10 +154,16 @@ function parseJsonBody(headers: Headers, text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
+    // observability: (a) parse fallback — a non-JSON body has no parsed value
     return undefined;
   }
 }
 
 function hasHeader(headers: Record<string, string>, name: string): boolean {
   return Object.keys(headers).some((key) => key.toLowerCase() === name);
+}
+
+/** A retryable HTTP status is a retry; a request that never got a response is an error. */
+function isTransientHttpFailure(response: ProviderHttpResponse): boolean {
+  return response.retryable && response.status !== 0;
 }

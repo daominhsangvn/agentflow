@@ -110,6 +110,7 @@ export async function isStaleBinaryOverride(
     await access(override, constants.X_OK);
     return false;
   } catch {
+    // observability: b — probe, absence is a normal state
     return true;
   }
 }

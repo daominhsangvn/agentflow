@@ -1,9 +1,9 @@
 // Matching a check rollup against the REQUIRED-context set, and collapsing
 // re-run attempts to the live one (ISS-4450, ISS-5141, ISS-5386).
 //
-// Moved here verbatim from the stall cron's derivation (ISS-6018) because it now
-// has a second consumer: the "ready to enqueue" sweep asks the same question of
-// the same rollup on a PR head that the cron asks of a merge-group commit — has
+// Moved here verbatim from the former merge-queue stall derivation (ISS-6018) because
+// it has a second consumer: the "ready to enqueue" sweep asks the same question of
+// the same rollup on a PR head that the stall check asked of a merge-group commit — has
 // this required rule reported, and what did it report. Re-declaring the identity
 // rule in the second consumer is the SSOT-drift-by-copy failure AGENTS.md names,
 // and the drift would be invisible: both copies would keep answering, just

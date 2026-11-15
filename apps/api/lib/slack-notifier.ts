@@ -35,7 +35,7 @@ export type NotifySlackOpts = {
   message: string;
   /** Structured error counters used to build the per-category error summary. */
   counters?: CategoryCounters;
-  /** Datadog-pivotable correlation identifier. Derive via `buildCorrelationId()`. */
+  /** telemetry-pivotable correlation identifier. Derive via `buildCorrelationId()`. */
   correlationId: string;
   /**
    * Bold headline for the alert. Optional: omitting it keeps the historical
@@ -83,7 +83,7 @@ type PostToSlackResult = SlackApiResponse & {
  * - Headline from `opts.title` (defaults to the historical preview-schema text)
  * - Route name for triage
  * - Per-category error summary for any category with errored > 0
- * - Datadog correlation identifier passed in via `opts.correlationId`
+ * - SigNoz correlation identifier passed in via `opts.correlationId`
  */
 export function buildAlertText(opts: NotifySlackOpts): string {
   const { route, message, counters, correlationId, title } = opts;
@@ -126,7 +126,7 @@ export function buildAlertText(opts: NotifySlackOpts): string {
 }
 
 /**
- * Returns a Datadog-pivotable correlation identifier.
+ * Returns a telemetry-pivotable correlation identifier.
  * Uses Vercel deployment identifiers when available; falls back to timestamp.
  */
 export function buildCorrelationId(): string {

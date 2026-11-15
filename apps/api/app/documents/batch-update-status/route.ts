@@ -1,4 +1,5 @@
 import { AuditAction, AuditObjectType } from "@repo/api/src/types/audit";
+import { log } from "@repo/observability/log";
 import {
   dispatchAuditEvents,
   userAuditActor,
@@ -74,7 +75,8 @@ export const POST = withAnyAuth(
               : [{ artifactId: id, before, after: body.status }];
           }),
         });
-      } catch {
+      } catch (error) {
+        log.warn("documents.activity_capture_failed", { error });
         // Swallowed by design: activity capture must never fail the write.
       }
 

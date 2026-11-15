@@ -14,6 +14,7 @@ import type {
 } from "../operation-dispatcher.js";
 import { killProcessTree } from "../platform-shell.js";
 import { resolveRepoFullName } from "./git-helpers.js";
+import { loopDebug, loopError } from "./loop-log.js";
 import { parseBody } from "./parse-body.js";
 import { json } from "./response-utils.js";
 import { getActiveLoopPid, getResolvedGitPath } from "./symphony-loop.js";
@@ -187,6 +188,7 @@ function resolveCurrentBranch(repoPath: string): string | null {
       }
     ).trim();
   } catch {
+    // observability: probe — the repo may have no current branch (detached or missing)
     return null;
   }
 }
@@ -209,6 +211,7 @@ function resolveDefaultBranch(repoPath: string): string {
     // refs/remotes/origin/main -> main
     return ref.split("/").pop() ?? "main";
   } catch {
+    // observability: probe — a repo without origin/HEAD falls back to main
     return "main";
   }
 }
@@ -377,6 +380,10 @@ export function registerSymphonyPlanLoopRoutes(
           return;
         }
       } catch (err) {
+        loopError(
+          loopId,
+          `Failed to reach API to cancel loop (reason: cancel_api_unreachable): ${err instanceof Error ? err.message : String(err)}`
+        );
         json(context, 502, {
           error: `Failed to reach API: ${err instanceof Error ? err.message : String(err)}`,
         });
@@ -440,7 +447,7 @@ export function registerSymphonyPlanLoopRoutes(
           try {
             killProcessTree(pid, "SIGKILL");
           } catch {
-            // Already gone
+            // observability: best-effort cleanup — the process may already be gone
           }
           // Check again after SIGKILL
           await new Promise<void>((resolve) => setTimeout(resolve, 500));
@@ -448,10 +455,11 @@ export function registerSymphonyPlanLoopRoutes(
             process.kill(pid, 0);
             processGone = false;
           } catch {
+            // observability: probe — kill(pid, 0) throws once the process is gone
             processGone = true;
           }
         } catch {
-          // SIGTERM killed it or it was already gone
+          // observability: probe — SIGTERM killed it or it was already gone
           processGone = true;
         }
 
@@ -485,8 +493,12 @@ export function registerSymphonyPlanLoopRoutes(
             warning: "process-still-running",
           });
         }
-      } catch {
-        // Could not send signal -- process not found
+      } catch (error) {
+        loopDebug(
+          loopId,
+          () =>
+            `Could not signal pid ${pid} (reason: signal_failed): ${error instanceof Error ? error.message : String(error)}`
+        );
         const alive = isProcessRunning(pid);
         if (alive) {
           if (jobStore) {

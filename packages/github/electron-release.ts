@@ -360,6 +360,7 @@ export function parseDesktopReleaseMetadata(
     }
     return parsed.data;
   } catch {
+    // observability: parse fallback — unparseable release metadata is treated as absent
     return null;
   }
 }
@@ -534,6 +535,7 @@ function parseJsonOrNull(value: string): unknown {
   try {
     return JSON.parse(value);
   } catch {
+    // observability: parse fallback — non-JSON text is treated as absent
     return null;
   }
 }

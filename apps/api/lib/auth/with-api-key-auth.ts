@@ -2,7 +2,6 @@ import "server-only";
 
 import type { ApiKeyScope } from "@repo/api/src/types/api-key";
 import { failure } from "@repo/api/src/types/common";
-import { log } from "@repo/observability/log";
 import { type NextRequest, NextResponse } from "next/server";
 import { apiKeysService } from "@/app/api-keys/service";
 import { organizationsService } from "@/app/organizations/service";
@@ -11,12 +10,16 @@ import { waitUntil } from "@/lib/wait-until";
 import {
   forbiddenResponse,
   getBearerToken,
-  logRequestCompleted,
   unauthorizedResponse,
 } from "../route-utils";
 import type { VerifiedApiKeyContextWithMetadata } from "./api-key-context";
 import { hasApiKeyScopes } from "./api-key-scopes";
+import { annotateAuthSpan } from "./auth-span-attributes";
 import { getDesktopManagedPopRequestFailure } from "./desktop-managed-pop";
+import {
+  observeFailedResponse,
+  observeThrownError,
+} from "./observe-failed-response";
 import type {
   AuthContext,
   AuthenticatedHandler,
@@ -65,7 +68,6 @@ export function withApiKeyAuth<TResponse, TRoute extends string = string>(
     request: NextRequest,
     routeContext: RouteContext<TRoute>
   ): Promise<AuthenticatedJsonResponse<TResponse>> => {
-    const startMs = globalThis.performance.now();
     let response: AuthenticatedJsonResponse<TResponse> | undefined;
     try {
       const token = getBearerToken(request);
@@ -131,16 +133,19 @@ export function withApiKeyAuth<TResponse, TRoute extends string = string>(
         return response;
       }
 
+      annotateAuthSpan(authContext);
       response = await handler(authContext, request, routeContext.params);
       return response;
     } catch (error) {
-      log.error("API key authentication failed", { error });
+      observeThrownError("API key authentication failed", error);
       response = NextResponse.json(failure("Authentication failed"), {
         status: 500,
       });
       return response;
     } finally {
-      logRequestCompleted(request, startMs, response?.status ?? 500);
+      if (response) {
+        await observeFailedResponse(request, response);
+      }
     }
   };
 }

@@ -2,10 +2,10 @@
 // Centralized redaction for structured log metadata.
 //
 // Every `log.info("msg", { … })` meta object is serialized — both into the
-// agentless Datadog HTTP intake body and into the structured-console JSON line
-// the platform log drain (Vercel → Datadog) parses into facets. Without a
+// OTLP log record body and into the structured-console JSON line
+// the platform log drain (stdout collector) parses into facets. Without a
 // chokepoint, any caller that puts an apiKey, token, password, authorization
-// header, credential, or user email in `meta` leaks it to Datadog as-is. The
+// header, credential, or user email in `meta` leaks it to SigNoz as-is. The
 // desktop-only exception-sanitizer / sanitizeDesktopTelemetryDiagnostics cover
 // narrow paths and never see general logger meta.
 //
@@ -13,8 +13,8 @@
 // for every serialized meta field with no opt-in at each call site.
 //
 // Protected sink (AGENTS.md): this only redacts the JSON-serialized output —
-// the Datadog HTTP intake body and the structured-console JSON line that the
-// platform drain ships to Datadog. It does NOT touch the human-readable
+// the OTLP log record body and the structured-console JSON line that the
+// platform drain ships to SigNoz. It does NOT touch the human-readable
 // local-dev console line (that path skips JSON.stringify), which is by design
 // (dev logs stay readable) but means raw meta can still appear in a developer's
 // local terminal; it is not a complete source-log redactor for non-drain sinks.
@@ -38,7 +38,7 @@ const REDACTED = "[redacted]";
 // Normalized key fragments whose value is inherently sensitive. The key is
 // lower-cased with separators (_ - space) removed before matching, so apiKey,
 // api_key, and API-KEY all collapse to "apikey". Substring (includes) matching
-// catches the fragment wherever it sits in the key name — datadogApiKey,
+// catches the fragment wherever it sits in the key name — exampleApiKey,
 // userAccessToken, and setCookieHeader all match — without a hand-maintained
 // exact list. Every fragment is a multi-character secret/PII word that is
 // vanishingly unlikely to appear inside a benign field name, so substring
@@ -76,7 +76,7 @@ function normalizeKey(key: string): string {
 
 /**
  * True when the (raw) meta key names a field whose value should never be
- * shipped to Datadog. Token-count fields (inputTokens, outputTokens,
+ * shipped to SigNoz. Token-count fields (inputTokens, outputTokens,
  * tokenUsage, …) are intentionally NOT matched — they are metrics, not
  * secrets — by only treating a key as a token field when it ends in the
  * singular "token" (not the plural "tokens").

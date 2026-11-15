@@ -1,9 +1,9 @@
 import { onTestFinished, vi } from "vitest";
+import type { LogRecordInput } from "../log-sink";
 
 // Generic module-with-fetch importer: stub fetch, reset the module graph, then
-// dynamically import the caller-supplied module. Used by importLogWithFetch
-// below and directly by tests that need to re-import sibling modules (e.g.
-// `../telemetry/emitter`) under the same fresh-module guarantee.
+// dynamically import the caller-supplied module. Used directly by tests that
+// need to re-import sibling modules under the same fresh-module guarantee.
 export function importModuleWithFetch<T>(
   fetchMock: ReturnType<typeof vi.fn>,
   importFn: () => Promise<T>
@@ -13,25 +13,28 @@ export function importModuleWithFetch<T>(
   return importFn();
 }
 
-export async function importLogWithFetch(fetchMock: ReturnType<typeof vi.fn>) {
-  const mod = await importModuleWithFetch(fetchMock, () => import("../log"));
-  return mod.log;
+// Import a module from a fresh module graph with a log-record sink registered
+// first, so every record the code under test emits is captured in `records`.
+export async function importModuleWithSink<T>(
+  importFn: () => Promise<T>
+): Promise<{ mod: T; records: LogRecordInput[] }> {
+  vi.resetModules();
+  const sink = await import("../log-sink");
+  const records: LogRecordInput[] = [];
+  sink.setLogRecordSink((record) => {
+    records.push(record);
+  });
+  onTestFinished(sink.resetLogRecordSink);
+  const mod = await importFn();
+  return { mod, records };
 }
 
-export function parseFlushedBody<T>(
-  fetchMock: ReturnType<typeof vi.fn>,
-  callIndex = 0
-): T[] {
-  // Bounds check produces a clear assertion failure instead of an opaque
-  // TypeError ("Cannot read properties of undefined") when the expected
-  // flush did not produce a fetch call.
-  const callCount = fetchMock.mock.calls.length;
-  if (callIndex >= callCount) {
-    throw new Error(
-      `parseFlushedBody: no call at index ${callIndex} — fetchMock was called ${callCount} time(s)`
-    );
-  }
-  return JSON.parse(fetchMock.mock.calls[callIndex][1].body as string) as T[];
+export async function importLogWithSink(): Promise<{
+  log: typeof import("../log")["log"];
+  records: LogRecordInput[];
+}> {
+  const { mod, records } = await importModuleWithSink(() => import("../log"));
+  return { log: mod.log, records };
 }
 
 // Delete an env var for the current test and register a restore callback so

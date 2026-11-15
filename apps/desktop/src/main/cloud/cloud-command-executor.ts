@@ -1,7 +1,14 @@
 import { URL } from "node:url";
+import {
+  gatewayTraceBaggageHeaders,
+  getGatewayTraceparent,
+  parseAfBaggage,
+  runWithGatewayTrace,
+  TRACEPARENT_HEADER,
+} from "../../server/gateway-trace-context.js";
 import { COMMAND_SIGNING_REJECTION_REASONS } from "../../shared/contracts.js";
 import type { CommandSignatureVerifier } from "../command-signing/command-signature-verifier.js";
-import { gatewayLog } from "../logging/gateway-logger.js";
+import { type GatewayLogMeta, gatewayLog } from "../logging/gateway-logger.js";
 import { Observability } from "../telemetry/observability.js";
 import { asRecord } from "../util/api-response-utils.js";
 import type {
@@ -154,6 +161,7 @@ export class CloudCommandExecutor {
         commandId: command.commandId,
         accepted: true,
         state: "accepted",
+        ...(command.traceparent ? { traceparent: command.traceparent } : {}),
       });
       if (existing.state === "terminal") {
         this.replayBuffered(command.commandId, 0);
@@ -180,6 +188,7 @@ export class CloudCommandExecutor {
           accepted: false,
           state: "failed",
           reason: verification.reason,
+          ...(command.traceparent ? { traceparent: command.traceparent } : {}),
         });
         return;
       }
@@ -205,6 +214,7 @@ export class CloudCommandExecutor {
         accepted: false,
         state: "failed",
         reason: validationError,
+        ...(command.traceparent ? { traceparent: command.traceparent } : {}),
       });
       return;
     }
@@ -229,6 +239,7 @@ export class CloudCommandExecutor {
       commandId: command.commandId,
       accepted: true,
       state: "accepted",
+      ...(command.traceparent ? { traceparent: command.traceparent } : {}),
     });
     Observability.commandInitiated(command.commandId, command.operationId);
     this.schedule();
@@ -508,7 +519,8 @@ export class CloudCommandExecutor {
         });
         gatewayLog.error(
           "command-executor",
-          `Command ${command.commandId} timed out`
+          `Command ${command.commandId} timed out`,
+          commandLogMeta(command, "command_timed_out")
         );
         Observability.commandTimedOut(command.commandId, command.operationId);
         this.markTerminal(command.commandId, "failed");
@@ -525,7 +537,8 @@ export class CloudCommandExecutor {
         });
         gatewayLog.error(
           "command-executor",
-          `Command ${command.commandId} failed: ${msg}`
+          `Command ${command.commandId} failed: ${msg}`,
+          { ...commandLogMeta(command, "command_failed"), error }
         );
         Observability.commandFailed(
           command.commandId,
@@ -553,7 +566,23 @@ export class CloudCommandExecutor {
     }
   }
 
-  private async executeViaGateway(
+  private executeViaGateway(
+    command: DesktopCommandEvent,
+    signal: AbortSignal
+  ): Promise<void> {
+    return runWithGatewayTrace(
+      "runner.command",
+      command.traceparent,
+      {
+        [RunnerSpanAttribute.CommandId]: command.commandId,
+        [RunnerSpanAttribute.OperationId]: command.operationId,
+      },
+      () => this.executeViaGatewayTraced(command, signal),
+      parseAfBaggage(command.baggage)
+    );
+  }
+
+  private async executeViaGatewayTraced(
     command: DesktopCommandEvent,
     signal: AbortSignal
   ): Promise<void> {
@@ -564,6 +593,13 @@ export class CloudCommandExecutor {
     const headers = new Headers(command.headers);
     headers.set("x-desktop-gateway-token", this.options.getGatewayAuthToken());
     headers.set("x-desktop-source", "cloud-socket");
+    const traceparent = getGatewayTraceparent();
+    if (traceparent) {
+      headers.set(TRACEPARENT_HEADER, traceparent);
+    }
+    for (const [name, value] of Object.entries(gatewayTraceBaggageHeaders())) {
+      headers.set(name, value);
+    }
     if (isValidUuid(command.commandId)) {
       headers.set("x-desktop-command-id", command.commandId);
     }
@@ -753,6 +789,9 @@ export class CloudCommandExecutor {
       sequence,
       eventType,
       data,
+      ...(tracked.command.traceparent
+        ? { traceparent: tracked.command.traceparent }
+        : {}),
     });
   }
 
@@ -811,6 +850,9 @@ export class CloudCommandExecutor {
         sequence: event.sequence,
         eventType: event.eventType,
         data: event.data,
+        ...(tracked.command.traceparent
+          ? { traceparent: tracked.command.traceparent }
+          : {}),
       });
     }
   }
@@ -1082,4 +1124,26 @@ const SAFE_HEADER_VALUE_REGEX = /^[\x20-\x7e]+$/;
 
 function isSafeHeaderValue(value: string): boolean {
   return SAFE_HEADER_VALUE_REGEX.test(value);
+}
+
+const RunnerSpanAttribute = {
+  CommandId: "af.command_id",
+  OperationId: "af.operation_id",
+} as const;
+
+/**
+ * Ids for a command's terminal log lines. They are written after the
+ * `runner.command` span ends, so the active trace context no longer labels
+ * them: the command id and the baggage ids link them to the span instead.
+ */
+function commandLogMeta(
+  command: DesktopCommandEvent,
+  reason: string
+): GatewayLogMeta {
+  return {
+    ...parseAfBaggage(command.baggage),
+    commandId: command.commandId,
+    operationId: command.operationId,
+    reason,
+  };
 }

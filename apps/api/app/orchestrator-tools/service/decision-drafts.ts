@@ -7,6 +7,7 @@ import {
 import { OrchestratorSourceOperation } from "@repo/api/src/types/orchestrator-grants";
 import { Result } from "@repo/api/src/types/result";
 import { withDb } from "@repo/database";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 import { sourceGrantDefinitions } from "@/lib/integrations/connection-grants";
 import type { StoredDecisionDraft } from "@/lib/orchestrator/decision-draft";
@@ -139,6 +140,11 @@ export async function carryOutDecisionDraft(
       transitionName: draft.transitionName,
     });
   } catch (error) {
+    log.warn("orchestrator_tools.transition_failed", {
+      organizationId: context.organizationId,
+      reason: "transition_threw",
+      error,
+    });
     return failed(
       error instanceof Error ? error.message : String(error),
       commentRef

@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // SDK-free tracing seam (ISS-4659).
 //
-// This is the module application code imports to flush spans. It deliberately
+// This is the module application code imports to flush telemetry. It deliberately
 // has NO OpenTelemetry import, so pulling it in never drags the Node SDK along.
 //
 // `apps/api/lib/route-utils.ts` is the reason. It is imported by ~40 route
@@ -18,47 +18,53 @@
 // `packages/database`.
 // ---------------------------------------------------------------------------
 
-/** Flushes buffered spans. Registered by the tracer bootstrap. */
-export type SpanFlushHook = () => Promise<void>;
+import { globalSlot } from "../global-slot";
 
-let spanFlushHook: SpanFlushHook | undefined;
+/** Flushes buffered traces, logs and metrics. Registered by the telemetry bootstrap. */
+export type TelemetryFlushHook = () => Promise<void>;
+
+const hookSlot = globalSlot<TelemetryFlushHook | undefined>(
+  "flush-hook",
+  () => undefined
+);
 
 /**
- * Register the process-wide span-flush implementation. Called once by
+ * Register the process-wide telemetry-flush implementation. Called once by
  * `./provider` after the tracer is installed; never by application code.
  */
-export function setSpanFlushHook(hook: SpanFlushHook): void {
-  spanFlushHook = hook;
+export function setTelemetryFlushHook(hook: TelemetryFlushHook): void {
+  hookSlot.value = hook;
 }
 
 /** Clear the hook. Used by tracer shutdown and by tests. */
-export function resetSpanFlushHook(): void {
-  spanFlushHook = undefined;
+export function resetTelemetryFlushHook(): void {
+  hookSlot.value = undefined;
 }
 
 /**
- * Whether a tracer is installed and therefore has spans worth flushing.
+ * Whether telemetry is installed and therefore has data worth flushing.
  *
  * Callers use this to avoid scheduling flush work at all when tracing is off —
  * every local run, every CI worker, any deploy with the kill switch set.
- * `flushSpans()` is already inert in that state, but *scheduling* it is not
- * free: it consumes a `waitUntil` slot on the serverless response, and route
+ * `flushTelemetry()` is already inert in that state, but *scheduling* it is not
+ * free: it consumes a `waitUntil` slot on the response, and route
  * tests legitimately assert on how much deferred work a request schedules.
  */
-export function isTracingActive(): boolean {
-  return spanFlushHook !== undefined;
+export function isTelemetryActive(): boolean {
+  return hookSlot.value !== undefined;
 }
 
 /**
- * Flush buffered spans. Never rejects — a failed export must not surface as a
+ * Flush buffered traces, logs and metrics. Never rejects — a failed export must not surface as a
  * failed request — and resolves immediately when no tracer is installed.
  */
-export async function flushSpans(): Promise<void> {
-  if (!spanFlushHook) {
+export async function flushTelemetry(): Promise<void> {
+  const hook = hookSlot.value;
+  if (!hook) {
     return;
   }
   try {
-    await spanFlushHook();
+    await hook();
   } catch {
     // Best-effort, by contract.
   }

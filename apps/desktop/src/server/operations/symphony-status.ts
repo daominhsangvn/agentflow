@@ -164,6 +164,10 @@ export function registerSymphonyStatusRoutes(
           processRunning: effective.processRunning,
         });
       } catch (error) {
+        gatewayLog.error("symphony-status", "status read failed", {
+          reason: "status_read_failed",
+          error,
+        });
         const message =
           error instanceof Error ? error.message : "Unknown error";
         json(context, 500, { error: `Failed to read status: ${message}` });
@@ -177,6 +181,7 @@ function isProcessRunning(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch {
+    // observability: probe — signal 0 fails when the process is gone
     return false;
   }
 }
@@ -207,6 +212,7 @@ async function detectCompletionFromLogs(
 
     return { completed: true, awaitingUser };
   } catch {
+    // observability: probe — an unreadable log means not completed
     return { completed: false, awaitingUser: false };
   }
 }

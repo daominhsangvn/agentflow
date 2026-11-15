@@ -1,5 +1,6 @@
 import type { JsonObject } from "@repo/api/src/types/common.js";
 import { API_KEY_SCOPES_UNRESOLVABLE_CODE } from "@repo/api/src/utils/api-key-scope-resolution.js";
+import { log } from "@repo/observability/log";
 import { McpApiError } from "./api-error.js";
 import type {
   ApiKeyVerification,
@@ -96,7 +97,7 @@ function unwrapApiResult<T>(body: unknown): T {
     try {
       msg = JSON.stringify(error);
     } catch {
-      /* keep default */
+      // observability: parse fallback — an unserializable error body keeps the default message
     }
   }
   throw new McpApiError(msg, {
@@ -286,7 +287,7 @@ async function readVerificationRefusal(
       return ApiKeyVerificationStatus.UnresolvableScopes;
     }
   } catch {
-    // A refusal with no readable body is still a refusal.
+    // observability: parse fallback — a refusal with no readable body is still a refusal
   }
   return ApiKeyVerificationStatus.Invalid;
 }
@@ -324,6 +325,7 @@ function parseJson(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch {
+    // observability: parse fallback — non-JSON input is treated as no body
     return null;
   }
 }
@@ -361,7 +363,11 @@ export async function checkApiReachable(): Promise<boolean> {
       signal: AbortSignal.timeout(5000),
     });
     return true;
-  } catch {
+  } catch (error) {
+    log.debug("mcp.api_reachability_probe_failed", {
+      reason: "api_unreachable",
+      error,
+    });
     return false;
   }
 }

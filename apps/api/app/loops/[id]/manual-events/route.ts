@@ -35,7 +35,7 @@ export const POST = withAnyAuth<
 >(
   async ({ user }, request, params) => {
     // Hoisted so the outer catch can stitch the failure to its loop in
-    // Datadog — see `loop.manual_event_ingest_failed` below.
+    // SigNoz — see `loop.manual_event_ingest_failed` below.
     let loopId: string | undefined;
     try {
       ({ id: loopId } = await params);

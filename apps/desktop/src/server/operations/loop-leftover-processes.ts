@@ -1,4 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 
 /**
  * Processes an agent starts in the background during a loop (a dev server, a
@@ -42,6 +43,7 @@ export async function findLoopLeftoverProcesses(
   try {
     entries = await readdir(procRoot);
   } catch {
+    // observability: probe — /proc may be unreadable
     return [];
   }
   const tag = `${LOOP_PROCESS_TAG_ENV}=${loopId}`;
@@ -60,7 +62,7 @@ export async function findLoopLeftoverProcesses(
           );
           return environ.split("\0").includes(tag) ? pid : null;
         } catch {
-          // Exited meanwhile, or not readable (another user's process).
+          // observability: probe — exited meanwhile, or not readable (another user's process).
           return null;
         }
       })
@@ -100,6 +102,11 @@ export async function stopLoopLeftoverProcesses(
     );
     return pids.length;
   } catch (error) {
+    gatewayLog.warn(LOG_TAG, "stopping leftover loop processes failed", {
+      reason: "leftover_process_stop_failed",
+      loopId,
+      error,
+    });
     log(`Could not stop the loop's leftover processes: ${String(error)}`);
     return 0;
   }
@@ -114,7 +121,9 @@ function signalAll(
     try {
       kill(pid, signal);
     } catch {
-      // Already gone.
+      // observability: best-effort cleanup — already gone.
     }
   }
 }
+
+const LOG_TAG = "loop-leftover-processes";

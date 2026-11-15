@@ -36,7 +36,7 @@ Repository: agentflow-ai (Next.js monorepo on next-forge template)
 | **packages/rich-text** | Rich text editor for document artifacts | Shared Library | TipTap 3, Mermaid diagrams |
 | **packages/collaboration** | Real-time collaboration on documents | Shared Library | Liveblocks, Yjs |
 | **packages/analytics** | Web and product analytics | Shared Library | PostHog, Google Analytics, Vercel Analytics |
-| **packages/observability** | Structured logging with agentless Datadog export | Shared Library | Custom (Datadog HTTP intake) |
+| **packages/observability** | Structured logging, spans and metrics over OpenTelemetry (SigNoz) | Shared Library | OpenTelemetry |
 | **packages/security** | Application security - security headers | Shared Library | Nosecone |
 | **packages/aws** | AWS S3 operations for artifact storage | Shared Library | AWS SDK v3, S3, pre-signed URLs |
 | **packages/feature-flags** | Feature flag management | Shared Library | Vercel Flags, PostHog |
@@ -346,7 +346,7 @@ The most distinctive integration pattern is the GitHub Actions-based execution p
 | **Knock** | Knock | In-app notifications | SDK (Client + Server) | Important |
 | **Resend** | Resend | Transactional email delivery | SDK | Nice-to-have |
 | **Vercel** | Vercel | Hosting, deployment, edge functions | Platform | Critical |
-| **Datadog** | Datadog | Structured log ingestion and observability | HTTP intake API (agentless) | Important |
+| **SigNoz** | SigNoz (self-hosted) | Traces, logs, metrics, dashboards, alerts | OTLP (collector in the compose stack) | Important |
 | **Google Analytics** | Google | Web analytics | Script tag | Nice-to-have |
 | **Vercel Analytics** | Vercel | Web vitals and analytics | SDK | Nice-to-have |
 | **Slack** | Slack | Deploy notifications, integration status | Bot API | Nice-to-have |
@@ -371,7 +371,7 @@ The most distinctive integration pattern is the GitHub Actions-based execution p
 
 **Analytics & Monitoring:**
 - **PostHog** - Product analytics and feature flag evaluation. Used both client-side and server-side. Feature flags currently have only one flag defined (`showBetaFeature`).
-- **Datadog** - Server-side structured logging via agentless HTTP intake (`packages/observability/log.ts`). Batched and shipped when `DD_API_KEY` + `DD_SITE` are set.
+- **SigNoz** - Self-hosted observability (traces, logs, metrics) over OTLP, part of the default compose stack. Apps export when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (`packages/observability`).
 - **Google Analytics** - Web analytics via `@next/third-parties`.
 
 ### Dependency Risks

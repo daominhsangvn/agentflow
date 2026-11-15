@@ -207,7 +207,6 @@ describe("requiresOrgSlugResolution (keeps auth() lazy in the proxy)", () => {
     expect(requiresOrgSlugResolution("/sign-in")).toBe(false);
     expect(requiresOrgSlugResolution("/invitations/x")).toBe(false);
     expect(requiresOrgSlugResolution("/onboarding")).toBe(false);
-    expect(requiresOrgSlugResolution("/rum-validation")).toBe(false);
     expect(requiresOrgSlugResolution("/")).toBe(false);
   });
 });

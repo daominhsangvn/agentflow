@@ -94,10 +94,10 @@ All three correlation fields are optional in the `WithCorrelation<T>` type. No v
 
 ### The rule
 
-`commandId`, `requestId`, `operationId`, and similar high-cardinality correlation handles MUST appear only in structured log body entries and NEVER be elevated as a Datadog metric tag. The exclusion rationale varies by field:
+`commandId`, `requestId`, `operationId`, and similar high-cardinality correlation handles MUST appear only in structured log body entries and NEVER be elevated as a SigNoz metric tag. The exclusion rationale varies by field:
 
-- **Cardinality only:** `commandId`, `operationId`, `requestId`, `loopId`, `loopSessionId`, `jobId` — these are excluded solely because they produce unbounded tag cardinality in Datadog, which inflates metric costs.
-- **Cardinality + privacy:** `userId`, `machineName` — these are excluded for *both* cardinality AND privacy reasons. Even if Datadog cardinality limits were removed, PII-adjacent identifiers must not appear as metric dimensions that could be queried or exported outside the log pipeline.
+- **Cardinality only:** `commandId`, `operationId`, `requestId`, `loopId`, `loopSessionId`, `jobId` — these are excluded solely because they produce unbounded tag cardinality in SigNoz, which inflates metric costs.
+- **Cardinality + privacy:** `userId`, `machineName` — these are excluded for *both* cardinality AND privacy reasons. Even if SigNoz cardinality limits were removed, PII-adjacent identifiers must not appear as metric dimensions that could be queried or exported outside the log pipeline.
 
 Always identify which category applies before proposing a new field for the allowlist.
 

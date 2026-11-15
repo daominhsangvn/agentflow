@@ -12,8 +12,10 @@ import {
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
 import { Prisma, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { parseError } from "@repo/observability/error";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { waitUntil } from "@/lib/wait-until";
 import {
   drainActionRuns,
@@ -34,7 +36,7 @@ import {
   findRetryableStep,
   RETRYABLE_RUN_STATUSES,
 } from "./retry-step";
-import { readAgentConfig, readRunStatus } from "./run-data";
+import { readAgentConfig, readRunSource, readRunStatus } from "./run-data";
 import type { RunLoopState } from "./run-loops";
 import {
   type EngineRun,
@@ -95,32 +97,63 @@ export async function advanceRun(
   runId: string,
   now: Date = new Date()
 ): Promise<AdvanceRunOutcome> {
-  const leaseUntil = await acquireLease(runId, now, stepDueFilter(now));
-  if (!leaseUntil) {
-    return AdvanceRunOutcome.Skipped;
-  }
-  const lease: RunLease = { runId, until: leaseUntil };
-  try {
-    await stepUntilWaiting(runId, {
-      now,
-      renewLease: () => renewLease(lease),
-    });
-  } catch (error) {
-    log.error(`${LOG_PREFIX} Run step failed; retrying on the next tick`, {
-      runId,
-      error,
-    });
-  } finally {
-    await releaseLease(lease);
-  }
-  return AdvanceRunOutcome.Advanced;
+  const row = await readRunSpanContext(runId);
+  return withSpan(
+    "workflow.advance_run",
+    {
+      [AfAttribute.WorkflowRunId]: runId,
+      [AfAttribute.OrgId]: row?.organizationId,
+      [AfAttribute.ProjectId]: row?.projectId ?? undefined,
+    },
+    async (span) => {
+      const leaseUntil = await acquireLease(runId, now, stepDueFilter(now));
+      if (!leaseUntil) {
+        setSpanOutcome(AfOutcome.Skipped, undefined, span);
+        return AdvanceRunOutcome.Skipped;
+      }
+      const lease: RunLease = { runId, until: leaseUntil };
+      try {
+        await stepUntilWaiting(runId, {
+          now,
+          renewLease: () => renewLease(lease),
+        });
+      } catch (error) {
+        log.error(`${LOG_PREFIX} Run step failed; retrying on the next tick`, {
+          runId,
+          error,
+        });
+        setSpanOutcome(AfOutcome.Error, parseError(error), span);
+      } finally {
+        await releaseLease(lease);
+      }
+      return AdvanceRunOutcome.Advanced;
+    },
+    { links: [readRunSource(row?.source)?.traceparent] }
+  );
 }
 
 /**
  * Cancels a non-final run: takes the lease (waiting briefly for an advance in
  * progress), cancels the run's active loops, then writes `cancelled`.
  */
-export async function cancelRun(
+export function cancelRun(
+  organizationId: string,
+  runId: string
+): Promise<Result<null, CancelRunFailure>> {
+  return withSpan(
+    "workflow.cancel_run",
+    { [AfAttribute.WorkflowRunId]: runId, [AfAttribute.OrgId]: organizationId },
+    async (span) => {
+      const result = await cancelRunLocked(organizationId, runId);
+      if (!result.ok) {
+        setSpanOutcome(AfOutcome.Error, result.error, span);
+      }
+      return result;
+    }
+  );
+}
+
+async function cancelRunLocked(
   organizationId: string,
   runId: string
 ): Promise<Result<null, CancelRunFailure>> {
@@ -184,10 +217,30 @@ export type RetryRunFailure =
  * Runs the step a run failed or was cancelled in again (retry-step.ts):
  * takes the run's lease, launches the step's loop and writes its status.
  */
-export async function retryRun(
+export function retryRun(
   organizationId: string,
   runId: string,
   mode: WorkflowRunRetryMode = WorkflowRunRetryMode.Restart
+): Promise<
+  Result<null, { failure: RetryRunFailure; error?: WorkflowRunError }>
+> {
+  return withSpan(
+    "workflow.retry_run",
+    { [AfAttribute.WorkflowRunId]: runId, [AfAttribute.OrgId]: organizationId },
+    async (span) => {
+      const result = await retryRunLocked(organizationId, runId, mode);
+      if (!result.ok) {
+        setSpanOutcome(AfOutcome.Error, result.error.failure, span);
+      }
+      return result;
+    }
+  );
+}
+
+async function retryRunLocked(
+  organizationId: string,
+  runId: string,
+  mode: WorkflowRunRetryMode
 ): Promise<
   Result<null, { failure: RetryRunFailure; error?: WorkflowRunError }>
 > {
@@ -621,4 +674,26 @@ async function retryFailedStep(
     data,
     now,
   });
+}
+
+async function readRunSpanContext(runId: string): Promise<{
+  source: unknown;
+  organizationId: string;
+  projectId: string | null;
+} | null> {
+  try {
+    return await withDb((db) =>
+      db.workflowRun.findUnique({
+        where: { id: runId },
+        select: { source: true, organizationId: true, projectId: true },
+      })
+    );
+  } catch (error) {
+    log.warn("workflow.run_source_read_failed", {
+      workflowRunId: runId,
+      reason: "run_read_failed",
+      error,
+    });
+    return null;
+  }
 }

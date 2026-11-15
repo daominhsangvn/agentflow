@@ -30,6 +30,10 @@ import { prepareLoopCommandForExecution } from "../main/loop/loop-command-prepar
 import { LoopSchedulerContext } from "../main/loop/loop-scheduler-context.js";
 import { LoopTokenStore } from "../main/loop/loop-token-store.js";
 import {
+  GatewayTraceIdKey,
+  setGatewayStaticTraceIds,
+} from "../server/gateway-trace-context.js";
+import {
   getBundledPluginDirs,
   getBundledPluginVersion,
 } from "../server/operations/bundled-plugins.js";
@@ -48,6 +52,7 @@ import {
   GATEWAY_PROTOCOL_VERSION,
 } from "../shared/contracts.js";
 import { startHeadlessCapabilitiesReporter } from "./headless-capabilities-reporter.js";
+import { createHeadlessClaudeCodeOtel } from "./headless-claude-code-otel.js";
 import {
   classifyHeadlessCommand,
   HEADLESS_RUNNER_OPERATION_IDS,
@@ -62,6 +67,7 @@ import {
   STATUS_REFRESH_INTERVAL_MS,
   writeRunnerStatus,
 } from "./headless-status.js";
+import { startHeadlessTelemetry } from "./headless-telemetry.js";
 import { createHeadlessTranscriptUploader } from "./headless-transcript-uploader.js";
 import { ensureRunnerWorktreeSettings } from "./headless-workspace.js";
 
@@ -87,6 +93,7 @@ export async function startHeadlessRunner(
 ): Promise<HeadlessRunner> {
   fs.mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
   const gatewayId = new GatewayIdentityStore(config.dataDir).loadSync();
+  const telemetry = startHeadlessTelemetry({ config, gatewayId });
   const gatewayAuthToken = randomBytes(GATEWAY_TOKEN_BYTES).toString("hex");
   const allowedDirectories = [config.workspaceDir];
   const loopTokenStore = new LoopTokenStore({
@@ -102,7 +109,7 @@ export async function startHeadlessRunner(
   const schedulers = new LoopSchedulerContext();
   const recovery = new BootRecoveryService({
     jobStore,
-    telemetry: { emit: () => undefined },
+    telemetry: telemetry.emitter,
     getApiKey: () => config.apiKey,
     getApiOrigin: () => config.apiUrl,
     getAllowedDirectories: () => [config.workspaceDir],
@@ -141,7 +148,9 @@ export async function startHeadlessRunner(
     writeRunnerStatus(config.dataDir, status);
   };
 
+  const claudeCodeOtel = createHeadlessClaudeCodeOtel(telemetry.exportSignal);
   const server = new DesktopGatewayServer({
+    ...claudeCodeOtel.serverOptions,
     host: LOOPBACK_HOST,
     // The configured port, or any free one: runners never compete for a
     // default port, however many share the computer.
@@ -236,6 +245,11 @@ export async function startHeadlessRunner(
     },
     onHelloAck: (event: DesktopHelloAckEvent) => {
       publishStatus({ computeTargetId: event.computeTargetId });
+      if (typeof event.computeTargetId === "string") {
+        setGatewayStaticTraceIds({
+          [GatewayTraceIdKey.ComputeTargetId]: event.computeTargetId,
+        });
+      }
       // Connected (again): AgentFlow gets the runner's AGENTFLOW.md as it is now.
       capabilitiesReporter?.report({ force: true }).catch(() => undefined);
       // AgentFlow is reachable again: finish the loops it could not be told about.
@@ -298,6 +312,7 @@ export async function startHeadlessRunner(
       })
     : null;
 
+  const otlpForwarder = await claudeCodeOtel.start();
   await server.start();
   replayPendingFinalizations(deadJobs);
   recovery.reattachLiveJobs().catch((error: unknown) => {
@@ -338,6 +353,8 @@ export async function startHeadlessRunner(
       // Clears the loop heartbeat/refresh timers shared with the server.
       recovery[Symbol.dispose]();
       publishStatus({ state: CloudSocketState.Idle, error: "stopped" });
+      await otlpForwarder?.stop();
+      await telemetry.stop();
     },
   };
 }

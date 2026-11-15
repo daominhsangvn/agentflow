@@ -35,6 +35,7 @@ function readStoreIndex(monorepoRoot: string): StoreIndex | null {
   try {
     return { entries: readdirSync(storeDirectory), storeDirectory };
   } catch {
+    // observability: (b) probe — the pnpm store may be absent
     return null;
   }
 }
@@ -72,6 +73,7 @@ function readRuntimeDependencies(
       ...Object.keys(manifest.optionalDependencies ?? {}),
     ];
   } catch {
+    // observability: (b) probe — the manifest may be absent or unreadable
     return [];
   }
 }

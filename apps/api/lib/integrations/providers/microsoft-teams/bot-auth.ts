@@ -1,3 +1,4 @@
+import { log } from "@repo/observability/log";
 import {
   createLocalJWKSet,
   decodeProtectedHeader,
@@ -214,7 +215,12 @@ async function verifyToken(
       }
     );
     return payload;
-  } catch {
+  } catch (error) {
+    log.info("integration.teams.token_rejected", {
+      provider: "microsoft-teams",
+      reason: "token_verification_failed",
+      error,
+    });
     return null;
   }
 }
@@ -223,6 +229,7 @@ function readKeyId(token: string): string | null {
   try {
     return decodeProtectedHeader(token).kid ?? null;
   } catch {
+    // observability: (a) parse fallback — a token without a readable header has no key id
     return null;
   }
 }
@@ -232,6 +239,7 @@ function parseActivity(rawBody: string) {
     const parsed = authActivitySchema.safeParse(JSON.parse(rawBody));
     return parsed.success ? parsed.data : null;
   } catch {
+    // observability: (a) parse fallback — an unparseable activity is rejected by the caller
     return null;
   }
 }

@@ -54,9 +54,12 @@ import {
   type BrowserSignedCommandId,
   DesktopCommandStatus,
 } from "@repo/api/src/types/compute-target";
+import { AfAttribute } from "@repo/observability/af-attributes";
+import { withSpan } from "@repo/observability/span";
 import { emitCommandLifecycleEvent } from "@repo/observability/telemetry/emitter";
 import { FilterToken } from "@repo/observability/telemetry/filter-tokens";
 import { TelemetryCategory } from "@repo/observability/telemetry/schema";
+import { installInMemorySpans } from "@repo/observability/testing/in-memory-spans";
 import { desktopCommandStore } from "@/lib/desktop-command-store";
 
 beforeEach(() => {
@@ -166,6 +169,72 @@ describe("desktopCommandStore.createCommand command signing fields", () => {
     >;
 
     expect(firstData.requestFingerprint).toBe(secondData.requestFingerprint);
+  });
+});
+
+describe("desktopCommandStore.createCommand baggage", () => {
+  let spans: ReturnType<typeof installInMemorySpans>;
+  const baseCommand = {
+    operationId: "git_action",
+    method: "POST" as const,
+    path: "/api/gateway/git",
+    body: { action: "status" },
+  };
+
+  beforeEach(() => {
+    desktopCommandStore.__resetForTests();
+    installCreateCommandMock();
+    spans = installInMemorySpans();
+  });
+
+  afterEach(() => {
+    spans.uninstall();
+  });
+
+  function persistedPayload(callIndex: number): Record<string, unknown> {
+    const data = desktopCommandCreateSpy.mock.calls[callIndex][0]
+      .data as Record<string, unknown>;
+    return data.requestPayload as Record<string, unknown>;
+  }
+
+  it("stamps baggage from the active af ids", async () => {
+    await withSpan(
+      "t",
+      { [AfAttribute.CaseId]: "c1", [AfAttribute.LoopId]: "l1" },
+      () => desktopCommandStore.createCommand("target-1", baseCommand)
+    );
+
+    const baggage = persistedPayload(0).baggage as string;
+    expect(baggage).toContain("c1");
+    expect(baggage).toContain("l1");
+  });
+
+  it("lets an explicit baggage win", async () => {
+    await withSpan("t", { [AfAttribute.CaseId]: "c1" }, () =>
+      desktopCommandStore.createCommand("target-1", {
+        ...baseCommand,
+        baggage: "af.case_id=explicit",
+      })
+    );
+
+    expect(persistedPayload(0).baggage).toBe("af.case_id=explicit");
+  });
+
+  it("does not change the fingerprint", async () => {
+    await desktopCommandStore.createCommand("target-1", baseCommand);
+    await withSpan("t", { [AfAttribute.CaseId]: "c1" }, () =>
+      desktopCommandStore.createCommand("target-1", baseCommand)
+    );
+
+    const first = desktopCommandCreateSpy.mock.calls[0][0].data as Record<
+      string,
+      unknown
+    >;
+    const second = desktopCommandCreateSpy.mock.calls[1][0].data as Record<
+      string,
+      unknown
+    >;
+    expect(first.requestFingerprint).toBe(second.requestFingerprint);
   });
 });
 

@@ -3,6 +3,7 @@ import type {
   DocumentListPage,
   DocumentWithProject,
 } from "@repo/api/src/types/document";
+import { log } from "@repo/observability/log";
 import { forbiddenAttachmentUploadResponse } from "@/app/documents/attachment-route-responses";
 import { isMcpAttachmentUploadEnabled } from "@/app/documents/attachment-upload-feature";
 import { documentListService } from "@/app/documents/document-list-service";
@@ -172,7 +173,8 @@ export const POST = withAnyAuth<CreateDocumentResponse, "/documents">(
               title: result.value.document.title,
             },
           });
-        } catch {
+        } catch (error) {
+          log.warn("documents.activity_capture_failed", { error });
           // Swallowed by design: activity capture must never fail the write.
         }
         return successResponse(
@@ -198,7 +200,8 @@ export const POST = withAnyAuth<CreateDocumentResponse, "/documents">(
           actor: { userId: user.id, authMethod },
           after: { status: document.status, title: document.title },
         });
-      } catch {
+      } catch (error) {
+        log.warn("documents.activity_capture_failed", { error });
         // Swallowed by design: activity capture must never fail the write.
       }
 

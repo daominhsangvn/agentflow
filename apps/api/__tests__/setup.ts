@@ -10,30 +10,10 @@ config({ path: ".env.local" });
 // endpoints unless they set the variable themselves (endpoints/emulator tests).
 delete process.env.TEAMS_EMULATOR_URL;
 
-// DD_SERVICE identifies this process as the API service for telemetry/origin
-// resolution. Must be set before any test module imports
-// packages/observability/telemetry/origin.ts, which resolves ORIGIN once at
-// module load time.
-//
-// FORCED, not a fallback (ISS-4930). The CI lanes that run this suite now
-// declare their own step-level DD_SERVICE (`symphony-unit`,
-// `symphony-api-integration`) so dd-trace stops auto-detecting the Test
-// Optimization service from the nearest package.json. Neither value is a known
-// origin, so under `??=` this line would no-op in CI and ORIGIN would resolve
-// to `Origin.Unknown` for every apps/api test — a value that differs from the
-// local run, where DD_SERVICE is unset and this line still fires.
-//
-// Measured: no test asserts on it today, so `??=` is not currently red. The
-// point is that `origin: ORIGIN` IS stamped onto records by production code
-// these tests exercise (lib/desktop-command-store.ts, lib/relay-event-bus.ts),
-// so leaving it lane-dependent means the suite silently proves a different
-// origin in CI than on a laptop. Forcing it removes that skew and matches
-// packages/observability/vitest.setup.ts, which already assigns unconditionally.
-//
-// The tracer is unaffected: it reads DD_SERVICE at process start via the
-// NODE_OPTIONS preload, long before vitest runs this setup file, so the lane
-// still reports to Test Optimization under its own service.
-process.env.DD_SERVICE = "api";
+// OTEL_SERVICE_NAME identifies this process as the API service for telemetry/origin
+// resolution. Forced (not a fallback) so ORIGIN resolves to "api" in every lane;
+// it must be set before telemetry/origin.ts is first imported.
+process.env.OTEL_SERVICE_NAME = "api";
 
 // INTERNAL_API_SECRET is FORCED (not a fallback) because the compatibility
 // test fixtures send this exact value in the x-internal-secret header and

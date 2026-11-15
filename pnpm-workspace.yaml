@@ -43,21 +43,6 @@ minimumReleaseAge: 10080
 # blockExoticSubdeps: refuse non-registry specifiers (git:, github:, http(s):,
 # file:, link:) introduced via transitive deps — closes the github-ref bypass.
 blockExoticSubdeps: true
-# dd-trace's four optional native addons are excluded outright rather than
-# listed in allowBuilds as `false`. They back capabilities we deliberately leave
-# off — the continuous profiler (@datadog/pprof), runtime metrics, AppSec and
-# IAST — while Test Optimization, the only reason dd-trace is installed, is pure
-# JS. Excluding them keeps the install smaller (they ship prebuilt binaries for
-# every entry in supportedArchitectures above) and, critically, means pnpm needs
-# no build decision for them at all: adding them to allowBuilds changed the
-# recorded build-approval state, which made the bind-mounted node_modules look
-# stale to the e2e-runner container and triggered a full in-container reinstall
-# that the egress-restricted network cannot serve.
-ignoredOptionalDependencies:
-  - '@datadog/native-appsec'
-  - '@datadog/native-iast-taint-tracking'
-  - '@datadog/native-metrics'
-  - '@datadog/pprof'
 allowBuilds:
   '@scarf/scarf': false
   '@prisma/engines': true

@@ -48,6 +48,7 @@ export async function readInlineImageAwareRequestText(
       chunks.push(chunk);
     }
   } catch {
+    // observability: stream teardown — the client aborted the upload mid-read
     await reader.cancel().catch(() => undefined);
     return {
       ok: true,

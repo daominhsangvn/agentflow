@@ -1,15 +1,14 @@
 import "server-only";
 
 import { failure } from "@repo/api/src/types/common";
-import { parseError } from "@repo/observability/error";
-import { log } from "@repo/observability/log";
 import { type NextRequest, NextResponse } from "next/server";
-import {
-  getBearerToken,
-  logRequestCompleted,
-  unauthorizedResponse,
-} from "../route-utils";
+import { getBearerToken, unauthorizedResponse } from "../route-utils";
+import { annotateAuthSpan } from "./auth-span-attributes";
 import { resolveDesktopSessionContext } from "./desktop-session-auth";
+import {
+  observeFailedResponse,
+  observeThrownError,
+} from "./observe-failed-response";
 import type {
   AuthContext,
   AuthenticatedHandler,
@@ -42,7 +41,6 @@ export function withDesktopSessionAuth<
     request: NextRequest,
     routeContext: RouteContext<TRoute>
   ): Promise<AuthenticatedJsonResponse<TResponse>> => {
-    const startMs = globalThis.performance.now();
     let response: AuthenticatedJsonResponse<TResponse> | undefined;
     try {
       const token = getBearerToken(request);
@@ -66,18 +64,19 @@ export function withDesktopSessionAuth<
         apiKeyScopes: undefined,
       };
 
+      annotateAuthSpan(authContext);
       response = await handler(authContext, request, routeContext.params);
       return response;
     } catch (error) {
-      log.error("Desktop session authentication failed", {
-        error: parseError(error),
-      });
+      observeThrownError("Desktop session authentication failed", error);
       response = NextResponse.json(failure("Authentication failed"), {
         status: 500,
       });
       return response;
     } finally {
-      logRequestCompleted(request, startMs, response?.status ?? 500);
+      if (response) {
+        await observeFailedResponse(request, response);
+      }
     }
   };
 }

@@ -1,4 +1,6 @@
 import type { ApiResult } from "@repo/api/src/types/common";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import type { NextResponse } from "next/server";
 import { apiKeyService } from "@/app/settings/api-key-service";
 import { MISSING_ANTHROPIC_API_KEY_MESSAGE } from "@/lib/loops/loop-dispatch-utils";
@@ -30,7 +32,7 @@ import { badRequestResponse } from "@/lib/route-utils";
  * to Cloud. `loopsService.resume` writes `computeTargetId: computeTargetId ?? null`,
  * so an undefined resolved target genuinely means the child runs on ECS.
  */
-export async function buildMissingAnthropicApiKeyResponse({
+export function buildMissingAnthropicApiKeyResponse({
   resolvedComputeTargetId,
   userId,
   organizationId,
@@ -39,13 +41,20 @@ export async function buildMissingAnthropicApiKeyResponse({
   userId: string;
   organizationId: string;
 }): Promise<NextResponse<ApiResult<never>> | null> {
-  // A resolved target means Local; only Cloud (`undefined`) needs the key here.
-  if (resolvedComputeTargetId !== undefined) {
-    return null;
-  }
-  const key = await apiKeyService.resolveApiKey(userId, organizationId);
-  if (key) {
-    return null;
-  }
-  return badRequestResponse(MISSING_ANTHROPIC_API_KEY_MESSAGE);
+  return withSpan(
+    "loop.preflight",
+    { [AfAttribute.OrgId]: organizationId },
+    async (span) => {
+      // A resolved target means Local; only Cloud (`undefined`) needs the key here.
+      if (resolvedComputeTargetId !== undefined) {
+        return null;
+      }
+      const key = await apiKeyService.resolveApiKey(userId, organizationId);
+      if (key) {
+        return null;
+      }
+      setSpanOutcome(AfOutcome.Error, "anthropic_api_key_missing", span);
+      return badRequestResponse(MISSING_ANTHROPIC_API_KEY_MESSAGE);
+    }
+  );
 }

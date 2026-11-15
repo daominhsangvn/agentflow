@@ -192,7 +192,8 @@ export function elevationCommand(scriptFile: string): {
   const script = scriptFile.replaceAll("'", "''");
   const ps =
     `try { $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c ""${script}""' ` +
-    "-Verb RunAs -Wait -PassThru; exit $p.ExitCode } catch { exit 1223 }";
+    "-Verb RunAs -Wait -PassThru; exit $p.ExitCode } " +
+    "catch { exit 1223 }";
   return {
     file: "powershell.exe",
     args: ["-NoProfile", "-NonInteractive", "-Command", ps],
@@ -213,6 +214,7 @@ export function defaultWindowsServiceDeps(
       try {
         return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
       } catch {
+        // observability: probe — an unreadable file has no hash
         return null;
       }
     },
@@ -230,7 +232,7 @@ export function defaultWindowsServiceDeps(
       try {
         fs.rmSync(file, { force: true });
       } catch {
-        // best effort
+        // observability: cleanup — best-effort file removal
       }
     },
   };
@@ -338,6 +340,7 @@ export function installedServiceId(
     );
     return xml ? xml.slice(0, -".xml".length) : null;
   } catch {
+    // observability: probe — a missing service directory means no service id
     return null;
   }
 }

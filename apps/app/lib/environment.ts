@@ -5,7 +5,7 @@ export type AppEnvironment = "local" | "stage" | "preview" | "prod";
 const PRODUCTION_APP_HOST = "app.agentflow.ai";
 
 /**
- * Detect the current deployment environment for telemetry tagging (Datadog RUM).
+ * Detect the current deployment environment for telemetry tagging.
  *
  * Priority:
  *  1. VERCEL_ENV === "preview" → "preview". Vercel sets VERCEL_ENV automatically

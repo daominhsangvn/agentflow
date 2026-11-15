@@ -6,7 +6,8 @@ import type {
   LoopTokenMeta,
   LoopTokenStore,
 } from "../../main/loop/loop-token-store.js";
-import { loopError, loopLog } from "./symphony-utils.js";
+import { gatewayTraceHeaders } from "../gateway-trace-context.js";
+import { loopDebug, loopError, loopLog } from "./loop-log.js";
 
 // ---------------------------------------------------------------------------
 // Consolidated HTTP helpers for loop event posting and artifact upload.
@@ -105,6 +106,7 @@ export async function postLoopEvent(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "x-loop-event-nonce": crypto.randomUUID(),
+        ...gatewayTraceHeaders(),
       },
       body: JSON.stringify(payload),
       signal,
@@ -206,6 +208,7 @@ export async function uploadArtifacts(
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
+        ...gatewayTraceHeaders(),
       },
       body: JSON.stringify(body),
     });
@@ -274,6 +277,7 @@ export async function getCloudLoopStatus(
       method: "GET",
       headers: {
         Authorization: `Bearer ${token ?? ""}`,
+        ...gatewayTraceHeaders(),
       },
       signal: controller.signal,
     });
@@ -301,6 +305,11 @@ export async function getCloudLoopStatus(
     }
     return { kind: "active" };
   } catch (err) {
+    loopDebug(
+      loopId,
+      () =>
+        `cloud status poll failed: ${err instanceof Error ? err.message : String(err)}`
+    );
     return {
       kind: "error",
       message: err instanceof Error ? err.message : String(err),
@@ -508,6 +517,7 @@ export async function postLoopHeartbeat(
     Authorization: authorizationValue,
     "Content-Type": "application/json",
     ...(popHeaders ?? {}),
+    ...gatewayTraceHeaders(),
   };
 
   try {
@@ -528,6 +538,7 @@ export async function postLoopHeartbeat(
     return { success: true, status: resp.status, ...revivalFields };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    loopDebug(loopId, () => `heartbeat request failed: ${msg}`);
     return { success: false, kind: "network", error: msg };
   }
 }
@@ -570,6 +581,7 @@ async function parseHeartbeatRevivalFields(
     }
     return result;
   } catch {
+    // observability: parse fallback — revival fields are optional
     return {};
   }
 }

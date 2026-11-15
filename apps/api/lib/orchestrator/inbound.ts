@@ -6,7 +6,14 @@ import {
   OrchestratorMessageVia,
 } from "@repo/api/src/types/orchestrator";
 import { type Prisma, type TransactionClient, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import {
+  addActiveSpanEvent,
+  setActiveSpanAttributes,
+  setSpanOutcome,
+  withSpan,
+} from "@repo/observability/span";
 import { z } from "zod";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import type { LoadedConnection } from "@/lib/integrations/connection-service";
@@ -98,45 +105,64 @@ type KnownConversation = {
   case: { id: string; workflowId: string };
 };
 
-export async function routeToOrchestrator(
+export function routeToOrchestrator(
   input: OrchestratorRouteInput
 ): Promise<OrchestratorRouteResult[]> {
-  const { event } = input;
-  const organizationId = input.connection.record.organizationId;
-  const parentId =
-    event.message?.parentId ??
-    input.connection.provider.answerReply?.(event) ??
-    null;
-  const targets = await resolveTargets(input, organizationId, parentId);
-  if (targets.length === 0) {
-    return [];
-  }
-  const settings = await loadOrchestratorWorkflows(
-    organizationId,
-    targets.map((target) => target.workflowId)
-  );
-  const results: OrchestratorRouteResult[] = [];
-  for (const target of targets) {
-    const workflow = settings.get(target.workflowId);
-    if (!workflow?.enabled) {
-      log.info(`${LOG_PREFIX} workflow is not an enabled orchestrator`, {
-        workflowId: target.workflowId,
-        dedupKey: event.dedupKey,
-      });
-      continue;
-    }
-    if (target.continued && workflow.mentionOnly) {
-      log.info(
-        `${LOG_PREFIX} mention-only workflow: a thread reply does not wake it`,
-        { workflowId: target.workflowId, dedupKey: event.dedupKey }
+  return withSpan(
+    "orchestrator.route_inbound",
+    {
+      [AfAttribute.OrgId]: input.connection.record.organizationId,
+      [AfAttribute.ConnectionId]: input.connection.record.id,
+    },
+    async (span) => {
+      const { event } = input;
+      const organizationId = input.connection.record.organizationId;
+      const parentId =
+        event.message?.parentId ??
+        input.connection.provider.answerReply?.(event) ??
+        null;
+      const targets = await resolveTargets(input, organizationId, parentId);
+      if (targets.length === 0) {
+        setSpanOutcome(AfOutcome.Ignored, undefined, span);
+        return [];
+      }
+      const settings = await loadOrchestratorWorkflows(
+        organizationId,
+        targets.map((target) => target.workflowId)
       );
-      continue;
+      const results: OrchestratorRouteResult[] = [];
+      for (const target of targets) {
+        const workflow = settings.get(target.workflowId);
+        if (!workflow?.enabled) {
+          log.info(`${LOG_PREFIX} workflow is not an enabled orchestrator`, {
+            workflowId: target.workflowId,
+            dedupKey: event.dedupKey,
+          });
+          continue;
+        }
+        if (target.continued && workflow.mentionOnly) {
+          log.info(
+            `${LOG_PREFIX} mention-only workflow: a thread reply does not wake it`,
+            { workflowId: target.workflowId, dedupKey: event.dedupKey }
+          );
+          continue;
+        }
+        const delivered = await deliver({
+          input,
+          organizationId,
+          parentId,
+          target,
+          workflow,
+        });
+        addActiveSpanEvent("orchestrator.routed", {
+          [AfAttribute.CaseId]: delivered.caseId,
+          [AfAttribute.ConversationId]: delivered.conversationId,
+        });
+        results.push(delivered);
+      }
+      return results;
     }
-    results.push(
-      await deliver({ input, organizationId, parentId, target, workflow })
-    );
-  }
-  return results;
+  );
 }
 
 /**
@@ -279,7 +305,11 @@ async function openConversation(input: {
   const { organizationId, projectId, workflowId, event } = input;
   const sourceKey = caseSourceKey(event.item);
   const channelKey = channelKeyFor(event.item, input.parentId);
-  return await withDb.tx(async (tx) => {
+  const opened = await withDb.tx(async (tx) => {
+    const before = await tx.orchestratorCase.findUnique({
+      where: { workflowId_sourceKey: { workflowId, sourceKey } },
+      select: { status: true },
+    });
     const found = await tx.orchestratorCase.upsert({
       where: { workflowId_sourceKey: { workflowId, sourceKey } },
       create: {
@@ -309,7 +339,11 @@ async function openConversation(input: {
             }
           : {},
       });
-      return { conversationId: existing.id, caseId: found.id };
+      return {
+        conversationId: existing.id,
+        caseId: found.id,
+        previousStatus: before?.status ?? null,
+      };
     }
     const conversation = await tx.orchestratorConversation.create({
       data: {
@@ -325,8 +359,29 @@ async function openConversation(input: {
       },
       select: { id: true },
     });
-    return { conversationId: conversation.id, caseId: found.id };
+    return {
+      conversationId: conversation.id,
+      caseId: found.id,
+      previousStatus: before?.status ?? null,
+    };
   });
+  logCaseOpened(opened.previousStatus, {
+    organizationId,
+    projectId,
+    caseId: opened.caseId,
+  });
+  return { conversationId: opened.conversationId, caseId: opened.caseId };
+}
+
+function logCaseOpened(
+  previousStatus: string | null,
+  meta: { organizationId: string; projectId: string; caseId: string }
+): void {
+  if (previousStatus === null) {
+    log.info("orchestrator.case.created", meta);
+  } else if (previousStatus !== OrchestratorCaseStatus.Open) {
+    log.info("orchestrator.case.reopened", meta);
+  }
 }
 
 /** Records the message once; true when it is new. */
@@ -464,6 +519,7 @@ function messageContent(event: InboundEvent): {
     ? ticketChangeMessage(event.itemChange, actor)
     : null;
   if (change) {
+    setActiveSpanAttributes({ "af.orchestrator.ticket_change": change.kind });
     return change;
   }
   return {
@@ -522,6 +578,9 @@ async function askTargets(
       conversationId: conversation.id,
     });
     if (!checked.ok) {
+      addActiveSpanEvent("orchestrator.teams_ask_ignored", {
+        reason: checked.reason,
+      });
       input.onIgnored?.(describeTeamsAskIgnored(checked.reason));
     }
     return [];

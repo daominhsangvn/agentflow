@@ -142,6 +142,7 @@ async function git(cwd: string, args: string[]): Promise<string | null> {
     });
     return stdout;
   } catch {
+    // observability: probe — git may fail when the ref or repo is absent; null means no diff
     return null;
   }
 }

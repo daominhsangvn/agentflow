@@ -92,6 +92,7 @@ function readStoreFile(filePath: string): Record<string, unknown> {
   try {
     raw = fs.readFileSync(filePath, "utf8");
   } catch {
+    // observability: probe — a missing store file is empty
     return {};
   }
   try {
@@ -103,6 +104,9 @@ function readStoreFile(filePath: string): Record<string, unknown> {
       : {};
   } catch {
     // A corrupt file must not stop the runner; keep a copy for diagnosis.
+    console.warn(
+      `electron-store: corrupt store file ${path.basename(filePath)} moved aside (reason: store_file_corrupt)`
+    );
     fs.renameSync(filePath, `${filePath}.corrupt-${Date.now()}`);
     return {};
   }

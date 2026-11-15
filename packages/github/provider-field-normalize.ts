@@ -56,6 +56,7 @@ export function sanitizeProviderUrl(
       ? url.toString()
       : null;
   } catch {
+    // observability: parse fallback — an unparseable URL is treated as absent
     return null;
   }
 }

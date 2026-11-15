@@ -10,8 +10,10 @@ import {
   type WorkflowRunError,
   WorkflowRunErrorCode,
 } from "@repo/api/src/types/workflow";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { parseError } from "@repo/observability/error";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { computeTargetsService } from "@/app/compute-targets/service";
 import { resolveLoopContext } from "@/app/documents/[id]/run-loop/run-loop-helpers";
 import { documentGenerationService } from "@/app/documents/generation-service";
@@ -87,7 +89,32 @@ type AgentFlowCommand = Exclude<EngineLoopCommand, typeof LoopCommand.Step>;
 
 export type LaunchedLoop = { loopId: string; computeTargetId: string };
 
-export async function launchWorkflowLoop(
+export function launchWorkflowLoop(
+  input: LaunchWorkflowLoopInput
+): Promise<Result<LaunchedLoop, WorkflowRunError>> {
+  return withSpan(
+    "workflow.launch_loop",
+    {
+      [AfAttribute.WorkflowRunId]: input.runId,
+      [AfAttribute.OrgId]: input.organizationId,
+    },
+    async (span) => {
+      const result = await launchWorkflowLoopLocked(input);
+      if (result.ok) {
+        span.setAttribute(AfAttribute.LoopId, result.value.loopId);
+        span.setAttribute(
+          AfAttribute.ComputeTargetId,
+          result.value.computeTargetId
+        );
+      } else {
+        setSpanOutcome(AfOutcome.Error, result.error.message, span);
+      }
+      return result;
+    }
+  );
+}
+
+async function launchWorkflowLoopLocked(
   input: LaunchWorkflowLoopInput
 ): Promise<Result<LaunchedLoop, WorkflowRunError>> {
   const artifact = await documentGenerationService.findWithRegenerationContext(

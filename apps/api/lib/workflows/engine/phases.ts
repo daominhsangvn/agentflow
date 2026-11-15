@@ -18,11 +18,7 @@ import {
 import { withDb } from "@repo/database";
 import { parseError } from "@repo/observability/error";
 import { loopsService } from "@/app/loops/service";
-import { createProviderContext } from "@/lib/integrations/connection-service";
-import {
-  RetryableSourceError,
-  type SourceItem,
-} from "@/lib/integrations/types";
+import type { SourceItem } from "@/lib/integrations/types";
 import {
   readRunStepState,
   settleAgentStep,
@@ -46,7 +42,7 @@ import {
   ensureRunDocuments,
   markIssueInReview,
 } from "./documents";
-import { runError, scrubProviderError } from "./errors";
+import { runError } from "./errors";
 import { launchWorkflowLoop } from "./launch";
 import {
   enterPreActions,
@@ -65,7 +61,7 @@ import {
 } from "./process";
 import { publishExecuteReleaseNotes } from "./release-notes";
 import { advanceReview } from "./review-round";
-import { readAgentConfig, readRunSource } from "./run-data";
+import { readAgentConfig } from "./run-data";
 import {
   findAdoptableLoop,
   findLatestRunLoop,
@@ -82,7 +78,7 @@ import {
   requestSourceClassification,
   SourceClassificationKind,
 } from "./source-classification";
-import { loadSourceConnection } from "./source-connection";
+import { resolveSourceItem, retrySourceFetch } from "./source-item";
 import {
   type EngineRun,
   failRun,
@@ -95,7 +91,6 @@ import {
   transition,
   WAIT,
 } from "./step-outcome";
-import { STEP_MAX_ATTEMPTS, stepRetryDelayMs } from "./step-retry";
 
 /**
  * One step of the run state machine per status (docs/workflows.md "Run state
@@ -103,8 +98,6 @@ import { STEP_MAX_ATTEMPTS, stepRetryDelayMs } from "./step-retry";
  * transition, and advance.ts applies it under the lease together with the
  * events it enqueues.
  */
-
-const LOG_PREFIX = "[workflows/engine]";
 
 export async function runPhaseStep(
   run: EngineRun,
@@ -140,7 +133,6 @@ export type RunContext = {
 };
 
 /** Why the source item is unavailable; retryable for temporary failures. */
-type SourceItemFailure = { error: WorkflowRunError; retryable: boolean };
 
 /**
  * received: import the item first; ingesting runs the workflow.triggered
@@ -840,64 +832,6 @@ export async function loadRunContext(
   return Result.ok({ agent, projectId: project.id, runAsUser });
 }
 
-/**
- * The inline item, else the canonical item fetched with the connection. A
- * RetryableSourceError (rate limited, 5xx, timeout) is reported as retryable.
- */
-async function resolveSourceItem(
-  run: EngineRun
-): Promise<Result<SourceItem, SourceItemFailure>> {
-  const source = readRunSource(run.source);
-  if (!source) {
-    return sourceError("The run's source item could not be read.");
-  }
-  if (source.inlineItem) {
-    return Result.ok(source.inlineItem);
-  }
-  const loaded = await loadSourceConnection(run);
-  if (!loaded) {
-    return sourceError(
-      "The integration connection of the trigger is no longer available."
-    );
-  }
-  const fetchItem = loaded.provider.source?.fetchItem;
-  if (!fetchItem) {
-    return sourceError(
-      `${loaded.provider.displayName} cannot fetch source items.`
-    );
-  }
-  try {
-    const item = await fetchItem(
-      createProviderContext(loaded.runtime, LOG_PREFIX),
-      source.item
-    );
-    return Result.ok(item);
-  } catch (error) {
-    return sourceError(
-      `Could not load ${source.item.key} from ${loaded.provider.displayName}: ${scrubProviderError(error, loaded.runtime.secrets)}`,
-      error instanceof RetryableSourceError
-    );
-  }
-}
-
-/** Retry the import after its backoff, or fail once every attempt is used. */
-function retrySourceFetch(
-  run: EngineRun,
-  error: WorkflowRunError
-): StepOutcome {
-  const failedAttempts = run.stepAttempts + 1;
-  const delayMs = stepRetryDelayMs(failedAttempts);
-  if (delayMs === null) {
-    return failRun(
-      runError(
-        WorkflowRunErrorCode.SourceFetchFailed,
-        `${error.message} (gave up after ${STEP_MAX_ATTEMPTS} attempts)`
-      )
-    );
-  }
-  return { kind: "retry", delayMs, error };
-}
-
 /** PR URL and branch from the loop row, else from its linked pull request. */
 async function resolvePullRequest(
   organizationId: string,
@@ -974,16 +908,6 @@ function agentConfigError(): WorkflowRunError {
     WorkflowRunErrorCode.AgentConfigInvalid,
     "The workflow's agent settings are invalid. Save the workflow again."
   );
-}
-
-function sourceError(
-  message: string,
-  retryable = false
-): Result<never, SourceItemFailure> {
-  return Result.err({
-    error: runError(WorkflowRunErrorCode.SourceFetchFailed, message),
-    retryable,
-  });
 }
 
 /** The agent policy of the run's plan or implement step about to launch. */

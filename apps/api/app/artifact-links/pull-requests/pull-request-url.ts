@@ -15,6 +15,7 @@ export function parseGitHubPullRequestUrl(
   try {
     url = new URL(value);
   } catch {
+    // observability: (a) parse fallback — an invalid URL is not a pull request link
     return null;
   }
   if (
@@ -62,6 +63,7 @@ export function isSafeRepositorySegment(segment: string): boolean {
       !hasControlCharacter(decoded)
     );
   } catch {
+    // observability: (a) parse fallback — an undecodable segment is unsafe
     return false;
   }
 }

@@ -14,7 +14,7 @@ any integration connection plays them.
 
 | View | Shows |
 |---|---|
-| `index` | The components: Orchestrator Core (API, code) and Orchestrator Agent (LLM, own runner), Integration layer, MCP server, worker runners |
+| `index` | The components: Orchestrator Core (API, code) and Orchestrator Agent (LLM, own runner), Integration layer, MCP server, worker runners, and the observability stack (OTel collector, ClickHouse, SigNoz UI) that the services report to |
 | `deployment` | Where each component runs |
 | `turnLifecycle` | Flow 1: a message arrives, the agent decides, the Core acts |
 | `taskAndWait` | Flow 2: a task on a worker runner, the wait, the next turn |

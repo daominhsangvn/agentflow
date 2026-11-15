@@ -40,7 +40,7 @@ Providers retry on timeout or non-2xx. All handlers must be safe to invoke multi
 
 ## Logging Conventions
 
-Log prefixes: `[webhook/<provider>]` in `route.ts`, `[<handlerFunctionName>]` in handlers. Log key identifiers (event type, entity IDs, correlation IDs) as structured fields, not interpolated strings — this enables log-based metrics in Datadog. Emit one terminal structured `outcome` log per request; no received/validating/processing narration at info. GitHub's exact strings are `[webhook/github] Completed webhook handling` (route) and `[handleCheckRun] Completed check_run webhook handling` (check_run handler).
+Log prefixes: `[webhook/<provider>]` in `route.ts`, `[<handlerFunctionName>]` in handlers. Log key identifiers (event type, entity IDs, correlation IDs) as structured fields, not interpolated strings — this enables log-based queries in SigNoz. Emit one terminal structured `outcome` log per request; no received/validating/processing narration at info. GitHub's exact strings are `[webhook/github] Completed webhook handling` (route) and `[handleCheckRun] Completed check_run webhook handling` (check_run handler).
 
 ## Adding a New Webhook Handler
 

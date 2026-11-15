@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { TracingConfig } from "@repo/observability/tracing/config";
-import { TracingDisabledReason } from "@repo/observability/tracing/config";
+import type { TelemetryConfig } from "@repo/observability/tracing/config";
+import { TelemetryDisabledReason } from "@repo/observability/tracing/config";
 import ts from "typescript6";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * FEA-3300: pool telemetry reaches Datadog only because `register()` injects the
+ * FEA-3300: pool telemetry reaches SigNoz only because `register()` injects the
  * emitter into `@repo/database` — that package cannot import
  * `@repo/observability` itself (apps/mcp packages it through a narrow Docker
  * context). If this wiring is ever dropped, the pool goes quiet silently and an
@@ -18,9 +18,9 @@ const mocks = vi.hoisted(() => ({
   emitDbPoolMetric: vi.fn(),
   assertRunnerSecretConfigured: vi.fn(),
   // No default impl here: `vi.hoisted` runs before module imports initialize,
-  // so `TracingDisabledReason` is still in its temporal dead zone. The default
+  // so `TelemetryDisabledReason` is still in its temporal dead zone. The default
   // is set from the const in `beforeEach` instead of hardcoding the literal.
-  initTracing: vi.fn<() => TracingConfig>(),
+  initTelemetry: vi.fn<() => TelemetryConfig>(),
   logInfo: vi.fn(),
   logWarn: vi.fn(),
 }));
@@ -46,7 +46,7 @@ vi.mock("@repo/observability/telemetry/metrics", () => ({
 // ISS-4659: mocked so this stays a unit test — the real provider would pull the
 // OpenTelemetry Node SDK into the suite.
 vi.mock("@repo/observability/tracing/provider", () => ({
-  initTracing: mocks.initTracing,
+  initTelemetry: mocks.initTelemetry,
 }));
 
 vi.mock("@repo/observability/log", () => ({
@@ -67,9 +67,9 @@ describe("apps/api register()", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("NEXT_RUNTIME", "nodejs");
-    mocks.initTracing.mockReturnValue({
+    mocks.initTelemetry.mockReturnValue({
       enabled: false,
-      reason: TracingDisabledReason.NotDeployed,
+      reason: TelemetryDisabledReason.MissingEndpoint,
     });
   });
 
@@ -122,9 +122,9 @@ describe("apps/api register()", () => {
 describe("apps/api register() — tracing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.initTracing.mockReturnValue({
+    mocks.initTelemetry.mockReturnValue({
       enabled: false,
-      reason: TracingDisabledReason.NotDeployed,
+      reason: TelemetryDisabledReason.MissingEndpoint,
     });
   });
 
@@ -138,7 +138,7 @@ describe("apps/api register() — tracing", () => {
 
     await register();
 
-    expect(mocks.initTracing).not.toHaveBeenCalled();
+    expect(mocks.initTelemetry).not.toHaveBeenCalled();
     expect(mocks.setPoolTelemetrySink).not.toHaveBeenCalled();
   });
 
@@ -148,7 +148,7 @@ describe("apps/api register() — tracing", () => {
 
     await register();
 
-    expect(mocks.initTracing).toHaveBeenCalledTimes(1);
+    expect(mocks.initTelemetry).toHaveBeenCalledTimes(1);
   });
 
   it("starts the tracer before anything can pull pg in through @repo/database", async () => {
@@ -162,16 +162,16 @@ describe("apps/api register() — tracing", () => {
     // PgInstrumentation patches `pg` at require time and @repo/database imports
     // pg at module scope, so wiring the pool sink first would load pg before
     // the patch and every DB child span would go silently missing.
-    expect(mocks.initTracing.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(mocks.initTelemetry.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.setPoolTelemetrySink.mock.invocationCallOrder[0]
     );
   });
 
   it("stays quiet when tracing is off because this is not a deployed runtime", async () => {
     vi.stubEnv("NEXT_RUNTIME", "nodejs");
-    mocks.initTracing.mockReturnValueOnce({
+    mocks.initTelemetry.mockReturnValueOnce({
       enabled: false,
-      reason: TracingDisabledReason.NotDeployed,
+      reason: TelemetryDisabledReason.MissingEndpoint,
     });
     const { register } = await import("../instrumentation");
 
@@ -184,9 +184,9 @@ describe("apps/api register() — tracing", () => {
 
   it("warns when tracing is off for a reason an operator should act on", async () => {
     vi.stubEnv("NEXT_RUNTIME", "nodejs");
-    mocks.initTracing.mockReturnValueOnce({
+    mocks.initTelemetry.mockReturnValueOnce({
       enabled: false,
-      reason: TracingDisabledReason.MissingEndpoint,
+      reason: TelemetryDisabledReason.ExplicitlyDisabled,
     });
     const { register } = await import("../instrumentation");
 
@@ -194,8 +194,8 @@ describe("apps/api register() — tracing", () => {
 
     // A tracer that never started looks identical to a service with no
     // traffic; this warning is the only thing that distinguishes them.
-    expect(mocks.logWarn).toHaveBeenCalledWith("telemetry.tracing_disabled", {
-      reason: TracingDisabledReason.MissingEndpoint,
+    expect(mocks.logWarn).toHaveBeenCalledWith("telemetry.disabled", {
+      reason: TelemetryDisabledReason.ExplicitlyDisabled,
     });
   });
 });
@@ -217,7 +217,7 @@ describe("apps/api register() — tracing", () => {
  *    orders the two calls. `packages/database/index.ts` imports `pg` at module
  *    scope (and `@prisma/adapter-pg`, which depends on `pg`), while
  *    `PgInstrumentation` patches `pg` at require time. A static import here
- *    would materialise `pg` before `registerTracing()` runs and every DB child
+ *    would materialise `pg` before `registerTelemetry()` runs and every DB child
  *    span would go silently missing for the life of the process — and the
  *    behavioural tests above would stay green, because they mock
  *    `@repo/database` away entirely.
@@ -241,7 +241,7 @@ describe("apps/api instrumentation — import evaluation order", () => {
    *
    * `@repo/observability/tracing/provider` is deliberately absent: its dynamic
    * import is load-bearing for a different reason (it sits inside
-   * `registerTracing`'s fail-open `try`), and
+   * `registerTelemetry`'s fail-open `try`), and
    * `instrumentation-tracing-import-failure.test.ts` already fails if it turns
    * static, because the throwing module mock would then reject `register()`.
    */

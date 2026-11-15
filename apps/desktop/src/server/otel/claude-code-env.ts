@@ -42,6 +42,8 @@ export type ClaudeCodeShellEnvProviderOptions = {
   getReceiverStatus: () => unknown;
   diagnostics?: ClaudeCodeOtelEnvDiagnostics;
   getBaseShellEnv?: typeof getShellEnv;
+  /** Applied on top of the merged env when the receiver is Ready; always wins. */
+  envOverrides?: Record<string, string>;
 };
 
 export const ClaudeCodeOtelDiagnosticTag = "claude-otel-env";
@@ -132,7 +134,7 @@ export function createClaudeCodeShellEnvProvider(
         merged[key] = defaults[key];
       }
     }
-    return merged;
+    return { ...merged, ...options.envOverrides };
   };
 }
 
@@ -156,6 +158,7 @@ function readReceiverStatus(
   try {
     rawStatus = getReceiverStatus();
   } catch {
+    // observability: telemetry — the Unavailable status carries the thrown reason
     return {
       state: ClaudeCodeOtelReceiverState.Unavailable,
       reason: ClaudeCodeOtelUnavailableReason.ReceiverStatusThrown,

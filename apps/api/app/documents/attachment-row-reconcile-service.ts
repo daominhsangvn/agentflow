@@ -137,6 +137,7 @@ async function classifyRow(
       outcome: head === null ? HeadOutcome.Absent : HeadOutcome.Present,
     };
   } catch (error) {
+    log.warn("documents.attachment_head_failed", { error, key: row.key });
     return {
       outcome: HeadOutcome.Ambiguous,
       error: getSafeAttachmentStorageErrorMessage(error),

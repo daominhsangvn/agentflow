@@ -3,6 +3,7 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import { Observability } from "../../main/telemetry/observability.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import { validateOutboundUrlForSurface } from "../outbound-url-policy.js";
@@ -188,12 +189,14 @@ export function registerDeployRoutes(
         repoName: path.basename(expandedRepoPath),
       });
     } catch (error) {
+      gatewayLog.error(LOG_TAG, "start deployment failed", { error });
       const message = error instanceof Error ? error.message : "Unknown error";
       json(context, 500, { error: `Failed to start deployment: ${message}` });
     } finally {
       try {
         closeSync(logFd);
       } catch {
+        // observability: c — best-effort log fd close
         // no-op
       }
     }
@@ -239,6 +242,7 @@ export function registerDeployRoutes(
         statusCode: response.status,
       });
     } catch {
+      // observability: b — health probe, the response reports alive=false
       json(context, 200, {
         alive: false,
         statusCode: null,
@@ -262,6 +266,7 @@ export function registerDeployRoutes(
     try {
       process.kill(pid, 0);
     } catch {
+      // observability: b — liveness probe, the response reports the process gone
       json(context, 200, {
         success: true,
         message: "Process already terminated",
@@ -277,6 +282,7 @@ export function registerDeployRoutes(
         process.kill(pid, 0);
         killProcessTree(pid, "SIGKILL");
       } catch {
+        // observability: c — process already gone
         // Process is already gone.
       }
 
@@ -296,6 +302,7 @@ export function registerDeployRoutes(
         return;
       }
 
+      gatewayLog.error(LOG_TAG, "kill process failed", { error });
       json(context, 500, {
         error: `Failed to kill process: ${message}`,
       });
@@ -750,6 +757,7 @@ function detectDeployment(repoPath: string): RepoDeploymentConfig | null {
       healthCheckUrl: port ? `http://localhost:${port}` : undefined,
     };
   } catch {
+    // observability: a — parse fallback, the fallback is the handling
     return null;
   }
 }
@@ -893,6 +901,7 @@ function isProcessAlive(pidRaw: string | null): boolean {
     process.kill(pid, 0);
     return true;
   } catch {
+    // observability: b — liveness probe
     return false;
   }
 }
@@ -905,6 +914,7 @@ async function readTextFile(targetPath: string): Promise<string> {
   try {
     return await fs.readFile(targetPath, "utf-8");
   } catch {
+    // observability: b — probe, absence is a normal state
     return "";
   }
 }
@@ -921,6 +931,7 @@ async function readJsonFile<T>(targetPath: string): Promise<T | null> {
     }
     return JSON.parse(content) as T;
   } catch {
+    // observability: a — parse fallback, the fallback is the handling
     return null;
   }
 }
@@ -930,13 +941,15 @@ function killByPid(pid: number): "killed" | "error" {
     killProcessTree(pid, "SIGTERM");
     return "killed";
   } catch {
+    // observability: c — fall back to the direct PID kill
     // Try direct PID fallback.
   }
 
   try {
     process.kill(pid, "SIGTERM");
     return "killed";
-  } catch {
+  } catch (error) {
+    gatewayLog.warn(LOG_TAG, "kill by pid failed", { error });
     return "error";
   }
 }
@@ -979,12 +992,14 @@ function killByPort(port: number): "killed" | "none" | "error" {
         process.kill(pid, "SIGTERM");
         killed = true;
       } catch {
+        // observability: c — process already gone
         // Process already gone.
       }
     }
 
     return killed ? "killed" : "none";
-  } catch {
+  } catch (error) {
+    gatewayLog.debug(LOG_TAG, "kill by ports failed", { error });
     return "none";
   }
 }
@@ -1002,7 +1017,8 @@ async function runTeardownCommand(
       env: await getShellEnv(),
     });
     return true;
-  } catch {
+  } catch (error) {
+    gatewayLog.warn(LOG_TAG, "teardown command failed", { error });
     return false;
   }
 }
@@ -1048,15 +1064,23 @@ export function startHealthPoll(
 
       if (isDeployHealthAlive(response)) {
         clearInterval(interval);
-        await fs.writeFile(
-          resultJsonPath,
-          JSON.stringify({ url: healthCheckUrl }),
-          "utf-8"
-        );
+        try {
+          await fs.writeFile(
+            resultJsonPath,
+            JSON.stringify({ url: healthCheckUrl }),
+            "utf-8"
+          );
+        } catch (error: unknown) {
+          gatewayLog.warn(LOG_TAG, "deploy result write failed", {
+            reason: "deploy_result_write_failed",
+            error,
+          });
+        }
         return;
       }
-    } catch {
-      // keep polling
+    } catch (error: unknown) {
+      // observability: health poll, the next attempt retries
+      gatewayLog.debug(LOG_TAG, "health poll attempt failed", { error });
     }
 
     if (attempt >= maxAttempts) {
@@ -1139,3 +1163,5 @@ function asNumber(value: unknown): number | null {
 
   return null;
 }
+
+const LOG_TAG = "deploy";

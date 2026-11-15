@@ -42,6 +42,27 @@ describe("createClaudeCodeShellEnvProvider", () => {
     assert.equal(env.EXISTING_EXTRA, "kept");
   });
 
+  test("envOverrides pin content switches over the inherited shell env", async () => {
+    const provider = createClaudeCodeShellEnvProvider({
+      getReceiverStatus: () => ({
+        state: ClaudeCodeOtelReceiverState.Ready,
+        host: "127.0.0.1",
+        port: 4318,
+      }),
+      getBaseShellEnv: async (extra) => ({
+        ...(await baseShellEnv(extra)),
+        OTEL_LOG_USER_PROMPTS: "1",
+        OTEL_LOG_TOOL_DETAILS: "1",
+      }),
+      envOverrides: { OTEL_LOG_USER_PROMPTS: "0", OTEL_LOG_TOOL_DETAILS: "0" },
+    });
+
+    const env = await provider();
+
+    assert.equal(env.OTEL_LOG_USER_PROMPTS, "0");
+    assert.equal(env.OTEL_LOG_TOOL_DETAILS, "0");
+  });
+
   test("fails closed when receiver status is unavailable and warns once", async () => {
     const warnings: Array<{ tag: string; message: string }> = [];
     const provider = createClaudeCodeShellEnvProvider({

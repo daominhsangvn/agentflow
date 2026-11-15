@@ -225,8 +225,8 @@ describe("withApiKeyAuth", () => {
 
     expect(response.status).toBe(200);
     expect(handler).toHaveBeenCalledOnce();
-    // Two waitUntils: apiKeysService.touchLastUsedAt + logRequestCompleted's scheduleLogFlush
-    expect(mockWaitUntil).toHaveBeenCalledTimes(2);
+    // One waitUntil: apiKeysService.touchLastUsedAt
+    expect(mockWaitUntil).toHaveBeenCalledTimes(1);
   });
 
   it("does not report non-PoP lookup exceptions as PoP verifier outages", async () => {

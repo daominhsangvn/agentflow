@@ -214,3 +214,14 @@ test("personal mode reads this computer's role", () => {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }
 });
+
+test("telemetry is on unless AGENTFLOW_RUNNER_TELEMETRY=false", () => {
+  const unset = loadHeadlessConfig(baseEnv());
+  assert.equal(unset.ok && unset.config.telemetry, true);
+  const off = loadHeadlessConfig({
+    ...baseEnv(),
+    [HeadlessRunnerEnv.Telemetry]: "false",
+  });
+  assert.equal(off.ok, true);
+  assert.equal(off.ok && off.config.telemetry, false);
+});

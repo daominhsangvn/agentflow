@@ -62,7 +62,7 @@ describe("createStatusFoldTally — never-throw contract (ISS-5981)", () => {
     // down with it. Asserting the emit was ATTEMPTED first, so this cannot pass
     // by silently emitting nothing.
     emitTelemetryMetric.mockImplementationOnce(() => {
-      throw new Error("datadog unavailable");
+      throw new Error("telemetry unavailable");
     });
     const tally = createStatusFoldTally();
     tally.record(buildOutcome({ unmodelledStatus: "brand-new-status" }));

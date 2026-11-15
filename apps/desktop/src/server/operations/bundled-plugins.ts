@@ -100,6 +100,7 @@ export function getBundledPluginVersion(pluginName: string): string | null {
     ) as { version?: unknown };
     return typeof manifest.version === "string" ? manifest.version : "";
   } catch {
+    // observability: b — probe, absence is a normal state
     return "";
   }
 }

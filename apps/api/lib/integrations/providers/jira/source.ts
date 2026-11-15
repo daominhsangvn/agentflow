@@ -279,6 +279,7 @@ function decodePathSegment(segment: string): string {
   try {
     return decodeURIComponent(segment);
   } catch {
+    // observability: (a) parse fallback — an undecodable segment is used as is
     return segment;
   }
 }

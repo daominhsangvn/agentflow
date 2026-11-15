@@ -1,7 +1,9 @@
 import { WORKFLOW_RUN_FINAL_STATUSES } from "@repo/api/src/types/workflow";
 import { withDb } from "@repo/database";
+import { AfOutcome } from "@repo/observability/af-attributes";
 import { parseError } from "@repo/observability/error";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import pLimit from "p-limit";
 import { mapWithDbConcurrency } from "@/lib/db-fanout";
 import { advanceDueConversations } from "@/lib/orchestrator/advance";
@@ -39,36 +41,50 @@ export type WorkflowTickResult = {
   durationMs: number;
 };
 
-export async function runWorkflowTick(
+export function runWorkflowTick(
   now: Date = new Date()
 ): Promise<WorkflowTickResult> {
+  return withSpan("workflow.tick", {}, () => runTickStages(now));
+}
+
+async function runTickStages(now: Date): Promise<WorkflowTickResult> {
   const startedAt = Date.now();
   const errors: string[] = [];
-  const poll = await runStage(errors, "poll", () => pollDueConnections(now), {
-    polled: 0,
-    failed: 0,
-    events: 0,
-    runs: 0,
-  });
-  const runs = await runStage(errors, "advance", () => advanceDueRuns(now), {
-    checked: 0,
-    advanced: 0,
-  });
+  const poll = await runStage(
+    errors,
+    WorkflowTickStage.Poll,
+    () => pollDueConnections(now),
+    {
+      polled: 0,
+      failed: 0,
+      events: 0,
+      runs: 0,
+    }
+  );
+  const runs = await runStage(
+    errors,
+    WorkflowTickStage.Advance,
+    () => advanceDueRuns(now),
+    {
+      checked: 0,
+      advanced: 0,
+    }
+  );
   const requeued = await runStage(
     errors,
-    "requeue",
+    WorkflowTickStage.Requeue,
     () => requeueStaleActionRuns(now),
     0
   );
   const drained = await runStage(
     errors,
-    "drain",
+    WorkflowTickStage.Drain,
     () => drainActionRuns({ limit: TICK_DRAIN_LIMIT, now }),
     { claimed: 0, succeeded: 0, skipped: 0, retried: 0, failed: 0 }
   );
   const orchestrator = await runStage(
     errors,
-    "orchestrator",
+    WorkflowTickStage.Orchestrator,
     () => advanceDueConversations(now),
     { advanced: 0, tasksLaunched: 0, waitsFired: 0 }
   );
@@ -110,17 +126,30 @@ async function advanceDueRuns(
   };
 }
 
-async function runStage<T>(
+function runStage<T>(
   errors: string[],
-  stage: string,
+  stage: WorkflowTickStage,
   work: () => Promise<T>,
   fallback: T
 ): Promise<T> {
-  try {
-    return await work();
-  } catch (error) {
-    log.error(`${LOG_PREFIX} Stage failed`, { stage, error });
-    errors.push(`${stage}: ${parseError(error)}`);
-    return fallback;
-  }
+  return withSpan(`workflow.tick.${stage}`, {}, async (span) => {
+    try {
+      return await work();
+    } catch (error) {
+      log.error(`${LOG_PREFIX} Stage failed`, { stage, error });
+      errors.push(`${stage}: ${parseError(error)}`);
+      setSpanOutcome(AfOutcome.Error, parseError(error), span);
+      return fallback;
+    }
+  });
 }
+
+export const WorkflowTickStage = {
+  Poll: "poll",
+  Advance: "advance",
+  Requeue: "requeue",
+  Drain: "drain",
+  Orchestrator: "orchestrator",
+} as const;
+export type WorkflowTickStage =
+  (typeof WorkflowTickStage)[keyof typeof WorkflowTickStage];

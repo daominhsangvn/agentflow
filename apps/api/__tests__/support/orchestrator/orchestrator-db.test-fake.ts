@@ -140,6 +140,9 @@ export function createOrchestratorDbFake() {
         Promise.resolve(workflows.filter((row) => matches(row, args.where))),
     },
     orchestratorCase: {
+      findUnique: (args: { where: { workflowId_sourceKey: Row } }) =>
+        cases.find((row) => matches(row, args.where.workflowId_sourceKey)) ??
+        null,
       upsert: (args: {
         where: { workflowId_sourceKey: Row };
         create: Row;

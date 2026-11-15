@@ -13,7 +13,13 @@ import {
   sanitizeApiKeyScopes,
 } from "@repo/api/src/utils/api-key-scope-resolution";
 import { ApiKeySource, withDb } from "@repo/database";
+import { AfAttribute } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import {
+  type SpanAttributes,
+  setActiveSpanAttributes,
+  withSpan,
+} from "@repo/observability/span";
 import type { VerifiedApiKeyContextWithMetadata } from "@/lib/auth/api-key-context";
 import {
   type ApiKeyVerificationOutcome,
@@ -116,35 +122,42 @@ export const apiKeysService = {
    * Generate a new API key for a user in an organization.
    * Returns the ApiKey record plus the plaintext key (shown once only).
    */
-  async generate(
+  generate(
     organizationId: string,
     userId: string,
     input: CreateApiKeyInput
   ): Promise<CreateApiKeyResponse> {
-    const plaintextKey = createPlaintextKey();
-    const hash = hashToken(plaintextKey);
+    return withResultAttributes(
+      "api_key.generate",
+      { [AfAttribute.OrgId]: organizationId, [AfAttribute.UserId]: userId },
+      async () => {
+        const plaintextKey = createPlaintextKey();
+        const hash = hashToken(plaintextKey);
 
-    const record = await withDb((db) =>
-      db.apiKey.create({
-        data: {
-          organizationId,
-          userId,
-          name: input.name,
-          scopes: [...FULL_ACCESS_SCOPES],
-          keyHash: hash,
-          keyPrefix: "sk_live_",
-          expiresAt: input.expiresAt ?? null,
-          source: ApiKeySource.USER_CREATED,
-          gatewayId: null,
-          boundPublicKey: null,
-        },
-      })
+        const record = await withDb((db) =>
+          db.apiKey.create({
+            data: {
+              organizationId,
+              userId,
+              name: input.name,
+              scopes: [...FULL_ACCESS_SCOPES],
+              keyHash: hash,
+              keyPrefix: "sk_live_",
+              expiresAt: input.expiresAt ?? null,
+              source: ApiKeySource.USER_CREATED,
+              gatewayId: null,
+              boundPublicKey: null,
+            },
+          })
+        );
+
+        return {
+          ...toApiKey(record),
+          plaintext: plaintextKey,
+        };
+      },
+      (value) => ({ [ApiKeySpanAttribute.KeyId]: value.id })
     );
-
-    return {
-      ...toApiKey(record),
-      plaintext: plaintextKey,
-    };
   },
 
   /**
@@ -154,51 +167,62 @@ export const apiKeysService = {
    * Concurrent claims rely on the partial unique index added in the matching
    * migration to reject duplicate active rows with Prisma `P2002`.
    */
-  async rotateDesktopManagedKey(
+  rotateDesktopManagedKey(
     input: RotateDesktopManagedKeyInput
   ): Promise<CreateApiKeyResponse> {
-    const plaintextKey = createPlaintextKey();
-    const hash = hashToken(plaintextKey);
-    const now = new Date();
+    return withResultAttributes(
+      "api_key.rotate_desktop_managed",
+      {
+        [AfAttribute.OrgId]: input.organizationId,
+        [AfAttribute.UserId]: input.userId,
+      },
+      async () => {
+        const plaintextKey = createPlaintextKey();
+        const hash = hashToken(plaintextKey);
+        const now = new Date();
 
-    try {
-      const record = await withDb.tx(async (tx) => {
-        await tx.apiKey.updateMany({
-          where: {
-            organizationId: input.organizationId,
-            userId: input.userId,
-            source: ApiKeySource.DESKTOP_MANAGED,
-            gatewayId: input.gatewayId,
-            revokedAt: null,
-          },
-          data: { revokedAt: now },
-        });
+        try {
+          const record = await withDb.tx(async (tx) => {
+            await tx.apiKey.updateMany({
+              where: {
+                organizationId: input.organizationId,
+                userId: input.userId,
+                source: ApiKeySource.DESKTOP_MANAGED,
+                gatewayId: input.gatewayId,
+                revokedAt: null,
+              },
+              data: { revokedAt: now },
+            });
 
-        return tx.apiKey.create({
-          data: {
-            organizationId: input.organizationId,
-            userId: input.userId,
-            name: input.name ?? defaultDesktopManagedKeyName(input.gatewayId),
-            scopes: [...FULL_ACCESS_SCOPES],
-            keyHash: hash,
-            keyPrefix: "sk_live_",
-            expiresAt: null,
-            source: ApiKeySource.DESKTOP_MANAGED,
-            gatewayId: input.gatewayId,
-            boundPublicKey: input.boundPublicKey ?? null,
-          },
-        });
-      });
-      return {
-        ...toApiKey(record),
-        plaintext: plaintextKey,
-      };
-    } catch (error) {
-      if (getPrismaErrorCode(error) === "P2002") {
-        throw new DesktopManagedKeyRotationConflictError();
-      }
-      throw error;
-    }
+            return tx.apiKey.create({
+              data: {
+                organizationId: input.organizationId,
+                userId: input.userId,
+                name:
+                  input.name ?? defaultDesktopManagedKeyName(input.gatewayId),
+                scopes: [...FULL_ACCESS_SCOPES],
+                keyHash: hash,
+                keyPrefix: "sk_live_",
+                expiresAt: null,
+                source: ApiKeySource.DESKTOP_MANAGED,
+                gatewayId: input.gatewayId,
+                boundPublicKey: input.boundPublicKey ?? null,
+              },
+            });
+          });
+          return {
+            ...toApiKey(record),
+            plaintext: plaintextKey,
+          };
+        } catch (error) {
+          if (getPrismaErrorCode(error) === "P2002") {
+            throw new DesktopManagedKeyRotationConflictError();
+          }
+          throw error;
+        }
+      },
+      (value) => ({ [ApiKeySpanAttribute.KeyId]: value.id })
+    );
   },
 
   /**
@@ -230,19 +254,29 @@ export const apiKeysService = {
     userId: string,
     canManageAll = false
   ): Promise<boolean> {
-    return withDb(async (db) => {
-      const where = canManageAll
-        ? { id, organizationId, revokedAt: null }
-        : { id, organizationId, userId, revokedAt: null };
+    return withSpan(
+      "api_key.revoke",
+      {
+        [AfAttribute.OrgId]: organizationId,
+        [AfAttribute.UserId]: userId,
+        [ApiKeySpanAttribute.KeyId]: id,
+      },
+      () => {
+        return withDb(async (db) => {
+          const where = canManageAll
+            ? { id, organizationId, revokedAt: null }
+            : { id, organizationId, userId, revokedAt: null };
 
-      const result = await db.apiKey.updateMany({
-        where,
-        data: {
-          revokedAt: new Date(),
-        },
-      });
-      return result.count > 0;
-    });
+          const result = await db.apiKey.updateMany({
+            where,
+            data: {
+              revokedAt: new Date(),
+            },
+          });
+          return result.count > 0;
+        });
+      }
+    );
   },
 
   /**
@@ -371,3 +405,25 @@ export const apiKeysService = {
     return updateLastUsedAt(apiKeyId, new Date());
   },
 };
+
+/**
+ * Span attribute key local to api-key writes. Not `af.api_key_id`: the span
+ * sanitizer drops any key containing "apikey".
+ */
+const ApiKeySpanAttribute = { KeyId: "af.key_id" } as const;
+
+/** Runs `fn` in a span and adds attributes derived from its result. */
+function withResultAttributes<T>(
+  name: string,
+  attributes: SpanAttributes,
+  fn: () => Promise<T>,
+  okAttributes?: (value: T) => SpanAttributes
+): Promise<T> {
+  return withSpan(name, attributes, async () => {
+    const value = await fn();
+    if (okAttributes) {
+      setActiveSpanAttributes(okAttributes(value));
+    }
+    return value;
+  });
+}

@@ -177,6 +177,7 @@ function safeParseJson(line: string): unknown {
   try {
     return JSON.parse(line);
   } catch {
+    // observability: (a) parse fallback — a malformed transcript line is skipped
     return null;
   }
 }

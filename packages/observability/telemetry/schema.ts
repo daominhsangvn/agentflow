@@ -86,7 +86,7 @@ export const TelemetryCategory = {
   //
   // `severity` here is a queryable FIELD, not a log level: the api handler logs
   // every desktop telemetry event at `log.info`. Alerting on this category
-  // therefore needs a `datadog_monitor` in `af-tofu-aws-live` querying
+  // therefore needs an alert rule querying
   // `service:af-api env:prod @category:desktop.db_host.exited_unexpectedly`,
   // exactly as the token-cost pricing-miss monitors do. Not yet landed.
   DbHostExitedUnexpectedly: "desktop.db_host.exited_unexpectedly",
@@ -374,7 +374,7 @@ const desktopShutdownDiagnosticsSchema = z.object({
 // ---------------------------------------------------------------------------
 // LoopPerfEventDiagnostics — permissive passthrough for loop.perf.* categories
 // ---------------------------------------------------------------------------
-// The relay forwards `loopPerf` payloads to Datadog opaquely so version skew
+// The relay forwards `loopPerf` payloads to SigNoz opaquely so version skew
 // between desktop producers and the relay never drops observability data
 // (PRD-254 §FR-6 fail-open, producer-additivity rollout property). Field-level
 // validation is owned by the producer schema in apps/desktop.
@@ -448,7 +448,7 @@ export type LoopPerfEventDiagnostics = z.infer<
 //
 // `command` is `.optional()` so payloads without the field also validate
 // (back-compat, AC-001). Unknown sibling fields under `lifecycle` survive
-// parsing and reach Datadog via `.passthrough()` (AC-003).
+// parsing and reach SigNoz via `.passthrough()` (AC-003).
 
 /**
  * FEA-1999 / ISS-4818 — the desktop store-integrity probe's sub-check names, as
@@ -586,7 +586,7 @@ const desktopTelemetryDiagnosticsSchema = z.object({
   lifecycle: lifecycleDiagnosticsSchema.optional(),
   // FEA-1969 — token-cost pricing miss. Typed (not `extra`) so the fields
   // survive validation: the top-level diagnostics object strips unknown keys,
-  // so only declared fields reach Datadog.
+  // so only declared fields reach SigNoz.
   tokenCostPricingMiss: z
     .object({
       model: z.string().max(120),
@@ -602,7 +602,7 @@ const desktopTelemetryDiagnosticsSchema = z.object({
     })
     .optional(),
   // FEA-1999 — desktop SQLite store integrity probe result. Typed (not `extra`)
-  // so the fields survive validation and reach Datadog. The producer only ever
+  // so the fields survive validation and reach SigNoz. The producer only ever
   // emits bounded, content-free fields: `object` is a schema identifier (index
   // or table name), never row content. `.strip()` drops any unexpected key, and
   // `issues` is bounded so a corrupt store cannot inflate the payload.

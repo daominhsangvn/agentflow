@@ -9,15 +9,18 @@ import type { ApiResult } from "@repo/api/src/types/common";
 import { failure } from "@repo/api/src/types/common";
 import type { User } from "@repo/api/src/types/user";
 import { auth } from "@repo/auth/server";
-import { log } from "@repo/observability/log";
 import { type NextRequest, NextResponse } from "next/server";
 import {
   forbiddenResponse,
-  logRequestCompleted,
   serviceUnavailableResponse,
   unauthorizedResponse,
 } from "../route-utils";
+import { annotateAuthSpan } from "./auth-span-attributes";
 import { findOrCreateUser } from "./find-or-create-user";
+import {
+  observeFailedResponse,
+  observeThrownError,
+} from "./observe-failed-response";
 import { resolveOrgHeader } from "./resolve-org-header";
 
 /**
@@ -95,7 +98,6 @@ export function withAuth<TResponse, TRoute extends string = string>(
     request: NextRequest,
     routeContext: RouteContext<TRoute>
   ): Promise<AuthenticatedJsonResponse<TResponse>> => {
-    const startMs = globalThis.performance.now();
     let response: AuthenticatedJsonResponse<TResponse> | undefined;
     try {
       const { userId: clerkUserId, orgId: clerkOrgId, orgRole } = await auth();
@@ -158,13 +160,17 @@ export function withAuth<TResponse, TRoute extends string = string>(
         apiKeyScopes: undefined,
       };
 
+      annotateAuthSpan(authContext);
       response = await handler(authContext, request, routeContext.params);
       return response;
     } catch (error) {
+      // observability: authErrorResponse records the error via observeThrownError
       response = authErrorResponse("Authentication failed", error);
       return response;
     } finally {
-      logRequestCompleted(request, startMs, response?.status ?? 500);
+      if (response) {
+        await observeFailedResponse(request, response);
+      }
     }
   };
 }
@@ -174,6 +180,6 @@ function authErrorResponse(
   error: unknown,
   status = 500
 ): NextResponse<ApiResult<never>> {
-  log.error(message, { error });
+  observeThrownError(message, error);
   return NextResponse.json(failure(message), { status });
 }

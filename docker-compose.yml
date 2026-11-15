@@ -4,6 +4,9 @@
 #   pnpm storage:init             # create the buckets (idempotent)
 #   pnpm local-git:init           # Local Git admin + token (the API's default connection)
 #
+#   docker compose --profile observability up -d   # adds SigNoz (UI http://localhost:8080;
+#                                 # apps send to OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318)
+#
 # Values below are development defaults. Override any of them in a `.env` file
 # next to this compose file (see .env.docker.example).
 
@@ -92,7 +95,173 @@ services:
       timeout: 5s
       retries: 5
 
+  # --- Observability: self-hosted SigNoz (opt-in profile `observability`) ------------------------
+  # Config files live in deploy/observability/. Ports bind to 127.0.0.1 only.
+  init-clickhouse:
+    image: clickhouse/clickhouse-server:25.5.6
+    profiles: ["observability"]
+    restart: on-failure
+    command:
+      - bash
+      - -c
+      - |
+        version="v0.0.1"
+        node_os=$$(uname -s | tr '[:upper:]' '[:lower:]')
+        node_arch=$$(uname -m | sed s/aarch64/arm64/ | sed s/x86_64/amd64/)
+        cd /tmp
+        wget -O histogram-quantile.tar.gz "https://github.com/SigNoz/signoz/releases/download/histogram-quantile%2F$${version}/histogram-quantile_$${node_os}_$${node_arch}.tar.gz"
+        tar -xvzf histogram-quantile.tar.gz
+        mv histogram-quantile /var/lib/clickhouse/user_scripts/histogramQuantile
+    volumes:
+      - signoz_clickhouse_scripts:/var/lib/clickhouse/user_scripts/
+
+  zookeeper-1:
+    image: signoz/zookeeper:3.7.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      ZOO_SERVER_ID: "1"
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+      ZOO_AUTOPURGE_INTERVAL: "1"
+    volumes:
+      - signoz_zookeeper:/bitnami/zookeeper
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.5.6
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      # Keep the users.xml in the repo authoritative: without this the image entrypoint
+      # writes users.d/default-user.xml, which limits `default` to localhost and locks
+      # out the schema migrator, collector and signoz containers.
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    volumes:
+      - ./deploy/observability/clickhouse/config.xml:/etc/clickhouse-server/config.xml:ro
+      - ./deploy/observability/clickhouse/users.xml:/etc/clickhouse-server/users.xml:ro
+      - ./deploy/observability/clickhouse/custom-function.xml:/etc/clickhouse-server/custom-function.xml:ro
+      - ./deploy/observability/clickhouse/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - signoz_clickhouse:/var/lib/clickhouse/
+      - signoz_clickhouse_scripts:/var/lib/clickhouse/user_scripts/
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    depends_on:
+      init-clickhouse:
+        condition: service_completed_successfully
+      zookeeper-1:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "0.0.0.0:8123/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  signoz-schema-migrator-sync:
+    image: signoz/signoz-schema-migrator:v0.129.6
+    profiles: ["observability"]
+    restart: on-failure
+    command: ["sync", "--dsn=tcp://clickhouse:9000", "--up="]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  signoz-schema-migrator-async:
+    image: signoz/signoz-schema-migrator:v0.129.6
+    profiles: ["observability"]
+    restart: on-failure
+    command: ["async", "--dsn=tcp://clickhouse:9000", "--up="]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      signoz-schema-migrator-sync:
+        condition: service_completed_successfully
+
+  signoz:
+    image: signoz/signoz:v0.96.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://clickhouse:9000
+      SIGNOZ_SQLSTORE_SQLITE_PATH: /var/lib/signoz/signoz.db
+      SIGNOZ_TELEMETRYSTORE_PROVIDER: clickhouse
+      SIGNOZ_PROMETHEUS_CONFIG: /root/config/prometheus.yml
+      SIGNOZ_JWT_SECRET: ${SIGNOZ_JWT_SECRET:-agentflow-dev-signoz-jwt-secret}
+      # SMTP for email alerts (env names verified in T031).
+      SIGNOZ_ALERTMANAGER_SIGNOZ_GLOBAL_SMTP__SMARTHOST: ${SIGNOZ_SMTP_SMARTHOST:-mailpit:1025}
+      SIGNOZ_ALERTMANAGER_SIGNOZ_GLOBAL_SMTP__FROM: ${SIGNOZ_SMTP_FROM:-signoz@agentflow.local}
+      SIGNOZ_ALERTMANAGER_SIGNOZ_GLOBAL_SMTP__AUTH__USERNAME: ${SIGNOZ_SMTP_USERNAME:-}
+      SIGNOZ_ALERTMANAGER_SIGNOZ_GLOBAL_SMTP__AUTH__PASSWORD: ${SIGNOZ_SMTP_PASSWORD:-}
+      SIGNOZ_ALERTMANAGER_SIGNOZ_GLOBAL_SMTP__REQUIRE__TLS: "${SIGNOZ_SMTP_REQUIRE_TLS:-false}"
+      GODEBUG: netdns=go
+      SIGNOZ_ANALYTICS_ENABLED: "false"
+      DEPLOYMENT_TYPE: docker-standalone-amd
+    ports:
+      - "127.0.0.1:${SIGNOZ_PORT:-8080}:8080"
+    volumes:
+      - ./deploy/observability/signoz/prometheus.yml:/root/config/prometheus.yml:ro
+      - signoz_sqlite:/var/lib/signoz/
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      signoz-schema-migrator-sync:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "localhost:8080/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  signoz-otel-collector:
+    image: signoz/signoz-otel-collector:v0.129.6
+    profiles: ["observability"]
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    environment:
+      LOW_CARDINAL_EXCEPTION_GROUPING: "false"
+      TAIL_SAMPLING_BASELINE_PERCENT: ${TAIL_SAMPLING_BASELINE_PERCENT:-100}
+    ports:
+      - "127.0.0.1:${OTEL_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTEL_HTTP_PORT:-4318}:4318"
+    volumes:
+      - ./deploy/observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      signoz-schema-migrator-sync:
+        condition: service_completed_successfully
+      signoz:
+        condition: service_started
+
+  # One-shot provisioning: creates the SigNoz admin, notification channels, dashboards
+  # and alert rules from deploy/observability/. Idempotent, never prints the password;
+  # re-run with `docker compose --profile observability run --rm signoz-init`.
+  signoz-init:
+    image: node:24-slim
+    profiles: ["observability"]
+    restart: "no"
+    command: ["node", "/provision/signoz-init/signoz-init.mjs"]
+    environment:
+      SIGNOZ_URL: http://signoz:8080
+      SIGNOZ_ADMIN_EMAIL: ${SIGNOZ_ADMIN_EMAIL:-admin@agentflow.local}
+      SIGNOZ_ADMIN_PASSWORD: ${SIGNOZ_ADMIN_PASSWORD:-}
+      SIGNOZ_ADMIN_NAME: ${SIGNOZ_ADMIN_NAME:-Admin}
+      SIGNOZ_ORG_NAME: ${SIGNOZ_ORG_NAME:-AgentFlow}
+      SIGNOZ_ALERT_EMAIL_TO: ${SIGNOZ_ALERT_EMAIL_TO:-}
+      SIGNOZ_SMTP_REQUIRE_TLS: "${SIGNOZ_SMTP_REQUIRE_TLS:-false}"
+      SIGNOZ_ALERT_WEBHOOK_URL: ${SIGNOZ_ALERT_WEBHOOK_URL:-}
+    volumes:
+      - ./deploy/observability:/provision:ro
+    depends_on:
+      signoz:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   rustfs_data:
   local_git_data:
+  signoz_zookeeper:
+  signoz_clickhouse:
+  signoz_clickhouse_scripts:
+  signoz_sqlite:

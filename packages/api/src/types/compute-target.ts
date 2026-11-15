@@ -235,6 +235,8 @@ export type RelayOperationDispatchRequest = {
   operation: string;
   params: JsonValue;
   streaming: boolean;
+  traceparent?: string;
+  baggage?: string;
 };
 
 export type RelayResultIngestRequest =
@@ -287,6 +289,8 @@ export type CreateDesktopCommandInput = {
   signature?: string;
   signaturePayload?: string;
   publicKeyFingerprint?: string;
+  traceparent?: string;
+  baggage?: string;
 };
 
 export type PublicKeyRegistrationRequest = {

@@ -23,7 +23,9 @@ import {
 } from "@repo/api/src/types/runner-capabilities";
 import { WorkflowRunErrorCode } from "@repo/api/src/types/workflow";
 import { type Prisma, withDb } from "@repo/database";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import { z } from "zod";
 import { computeTargetCapabilitiesService } from "@/app/compute-targets/capabilities-service";
 import { documentService } from "@/app/documents/document-service";
@@ -57,20 +59,23 @@ import { mailTaskQuestions } from "./needs-person-mail";
 import { recordAskedQuestions } from "./task-asked";
 import { taskCancelledMessage } from "./task-cancel";
 import {
-  checkInputsFit,
   loadTaskInputs,
-  resolveTaskInputs,
   type TaskFileRef,
   taskFilesFromStep,
 } from "./task-files";
 import { checkTaskCommand, checkTaskNeeds } from "./task-guards";
+import { initialResultFor } from "./task-initial-result";
+import {
+  logTaskFailed,
+  logTaskQueued,
+  logTaskSettled,
+  logTaskStarted,
+} from "./task-log";
 import { buildTaskPrompt, stepAttachGlob } from "./task-prompt";
 import {
   mergeTaskResult,
   readTaskResult,
-  type TaskInputFile,
   type TaskPageInput,
-  type TaskResult,
 } from "./task-result";
 import { loadCaseRunnerContext } from "./task-runner-context";
 import { matchTaskRunners, pickCaseTaskRunner } from "./task-runner-match";
@@ -117,7 +122,39 @@ export type StartTaskInput = {
   replyTo: string | null;
 };
 
-export async function startTask(input: StartTaskInput): Promise<
+export function startTask(input: StartTaskInput): Promise<
+  Result<
+    {
+      taskId: string;
+      status: string;
+      runner: string;
+      error: string | null;
+      waiting: string | null;
+      replyTo: string | null;
+    },
+    string
+  >
+> {
+  return withSpan(
+    "orchestrator.start_task",
+    {
+      [AfAttribute.OrgId]: input.organizationId,
+      [AfAttribute.ProjectId]: input.projectId,
+      [AfAttribute.CaseId]: input.caseId,
+      [AfAttribute.ConversationId]: input.conversationId,
+      [AfAttribute.TurnId]: input.turnId,
+    },
+    async (span) => {
+      const result = await runStartTask(input);
+      if (!result.ok) {
+        setSpanOutcome(AfOutcome.Error, result.error, span);
+      }
+      return result;
+    }
+  );
+}
+
+async function runStartTask(input: StartTaskInput): Promise<
   Result<
     {
       taskId: string;
@@ -213,6 +250,7 @@ export async function startTask(input: StartTaskInput): Promise<
       select: { id: true },
     })
   );
+  logTaskQueued(input, task.id, runner.computeTargetId);
   if (input.resumeTaskId && !input.fork) {
     await clearOpenQuestions(input);
   }
@@ -235,44 +273,46 @@ export async function startTask(input: StartTaskInput): Promise<
 }
 
 /** The tick's stage: queued tasks try their runner again, running ones settle. */
-export async function advanceTasks(now: Date): Promise<{
+export function advanceTasks(now: Date): Promise<{
   launched: number;
   /** Conversations whose tasks finished: their waits are evaluated next. */
   settledConversationIds: string[];
 }> {
-  const queued = await withDb((db) =>
-    db.orchestratorTask.findMany({
-      where: { status: OrchestratorTaskStatus.Queued },
-      orderBy: { createdAt: "asc" },
-      take: TICK_LIMIT,
-      select: { id: true, conversationId: true },
-    })
-  );
-  let launched = 0;
-  const settled = new Set<string>();
-  for (const task of queued) {
-    const status = await launchTask(task.id);
-    if (status === OrchestratorTaskStatus.Running) {
-      launched += 1;
+  return withSpan("orchestrator.advance_tasks", {}, async () => {
+    const queued = await withDb((db) =>
+      db.orchestratorTask.findMany({
+        where: { status: OrchestratorTaskStatus.Queued },
+        orderBy: { createdAt: "asc" },
+        take: TICK_LIMIT,
+        select: { id: true, conversationId: true },
+      })
+    );
+    let launched = 0;
+    const settled = new Set<string>();
+    for (const task of queued) {
+      const status = await launchTask(task.id);
+      if (status === OrchestratorTaskStatus.Running) {
+        launched += 1;
+      }
+      // A queued task that fails now will never run: its wait must hear of it.
+      if (status === OrchestratorTaskStatus.Failed) {
+        settled.add(task.conversationId);
+      }
     }
-    // A queued task that fails now will never run: its wait must hear of it.
-    if (status === OrchestratorTaskStatus.Failed) {
-      settled.add(task.conversationId);
+    const running = await withDb((db) =>
+      db.orchestratorTask.findMany({
+        where: { status: OrchestratorTaskStatus.Running },
+        take: TICK_LIMIT,
+        select: { id: true, conversationId: true, loopId: true, result: true },
+      })
+    );
+    for (const task of running) {
+      if (task.loopId && (await settleTask(task, task.loopId, now))) {
+        settled.add(task.conversationId);
+      }
     }
-  }
-  const running = await withDb((db) =>
-    db.orchestratorTask.findMany({
-      where: { status: OrchestratorTaskStatus.Running },
-      take: TICK_LIMIT,
-      select: { id: true, conversationId: true, loopId: true, result: true },
-    })
-  );
-  for (const task of running) {
-    if (task.loopId && (await settleTask(task, task.loopId, now))) {
-      settled.add(task.conversationId);
-    }
-  }
-  return { launched, settledConversationIds: [...settled] };
+    return { launched, settledConversationIds: [...settled] };
+  });
 }
 
 const TICK_LIMIT = 50;
@@ -406,6 +446,13 @@ async function launchLoop(task: TaskRow): Promise<Result<string, string>> {
       },
     });
   } catch (error) {
+    log.warn("orchestrator.task_loop_create_failed", {
+      taskId: task.id,
+      caseId: task.caseId,
+      organizationId: task.organizationId,
+      reason: "loop_create_failed",
+      error,
+    });
     return await loopCreateFailure(task, error);
   }
   if (created.status === LoopStatus.Blocked) {
@@ -502,6 +549,9 @@ async function markStarted(
       },
     })
   );
+  if (updated.count === 1) {
+    logTaskStarted(taskId, loopId);
+  }
   return updated.count === 1;
 }
 
@@ -693,6 +743,7 @@ async function settleTask(
     })
   );
   if (updated.count === 1) {
+    logTaskSettled(taskId, loopId, succeeded);
     await recordAskedQuestions(taskId, result.questions);
     if (result.questions.length > 0) {
       waitUntil(
@@ -704,7 +755,6 @@ async function settleTask(
 }
 
 async function failTask(taskId: string, error: string): Promise<void> {
-  log.warn(`${LOG_PREFIX} task failed`, { taskId, error });
   const stored = await withDb((db) =>
     db.orchestratorTask.findUnique({
       where: { id: taskId },
@@ -716,7 +766,7 @@ async function failTask(taskId: string, error: string): Promise<void> {
     questions: [],
     error: error.slice(0, ERROR_MAX),
   });
-  await withDb((db) =>
+  const failed = await withDb((db) =>
     db.orchestratorTask.updateMany({
       where: {
         id: taskId,
@@ -731,6 +781,9 @@ async function failTask(taskId: string, error: string): Promise<void> {
       },
     })
   );
+  if (failed.count === 1) {
+    logTaskFailed(taskId, error);
+  }
 }
 
 const loopErrorSchema = z.object({ message: z.string() });
@@ -820,45 +873,6 @@ async function loopCreateFailure(
     return Result.err(mapped.message);
   }
   throw error;
-}
-
-function initialTaskResult(
-  inputs: TaskInputFile[] | null,
-  pageInputs: TaskPageInput[],
-  replyTo: string | null
-): TaskResult | null {
-  if (!(inputs || replyTo || pageInputs.length > 0)) {
-    return null;
-  }
-  return {
-    reply: null,
-    questions: [],
-    error: null,
-    ...(inputs ? { inputs } : {}),
-    ...(pageInputs.length > 0 ? { pageInputs } : {}),
-    ...(replyTo ? { replyTo } : {}),
-  };
-}
-
-/** Checks the task's input files and pages and builds the result it starts with. */
-async function initialResultFor(
-  input: StartTaskInput
-): Promise<Result<TaskResult | null, string>> {
-  const inputs =
-    input.files.length > 0
-      ? await resolveTaskInputs(input.caseId, input.files)
-      : null;
-  if (inputs && !inputs.ok) {
-    return Result.err(inputs.error);
-  }
-  const resolved = inputs?.ok ? inputs.value : null;
-  const fits = checkInputsFit(resolved ?? [], input.pageInputs);
-  if (!fits.ok) {
-    return Result.err(fits.error);
-  }
-  return Result.ok(
-    initialTaskResult(resolved, input.pageInputs, input.replyTo)
-  );
 }
 
 /** The repositories a task works in; none is fine for a personal Agent, which works in its project folder. */

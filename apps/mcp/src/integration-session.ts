@@ -19,6 +19,8 @@ import {
   ORCHESTRATOR_TOOLS_CALL_ROUTE,
   ORCHESTRATOR_TOOLS_SESSION_ROUTE,
 } from "@repo/api/src/types/orchestrator.js";
+import { log } from "@repo/observability/log";
+import { withToolSpan } from "./tool-span.js";
 
 /**
  * Integration tool sessions (docs/workflows.md "Integration tools"): an
@@ -143,38 +145,52 @@ export function createIntegrationMcpServer(
   }));
   server.setRequestHandler(
     CallToolRequestSchema,
-    async (request): Promise<CallToolResult> => {
-      try {
-        const result = await api.call(
-          token,
-          request.params.name,
-          request.params.arguments ?? {}
-        );
-        return result.ok
-          ? { content: [{ type: "text", text: formatOutput(result.output) }] }
-          : {
+    (request): Promise<CallToolResult> =>
+      withToolSpan(
+        request.params.name,
+        {},
+        async (): Promise<CallToolResult> => {
+          try {
+            const result = await api.call(
+              token,
+              request.params.name,
+              request.params.arguments ?? {}
+            );
+            return result.ok
+              ? {
+                  content: [
+                    { type: "text", text: formatOutput(result.output) },
+                  ],
+                }
+              : {
+                  content: [
+                    {
+                      type: "text",
+                      text: result.retryable
+                        ? `${result.error} (temporary: you may try again once)`
+                        : result.error,
+                    },
+                  ],
+                  isError: true,
+                };
+          } catch (error) {
+            log.warn("mcp.integration_tool_call_failed", {
+              reason: "tool_call_threw",
+              toolName: request.params.name,
+              error,
+            });
+            return {
               content: [
                 {
                   type: "text",
-                  text: result.retryable
-                    ? `${result.error} (temporary: you may try again once)`
-                    : result.error,
+                  text: `AgentFlow could not run the tool: ${error instanceof Error ? error.message : String(error)}`,
                 },
               ],
               isError: true,
             };
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `AgentFlow could not run the tool: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    }
+          }
+        }
+      )
   );
   return server;
 }
@@ -194,7 +210,11 @@ export async function handleIntegrationMcpRequest(input: {
   let descriptor: IntegrationToolSessionDescriptor | null;
   try {
     descriptor = await loadDescriptor(input.api, input.token);
-  } catch {
+  } catch (error) {
+    log.error("mcp.integration_descriptor_load_failed", {
+      reason: "descriptor_load_failed",
+      error,
+    });
     input.sendJson(input.res, 502, {
       error: "AgentFlow could not load the integration tools; try again.",
     });

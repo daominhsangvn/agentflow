@@ -29,6 +29,7 @@ export function createEd25519PublicKey(pem: string): KeyObject | null {
     }
     return key;
   } catch {
+    // observability: parse fallback — an invalid PEM yields null
     return null;
   }
 }
