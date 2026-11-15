@@ -8,6 +8,7 @@ export function readJsonFileSync(filePath: string): unknown | null {
     }
     return JSON.parse(readFileSync(filePath, "utf-8"));
   } catch {
+    // observability: parse fallback — documented null for missing or invalid JSON
     return null;
   }
 }

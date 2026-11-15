@@ -583,6 +583,7 @@ function currentUsername(): string {
   try {
     return os.userInfo().username;
   } catch {
+    // observability: probe — falls back to environment variables for the username
     return process.env.USERNAME ?? process.env.USER ?? "";
   }
 }
@@ -679,6 +680,7 @@ function realpathOrSelf(file: string): string {
   try {
     return fs.realpathSync(file);
   } catch {
+    // observability: probe — falls back to the unresolved path
     return file;
   }
 }

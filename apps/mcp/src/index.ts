@@ -215,6 +215,7 @@ function isRedirectUriAllowedByEntry(
       entryUrl = new URL(allowlistEntry.slice(0, -1));
       uriUrl = new URL(uri);
     } catch {
+      // observability: parse fallback — an unparseable allowlist entry or URI never matches
       return false;
     }
     if (uriUrl.origin !== entryUrl.origin) {
@@ -1393,7 +1394,11 @@ function decryptApiKey(encrypted: string, keyId: string): string | null {
       decipher.update(ciphertext),
       decipher.final(),
     ]).toString("utf8");
-  } catch {
+  } catch (error) {
+    log.debug("mcp.oauth_token_decrypt_failed", {
+      reason: "token_decrypt_failed",
+      error,
+    });
     return null;
   }
 }
@@ -1480,7 +1485,11 @@ function parseSignedOAuthAccessToken(
       iat: typeof payload.iat === "number" ? payload.iat : now,
       exp: payload.exp,
     };
-  } catch {
+  } catch (error) {
+    log.debug("mcp.oauth_token_payload_invalid", {
+      reason: "token_payload_invalid",
+      error,
+    });
     return null;
   }
 }
@@ -1551,7 +1560,11 @@ async function checkDbReachable(): Promise<boolean> {
       }
     );
     return true;
-  } catch {
+  } catch (error) {
+    log.warn("mcp.readiness_db_check_failed", {
+      reason: "database_unreachable",
+      error,
+    });
     return false;
   }
 }
@@ -1722,6 +1735,7 @@ async function handleMcpExistingSession(
   try {
     parsedBody = JSON.parse(rawBody);
   } catch {
+    // observability: 4xx — the 400 is captured by request_completed
     sendJson(res, 400, {
       error: "invalid_request",
       error_description: "Malformed JSON request body",
@@ -1753,6 +1767,7 @@ async function parseMcpJsonBody(
   try {
     return JSON.parse(rawBody);
   } catch {
+    // observability: 4xx — the 400 is captured by request_completed
     sendJson(res, 400, {
       error: "invalid_request",
       error_description: "Malformed JSON request body",
@@ -1893,6 +1908,7 @@ async function connectMcpTransportOrCleanup(
     try {
       await server.close();
     } catch {
+      // observability: best-effort cleanup — the original error is rethrown
       // best-effort cleanup — original error is more important
     }
     throw error;
@@ -2093,6 +2109,7 @@ async function readJsonBody<T>(
   try {
     return JSON.parse(raw) as T;
   } catch {
+    // observability: parse fallback — a non-JSON body is treated as absent
     return null;
   }
 }
@@ -2134,7 +2151,11 @@ function isValidRedirectUri(uri: string): boolean {
 
     // No allowlist and not loopback — deny in non-local envs, allow in local
     return isLocalOauthEnvironment();
-  } catch {
+  } catch (error) {
+    log.debug("mcp.oauth_redirect_uri_check_failed", {
+      reason: "redirect_uri_unparseable",
+      error,
+    });
     return false;
   }
 }
@@ -2161,6 +2182,7 @@ async function handleOAuthRegister(
         ? (parsedBody as Record<string, unknown>)
         : null;
   } catch {
+    // observability: parse fallback — an unreadable client metadata body is answered with a 400
     body = null;
   }
   if (!body) {
@@ -2320,7 +2342,11 @@ async function extractApiKeyFromRequest(
     const body = await readFormBody(req);
     const formKey = body.api_key;
     return formKey?.startsWith("sk_live_") ? formKey : null;
-  } catch {
+  } catch (error) {
+    log.debug("mcp.oauth_form_api_key_unreadable", {
+      reason: "form_body_unreadable",
+      error,
+    });
     return null;
   }
 }

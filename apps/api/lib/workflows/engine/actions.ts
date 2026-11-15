@@ -32,6 +32,7 @@ import {
   type ActionConnectionResult,
   resolveActionConnection,
 } from "./action-connection";
+import { logActionSettlement } from "./action-log";
 import { mergeActionResults } from "./action-results";
 import {
   compareActionRunOrder,
@@ -716,6 +717,7 @@ async function settleActionRun(
       data,
     })
   );
+  logActionSettlement(row, data);
   return {
     status: data.status,
     lastError: data.lastError ?? null,

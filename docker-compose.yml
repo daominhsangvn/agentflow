@@ -4,9 +4,8 @@
 #   pnpm storage:init             # create the buckets (idempotent)
 #   pnpm local-git:init           # Local Git admin + token (the API's default connection)
 #
-#   docker compose up -d          # also starts SigNoz (UI http://localhost:8080;
+#   docker compose --profile observability up -d   # adds SigNoz (UI http://localhost:8080;
 #                                 # apps send to OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318)
-#   docker compose up -d postgres rustfs mailpit local-git   # without SigNoz
 #
 # Values below are development defaults. Override any of them in a `.env` file
 # next to this compose file (see .env.docker.example).
@@ -96,10 +95,11 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- Observability: self-hosted SigNoz (default) ------------------------
+  # --- Observability: self-hosted SigNoz (opt-in profile `observability`) ------------------------
   # Config files live in deploy/observability/. Ports bind to 127.0.0.1 only.
   init-clickhouse:
     image: clickhouse/clickhouse-server:25.5.6
+    profiles: ["observability"]
     restart: on-failure
     command:
       - bash
@@ -117,6 +117,7 @@ services:
 
   zookeeper-1:
     image: signoz/zookeeper:3.7.1
+    profiles: ["observability"]
     restart: unless-stopped
     environment:
       ZOO_SERVER_ID: "1"
@@ -127,6 +128,7 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:25.5.6
+    profiles: ["observability"]
     restart: unless-stopped
     environment:
       # Keep the users.xml in the repo authoritative: without this the image entrypoint
@@ -157,6 +159,7 @@ services:
 
   signoz-schema-migrator-sync:
     image: signoz/signoz-schema-migrator:v0.129.6
+    profiles: ["observability"]
     restart: on-failure
     command: ["sync", "--dsn=tcp://clickhouse:9000", "--up="]
     depends_on:
@@ -165,6 +168,7 @@ services:
 
   signoz-schema-migrator-async:
     image: signoz/signoz-schema-migrator:v0.129.6
+    profiles: ["observability"]
     restart: on-failure
     command: ["async", "--dsn=tcp://clickhouse:9000", "--up="]
     depends_on:
@@ -175,6 +179,7 @@ services:
 
   signoz:
     image: signoz/signoz:v0.96.1
+    profiles: ["observability"]
     restart: unless-stopped
     environment:
       SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://clickhouse:9000
@@ -210,6 +215,7 @@ services:
 
   signoz-otel-collector:
     image: signoz/signoz-otel-collector:v0.129.6
+    profiles: ["observability"]
     restart: unless-stopped
     command: ["--config=/etc/otel-collector-config.yaml"]
     environment:
@@ -230,9 +236,10 @@ services:
 
   # One-shot provisioning: creates the SigNoz admin, notification channels, dashboards
   # and alert rules from deploy/observability/. Idempotent, never prints the password;
-  # re-run with `docker compose run --rm signoz-init`.
+  # re-run with `docker compose --profile observability run --rm signoz-init`.
   signoz-init:
     image: node:24-slim
+    profiles: ["observability"]
     restart: "no"
     command: ["node", "/provision/signoz-init/signoz-init.mjs"]
     environment:

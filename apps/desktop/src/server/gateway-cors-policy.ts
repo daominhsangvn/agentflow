@@ -24,6 +24,7 @@ export function sameOrigin(left: string, right: string): boolean {
   try {
     return new URL(left).origin === new URL(right).origin;
   } catch {
+    // observability: parse fallback — an unparsable origin is not the same origin
     return false;
   }
 }
@@ -41,6 +42,7 @@ export function isLoopbackOrigin(originValue: string): boolean {
       h.endsWith(".localhost")
     );
   } catch {
+    // observability: parse fallback — an unparsable host is not loopback
     return false;
   }
 }

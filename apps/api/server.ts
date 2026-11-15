@@ -17,7 +17,7 @@ async function startTelemetry(): Promise<void> {
     );
     initTelemetry();
   } catch {
-    // The server starts without telemetry.
+    // observability: (d) telemetry start is fail-open — the server starts without telemetry.
   }
 }
 

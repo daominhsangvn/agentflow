@@ -37,6 +37,7 @@ export function isAllowedDesktopLoopbackRedirectUri(uri: string): boolean {
   try {
     parsed = new URL(uri);
   } catch {
+    // observability: parse fallback — an unparsable redirect URI is not allowed
     return false;
   }
   if (parsed.username !== "" || parsed.password !== "") {

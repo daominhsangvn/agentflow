@@ -314,6 +314,7 @@ function parseActivity(rawBody: string): TeamsActivity | null {
     const parsed = activitySchema.safeParse(JSON.parse(rawBody));
     return parsed.success ? parsed.data : null;
   } catch {
+    // observability: (a) parse fallback — an unparseable activity is rejected by the caller
     return null;
   }
 }

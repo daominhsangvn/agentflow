@@ -130,6 +130,7 @@ export async function fetchPluginManifests(options: {
             ? { plugin, latestVersion: body.version }
             : { plugin, error: "manifest_unavailable" };
         } catch {
+          // observability: b — probe, absence is a normal state
           return { plugin, error: "manifest_unavailable" };
         }
       }
@@ -166,6 +167,7 @@ async function readConfiguredMarketplaceManifests(
         )
       : [];
   } catch {
+    // observability: b — probe, absence is a normal state
     return AGENTFLOW_USER_PLUGINS.map((plugin) => ({
       plugin,
       error: "manifest_unavailable",
@@ -199,6 +201,7 @@ async function readConfiguredMarketplaceManifests(
           ? { plugin, latestVersion: body.version }
           : { plugin, error: "manifest_unavailable" };
       } catch {
+        // observability: b — probe, absence is a normal state
         return { plugin, error: "manifest_unavailable" };
       }
     })
@@ -292,11 +295,13 @@ async function resolveConfiguredMarketplaceRoot(
         constants.F_OK
       );
     } catch {
+      // observability: b — probe, absence is a normal state
       return null;
     }
 
     return checkoutRoot;
   } catch {
+    // observability: b — probe, absence is a normal state
     return null;
   }
 }

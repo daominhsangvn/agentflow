@@ -9,9 +9,16 @@ logs and metrics in a self-hosted SigNoz, so a problem can be traced end to end.
 - Datadog support is removed. Services only know the standard `OTEL_*` env vars
   (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`,
   `OTEL_TRACES_SAMPLER[_ARG]`). Telemetry is on when an endpoint is set, off otherwise.
-- SigNoz runs in the default stack (dev `docker-compose.yml` and
-  `deploy/compose/docker-compose.prod.yml`), ports bound to `127.0.0.1`; `signoz-init`
-  provisions the admin, dashboards and alerts.
+- SigNoz runs in the default prod stack (`deploy/compose/docker-compose.prod.yml`); in dev it is
+  the opt-in compose profile `observability`, and the dev `.env.example` files leave the endpoint
+  commented out (console-only logs). Decided 2026-11-15, replaces the earlier default-in-dev
+  decision. Ports bound to `127.0.0.1`; `signoz-init` provisions the admin, dashboards and alerts.
+- Runner telemetry is on by default (opt-out `AGENTFLOW_RUNNER_TELEMETRY=false`, decided 2026-11-14,
+  was opt-in) and follows the api's OTLP endpoint (404 means off).
+- Correlation ids travel as baggage (`af.*` ids set once, read by spans and logs). Outcome rule: one
+  `request_completed` per API route, background operations use their span as outcome, one
+  `<entity>.<transition>` info line per lifecycle transition.
+- `LOG_LEVEL` defaults: `info` in production, `debug` elsewhere, `info` for the runner.
 - Retention: traces and logs 15 days, metrics 30 days.
 - Runners send OTLP through an authenticated api proxy (`/otel/v1/{traces,logs,metrics}`,
   runner JWT), not through the relay (the relay is not deployed).

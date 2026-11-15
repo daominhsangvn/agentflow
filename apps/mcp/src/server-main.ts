@@ -9,7 +9,7 @@ async function main(): Promise<void> {
     );
     initTelemetry({ handleShutdownSignals: false });
   } catch {
-    // Fail-open: the server starts without telemetry.
+    // observability: telemetry bootstrap itself — fail-open, the server starts without telemetry.
   }
   const { startHttpServer, __testables } = await import("./index.js");
   __testables.installShutdownHandlers(startHttpServer());

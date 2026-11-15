@@ -34,6 +34,7 @@ import {
 import { SearchEntityType } from "@repo/api/src/types/search-entity-kind";
 import { expandSlugAliases } from "@repo/api/src/types/slug-prefix";
 import { Prisma, type TransactionClient, withDb } from "@repo/database";
+import { log } from "@repo/observability/log";
 import { customFieldValuesService } from "@/app/custom-fields/values-service";
 import {
   computeNextSortOrder,
@@ -1181,7 +1182,8 @@ async function deleteCreatedInlineImageDocument(
   try {
     await documentService.delete(documentId, organizationId);
     return true;
-  } catch {
+  } catch (error) {
+    log.warn("documents.inline_image_cleanup_failed", { error, documentId });
     return false;
   }
 }

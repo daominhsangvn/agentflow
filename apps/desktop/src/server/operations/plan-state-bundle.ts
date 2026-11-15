@@ -266,6 +266,7 @@ export async function readPlanStateManifest(
     );
     return parsed.success ? parsed.data : null;
   } catch {
+    // observability: parse fallback — the manifest is optional or may be corrupt
     return null;
   }
 }
@@ -381,6 +382,7 @@ async function readPlanSummary(
     );
     return parsed.success ? parsed.data : null;
   } catch {
+    // observability: parse fallback — the summary is optional or may be corrupt
     return null;
   }
 }

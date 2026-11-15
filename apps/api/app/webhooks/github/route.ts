@@ -256,6 +256,7 @@ async function readJsonBody(
       ok?: unknown;
     };
   } catch {
+    // observability: parse fallback — response body is optional
     return null;
   }
 }

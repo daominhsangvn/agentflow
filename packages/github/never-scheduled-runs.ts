@@ -21,6 +21,7 @@
 
 import "server-only";
 import type { Octokit } from "@octokit/rest";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 // Explicit `.ts`: this module is executed directly by `node` from
 // `scripts/ci/ready-to-enqueue.ts`, which resolves ESM specifiers literally
@@ -182,6 +183,12 @@ export async function listQueuedWorkflowRuns(
     );
     raw = response.data;
   } catch (error) {
+    log.warn("github.queued_runs_read_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return {
       status: QueuedRunsReadStatus.Failed,
       detail: error instanceof Error ? error.message : String(error),
@@ -536,6 +543,12 @@ export async function listOpenPullRequestHeads(
         withComments: options.withComments ?? false,
       });
     } catch (error) {
+      log.warn("github.open_pull_requests_read_failed", {
+        reason: "github_api_failed",
+        owner,
+        repo,
+        error,
+      });
       return {
         status: OpenPullRequestsReadStatus.Failed,
         detail: error instanceof Error ? error.message : String(error),
@@ -668,7 +681,13 @@ export async function countScheduledJobs(
     );
     const parsed = JobsResponseSchema.safeParse(response.data);
     return parsed.success ? parsed.data.total_count : null;
-  } catch {
+  } catch (error) {
+    log.warn("github.run_jobs_read_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return null;
   }
 }
@@ -730,7 +749,13 @@ export async function listPullRequestCommentPage(
       commentLimit: COMMENT_PAGE_SIZE,
       after,
     });
-  } catch {
+  } catch (error) {
+    log.warn("github.pull_request_comments_read_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return null;
   }
 

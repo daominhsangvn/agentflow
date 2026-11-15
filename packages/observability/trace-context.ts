@@ -26,6 +26,8 @@ export type TraceContext = {
   traceId: string;
   /** 64-bit span id, 16 lowercase hex characters. */
   spanId: string;
+  /** Active `af.*` ids (e.g. `af.loop_id`), when any are known. */
+  afIds?: Record<string, string>;
 };
 
 /** Returns the currently-active trace context, or `undefined` when untraced. */
@@ -75,5 +77,6 @@ export function toLogCorrelationFields(
   return {
     trace_id: context.traceId,
     span_id: context.spanId,
+    ...context.afIds,
   };
 }

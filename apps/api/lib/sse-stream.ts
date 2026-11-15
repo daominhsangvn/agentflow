@@ -70,6 +70,7 @@ export function createSseStream(
         try {
           controller.close();
         } catch {
+          // observability: (e) teardown — the stream is already closed
           // Stream already closed.
         }
       };
@@ -106,6 +107,7 @@ export function createSseStream(
           try {
             controller.enqueue(KEEPALIVE_BYTES);
           } catch {
+            // observability: (e) teardown — the peer closed, the stream is closed below
             safeClose();
           }
         }, keepaliveMs);

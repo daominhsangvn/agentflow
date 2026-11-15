@@ -4,6 +4,7 @@ import {
   WorkflowActionRunStatus,
   WorkflowRunEvent,
 } from "@repo/api/src/types/workflow";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 import { truncateText } from "./markdown";
 import {
@@ -209,6 +210,10 @@ async function openPullRequest<TConnectionConfig, TSecrets>(
       existing: result.value.existing,
     };
   } catch (error) {
+    log.warn("integration.pull_request_open_failed", {
+      reason: "open_pull_request_threw",
+      error,
+    });
     return {
       kind: "failed",
       error: `${repository.fullName}: could not open the pull request: ${errorMessage(error)}`,

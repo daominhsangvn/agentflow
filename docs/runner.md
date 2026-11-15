@@ -88,6 +88,7 @@ docker run -d --name agentflow-runner-1 --restart unless-stopped \
   -e AGENTFLOW_RUNNER_NAME=runner-1 \
   -e CLAUDE_CODE_OAUTH_TOKEN=... \
   -e GH_TOKEN=github_pat_... \
+  -e AGENTFLOW_RUNNER_TELEMETRY=true \
   -v agentflow-runner-1-workspace:/workspace \
   -v agentflow-runner-1-data:/home/runner/.agentflow-runner \
   -v agentflow-runner-1-claude:/home/runner/.claude \
@@ -425,7 +426,8 @@ setup questions first.
 | `AGENTFLOW_RUNNER_ROLE` | — | Personal: this computer's role, e.g. `Dev (LeaveDesk, An)` (at most 120 characters). Replaces the `runner:` of the shared AGENTFLOW.md; `--role` wins. Auto runners ignore it. |
 | `AGENTFLOW_RUNNER_PARALLEL` | `false` | Personal: `true` lets several loops run in the folder at once (the project's commands make their own worktrees); `false` runs them in turn. |
 | `AGENTFLOW_RUNNER_SKIP_PERMISSIONS` | `false` | Personal: `true` lets the agent use any tool without a permission prompt (`--permission-mode bypassPermissions`). |
-| `AGENTFLOW_RUNNER_TELEMETRY` | `false` | `true` exports runner traces, logs and metrics through the api; needs the api's OTEL endpoint. |
+| `AGENTFLOW_RUNNER_TELEMETRY` | `true` | Exports Agent traces, logs and metrics through the api. `false` opts out. Exports nothing when the api has no OTEL endpoint (the api answers 404 and the Agent stops exporting). |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. Verbose mode or `debug` enables debug lines. |
 | `AGENTFLOW_RUNNER_MAX_CONCURRENT` | `2` | Commands executed at the same time. |
 | `AGENTFLOW_RUNNER_GATEWAY_PORT` | any free port | Local gateway port, loopback only. Setup asks for it (Enter: any free port). A configured port that is taken stops the runner. The port in use is logged at start and written to `<data dir>/gateway-port`. |
 | `AGENTFLOW_RUNNER_REWRITE_CALLBACK_URL` | `true` | Send loop callbacks to `AGENTFLOW_API_URL` instead of the API's own `API_BASE_URL`, which is often a host-local address. |

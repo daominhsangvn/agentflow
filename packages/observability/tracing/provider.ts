@@ -35,13 +35,14 @@ import {
 } from "@opentelemetry/semantic-conventions";
 import { PrismaInstrumentation } from "@prisma/instrumentation";
 import { globalSlot } from "../global-slot";
-import type { LogLevel } from "../log";
+import type { LogLevel } from "../log-level";
 import {
   type LogRecordInput,
   resetLogRecordSink,
   setLogRecordSink,
 } from "../log-sink";
 import { waitForDeadline } from "../shutdown";
+import { getActiveAfIds } from "../span";
 import { resolveGitSha, resolveServerVersion } from "../telemetry/context";
 import {
   resetTraceContextProvider,
@@ -266,7 +267,7 @@ function emitOtelLogRecord(record: LogRecordInput): void {
     severityNumber: LOG_SEVERITY[record.level],
     severityText: record.level.toUpperCase(),
     body: record.message,
-    attributes: record.attributes,
+    attributes: { ...getActiveAfIds(), ...record.attributes },
     timestamp: record.timestampMs,
     context: context.active(),
   });
@@ -332,14 +333,19 @@ function removeShutdownHandlers(): void {
  * stamp `trace_id` onto logs for traces that are never exported.
  */
 function readActiveTraceContext():
-  | { traceId: string; spanId: string }
+  | { traceId: string; spanId: string; afIds?: Record<string, string> }
   | undefined {
   const span = trace.getSpan(context.active());
   if (!span?.isRecording()) {
     return undefined;
   }
   const spanContext = span.spanContext();
-  return { traceId: spanContext.traceId, spanId: spanContext.spanId };
+  const afIds = getActiveAfIds();
+  return {
+    traceId: spanContext.traceId,
+    spanId: spanContext.spanId,
+    ...(Object.keys(afIds).length > 0 ? { afIds } : {}),
+  };
 }
 
 export type InitTelemetryOptions = {

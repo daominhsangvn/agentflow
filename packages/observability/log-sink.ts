@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { globalSlot } from "./global-slot";
-import type { LogLevel } from "./log";
+import type { LogLevel } from "./log-level";
 
 const sinkSlot = globalSlot<LogRecordSink | undefined>(
   "log-sink",

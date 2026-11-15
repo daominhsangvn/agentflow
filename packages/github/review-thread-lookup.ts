@@ -1,4 +1,5 @@
 import { parseError } from "@repo/observability/error";
+import { log } from "@repo/observability/log";
 
 type GraphqlClient = {
   graphql<T>(query: string, variables: Record<string, unknown>): Promise<T>;
@@ -122,6 +123,10 @@ export async function fetchReviewThreadResolutionByNodeId(
   try {
     return await withReviewThreadConfirmationTimeout(operation, controller);
   } catch (error) {
+    log.warn("github.review_thread_lookup_failed", {
+      reason: classifyReviewThreadLookupError(error),
+      error,
+    });
     return {
       status: ReviewThreadResolutionResultStatus.RetryableError,
       reason: classifyReviewThreadLookupError(error),
@@ -409,7 +414,13 @@ export async function fetchReviewThreadNodeIdByCommentId(
       MAX_PR_METADATA_PAGES
     );
     return threadIdsByCommentId.get(commentId) ?? null;
-  } catch {
+  } catch (error) {
+    log.warn("github.review_thread_node_lookup_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return null;
   }
 }

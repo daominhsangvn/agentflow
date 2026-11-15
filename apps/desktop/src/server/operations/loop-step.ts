@@ -49,6 +49,7 @@ import {
 } from "@repo/api/src/types/integration-tools";
 import { z } from "zod";
 import { CLAUDE_OUTPUT_SIDECAR_FILE } from "../../main/cost/token-usage.js";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import {
   collectNamedAttachEntries,
   type NamedAttachEntry,
@@ -688,6 +689,7 @@ function readStepQuestions(claudeWorkDir: string): {
   try {
     raw = JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
+    // observability: parse fallback — the invalid file is reported in the returned error
     return { questions: [], error: boundedError(`not JSON: ${String(error)}`) };
   }
   const parsed = questionsFileSchema.safeParse(raw);
@@ -714,8 +716,12 @@ export function recordStepSessionId(claudeWorkDir: string): void {
   if (sessionId) {
     try {
       writeFileSync(sessionFile, `${sessionId}\n`, "utf8");
-    } catch {
-      // Best effort: without it the answers start a new session.
+    } catch (error: unknown) {
+      gatewayLog.warn("loop-step", "step session id write failed", {
+        reason: "step_session_id_write_failed",
+        sessionId,
+        error,
+      });
     }
   }
 }
@@ -826,6 +832,7 @@ function walkFiles(
         withFileTypes: true,
       });
     } catch {
+      // observability: probe — an unreadable directory is skipped
       return;
     }
     for (const entry of entries) {
@@ -855,6 +862,7 @@ function parseJsonOrNull(text: string): unknown | null {
   try {
     return JSON.parse(text);
   } catch {
+    // observability: parse fallback — optional input
     return null;
   }
 }
@@ -863,6 +871,7 @@ function readTextOrNull(file: string): string | null {
   try {
     return readFileSync(file, "utf8");
   } catch {
+    // observability: probe — the file is optional
     return null;
   }
 }
@@ -871,6 +880,7 @@ function lstatOrNull(file: string) {
   try {
     return lstatSync(file);
   } catch {
+    // observability: probe — absence is the answer
     return null;
   }
 }
@@ -1056,6 +1066,7 @@ function stepStartedAt(claudeWorkDir: string, stepId: string): number {
   try {
     return statSync(path.join(claudeWorkDir, LoopStepFile.Request)).mtimeMs;
   } catch {
+    // observability: probe — the request file may be absent
     return 0;
   }
 }
@@ -1064,6 +1075,7 @@ function modifiedSince(file: string, sinceMs: number): boolean {
   try {
     return statSync(file).mtimeMs >= sinceMs;
   } catch {
+    // observability: probe — absence means not modified
     return false;
   }
 }

@@ -53,6 +53,7 @@ export function checkCapabilitiesFile(
   try {
     content = fs.readFileSync(filePath, "utf8");
   } catch (error) {
+    // observability: read failure is returned as an invalid-file result
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return { status: CapabilitiesFileStatus.Missing, filePath };
     }

@@ -469,7 +469,7 @@ function checkProjectDir(value: string, homeDir: string): SettingCheck {
       return { ok: true, value: dir };
     }
   } catch {
-    // Reported below.
+    // observability: probe — reported to the user below as not an existing folder
   }
   return { ok: false, error: `${dir} is not an existing folder` };
 }

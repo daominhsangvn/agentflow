@@ -51,6 +51,7 @@ export async function GET(request: Request): Promise<Response> {
         const { organizationId } = parseDocumentRoomId(roomId);
         return organizationId === user.organizationId;
       } catch {
+        // observability: parse fallback — an unparseable room id is not org scoped
         return false;
       }
     });
@@ -63,6 +64,7 @@ export async function GET(request: Request): Promise<Response> {
       try {
         return [parseDocumentRoomId(roomId).slug];
       } catch {
+        // observability: parse fallback — an unparseable room id has no slug
         return [];
       }
     });
@@ -94,6 +96,7 @@ export async function GET(request: Request): Promise<Response> {
 
           return { ...room, name };
         } catch {
+          // observability: parse fallback — a room that cannot be enriched is returned unchanged
           return room;
         }
       });

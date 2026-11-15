@@ -188,6 +188,7 @@ export function toWireCommandFromStore(command: {
   approvalReason?: string;
   streaming?: boolean;
   traceparent?: string;
+  baggage?: string;
   createdAt: string;
 }): WireCommandPayload {
   return {
@@ -205,6 +206,7 @@ export function toWireCommandFromStore(command: {
     approvalReason: command.approvalReason,
     streaming: command.streaming === true ? true : undefined,
     traceparent: command.traceparent,
+    baggage: toWireBaggage(command.baggage),
   };
 }
 
@@ -213,6 +215,7 @@ export function toWireCommandFromRelayOperation(operation: {
   params: JsonValue;
   streaming?: boolean;
   traceparent?: string;
+  baggage?: string;
 }): WireCommandPayload | null {
   const params = parseJsonObject(operation.params) ?? {};
   const request = parseJsonObject(params.request) ?? {};
@@ -269,6 +272,7 @@ export function toWireCommandFromRelayOperation(operation: {
       typeof operation.traceparent === "string"
         ? operation.traceparent
         : undefined,
+    baggage: toWireBaggage(operation.baggage),
   };
 }
 
@@ -364,4 +368,12 @@ export function resolveOperationId(pathname: string): string | null {
   }
 
   return null;
+}
+
+const MAX_WIRE_BAGGAGE_LENGTH = 512;
+
+function toWireBaggage(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= MAX_WIRE_BAGGAGE_LENGTH
+    ? value
+    : undefined;
 }

@@ -66,6 +66,10 @@ export function registerGitPrCreateRoute(
         json(context, 200, existing);
         return;
       }
+      gatewayLog.error(GATEWAY_LOG_TAG, "creating the pull request failed", {
+        reason: "pull_request_create_failed",
+        error,
+      });
       json(context, 500, { error: parseGhError(error) });
     }
   });
@@ -198,6 +202,7 @@ async function viewExistingPullRequest(
       ...(await labelResponseFields(request.cwd, ghBin, view.number, request)),
     };
   } catch {
+    // observability: probe — no existing pull request is a normal state
     return null;
   }
 }
@@ -371,7 +376,11 @@ async function applyPullRequestLabels(
         ...addLabelArgs,
       ]);
       applied.push(...batch.map((label) => label.name));
-    } catch {
+    } catch (error) {
+      gatewayLog.warn(GATEWAY_LOG_TAG, "applying pull request labels failed", {
+        reason: "pull_request_label_failed",
+        error,
+      });
       // Labelling is best effort — the PR itself already exists and is
       // reported. Return the batches that DID land rather than claiming none
       // did, so the response describes the PR's real state.
@@ -413,7 +422,11 @@ async function listRepositoryLabelNames(
       }
     }
     return names;
-  } catch {
+  } catch (error) {
+    gatewayLog.warn(GATEWAY_LOG_TAG, "listing repository labels failed", {
+      reason: "repo_label_list_failed",
+      error,
+    });
     // Unknown label inventory: fall through and let create-if-missing rely on
     // the "already exists" tolerance below.
     return [];
@@ -442,7 +455,11 @@ async function createRepositoryLabel(
   }
   try {
     await run(cwd, ghBin, args);
-  } catch {
+  } catch (error) {
+    gatewayLog.debug(GATEWAY_LOG_TAG, "creating a repository label failed", {
+      reason: "repo_label_create_failed",
+      error,
+    });
     // Already exists (422) or a transient failure — the `issues/{n}/labels`
     // add call below reports the real outcome, so never fail PR creation here.
   }

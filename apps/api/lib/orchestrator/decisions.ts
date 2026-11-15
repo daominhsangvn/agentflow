@@ -9,6 +9,7 @@ import {
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { withDb } from "@repo/database";
 import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import { log } from "@repo/observability/log";
 import { setSpanOutcome, withSpan } from "@repo/observability/span";
 import {
   draftResultNote,
@@ -245,6 +246,11 @@ async function runCarryOut(
       draft,
     });
   } catch (error) {
+    log.warn("orchestrator.decision_carry_out_failed", {
+      caseId: decision.caseId,
+      reason: "carry_out_threw",
+      error,
+    });
     return {
       outcome: OrchestratorDraftOutcome.Failed,
       commentRef: null,

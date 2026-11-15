@@ -138,6 +138,13 @@ async function runCancelTask(
       "The task changed meanwhile: read it with task_get and try again."
     );
   }
+  log.info("orchestrator.task.cancelled", {
+    organizationId,
+    caseId,
+    taskId,
+    reason,
+    previous,
+  });
   const loopStopped = await stopLoop(task, previous, organizationId, reason);
   await wakeCaseWaits(organizationId, caseId, now);
   return Result.ok({ taskId, previous, alreadyCancelled: false, loopStopped });

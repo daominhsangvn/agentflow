@@ -120,6 +120,7 @@ export async function publishPage(
   try {
     markdown = new TextDecoder("utf-8", { fatal: true }).decode(main.bytes);
   } catch {
+    // observability: (a) parse fallback — a non-text file is refused to the caller
     return refused(
       `"${main.name}" is not a text file: publish a Markdown file.`
     );

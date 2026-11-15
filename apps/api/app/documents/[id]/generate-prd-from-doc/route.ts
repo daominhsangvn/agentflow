@@ -1,5 +1,6 @@
 import type { Document } from "@repo/api/src/types/document";
 import { Status } from "@repo/api/src/types/result";
+import { log } from "@repo/observability/log";
 import { generatePrdFromDocumentService } from "@/app/documents/generate-prd-from-doc-service";
 import { captureArtifactCreation } from "@/lib/artifact-activity-capture";
 import { withAnyAuth } from "@/lib/auth/with-any-auth";
@@ -77,7 +78,8 @@ export const POST = withAnyAuth<
           actor: { userId: user.id, authMethod },
           after: { status: prd.status, title: prd.title },
         });
-      } catch {
+      } catch (error) {
+        log.warn("documents.activity_capture_failed", { error });
         // Swallowed by design: activity capture must never fail the write.
       }
 

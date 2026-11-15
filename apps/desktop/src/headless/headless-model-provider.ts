@@ -74,6 +74,7 @@ function toModelProvider(
   try {
     return { host: new URL(provider.baseUrl).host };
   } catch {
+    // observability: parse fallback — an invalid base URL means no provider host
     return null;
   }
 }

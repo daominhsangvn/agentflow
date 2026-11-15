@@ -124,7 +124,8 @@ image or a systemd service on Ubuntu/Debian): see [runner.md](runner.md).
 Workflows and the desktop app talk to compute targets through the desktop
 gateway socket hosted by `apps/api/server.ts`.
 
-Runner telemetry (`AGENTFLOW_RUNNER_TELEMETRY=true`, see Observability) starts
+Runner telemetry (on by default, opt out with `AGENTFLOW_RUNNER_TELEMETRY=false`, see
+Observability) starts
 asynchronously with the runner. Log records emitted before that OTel runtime
 finishes starting are dropped and never exported.
 
@@ -167,20 +168,24 @@ disabled.
 
 ## Observability (SigNoz)
 
-SigNoz is part of the default stack, in both `docker-compose.yml` and
-`deploy/compose/docker-compose.prod.yml`: ClickHouse, ZooKeeper, the schema migrators,
-`signoz` (UI and query service), `signoz-otel-collector` and the one-shot `signoz-init`.
+SigNoz starts by default in production (`deploy/compose/docker-compose.prod.yml`). In
+development it is opt-in through the compose profile `observability`; plain
+`docker compose up -d` starts only Postgres, RustFS, Mailpit and Local Git. The SigNoz
+services are ClickHouse, ZooKeeper, the schema migrators, `signoz` (UI and query service),
+`signoz-otel-collector` and the one-shot `signoz-init`.
 Config files are in `deploy/observability/` (mounted read-only). Every published port is
 bound to `127.0.0.1`.
 
 ```bash
 # development (UI http://localhost:8080, OTLP http on :4318)
-docker compose up -d
-# development without SigNoz (opt-out: name the services you want)
-docker compose up -d postgres rustfs mailpit local-git
+docker compose --profile observability up -d
 # production
 docker compose -f deploy/compose/docker-compose.prod.yml up -d --build
 ```
+
+In development, to send telemetry, start the profile and uncomment
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` in `apps/{api,app,mcp}/.env.local`;
+without it logs go to the console only.
 
 On a server, reach the UI through an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 host`)
 or your HTTPS reverse proxy.
@@ -204,7 +209,7 @@ differs from the existing admin's fails with "admin login failed". It never prin
 secrets. Re-run it after editing `deploy/observability/dashboards/` or `alerts/`:
 
 ```bash
-docker compose run --rm signoz-init
+docker compose --profile observability run --rm signoz-init
 # production
 docker compose -f deploy/compose/docker-compose.prod.yml run --rm signoz-init
 ```
@@ -229,6 +234,9 @@ Apps export with the standard OpenTelemetry variables (compose already sets them
 - `OTEL_TRACES_SAMPLER_ARG`: head sampling ratio, default `1`.
 - `OTEL_SDK_DISABLED=true`: off even when an endpoint is set.
 - `LOG_FORMAT=json|pretty`: stdout format. Default is JSON in production.
+- `LOG_LEVEL=debug|info|warn|error`: minimum level. Production writes stdout and SigNoz
+  (default `info`); development writes the console (default `debug`). Level convention:
+  [packages/observability/README.md](../packages/observability/README.md).
 
 Known gap: with browser RUM removed, client render errors (`apps/app` `error.tsx` and
 `global-error.tsx`) only reach the browser console; they are not in SigNoz.
@@ -251,11 +259,14 @@ traces and logs to 15 days and metrics to 30 days.
 
 ### Runner telemetry and Claude Code forwarding
 
-Runner telemetry is opt-in (default off). With `AGENTFLOW_RUNNER_TELEMETRY=true` the
-runner exports traces, logs and metrics (service `af-runner`) through
+Runner telemetry is on by default; opt out with `AGENTFLOW_RUNNER_TELEMETRY=false`. The
+Agent exports traces, logs and metrics (service `af-runner`) through
 `POST /otel/v1/{traces,logs,metrics}` on the api: API key, protobuf only, 512 KiB per
 request, rate limited. The api forwards only to its own `OTEL_EXPORTER_OTLP_ENDPOINT`
-and answers 404 when that is unset, so runners never need the collector.
+and answers 404 when that is unset; the Agent then stops exporting, so a dev stack without
+SigNoz stays quiet and runners never need the collector. Agent logs reach SigNoz as service
+`af-runner` with `trace_id` and `af.*` ids; Claude Code gets all known `af.*` ids in
+`OTEL_RESOURCE_ATTRIBUTES`.
 
 For loops the gateway hands the spawned Claude Code the current trace: `TRACEPARENT` and
 `af.loop_id` in `OTEL_RESOURCE_ATTRIBUTES`. When the runner's local OTLP receiver

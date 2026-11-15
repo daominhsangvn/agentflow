@@ -58,6 +58,7 @@ export function parseDesktopCommand(
     ...(parseTraceparent(event.traceparent)
       ? { traceparent: parseTraceparent(event.traceparent)! }
       : {}),
+    ...(isBaggageString(event.baggage) ? { baggage: event.baggage } : {}),
     ...(asNonEmptyString(event.signature)
       ? { signature: asNonEmptyString(event.signature)! }
       : {}),
@@ -194,4 +195,14 @@ function readStatusCode(record: Record<string, unknown>): number {
     return record.status;
   }
   return 0;
+}
+
+const MAX_BAGGAGE_LENGTH = 512;
+
+function isBaggageString(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_BAGGAGE_LENGTH
+  );
 }

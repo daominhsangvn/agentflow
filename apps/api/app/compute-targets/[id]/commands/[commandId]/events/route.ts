@@ -1,4 +1,5 @@
 import type { DesktopCommandEvent } from "@repo/api/src/types/compute-target";
+import { log } from "@repo/observability/log";
 import { NextResponse } from "next/server";
 import { authContextFailureResponse } from "@/lib/auth/auth-context-failure";
 import { resolveAnyAuthContext } from "@/lib/auth/resolve-any-auth-context";
@@ -237,7 +238,8 @@ export async function GET(
               send,
               close,
             });
-          } catch {
+          } catch (error) {
+            log.debug("compute_targets.command_events.poll_failed", { error });
             // Polling failure is non-fatal — next interval retries
           }
         }, 2000);

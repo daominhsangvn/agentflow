@@ -739,6 +739,7 @@ export async function deleteTranscriptObjects(
         }
       }
     } catch {
+      // observability: failure value — the keys are returned as failedKeys; storage has no logger dependency
       // The entire batch request failed (network error, auth error, etc.).
       // Treat every key in the chunk as undeleted and continue with remaining
       // batches so one bad batch does not abandon the rest.

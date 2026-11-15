@@ -187,6 +187,7 @@ async function applyLoopBacklink(
   try {
     await linkLoopSessionArtifact(backlink);
   } catch {
+    // observability: (c) the loss is counted by the metric below
     // AGENTS.md "Handling Bad or Nonsensical Data": an accepted loss is routed
     // to the monitored path, never absorbed silently.
     emitTelemetryMetric({

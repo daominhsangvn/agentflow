@@ -545,6 +545,11 @@ async function refreshOne(
     }
     reason = result.error.message;
   } catch (err) {
+    log.warn("capabilities_refresh.request_threw", {
+      error: err,
+      computeTargetId,
+      projectId,
+    });
     // A batch must go on past a runner that fails unexpectedly.
     reason = err instanceof Error ? err.message : String(err);
   }

@@ -1,5 +1,6 @@
 import { createEnv } from "@t3-oss/env-nextjs";
 import { z } from "zod";
+import { LogLevel } from "./log-level";
 
 export const keys = () =>
   createEnv({
@@ -11,6 +12,9 @@ export const keys = () =>
       OTEL_TRACES_SAMPLER: z.string().min(1).optional(),
       OTEL_TRACES_SAMPLER_ARG: z.string().min(1).optional(),
       OTEL_SDK_DISABLED: z.string().min(1).optional(),
+      LOG_LEVEL: z
+        .enum([LogLevel.Error, LogLevel.Warn, LogLevel.Info, LogLevel.Debug])
+        .optional(),
     },
     client: {},
     runtimeEnv: {
@@ -20,5 +24,6 @@ export const keys = () =>
       OTEL_TRACES_SAMPLER: process.env.OTEL_TRACES_SAMPLER,
       OTEL_TRACES_SAMPLER_ARG: process.env.OTEL_TRACES_SAMPLER_ARG,
       OTEL_SDK_DISABLED: process.env.OTEL_SDK_DISABLED,
+      LOG_LEVEL: process.env.LOG_LEVEL,
     },
   });

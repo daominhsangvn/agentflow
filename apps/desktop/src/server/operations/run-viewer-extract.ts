@@ -33,6 +33,7 @@ export function registerRunViewerExtractRoutes(
       try {
         uploaded = await parseZipUpload(contentType, context.rawBody);
       } catch {
+        // observability: 4xx response — the reason is captured by request_completed
         json(context, 400, { error: "Invalid form data" });
         return;
       }
@@ -64,6 +65,7 @@ export function registerRunViewerExtractRoutes(
 
         json(context, 200, { runDir });
       } catch (error) {
+        // observability: cleanup only; the original failure is reported below
         if (existsSync(runDir)) {
           await fs.rm(runDir, { recursive: true, force: true });
         }

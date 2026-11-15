@@ -715,6 +715,7 @@ function parseLine(rawLine: string): StreamLine | null {
       ? (parsed as StreamLine)
       : null;
   } catch {
+    // observability: parse fallback — per-line stream noise is skipped
     return null;
   }
 }

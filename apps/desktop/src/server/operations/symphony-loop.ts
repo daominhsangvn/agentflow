@@ -156,6 +156,7 @@ import {
   LOOP_PROCESS_TAG_ENV,
   stopLoopLeftoverProcesses,
 } from "./loop-leftover-processes.js";
+import { loopError, loopLog, loopWarn } from "./loop-log.js";
 import { prepareProjectRepos } from "./loop-project-repos.js";
 import { preparePlanWorkDir } from "./loop-replan.js";
 import {
@@ -203,8 +204,6 @@ import {
   CLONE_GIT_TIMEOUT,
   expandHome,
   isProcessRunning,
-  loopError,
-  loopLog,
   resolveWorktreeParentDir,
   runBootstrapIfNeeded,
   runLoopsSetupScript,
@@ -538,6 +537,7 @@ function isValidJson(value: string): boolean {
     JSON.parse(value);
     return true;
   } catch {
+    // observability: parse fallback — invalid JSON is the false answer
     return false;
   }
 }
@@ -786,6 +786,7 @@ function parseJsonBody(
   try {
     return JSON.parse(context.body) as Record<string, unknown>;
   } catch {
+    // observability: parse fallback — malformed request body yields null
     return null;
   }
 }
@@ -961,6 +962,7 @@ function parseBootstrapParams(
     }
     return parsed as unknown as BootstrapParams;
   } catch {
+    // observability: parse fallback — malformed bootstrap params yield null
     return null;
   }
 }
@@ -1013,6 +1015,7 @@ export function readBootstrapRepoOutputs(
       });
     }
   } catch {
+    // observability: probe — the agents dir is optional
     // agents dir may not exist
   }
 
@@ -1703,6 +1706,10 @@ async function preflightAdditionalRepoBranchMaterialization(args: {
       });
     } catch (err) {
       const msg = sanitizeUnknownError(err);
+      loopError(
+        args.body.loopId,
+        `Additional repo branch materialization failed: ${msg}`
+      );
       const offender = peerOffenderLabel();
       await postLoopEventBounded(
         args.apiBaseUrl,
@@ -2017,6 +2024,7 @@ async function resolveOriginDefaultBranch(
     const branch = result.stdout.trim().replace(/^origin\//, "");
     return branch || baseBranch;
   } catch {
+    // observability: probe — default branch lookup falls back to the base branch
     return baseBranch;
   }
 }
@@ -2102,6 +2110,7 @@ function getCurrentBranchImpl(worktreeDir: string): string | null {
       ).trim() || null
     );
   } catch {
+    // observability: probe — remote lookup failure yields null
     return null;
   }
 }
@@ -2426,6 +2435,7 @@ export async function writeArtifactsForExecuteOrAmend(
           existing.content = artifact.content;
           await fs.writeFile(planJsonPath, JSON.stringify(existing, null, 2));
         } catch {
+          // observability: parse fallback — a corrupt existing plan.json is overwritten
           // If existing plan.json is corrupt, overwrite entirely
           if (isRawPlanArtifact(artifact.raw)) {
             await fs.writeFile(
@@ -3083,10 +3093,12 @@ export function detectSessionLimitFromJsonl(
           return entry.result;
         }
       } catch {
+        // observability: parse fallback — malformed jsonl line is skipped
         // skip malformed lines
       }
     }
   } catch {
+    // observability: probe — an unreadable output file means no match
     // file read error
   }
   return null;
@@ -3171,6 +3183,7 @@ export function scanJsonlForAuthChallenge(content: string): string | null {
         }
       }
     } catch {
+      // observability: parse fallback — malformed jsonl line is skipped
       // skip malformed lines
     }
   }
@@ -3192,6 +3205,7 @@ export function detectAuthChallengeFromJsonl(
   try {
     return scanJsonlForAuthChallenge(readFileSync(outputFile, "utf-8"));
   } catch {
+    // observability: probe — an unreadable output file means no auth challenge
     // file read error
     return null;
   }
@@ -3471,6 +3485,7 @@ async function attemptLlmCommit(
             process.kill(pid, 0); // check alive
             killProcessTree(pid, "SIGKILL");
           } catch {
+            // observability: best-effort cleanup — the process is already gone
             // Already gone
           }
         }, 5000);
@@ -3579,11 +3594,13 @@ async function attemptLlmCommit(
       try {
         unlinkSync(resultFilePath);
       } catch {
+        // observability: best-effort cleanup — the scratch file may not exist
         /* may not exist */
       }
       try {
         unlinkSync(prBodyFilePath);
       } catch {
+        // observability: best-effort cleanup — the scratch file may not exist
         /* may not exist */
       }
       if (result) {
@@ -3765,6 +3782,7 @@ function parseGitHubFullNameFromPrUrl(prUrl: string): string | null {
     const [owner, repo] = parts;
     return owner && repo ? `${owner}/${repo}` : null;
   } catch {
+    // observability: parse fallback — an unparsable remote url yields null
     return null;
   }
 }
@@ -3807,7 +3825,12 @@ function persistExecutionResultArtifact(
       json
     );
     return true;
-  } catch {
+  } catch (error) {
+    gatewayLog.warn(
+      "symphony-loop",
+      "execution result artifact write failed: execution_result_write_failed",
+      { reason: "execution_result_write_failed", error }
+    );
     return false;
   }
 }
@@ -3823,6 +3846,7 @@ function getHeadCommitShaFromWorktree(worktreeDir: string): string | null {
       }).trim() || null
     );
   } catch {
+    // observability: probe — git lookup failure yields null
     return null;
   }
 }
@@ -4215,11 +4239,13 @@ export async function runExecuteFinalization(
   try {
     unlinkSync(path.join(params.worktreeDir, LoopArtifactFile.ExecutionResult));
   } catch {
+    // observability: best-effort cleanup — the scratch file may not exist
     /* may not exist */
   }
   try {
     unlinkSync(path.join(params.worktreeDir, "pr-body.md"));
   } catch {
+    // observability: best-effort cleanup — the scratch file may not exist
     /* may not exist */
   }
 
@@ -4661,6 +4687,7 @@ function executeGitOperations(
       return { status: "no-changes" }; // No changes
     }
   } catch (err) {
+    loopError(loopId, `Git operations failed: ${sanitizeUnknownError(err)}`);
     const reason = err instanceof Error ? err.message : String(err);
     return { status: "error", reason };
   }
@@ -4736,6 +4763,7 @@ function executeGitOperations(
         metadataFooter,
       ].join("\n");
     } catch {
+      // observability: probe — no PR template is a normal state
       // No template found — use simple metadata body
       prBody = [
         "Automated PR created by AgentFlow loop runner.",
@@ -4784,6 +4812,7 @@ function executeGitOperations(
       prUrl = parsed.url;
       prNumber = parsed.number;
     } catch {
+      // observability: probe — no existing PR is a normal state
       // No existing PR — create one using --body-file to avoid shell escaping.
       // Create without --label first so the PR still succeeds on repos where the
       // 'symphony' label doesn't exist yet, then attach the label best-effort.
@@ -4825,6 +4854,7 @@ function executeGitOperations(
             }
           );
         } catch {
+          // observability: best-effort — the label may not exist on this repo
           // Label may not exist on this repo — not critical
         }
       }
@@ -4857,12 +4887,17 @@ function executeGitOperations(
           { cwd: worktreeDir, stdio: "pipe", env, timeout: 15_000 }
         );
       }
-    } catch {
+    } catch (error) {
+      loopWarn(
+        loopId,
+        `PR metadata update failed (PR exists): ${sanitizeUnknownError(error)}`
+      );
       // Non-critical — PR exists, metadata is best-effort
     }
 
     return { status: "success", prUrl, prNumber, branchName, commitSha };
   } catch (err) {
+    loopError(loopId, `PR creation failed: ${sanitizeUnknownError(err)}`);
     const reason = err instanceof Error ? err.message : String(err);
     return { status: "error", reason };
   }
@@ -5957,6 +5992,10 @@ async function provisionAdditionalRepoWorktrees(args: {
         });
       } catch (err) {
         const msg = sanitizeUnknownError(err);
+        loopError(
+          body.loopId,
+          `Additional repo branch materialization failed: ${msg}`
+        );
         await cleanupAdditionalWorktrees(
           additionalWorktreeDirs,
           body.loopId,
@@ -6186,6 +6225,10 @@ async function setupPrdWorktree(args: {
       });
       assertPathAllowed(worktreeDir, allowedDirs);
     } catch (err) {
+      loopWarn(
+        body.loopId,
+        `Primary worktree setup failed: ${sanitizeUnknownError(err)}`
+      );
       if (err instanceof DirectoryNotAllowedError) {
         json(context, 403, {
           error: `Worktree path not allowed: ${worktreeDir}`,
@@ -6212,6 +6255,10 @@ async function setupPrdWorktree(args: {
         baseBranch,
       });
     } catch (err) {
+      loopError(
+        body.loopId,
+        `Primary branch materialization failed: ${sanitizeUnknownError(err)}`
+      );
       await failBranchCreate({
         body,
         apiBaseUrl,
@@ -6869,6 +6916,10 @@ async function handleLoopRequest(
           body.repo
         );
       } catch (artifactErr) {
+        loopError(
+          body.loopId,
+          `Artifact write failed: ${sanitizeUnknownError(artifactErr)}`
+        );
         await fs.rm(tmpDir, { recursive: true, force: true });
         await postLoopEvent(
           apiBaseUrl,
@@ -6937,6 +6988,10 @@ async function handleLoopRequest(
           expandedRepoPath
         );
       } catch (artifactErr) {
+        loopError(
+          body.loopId,
+          `Artifact write failed: ${sanitizeUnknownError(artifactErr)}`
+        );
         await fs.rm(claudeWorkDir, { recursive: true, force: true });
         await postLoopEvent(
           apiBaseUrl,
@@ -7026,6 +7081,10 @@ async function handleLoopRequest(
           });
           assertPathAllowed(worktreeDir, allowedDirs);
         } catch (err) {
+          loopWarn(
+            body.loopId,
+            `Primary worktree setup failed: ${sanitizeUnknownError(err)}`
+          );
           if (err instanceof DirectoryNotAllowedError) {
             json(context, 403, {
               error: `Worktree path not allowed: ${worktreeDir}`,
@@ -7071,6 +7130,10 @@ async function handleLoopRequest(
               baseBranch,
             });
           } catch (err) {
+            loopError(
+              body.loopId,
+              `PLAN branch materialization failed: ${sanitizeUnknownError(err)}`
+            );
             await failBranchCreate({
               body,
               apiBaseUrl,
@@ -7181,6 +7244,10 @@ async function handleLoopRequest(
               baseBranch,
             });
           } catch (err) {
+            loopError(
+              body.loopId,
+              `Branch materialization failed: ${sanitizeUnknownError(err)}`
+            );
             await failBranchCreate({
               body,
               apiBaseUrl,
@@ -7318,6 +7385,7 @@ async function handleLoopRequest(
                 body.loopId
               );
             } catch {
+              // observability: best-effort cleanup — worktree removal failure is ignored
               /* ignore */
             }
             // Clean up all prior additional worktrees
@@ -7691,6 +7759,7 @@ async function handleLoopRequest(
       logFd = openSync(logFile, "a");
     } catch (logErr) {
       const msg = logErr instanceof Error ? logErr.message : String(logErr);
+      loopError(body.loopId, `Cannot open log file: ${msg}`);
       await postLoopEvent(
         apiBaseUrl,
         body.loopId,
@@ -8182,6 +8251,7 @@ async function handleLoopRequest(
               continue;
             }
           } catch {
+            // observability: probe — a missing repo path is recorded as a manifest skip
             manifest.push({
               fullName: repo.fullName,
               localPath,
@@ -8194,6 +8264,10 @@ async function handleLoopRequest(
           try {
             assertPathAllowed(localPath, allowedDirs);
           } catch {
+            loopWarn(
+              body.loopId,
+              `Bootstrap repo outside sandbox, skipped: ${repo.fullName}`
+            );
             manifest.push({
               fullName: repo.fullName,
               localPath: "",
@@ -8333,6 +8407,10 @@ async function handleLoopRequest(
         );
       }
     } catch (spawnErr) {
+      loopError(
+        body.loopId,
+        `Spawn failed: ${spawnErr instanceof Error ? spawnErr.message : String(spawnErr)}`
+      );
       closeSync(logFd);
       // The perf watcher is started before spawn() so its baseline snapshot
       // does not race the child. If spawn throws, the watcher is already
@@ -8341,6 +8419,7 @@ async function handleLoopRequest(
         try {
           await loopPerfWatcherHandle.stop();
         } catch {
+          // observability: best-effort cleanup — watcher errors must not mask the spawn failure
           // Ignore — watcher errors must not mask the spawn failure.
         }
         loopPerfWatcherHandle = undefined;
@@ -8772,9 +8851,11 @@ async function handleLoopKill(
             process.kill(job.pid, 0);
             killProcessTree(job.pid, "SIGKILL");
           } catch {
+            // observability: best-effort cleanup — the process is already gone
             /* gone */
           }
         } catch {
+          // observability: best-effort cleanup — the process is already dead
           /* already dead */
         }
         jobStore.upsert({
@@ -8820,9 +8901,11 @@ async function handleLoopKill(
       process.kill(entry.pid, 0);
       killProcessTree(entry.pid, "SIGKILL");
     } catch {
+      // observability: best-effort cleanup — the process is already gone
       // Already gone
     }
   } catch {
+    // observability: best-effort cleanup — the process already terminated
     // Process already terminated
   }
 
@@ -8904,6 +8987,7 @@ function stopStalledAgent(pid: number): void {
       process.kill(pid, 0);
       killProcessTree(pid, "SIGKILL");
     } catch {
+      // observability: best-effort cleanup — the process is already gone
       /* gone */
     }
   }, STALLED_AGENT_KILL_GRACE_MS);

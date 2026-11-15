@@ -160,6 +160,7 @@ async function probePythonExecutable(
     );
     return FIRST_LINE_RE.exec(stdout.trim())?.[0] || null;
   } catch {
+    // observability: probe — a missing interpreter is a normal state
     return null;
   }
 }

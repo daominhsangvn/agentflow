@@ -126,6 +126,10 @@ vi.mock("@/lib/loops/loop-commands", () => {
   };
 });
 
+vi.mock("@/lib/loops/loop-telemetry-ids", () => ({
+  resolveLoopTelemetryIds: vi.fn().mockResolvedValue({}),
+}));
+
 vi.mock("@/lib/loops/loop-ecs", () => ({
   runEcsTask: vi.fn().mockResolvedValue("ecs-task-arn"),
   stopLoopTask: vi.fn().mockResolvedValue(undefined),

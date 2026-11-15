@@ -41,6 +41,7 @@ export async function parseCommentActionBody<T extends z.ZodType>(
   try {
     raw = text.trim() ? JSON.parse(text) : {};
   } catch {
+    // observability: invalid JSON body is answered 400, request_completed captures it
     return {
       body: null,
       response: actionResultResponse(makeInvalid("Invalid JSON body")),

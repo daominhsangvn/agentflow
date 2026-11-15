@@ -28,6 +28,7 @@ import {
   queryStatusCheckRollupWithProviderResult,
 } from "@repo/github";
 import type { Octokit } from "@repo/github/user-token-auth";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 import { parseGitHubPullRequestUrl } from "@/app/artifact-links/pull-requests/pull-request-url";
 import { writeReconciledPullRequestFailures } from "@/app/cron/reconcile-pull-requests/reconcile-projection-write";
@@ -262,7 +263,12 @@ async function runPostConnectBackfillAfterClaim(
       ) {
         failures.push(`${repository.fullName}:provider_budget_low`);
       }
-    } catch {
+    } catch (error) {
+      log.warn("github.backfill_repository_failed", {
+        organizationId: input.organizationId,
+        reason: "repository_backfill_failed",
+        error,
+      });
       failures.push(repository.fullName);
     }
   }

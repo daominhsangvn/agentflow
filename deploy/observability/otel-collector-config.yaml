@@ -6,6 +6,8 @@
 #   batch                groups telemetry into large ClickHouse inserts.
 #   signozspanmetrics/delta  RED metrics from spans; runs BEFORE tail sampling
 #                        so the metrics count every span, not only kept traces.
+#   transform/claude_code_severity  raises Claude Code api_error to ERROR and
+#                        failed tool_result to WARN.
 #   redaction            second redaction layer (the in-process
 #                        packages/observability/redact.ts is the first): blocks
 #                        sensitive attribute keys and secret/email-shaped
@@ -57,6 +59,18 @@ processors:
       - name: signoz.collector.id
       - name: service.version
       - name: host.name
+  # Claude Code emits api_error and tool_result events at INFO. Raise them so
+  # severity filters and alerts see failures (names arrive with or without a
+  # claude_code. prefix).
+  transform/claude_code_severity:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(severity_number, SEVERITY_NUMBER_ERROR) where resource.attributes["service.name"] == "af-claude-code" and (attributes["event.name"] == "api_error" or attributes["event.name"] == "claude_code.api_error")
+          - set(severity_text, "ERROR") where resource.attributes["service.name"] == "af-claude-code" and (attributes["event.name"] == "api_error" or attributes["event.name"] == "claude_code.api_error")
+          - set(severity_number, SEVERITY_NUMBER_WARN) where resource.attributes["service.name"] == "af-claude-code" and (attributes["event.name"] == "tool_result" or attributes["event.name"] == "claude_code.tool_result") and attributes["success"] == "false"
+          - set(severity_text, "WARN") where resource.attributes["service.name"] == "af-claude-code" and (attributes["event.name"] == "tool_result" or attributes["event.name"] == "claude_code.tool_result") and attributes["success"] == "false"
   redaction:
     allow_all_keys: true
     blocked_key_patterns:
@@ -143,5 +157,5 @@ service:
       exporters: [signozclickhousemetrics]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, redaction, batch]
+      processors: [memory_limiter, transform/claude_code_severity, redaction, batch]
       exporters: [clickhouselogsexporter, metadataexporter]

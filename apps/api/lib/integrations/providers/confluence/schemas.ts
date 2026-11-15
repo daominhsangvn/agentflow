@@ -24,6 +24,7 @@ const siteUrlSchema = z
     try {
       url = new URL(value);
     } catch {
+      // observability: (a) validation fallback — the issue is added to the schema result
       context.addIssue({ code: "custom", message: SITE_URL_HINT });
       return z.NEVER;
     }

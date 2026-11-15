@@ -103,6 +103,7 @@ function resolveConfigDir(getSymphonyDir?: () => string): string | null {
   try {
     return path.join(getSymphonyDir(), "config");
   } catch {
+    // observability: probe — the symphony dir may be unavailable
     return null;
   }
 }

@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { logJsonReplacer, toLogAttributes } from "./log-attributes";
+import { LogLevel } from "./log-level";
 import { emitLogRecord, hasLogRecordSink } from "./log-sink";
 import { redactSensitiveText } from "./redact";
 import { resolveGitSha, resolveServerVersion } from "./telemetry/context";
@@ -21,16 +22,14 @@ import { KNOWN_ORIGINS, ORIGIN, type Origin } from "./telemetry/origin";
 import { getTraceContext, toLogCorrelationFields } from "./trace-context";
 import { flushTelemetry } from "./tracing/hooks";
 
-export const LogLevel = {
-  Debug: "debug",
-  Info: "info",
-  Warn: "warn",
-  Error: "error",
-} as const;
-
-export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
-
 const STRUCTURED_CONSOLE = resolveStructuredConsole();
+const LOG_THRESHOLD = resolveLogThreshold();
+const LOG_LEVEL_RANK: Record<LogLevel, number> = {
+  [LogLevel.Debug]: 10,
+  [LogLevel.Info]: 20,
+  [LogLevel.Warn]: 30,
+  [LogLevel.Error]: 40,
+};
 
 // If the second arg is a plain object, use it as structured meta.
 // Otherwise, pack extra args into a generic "args" field.
@@ -127,6 +126,9 @@ function makeLogFn(
   consoleFn: (...args: unknown[]) => void
 ): (message: string, ...args: unknown[]) => void {
   return (message: string, ...args: unknown[]) => {
+    if (LOG_LEVEL_RANK[level] < LOG_LEVEL_RANK[LOG_THRESHOLD]) {
+      return;
+    }
     const meta = extractMeta(args);
     writeConsole(consoleFn, level, message, args, meta);
     emitToSink(level, message, meta);
@@ -138,10 +140,10 @@ function makeLogFn(
 // ---------------------------------------------------------------------------
 
 export const log = {
-  debug: makeLogFn("debug", console.debug),
-  info: makeLogFn("info", console.info),
-  warn: makeLogFn("warn", console.warn),
-  error: makeLogFn("error", console.error),
+  debug: makeLogFn(LogLevel.Debug, console.debug),
+  info: makeLogFn(LogLevel.Info, console.info),
+  warn: makeLogFn(LogLevel.Warn, console.warn),
+  error: makeLogFn(LogLevel.Error, console.error),
   /**
    * Flush pending telemetry (traces, logs, metrics). Never rejects; resolves
    * immediately when telemetry is not installed.
@@ -159,6 +161,11 @@ if (globalThis.window === undefined) {
 
   if (resolveGitSha() === "unknown") {
     log.warn("telemetry.git_sha_fallback");
+  }
+
+  const invalidLogLevel = readInvalidLogLevel();
+  if (invalidLogLevel !== undefined) {
+    log.warn("telemetry.log_level_invalid", { value: invalidLogLevel });
   }
 }
 
@@ -202,4 +209,37 @@ function resolveEntryOrigin(meta: Record<string, unknown> | undefined): Origin {
     return candidate as Origin;
   }
   return ORIGIN;
+}
+
+/** True when a record at `level` would be written; skip building costly debug meta otherwise. */
+export function isLogLevelEnabled(level: LogLevel): boolean {
+  return LOG_LEVEL_RANK[level] >= LOG_LEVEL_RANK[LOG_THRESHOLD];
+}
+
+function parseLogLevel(value: string | undefined): LogLevel | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return (Object.values(LogLevel) as string[]).includes(normalized ?? "")
+    ? (normalized as LogLevel)
+    : undefined;
+}
+
+/**
+ * Minimum level: `LOG_LEVEL` when valid, else info in production and debug
+ * elsewhere. `process.env.LOG_LEVEL` is undefined in browsers.
+ */
+function resolveLogThreshold(): LogLevel {
+  const configured = parseLogLevel(process.env.LOG_LEVEL);
+  if (configured) {
+    return configured;
+  }
+  return process.env.NODE_ENV === "production" ? LogLevel.Info : LogLevel.Debug;
+}
+
+/** The raw `LOG_LEVEL` when it is set but not a valid level. */
+function readInvalidLogLevel(): string | undefined {
+  const raw = process.env.LOG_LEVEL;
+  if (raw === undefined || raw.trim() === "") {
+    return undefined;
+  }
+  return parseLogLevel(raw) ? undefined : raw;
 }

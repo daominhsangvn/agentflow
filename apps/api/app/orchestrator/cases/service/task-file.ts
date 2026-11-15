@@ -1,4 +1,5 @@
 import { withDb } from "@repo/database";
+import { log } from "@repo/observability/log";
 import {
   cleanFileName,
   uploadContentType,
@@ -44,7 +45,14 @@ export async function readCaseTaskFile(
   let bytes: Uint8Array;
   try {
     bytes = await getLoopAttachment(stored.storageKey);
-  } catch {
+  } catch (error) {
+    log.warn("orchestrator.task_file_read_failed", {
+      caseId,
+      taskId,
+      organizationId,
+      reason: "storage_read_failed",
+      error,
+    });
     return null;
   }
   const fileName = cleanFileName(name) ?? "file";

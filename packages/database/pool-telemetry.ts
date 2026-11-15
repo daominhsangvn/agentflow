@@ -246,6 +246,7 @@ function recordAcquire(
 
     emit(entry, { metric: "db_pool_acquire_wait", value: waitedMs });
   } catch {
+    // observability: telemetry code itself — warnSinkThrewOnce reports it, no recursion
     warnSinkThrewOnce();
   }
 }
@@ -284,6 +285,7 @@ function finishCheckout(pool: Pool, client: PoolClient): void {
       value: heldMs,
     });
   } catch {
+    // observability: telemetry code itself — warnSinkThrewOnce reports it, no recursion
     warnSinkThrewOnce();
   }
 }
@@ -305,6 +307,7 @@ function maybeSampleGauges(counters: PoolCounters): void {
       value: counters.waitingCount,
     });
   } catch {
+    // observability: telemetry code itself — warnSinkThrewOnce reports it, no recursion
     warnSinkThrewOnce();
   }
 }
@@ -336,6 +339,7 @@ function emit(
   try {
     sink({ ...sample, ...counters });
   } catch {
+    // observability: telemetry code itself — warnSinkThrewOnce reports it, no recursion
     warnSinkThrewOnce();
   }
 }

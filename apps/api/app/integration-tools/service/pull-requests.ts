@@ -5,6 +5,7 @@ import {
   IntegrationToolName,
 } from "@repo/api/src/types/integration-tools";
 import { withDb } from "@repo/database";
+import { log } from "@repo/observability/log";
 import {
   type PlannedToolCall,
   PullRequestThreadFilter,
@@ -193,7 +194,13 @@ async function openPullRequest(
   try {
     info = await definition.get(ctx, repository.externalId);
   } catch (error) {
-    return fail(scrubProviderError(error, loaded.runtime.secrets), true);
+    const reason = scrubProviderError(error, loaded.runtime.secrets);
+    log.warn("integration_tools.repository_lookup_failed", {
+      provider: repository.provider,
+      connectionId: repository.connectionId,
+      reason,
+    });
+    return fail(reason, true);
   }
   if (!info) {
     return fail(

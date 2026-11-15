@@ -314,6 +314,7 @@ export const workflowRunService = {
         trigger.type
       );
     } catch (error) {
+      // observability: the scrubbed provider error is returned to the caller as badRequest
       return badRequest(scrubProviderError(error, loaded.runtime.secrets));
     }
     if (!isClaimed(target.value.scopes, loaded, event.item.container)) {
@@ -700,6 +701,7 @@ function decodeCursor(cursor: string): RunCursor | null {
       ? { createdAt: new Date(parsed.data.c), id: parsed.data.i }
       : null;
   } catch {
+    // observability: an undecodable cursor is treated as no cursor
     return null;
   }
 }

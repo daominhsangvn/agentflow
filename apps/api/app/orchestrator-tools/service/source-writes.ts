@@ -7,6 +7,7 @@ import {
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
 import { withDb } from "@repo/database";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 import { sourceGrantDefinitions } from "@/lib/integrations/connection-grants";
 import {
@@ -196,7 +197,12 @@ async function readStatus(context: SourceWriteContext): Promise<string | null> {
       context.channel.item satisfies SourceItemRef
     );
     return item.status;
-  } catch {
+  } catch (error) {
+    log.warn("orchestrator_tools.status_read_failed", {
+      provider: context.channel.item.provider,
+      reason: "fetch_item_failed",
+      error,
+    });
     return null;
   }
 }

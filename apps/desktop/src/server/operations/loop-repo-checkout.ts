@@ -4,16 +4,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { sanitizeErrorMessage } from "../../main/diagnostics/diagnostics-helpers.js";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import { normalizeAndValidateOrigin } from "../../main/settings/origin-policy.js";
 import { assertPathAllowed } from "../security.js";
+import { loopError, loopLog } from "./loop-log.js";
 import { withRepoRefLock } from "./loop-worktree-git.js";
 import { addRepo } from "./repos-config-utils.js";
-import {
-  CLONE_GIT_TIMEOUT,
-  expandHome,
-  loopError,
-  loopLog,
-} from "./symphony-utils.js";
+import { CLONE_GIT_TIMEOUT, expandHome } from "./symphony-utils.js";
 
 /**
  * Local checkouts of project repositories: the repositories a project takes
@@ -256,6 +253,7 @@ function sameRemote(remote: string, cloneUrl: URL): boolean {
   try {
     parsed = new URL(remote);
   } catch {
+    // observability: parse fallback — a remote that is not a URL never matches
     return false;
   }
   return (
@@ -270,7 +268,7 @@ function normalizePath(pathname: string): string {
   try {
     decoded = decodeURIComponent(pathname);
   } catch {
-    // Keep the raw path; it then only matches an identical one.
+    // observability: parse fallback — keep the raw path; it then only matches an identical one.
   }
   return decoded
     .replace(TRAILING_SLASHES_RE, "")
@@ -302,7 +300,17 @@ export async function excludeAgentFlowFiles(
     await fs.mkdir(path.dirname(excludeFile), { recursive: true });
     const separator = current === "" || current.endsWith("\n") ? "" : "\n";
     await fs.appendFile(excludeFile, `${separator}${AGENTFLOW_EXCLUDE}\n`);
-  } catch {
+  } catch (error) {
+    gatewayLog.warn(
+      LOG_TAG,
+      "excluding AgentFlow files from git status failed",
+      {
+        reason: "git_exclude_write_failed",
+        error,
+      }
+    );
     // Untracked files then show in git status; the commit step skips them.
   }
 }
+
+const LOG_TAG = "loop-repo-checkout";

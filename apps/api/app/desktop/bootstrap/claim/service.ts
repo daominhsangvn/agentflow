@@ -1,3 +1,4 @@
+import { log } from "@repo/observability/log";
 import "server-only";
 
 import { z } from "zod";
@@ -45,6 +46,7 @@ async function readBootstrapClaimRequest(
   try {
     rawBody = await request.json();
   } catch {
+    // observability: unparsable claim body is answered 400, request_completed captures it
     return invalidClaimRequestResponse();
   }
 
@@ -79,7 +81,8 @@ async function loadBootstrapClaimAttempt(
 ): Promise<BootstrapClaimAttempt | Response> {
   try {
     return await desktopOnboardingAttemptsService.get(onboardingAttemptId);
-  } catch {
+  } catch (error) {
+    log.error("desktop.bootstrap_claim.attempt_load_failed", { error });
     return desktopContractError(
       503,
       "DESKTOP_MANAGED_KEY_ISSUANCE_FAILED",
@@ -131,7 +134,8 @@ async function validateBoundClaimAttempt(
     return target && target.gatewayId === body.gatewayId
       ? null
       : desktopContractError(403, "ONBOARDING_ATTEMPT_GATEWAY_MISMATCH", false);
-  } catch {
+  } catch (error) {
+    log.error("desktop.bootstrap_claim.gateway_check_failed", { error });
     return desktopContractError(
       503,
       "DESKTOP_MANAGED_KEY_ISSUANCE_FAILED",
@@ -175,7 +179,8 @@ export async function handleBootstrapClaim(request: Request) {
       attempt.userId,
       attempt.organizationId
     );
-  } catch {
+  } catch (error) {
+    log.error("desktop.bootstrap_claim.user_load_failed", { error });
     return desktopContractError(
       503,
       "DESKTOP_MANAGED_KEY_ISSUANCE_FAILED",
@@ -219,7 +224,8 @@ export async function handleBootstrapClaim(request: Request) {
         false
       );
     }
-  } catch {
+  } catch (error) {
+    log.error("desktop.bootstrap_claim.attempt_consume_failed", { error });
     return desktopContractError(
       503,
       "DESKTOP_MANAGED_KEY_ISSUANCE_FAILED",
@@ -250,6 +256,7 @@ export async function handleBootstrapClaim(request: Request) {
         false
       );
     }
+    log.error("desktop.bootstrap_claim.key_rotation_failed", { error });
     return desktopContractError(
       503,
       "DESKTOP_MANAGED_KEY_ISSUANCE_FAILED",

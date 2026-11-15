@@ -16,7 +16,11 @@ import type {
   HealthResponse,
 } from "../shared/contracts.js";
 import { isOriginAllowed } from "./gateway-cors-policy.js";
-import { runWithGatewayTrace } from "./gateway-trace-context.js";
+import {
+  BAGGAGE_HEADER,
+  parseAfBaggage,
+  runWithGatewayTrace,
+} from "./gateway-trace-context.js";
 import { OperationDispatcher } from "./operation-dispatcher.js";
 import type { BinaryPathKey, BinaryPaths } from "./operations/binary-paths.js";
 import { registerCapabilitiesRefreshRoutes } from "./operations/capabilities-refresh.js";
@@ -644,7 +648,8 @@ export class GatewayRouter {
             body,
             request,
             response,
-          })
+          }),
+        parseAfBaggage(firstHeaderValue(request.headers[BAGGAGE_HEADER]))
       );
       if (handled) {
         return;
@@ -922,6 +927,7 @@ export class GatewayRouter {
       }
       challengeToken = parsed.challengeToken;
     } catch {
+      // observability: 4xx response — the reason is captured by request_completed
       response.statusCode = 400;
       response.setHeader("content-type", "application/json");
       response.setHeader("Cache-Control", "no-store");
@@ -1204,6 +1210,7 @@ function parseStrictContentLength(value: string | null): bigint | null {
   try {
     return BigInt(value);
   } catch {
+    // observability: parse fallback — an invalid content-length yields null
     return null;
   }
 }

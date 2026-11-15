@@ -137,6 +137,7 @@ export function registerGitWorktreeRoutes(
         try {
           assertPathAllowed(prDir, getAllowedDirectories());
         } catch {
+          // observability: a directory outside the sandbox is skipped
           continue;
         }
 
@@ -236,6 +237,7 @@ async function canonicalizePath(rawPath: string): Promise<string> {
   try {
     return await fs.realpath(rawPath);
   } catch {
+    // observability: probe — the path may not exist yet
     return path.resolve(rawPath);
   }
 }

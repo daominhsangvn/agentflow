@@ -110,6 +110,7 @@ services:
         required: true
     environment:
       OTEL_SERVICE_NAME: af-api
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://signoz-otel-collector:4318}
       OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment.name=production}
       OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
@@ -286,6 +287,7 @@ services:
     restart: unless-stopped
     environment:
       OTEL_SERVICE_NAME: af-app
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://signoz-otel-collector:4318}
       OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment.name=production}
       OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
@@ -310,6 +312,7 @@ services:
     restart: unless-stopped
     environment:
       OTEL_SERVICE_NAME: af-mcp
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://signoz-otel-collector:4318}
       OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment.name=production}
       OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
@@ -348,7 +351,8 @@ services:
     restart: unless-stopped
     environment:
       OTEL_SERVICE_NAME: af-runner
-      AGENTFLOW_RUNNER_TELEMETRY: ${AGENTFLOW_RUNNER_TELEMETRY:-false}
+      AGENTFLOW_RUNNER_TELEMETRY: ${AGENTFLOW_RUNNER_TELEMETRY:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       AGENTFLOW_API_URL: http://api:3002
       AGENTFLOW_MCP_URL: http://mcp:3010/mcp
       AGENTFLOW_ALLOW_HTTP_HOSTS: api,mcp

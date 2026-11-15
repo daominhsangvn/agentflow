@@ -12,7 +12,13 @@ query service). Nothing here contains secrets.
 - `alerts/` – alert rule JSON, one file per rule (matched by `alert`).
 - `otel-collector-config.yaml` – OTLP in; redaction, tail sampling, ClickHouse out.
 
-Both `docker-compose.yml` and `deploy/compose/docker-compose.prod.yml` start SigNoz by
-default and mount this directory read-only.
+Claude Code events (service `af-claude-code`: `api_error`, `tool_result`, `api_request`) carry the
+case, loop and run ids as resource attributes. They appear in the Journeys dashboard "Claude Code" panel
+(errors first, with the failure reason) and in Logs. The collector raises `api_error` to ERROR and a
+`tool_result` with `success=false` to WARN. Tokens and cost per case are in the "Claude Code tokens / cost
+per case" panel.
+
+The prod compose (`deploy/compose/docker-compose.prod.yml`) starts SigNoz by default; the dev
+`docker-compose.yml` starts it with `--profile observability`. Both mount this directory read-only.
 
 Setup and operation: [docs/self-hosting.md](../../docs/self-hosting.md#observability-signoz).

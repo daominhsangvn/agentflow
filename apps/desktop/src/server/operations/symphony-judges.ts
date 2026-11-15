@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import { DirectoryNotAllowedError } from "../security.js";
 import { json } from "./response-utils.js";
@@ -66,6 +67,7 @@ export function registerSymphonyJudgesRoutes(
             try {
               data = JSON.parse(judgesContent);
             } catch {
+              // observability: parse fallback — retry after stripping trailing commas
               const fixedContent = judgesContent.replaceAll(
                 /,\s*([\]}])/g,
                 "$1"
@@ -83,6 +85,10 @@ export function registerSymphonyJudgesRoutes(
           } catch (error) {
             const message =
               error instanceof Error ? error.message : "Unknown error";
+            gatewayLog.error(JUDGES_TAG, "judges feedback is corrupted", {
+              reason: "judges_feedback_corrupt",
+              error,
+            });
             json(context, 500, {
               error: `Judges feedback is corrupted: ${message}`,
               exists: true,
@@ -101,8 +107,14 @@ export function registerSymphonyJudgesRoutes(
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
+        gatewayLog.error(JUDGES_TAG, "failed to read judges data", {
+          reason: "judges_read_failed",
+          error,
+        });
         json(context, 500, { error: `Failed to read judges data: ${message}` });
       }
     }
   );
 }
+
+const JUDGES_TAG = "symphony-judges";

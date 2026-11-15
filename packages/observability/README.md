@@ -24,6 +24,11 @@ Standard OpenTelemetry variables only:
 - `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` (head sampling ratio, default 1).
 - `OTEL_SDK_DISABLED=true`: off even when an endpoint is set.
 - `LOG_FORMAT=json|pretty`: stdout format (JSON in production).
+- `LOG_LEVEL=debug|info|warn|error`: minimum level for stdout and OTel logs (case-insensitive). Default
+  `info` in production, `debug` elsewhere. An invalid value falls back to the default and logs
+  `telemetry.log_level_invalid` once.
+
+Dev: start SigNoz with `docker compose --profile observability up -d` and set `OTEL_EXPORTER_OTLP_ENDPOINT`; unset means console only. Prod compose sets it to the collector.
 
 Datadog (`DD_*`, `ddtags`, the HTTP intake) is gone.
 
@@ -112,6 +117,37 @@ SigNoz by `body` and attribute. Conventions that still apply:
 - `origin` is one of `desktop`, `api`, `relay`, `mcp`, resolved once at module load from
   `OTEL_SERVICE_NAME` (with or without `af-`); an unknown value becomes `unknown` and logs a
   one-shot `telemetry.origin_fallback` warning.
+
+## Log levels and fields
+
+- Levels:
+  - `error`: needs attention. The operation aborts or loses work, a 5xx is returned, or a call failed after
+    its retries.
+  - `warn`: degraded or recoverable. A fallback after a real failure, a scheduled retry, or a best-effort
+    cleanup that left residue.
+  - `info`: lifecycle and business outcomes (created, started, completed, failed of Loop, WorkflowRun,
+    OrchestratorCase, Task, Turn). Not the reason for a failure.
+  - `debug`: expected control flow, failed probes, parse fallbacks, hot-path success.
+- Fields on every `warn`/`error`: `reason` (short snake_case cause), the ids in scope (`loopId`,
+  `commandId`, `computeTargetId`, `caseId`, `taskId`, `turnId`, `workflowRunId`, `organizationId`,
+  `projectId`), and `error` (the caught value; the logger expands and redacts it). Never log bodies,
+  prompts, tokens, file contents or URLs with queries. Message names are stable dotted events, for example
+  `integration.jira.comment_fetch_failed`.
+- No silent `catch`: log, rethrow, return an error value, or make the first line of the body
+  `// observability: <why silent>`. Allowed only for parse or validation fallback of optional input,
+  probing, best-effort cleanup, telemetry code itself, stream teardown after the peer closed, and a 4xx
+  response (captured by `request_completed`).
+- Outcome rule:
+  - O1: `request_completed` is the single outcome line of every API route.
+  - O2: background operations in `withSpan` use the span as outcome record, and every non-ok outcome also
+    gets a log line with `reason` and ids.
+  - O3: each business lifecycle transition emits exactly one info line named `<entity>.<transition>`.
+  - O4: hot paths (health, cron ticks, heartbeats, polling, chunks) log success at debug.
+- Use `isLogLevelEnabled(level)` to skip building expensive debug meta.
+
+### Catch audit
+
+`node scripts/observability/catch-audit.mjs` (also run by `pnpm lint`) fails when a `catch` block in server code neither logs, throws, returns a failure value nor starts with `// observability: <why>`. Scope: `apps/api`, `apps/mcp/src`, `apps/app/app/api`, `apps/desktop/src/server`, `apps/desktop/src/headless` and the server packages (storage, email, github, database). Tests and generated code are skipped, as are `catch` tokens inside string and template literals. `CATCH_AUDIT_ROOT` overrides the repo root (used by its test).
 
 ## Test setup
 

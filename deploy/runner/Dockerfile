@@ -128,6 +128,7 @@ ENV SHELL=/bin/bash \
     AGENTFLOW_PLUGINS_DIR=/opt/agentflow-runner/agent-plugins \
     AGENTFLOW_RUNNER_WORKSPACE=/workspace \
     AGENTFLOW_RUNNER_DATA_DIR=/home/runner/.agentflow-runner \
+    AGENTFLOW_RUNNER_TELEMETRY=true \
     DISABLE_AUTOUPDATER=1
 
 USER runner

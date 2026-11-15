@@ -40,6 +40,7 @@ async function loadReposConfig(configDir: string): Promise<ReposConfig> {
     );
     return JSON.parse(content) as ReposConfig;
   } catch {
+    // observability: a — parse fallback, the fallback is the handling
     return {};
   }
 }
@@ -51,6 +52,7 @@ export async function checkWorktreeDir(
   try {
     configDir = getConfigDir();
   } catch {
+    // observability: b — probe, absence is a normal state
     return { ...NOT_CONFIGURED };
   }
   const config = await loadReposConfig(configDir);

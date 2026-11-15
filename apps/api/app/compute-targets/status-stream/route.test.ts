@@ -36,7 +36,7 @@ vi.mock("@/lib/auth/auth-context-failure", () => ({
 }));
 
 vi.mock("@repo/observability/log", () => ({
-  log: { error: vi.fn(), info: vi.fn() },
+  log: { debug: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
 vi.mock("../service", () => ({

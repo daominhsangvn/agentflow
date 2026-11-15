@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { LoopArtifactFile } from "@agentflow-ai/loops-api/artifacts";
 import { sanitizeErrorMessage } from "../../main/diagnostics/diagnostics-helpers.js";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 
 /**
  * EXECUTE finalization for a project repository: commit what the agent team
@@ -70,6 +71,11 @@ export async function commitAndPushLoopBranch(
     const commitSha = await git(input, ["rev-parse", "HEAD"]);
     return { kind: "pushed", branchName, commitSha };
   } catch (error) {
+    gatewayLog.error(LOG_TAG, "commit and push of the loop branch failed", {
+      reason: "git_push_finalization_failed",
+      loopId: input.loopId,
+      error,
+    });
     return { kind: "error", reason: gitErrorText(error) };
   }
 }
@@ -164,6 +170,7 @@ async function gitOrNull(
   try {
     return (await git(input, args)) || null;
   } catch {
+    // observability: probe — absence of the git value is a normal state
     return null;
   }
 }
@@ -174,6 +181,7 @@ function firstHeading(filePath: string): string | null {
     const heading = match?.[1]?.trim();
     return heading ? heading.replace(DOCUMENT_KIND_PREFIX_RE, "") : null;
   } catch {
+    // observability: parse fallback — the plan heading is optional
     return null;
   }
 }
@@ -186,3 +194,5 @@ function gitErrorText(error: unknown): string {
   }
   return sanitizeErrorMessage(text.trim()).slice(0, 500);
 }
+
+const LOG_TAG = "execute-push-finalization";

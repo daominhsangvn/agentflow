@@ -323,6 +323,7 @@ function boundedStringifyForSample(value: unknown): string {
       }) ?? String(value)
     );
   } catch {
+    // observability: parse fallback — an unserializable payload falls back to String()
     return String(value);
   }
 }

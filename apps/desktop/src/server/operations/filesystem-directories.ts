@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import { isGitRepository } from "../../shared/git-utils.js";
 import { isTccProtectedBasename } from "../../shared/sandbox-policy.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
@@ -89,8 +90,11 @@ export function registerFilesystemDirectoriesRoutes(
 
       json(context, 200, { directories });
     } catch (error) {
+      gatewayLog.error(LOG_TAG, "list directories failed", { error });
       const message = error instanceof Error ? error.message : "Unknown error";
       json(context, 500, { error: `Failed to list directories: ${message}` });
     }
   });
 }
+
+const LOG_TAG = "filesystem";

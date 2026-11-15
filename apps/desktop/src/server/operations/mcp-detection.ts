@@ -79,6 +79,7 @@ export function normalizeMcpServerUrl(url: string): string | null {
     parsed.pathname = normalizedPath === "" ? "/" : normalizedPath;
     return parsed.toString();
   } catch {
+    // observability: b — probe, absence is a normal state
     return null;
   }
 }
@@ -636,6 +637,7 @@ async function runClaudeGetDetection(
     }
     return toDetectionResult(match, checkedAt);
   } catch (error) {
+    // observability: b — probe, the detection result carries the outcome
     const output = getCommandOutput(error);
     const match = parseClaudeMcpGet(output, expectedMcpUrl);
     if (match) {

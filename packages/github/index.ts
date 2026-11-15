@@ -204,6 +204,7 @@ export function verifyWebhookSignature(
       Buffer.from(providedSignature, "hex")
     );
   } catch {
+    // observability: parse fallback — a malformed signature never matches
     return false;
   }
 }
@@ -569,6 +570,12 @@ export async function queryStatusCheckRollupWithProviderResult(
       }),
     };
   } catch (error) {
+    log.warn("github.status_check_rollup_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     const classification = classifyGitHubProviderError(error);
     if (
       classification.status === GitHubProviderResultStatus.ProviderRateLimit
@@ -635,6 +642,12 @@ export async function queryBundledPullRequestsWithProviderResult(
           })
         );
       } catch (error) {
+        log.warn("github.bundled_pull_requests_page_failed", {
+          reason: "github_api_failed",
+          owner,
+          repo,
+          error,
+        });
         return resolveBundledPullRequestsPageFailure(error, pages, normalized);
       }
       const mapped = mapBundledPullRequestsResponse(
@@ -689,6 +702,12 @@ export async function queryBundledPullRequestsWithProviderResult(
       value: mergeBundledPullRequestsResults(pages, normalized),
     };
   } catch (error) {
+    log.warn("github.bundled_pull_requests_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return toGitHubProviderFailure(error);
   }
 }
@@ -993,6 +1012,12 @@ export async function getSinglePullRequestWithProviderResult(
       value: mapSinglePullRequestResponse(pr, authorityObservation),
     };
   } catch (error) {
+    log.warn("github.pull_request_fetch_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return toGitHubUserTokenProviderFailure(error);
   }
 }
@@ -1093,6 +1118,12 @@ export async function compareBranchFileChangesWithProviderResult(
 
     return { status: GitHubProviderResultStatus.Success, value: files };
   } catch (error) {
+    log.warn("github.compare_files_fetch_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return toGitHubProviderFailure(error);
   }
 }
@@ -1156,6 +1187,12 @@ export async function listPullRequestReviewCommentsWithProviderResult(
         ),
     };
   } catch (error) {
+    log.warn("github.review_comments_fetch_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return toGitHubProviderFailure(error);
   }
 }
@@ -1202,6 +1239,12 @@ export async function listPullRequestReviewsWithProviderResult(
       })),
     };
   } catch (error) {
+    log.warn("github.reviews_fetch_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return toGitHubProviderFailure(error);
   }
 }
@@ -1243,6 +1286,12 @@ export async function listPullRequestIssueCommentsWithProviderResult(
       value: comments.slice(0, limit).map(mapPullRequestIssueComment),
     };
   } catch (error) {
+    log.warn("github.issue_comments_fetch_failed", {
+      reason: "github_api_failed",
+      owner,
+      repo,
+      error,
+    });
     return toGitHubProviderFailure(error);
   }
 }

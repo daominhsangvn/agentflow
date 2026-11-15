@@ -1,3 +1,4 @@
+import { log } from "@repo/observability/log";
 import "server-only";
 
 import type {
@@ -223,7 +224,11 @@ async function buildAssetDownloadUrl(item: {
       expiresIn: ASSET_DOWNLOAD_URL_TTL_SECONDS,
       bucket: item.zipAssetBucket,
     });
-  } catch {
+  } catch (error) {
+    log.warn("distribution.asset_url_failed", {
+      reason: "asset_url_unavailable",
+      error,
+    });
     return null;
   }
 }

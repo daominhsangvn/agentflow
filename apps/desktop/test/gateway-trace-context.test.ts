@@ -8,11 +8,17 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { parseDesktopCommand } from "../src/main/cloud/cloud-socket-payloads.js";
 import {
+  annotateGatewayTrace,
+  BAGGAGE_HEADER,
+  GatewayTraceIdKey,
+  gatewayTraceBaggageHeaders,
   gatewayTraceEnv,
   gatewayTraceHeaders,
   getGatewayTraceparent,
+  parseAfBaggage,
   parseTraceparent,
   runWithGatewayTrace,
+  setGatewayStaticTraceIds,
 } from "../src/server/gateway-trace-context.js";
 
 const TRACE_ID = "0af7651916cd43dd8448eb211c80319c";
@@ -84,6 +90,94 @@ test("parseDesktopCommand keeps a valid traceparent and drops an invalid one", (
   );
   assert.equal(
     parseDesktopCommand({ ...base, traceparent: "bad" })?.traceparent,
+    undefined
+  );
+});
+
+test("ids from baggage reach OTEL_RESOURCE_ATTRIBUTES and the baggage header", async () => {
+  const ids = parseAfBaggage("af.case_id=c1,af.task_id=t1");
+  await runWithGatewayTrace(
+    "t",
+    TP,
+    {},
+    () => {
+      const env = gatewayTraceEnv();
+      assert.ok(env.TRACEPARENT);
+      assert.equal(env.OTEL_RESOURCE_ATTRIBUTES, "af.case_id=c1,af.task_id=t1");
+      assert.deepEqual(
+        parseAfBaggage(gatewayTraceBaggageHeaders()[BAGGAGE_HEADER]),
+        ids
+      );
+      return Promise.resolve();
+    },
+    ids
+  );
+});
+
+test("static compute target id is merged and annotate adds ids", async () => {
+  setGatewayStaticTraceIds({ [GatewayTraceIdKey.ComputeTargetId]: "ct1" });
+  try {
+    await runWithGatewayTrace(
+      "t",
+      TP,
+      {},
+      () => {
+        annotateGatewayTrace({ caseId: "c2", loopId: "bad value" });
+        const attrs = gatewayTraceEnv().OTEL_RESOURCE_ATTRIBUTES ?? "";
+        assert.ok(attrs.includes("af.compute_target_id=ct1"));
+        assert.ok(attrs.includes("af.case_id=c2"));
+        assert.ok(!attrs.includes("af.loop_id"));
+        return Promise.resolve();
+      },
+      {}
+    );
+  } finally {
+    setGatewayStaticTraceIds({});
+  }
+});
+
+test("invalid baggage values and unknown keys are dropped", () => {
+  assert.deepEqual(
+    parseAfBaggage("af.case_id=ok,af.task_id=a b,evil=x,af.loop_id=a%2Cb"),
+    { [GatewayTraceIdKey.CaseId]: "ok" }
+  );
+  assert.deepEqual(parseAfBaggage("x".repeat(600)), {});
+  assert.deepEqual(parseAfBaggage(42), {});
+});
+
+test("ids without a traceparent still label the env, without TRACEPARENT", async () => {
+  await runWithGatewayTrace(
+    "t",
+    undefined,
+    {},
+    () => {
+      const env = gatewayTraceEnv();
+      assert.equal(env.TRACEPARENT, undefined);
+      assert.equal(env.OTEL_RESOURCE_ATTRIBUTES, "af.case_id=c1");
+      return Promise.resolve();
+    },
+    { [GatewayTraceIdKey.CaseId]: "c1" }
+  );
+});
+
+test("parseDesktopCommand keeps a bounded baggage string and drops the rest", () => {
+  const base = {
+    commandId: "c1",
+    operationId: "op",
+    method: "GET",
+    path: "/api/gateway/health-check",
+  };
+  assert.equal(
+    parseDesktopCommand({ ...base, baggage: "af.case_id=c1,af.task_id=t1" })
+      ?.baggage,
+    "af.case_id=c1,af.task_id=t1"
+  );
+  assert.equal(
+    parseDesktopCommand({ ...base, baggage: "x".repeat(513) })?.baggage,
+    undefined
+  );
+  assert.equal(
+    parseDesktopCommand({ ...base, baggage: "" })?.baggage,
     undefined
   );
 });

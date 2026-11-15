@@ -269,6 +269,7 @@ async function clearStaleBinaryOverrides(
   try {
     deps.applyBinaryPathPatch(patch);
   } catch (error) {
+    gatewayLog.warn(LOG_TAG, "clear binary override failed", { error });
     steps.push({
       action: HealthCheckRepairAction.ClearBinaryOverride,
       label,
@@ -352,3 +353,5 @@ function getErrorMessage(error: unknown): string {
     ? error.message.trim()
     : "unknown error";
 }
+
+const LOG_TAG = "health-check";

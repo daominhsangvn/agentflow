@@ -19,6 +19,7 @@ import {
   ORCHESTRATOR_TOOLS_CALL_ROUTE,
   ORCHESTRATOR_TOOLS_SESSION_ROUTE,
 } from "@repo/api/src/types/orchestrator.js";
+import { log } from "@repo/observability/log";
 import { withToolSpan } from "./tool-span.js";
 
 /**
@@ -173,6 +174,11 @@ export function createIntegrationMcpServer(
                   isError: true,
                 };
           } catch (error) {
+            log.warn("mcp.integration_tool_call_failed", {
+              reason: "tool_call_threw",
+              toolName: request.params.name,
+              error,
+            });
             return {
               content: [
                 {
@@ -204,7 +210,11 @@ export async function handleIntegrationMcpRequest(input: {
   let descriptor: IntegrationToolSessionDescriptor | null;
   try {
     descriptor = await loadDescriptor(input.api, input.token);
-  } catch {
+  } catch (error) {
+    log.error("mcp.integration_descriptor_load_failed", {
+      reason: "descriptor_load_failed",
+      error,
+    });
     input.sendJson(input.res, 502, {
       error: "AgentFlow could not load the integration tools; try again.",
     });

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import { DirectoryNotAllowedError } from "../security.js";
 import { json } from "./response-utils.js";
@@ -84,6 +85,10 @@ export function registerSymphonyAttachmentsRoutes(
         context.response.setHeader("Cache-Control", "public, max-age=3600");
         context.response.end(fileBuffer);
       } catch (error) {
+        gatewayLog.error("symphony-attachments", "attachment read failed", {
+          reason: "attachment_read_failed",
+          error,
+        });
         const message =
           error instanceof Error ? error.message : "Unknown error";
         json(context, 500, { error: message });

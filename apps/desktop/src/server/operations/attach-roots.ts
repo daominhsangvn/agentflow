@@ -37,6 +37,7 @@ export function readLocalAttachRoots(
       "utf8"
     );
   } catch {
+    // observability: b — probe, absence is a normal state
     return { error: `${RUNNER_CAPABILITIES_FILE_NAME} is missing` };
   }
   const parsed = parseRunnerCapabilitiesMarkdown(content);
@@ -65,6 +66,7 @@ export function resolveAttachRootDir(
     const real = realpathSync.native(dir);
     return statSync(real).isDirectory() ? real : null;
   } catch {
+    // observability: b — probe, absence is a normal state
     return null;
   }
 }
@@ -139,6 +141,7 @@ function containedEntry(
   try {
     real = realpathSync.native(path.join(rootReal, relative));
   } catch {
+    // observability: a — path outside the root is reported as skipped
     return { path: reported, file: "", skipped: `outside ${name}` };
   }
   if (real !== rootReal && !real.startsWith(rootReal + path.sep)) {

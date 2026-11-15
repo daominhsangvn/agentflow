@@ -1,4 +1,5 @@
 import { ApiKeySource, withDb } from "@repo/database";
+import { log } from "@repo/observability/log";
 import { usableApiKeyWhere } from "@/lib/auth/usable-api-key-where";
 
 export type ProtectedGatewayLookup = {
@@ -48,7 +49,8 @@ export async function loadProtectedGateways(
       ),
       lookupFailed: false,
     };
-  } catch {
+  } catch (error) {
+    log.warn("compute_targets.protected_gateways_lookup_failed", { error });
     return { protectedGateways: new Set(), lookupFailed: true };
   }
 }

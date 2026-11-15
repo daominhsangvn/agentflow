@@ -305,7 +305,11 @@ async function openConversation(input: {
   const { organizationId, projectId, workflowId, event } = input;
   const sourceKey = caseSourceKey(event.item);
   const channelKey = channelKeyFor(event.item, input.parentId);
-  return await withDb.tx(async (tx) => {
+  const opened = await withDb.tx(async (tx) => {
+    const before = await tx.orchestratorCase.findUnique({
+      where: { workflowId_sourceKey: { workflowId, sourceKey } },
+      select: { status: true },
+    });
     const found = await tx.orchestratorCase.upsert({
       where: { workflowId_sourceKey: { workflowId, sourceKey } },
       create: {
@@ -335,7 +339,11 @@ async function openConversation(input: {
             }
           : {},
       });
-      return { conversationId: existing.id, caseId: found.id };
+      return {
+        conversationId: existing.id,
+        caseId: found.id,
+        previousStatus: before?.status ?? null,
+      };
     }
     const conversation = await tx.orchestratorConversation.create({
       data: {
@@ -351,8 +359,29 @@ async function openConversation(input: {
       },
       select: { id: true },
     });
-    return { conversationId: conversation.id, caseId: found.id };
+    return {
+      conversationId: conversation.id,
+      caseId: found.id,
+      previousStatus: before?.status ?? null,
+    };
   });
+  logCaseOpened(opened.previousStatus, {
+    organizationId,
+    projectId,
+    caseId: opened.caseId,
+  });
+  return { conversationId: opened.conversationId, caseId: opened.caseId };
+}
+
+function logCaseOpened(
+  previousStatus: string | null,
+  meta: { organizationId: string; projectId: string; caseId: string }
+): void {
+  if (previousStatus === null) {
+    log.info("orchestrator.case.created", meta);
+  } else if (previousStatus !== OrchestratorCaseStatus.Open) {
+    log.info("orchestrator.case.reopened", meta);
+  }
 }
 
 /** Records the message once; true when it is new. */

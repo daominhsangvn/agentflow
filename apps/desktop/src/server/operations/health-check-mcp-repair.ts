@@ -291,6 +291,7 @@ export function isConfigurableMcpUrl(url: string): boolean {
     const parsed = new URL(url);
     return parsed.protocol === "https:" || parsed.protocol === "http:";
   } catch {
+    // observability: b — probe, absence is a normal state
     return false;
   }
 }

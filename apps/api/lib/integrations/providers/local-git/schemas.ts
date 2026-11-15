@@ -107,6 +107,7 @@ export function normalizeBaseUrl(raw: string): string | null {
   try {
     url = new URL(raw.trim());
   } catch {
+    // observability: (a) parse fallback — an invalid URL is null
     return null;
   }
   if (!(url.protocol === "http:" || url.protocol === "https:")) {

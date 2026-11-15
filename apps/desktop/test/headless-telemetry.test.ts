@@ -91,5 +91,6 @@ test("emitter maps ids and drops diagnostics", async () => {
   assert.ok(bytes.includes("af.compute_target_id"));
   assert.ok(bytes.includes("ct_1"));
   assert.ok(bytes.includes("af.loop_id"));
+  assert.ok(bytes.includes("WARN"));
   assert.ok(!bytes.includes("SECRET_LOG_TAIL"));
 });

@@ -294,6 +294,7 @@ function runnerCloneUrl(
     url.host = runner.host;
     return url.toString();
   } catch {
+    // observability: (a) parse fallback — an invalid URL keeps the clone URL
     return cloneUrl;
   }
 }

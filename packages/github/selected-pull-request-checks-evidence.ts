@@ -15,6 +15,7 @@ import {
   SelectedPullRequestEvidenceAvailability,
   SelectedPullRequestEvidenceUnavailableReason,
 } from "@repo/api/src/types/selected-pull-request-evidence";
+import { log } from "@repo/observability/log";
 import { z } from "zod";
 import {
   createSelectedPullRequestAcquisitionDeadline,
@@ -55,6 +56,12 @@ export async function getSelectedPullRequestChecksEvidence(
       deadline.signal
     );
   } catch (error) {
+    log.warn("github.selected_pull_request_evidence_failed", {
+      reason: "github_api_failed",
+      owner: input.owner,
+      repo: input.repo,
+      error,
+    });
     return unavailableFromFailure(
       classifySelectedPullRequestProviderError(
         error,
@@ -147,6 +154,12 @@ async function readPullRequestMetadata(
       headSha: parsed.data.head.sha?.trim() ?? "",
     });
   } catch (error) {
+    log.warn("github.selected_pull_request_metadata_failed", {
+      reason: "github_api_failed",
+      owner: input.owner,
+      repo: input.repo,
+      error,
+    });
     return unavailableFromFailure(
       classifySelectedPullRequestProviderError(
         error,

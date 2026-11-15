@@ -24,6 +24,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { LoopArtifactType } from "@agentflow-ai/loops-api/artifacts";
 import { z } from "zod";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import { PLAN_STATE_FILE } from "./plan-state-bundle.js";
 
 const execFileAsync = promisify(execFile);
@@ -76,6 +77,10 @@ export async function preparePlanWorkDir(
       await handOverPreviousPlan(input, previousDir, head);
     }
   } catch (error) {
+    gatewayLog.warn(LOG_TAG, "re-plan hand-over failed", {
+      reason: "replan_handover_failed",
+      error,
+    });
     input.log(
       `Re-plan hand-over failed; planning from scratch: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -158,6 +163,7 @@ async function readJsonObject(
     );
     return parsed.success ? parsed.data : null;
   } catch {
+    // observability: parse fallback — the previous plan is optional
     return null;
   }
 }
@@ -172,6 +178,9 @@ async function gitHead(gitBin: string, dir: string): Promise<string | null> {
     ]);
     return stdout.trim() || null;
   } catch {
+    // observability: probe — no HEAD commit yet
     return null;
   }
 }
+
+const LOG_TAG = "loop-replan";

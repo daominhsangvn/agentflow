@@ -13,8 +13,9 @@ import {
   isTerminalStatus,
 } from "@repo/api/src/types/compute-target";
 import { type Prisma, type TransactionClient, withDb } from "@repo/database";
+import { buildAfBaggage } from "@repo/observability/af-baggage";
 import { log } from "@repo/observability/log";
-import { getActiveTraceparent } from "@repo/observability/span";
+import { getActiveAfIds, getActiveTraceparent } from "@repo/observability/span";
 import { emitCommandLifecycleEvent } from "@repo/observability/telemetry/emitter";
 import { FilterToken } from "@repo/observability/telemetry/filter-tokens";
 import {
@@ -118,6 +119,7 @@ type DispatchableCommand = {
   approvalReason?: string;
   streaming?: boolean;
   traceparent?: string;
+  baggage?: string;
   createdAt: string;
 };
 
@@ -158,8 +160,11 @@ function stripTransientCommandFields(
 }
 
 function fingerprintCommand(input: CreateDesktopCommandInput): string {
-  const { traceparent: _traceparent, ...fingerprintable } =
-    stripTransientCommandFields(input);
+  const {
+    traceparent: _traceparent,
+    baggage: _baggage,
+    ...fingerprintable
+  } = stripTransientCommandFields(input);
   return createHash("sha256")
     .update(stableStringify(fingerprintable))
     .digest("hex");
@@ -291,6 +296,8 @@ function mapRelayPayloadToCommandInput(
       typeof operation.traceparent === "string"
         ? operation.traceparent
         : undefined,
+    baggage:
+      typeof operation.baggage === "string" ? operation.baggage : undefined,
   };
 }
 
@@ -312,6 +319,7 @@ function toDispatchableCommand(command: StoredCommand): DispatchableCommand {
     approvalReason: command.requestPayload.approvalReason,
     streaming: command.requestPayload.streaming,
     traceparent: command.requestPayload.traceparent,
+    baggage: command.requestPayload.baggage,
     createdAt: command.createdAt.toISOString(),
   };
 }
@@ -515,9 +523,11 @@ export const desktopCommandStore = {
   ): Promise<CreateCommandResult> {
     const idempotencyKey = input.idempotencyKey?.trim() || undefined;
     const traceparent = input.traceparent ?? getActiveTraceparent();
+    const baggage = input.baggage ?? buildAfBaggage(getActiveAfIds());
     const requestPayload = stripTransientCommandFields({
       ...input,
       ...(traceparent ? { traceparent } : {}),
+      ...(baggage ? { baggage } : {}),
     });
     // Fingerprint with the trimmed key so " key " and "key" produce the
     // same hash — prevents false IdempotencyConflictError on retry.

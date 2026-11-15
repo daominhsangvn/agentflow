@@ -433,6 +433,7 @@ async function finishTurn(
     if (updated.count !== 1) {
       return;
     }
+    logTurnFinished(turn, outcome.status, outcome.error);
     await tx.orchestratorConversation.update({
       where: { id: turn.conversationId },
       data: {
@@ -446,6 +447,31 @@ async function finishTurn(
   });
 }
 
+const TURN_FINISHED_EVENTS: Record<string, string> = {
+  [OrchestratorTurnStatus.Succeeded]: "orchestrator.turn.succeeded",
+  [OrchestratorTurnStatus.Superseded]: "orchestrator.turn.superseded",
+  [OrchestratorTurnStatus.Failed]: "orchestrator.turn.failed",
+};
+
+function logTurnFinished(
+  turn: TurnRow,
+  status: OrchestratorTurnStatus,
+  error: string | null
+): void {
+  const meta = {
+    organizationId: turn.organizationId,
+    turnId: turn.id,
+    conversationId: turn.conversationId,
+    computeTargetId: turn.computeTargetId,
+  };
+  const event = TURN_FINISHED_EVENTS[status] ?? "orchestrator.turn.finished";
+  if (status === OrchestratorTurnStatus.Failed) {
+    log.warn(event, { ...meta, reason: error });
+    return;
+  }
+  log.info(event, meta);
+}
+
 async function failTurn(
   turn: TurnRow,
   error: string,
@@ -453,11 +479,6 @@ async function failTurn(
   sessionId: string | null,
   now: Date
 ): Promise<void> {
-  log.warn(`${LOG_PREFIX} turn failed`, {
-    turnId: turn.id,
-    conversationId: turn.conversationId,
-    error,
-  });
   const recent = await withDb((db) =>
     db.orchestratorTurn.findMany({
       where: { conversationId: turn.conversationId, id: { not: turn.id } },
@@ -606,6 +627,13 @@ async function startTurnIfDue(
     });
     return created;
   });
+  log.info("orchestrator.turn.started", {
+    organizationId: conversation.organizationId,
+    projectId: conversation.projectId,
+    turnId: turn.id,
+    conversationId,
+    computeTargetId: settings.computeTargetId,
+  });
   if (
     await refuseForeignOrchestratorAgent({
       turnId: turn.id,
@@ -645,6 +673,12 @@ async function startTurnIfDue(
     },
     approvalsRequired: settings.approvals === OrchestratorApprovals.Required,
   });
+  setActiveSpanAttributes({
+    [AfAttribute.CaseId]: conversation.caseId,
+    [AfAttribute.TurnId]: turn.id,
+    [AfAttribute.ProjectId]: conversation.projectId,
+    [AfAttribute.OrgId]: conversation.organizationId,
+  });
   try {
     const commandId = await dispatchOrchestratorTurn({
       computeTargetId: settings.computeTargetId,
@@ -663,6 +697,11 @@ async function startTurnIfDue(
       })
     );
   } catch (error) {
+    log.error("orchestrator.turn_dispatch_failed", {
+      turnId: turn.id,
+      reason: "dispatch_failed",
+      error,
+    });
     const row = await withDb((db) =>
       db.orchestratorTurn.findUnique({ where: { id: turn.id } })
     );

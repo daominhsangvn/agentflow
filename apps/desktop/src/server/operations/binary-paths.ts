@@ -53,6 +53,7 @@ export function registerBinaryPathsRoutes(
       try {
         parsed = JSON.parse(context.body || "{}");
       } catch {
+        // observability: f — 400 returned, request_completed captures the reason
         json(context, 400, { error: "invalid JSON body" });
         return;
       }
@@ -91,6 +92,7 @@ export function registerBinaryPathsRoutes(
         const updated = applyPatch(patch);
         json(context, 200, { binaryPaths: updated });
       } catch (err) {
+        // observability: f — 400 returned, request_completed captures the reason
         const message = err instanceof Error ? err.message : String(err);
         json(context, 400, { error: message });
       }

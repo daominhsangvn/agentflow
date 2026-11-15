@@ -621,6 +621,12 @@ async function decideRunLocked(
       data: { lastRunAt: now },
     })
   );
+  log.info("workflow.run.received", {
+    workflowRunId: run.id,
+    organizationId: input.connection.record.organizationId,
+    projectId: trigger.projectId,
+    sourceKind: event.triggerType,
+  });
   return { decision: IngestDecision.Created, runId: run.id };
 }
 
@@ -847,6 +853,7 @@ function parseJsonText(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
+    // observability: (a) parse fallback — a non-JSON body is kept as text
     return text;
   }
 }

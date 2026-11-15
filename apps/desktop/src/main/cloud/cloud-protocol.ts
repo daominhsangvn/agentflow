@@ -65,6 +65,8 @@ export interface DesktopCommandEvent extends ProtocolEnvelope {
   signaturePayload?: string;
   publicKeyFingerprint?: string;
   traceparent?: string;
+  /** W3C baggage carrying af.* ids (telemetry labels only). */
+  baggage?: string;
 }
 
 export interface DesktopCommandAckEvent extends ProtocolEnvelope {

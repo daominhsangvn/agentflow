@@ -45,6 +45,9 @@ variables there, one NAME=value per line, for the agents to use, e.g.
   CLAUDE_CODE_OAUTH_TOKEN=...            (from `claude setup-token`)
   ConnectionStrings__DefaultConnection=Server=localhost;Database=App_Agent;...
 
+Runner telemetry is on by default (exports nothing when the API has no OTEL
+endpoint). Add AGENTFLOW_RUNNER_TELEMETRY=false to runner.env to opt out.
+
 Variables set in the environment win over the file. Stop the runner with
 Ctrl+C.
 

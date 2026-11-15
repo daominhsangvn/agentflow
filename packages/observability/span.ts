@@ -1,5 +1,7 @@
 import {
   type Context,
+  context,
+  createContextKey,
   isSpanContextValid,
   ROOT_CONTEXT,
   type Span,
@@ -9,6 +11,7 @@ import {
   trace,
 } from "@opentelemetry/api";
 import { AfAttribute, AfOutcome } from "./af-attributes";
+import { type AfIds, pickAfIds } from "./af-baggage";
 import { isSensitiveKey, redactSensitiveText } from "./redact";
 
 const TRACER_NAME = "@repo/observability";
@@ -17,6 +20,9 @@ const ZERO_TRACE_ID = "0".repeat(32);
 const ZERO_SPAN_ID = "0".repeat(16);
 const MAX_REASON_LENGTH = 256;
 const MAX_STATUS_MESSAGE_LENGTH = 512;
+const AF_IDS_KEY = createContextKey("af.ids");
+
+type AfIdsHolder = { ids: AfIds };
 
 export type SpanAttributes = Record<
   string,
@@ -51,11 +57,11 @@ export function withSpan<T>(
     ...buildLinks(options?.links),
   };
   const tracer = trace.getTracer(TRACER_NAME);
-  const parentContext = buildParentContext(options?.parent);
-  if (parentContext) {
-    return tracer.startActiveSpan(name, spanOptions, parentContext, run);
-  }
-  return tracer.startActiveSpan(name, spanOptions, run);
+  const startContext = withAfIds(
+    buildParentContext(options?.parent) ?? context.active(),
+    attributes
+  );
+  return tracer.startActiveSpan(name, spanOptions, startContext, run);
 }
 
 export function getActiveTraceparent(): string | undefined {
@@ -194,6 +200,10 @@ export function setActiveSpanAttributes(attributes: SpanAttributes): void {
       return;
     }
     span.setAttributes(sanitizeSpanAttributes(attributes));
+    const holder = readHolder(context.active());
+    if (holder) {
+      Object.assign(holder.ids, pickAfIds(attributes));
+    }
   } catch {
     // Telemetry must never throw.
   }
@@ -262,5 +272,29 @@ export function markSpanError(span: Span, message?: string): void {
     });
   } catch {
     // Telemetry must never throw.
+  }
+}
+
+/** The `af.*` ids of the enclosing spans and `setActiveSpanAttributes` calls; `{}` when none. */
+export function getActiveAfIds(): AfIds {
+  try {
+    return { ...readHolder(context.active())?.ids };
+  } catch {
+    return {};
+  }
+}
+
+function readHolder(ctx: Context): AfIdsHolder | undefined {
+  const value = ctx.getValue(AF_IDS_KEY);
+  return value ? (value as AfIdsHolder) : undefined;
+}
+
+/** A child context holding the parent's ids plus those in `attributes`. Fail-open. */
+function withAfIds(ctx: Context, attributes: SpanAttributes): Context {
+  try {
+    const ids = { ...readHolder(ctx)?.ids, ...pickAfIds(attributes) };
+    return ctx.setValue(AF_IDS_KEY, { ids } satisfies AfIdsHolder);
+  } catch {
+    return ctx;
   }
 }

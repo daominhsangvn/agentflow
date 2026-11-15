@@ -30,6 +30,10 @@ import { prepareLoopCommandForExecution } from "../main/loop/loop-command-prepar
 import { LoopSchedulerContext } from "../main/loop/loop-scheduler-context.js";
 import { LoopTokenStore } from "../main/loop/loop-token-store.js";
 import {
+  GatewayTraceIdKey,
+  setGatewayStaticTraceIds,
+} from "../server/gateway-trace-context.js";
+import {
   getBundledPluginDirs,
   getBundledPluginVersion,
 } from "../server/operations/bundled-plugins.js";
@@ -241,6 +245,11 @@ export async function startHeadlessRunner(
     },
     onHelloAck: (event: DesktopHelloAckEvent) => {
       publishStatus({ computeTargetId: event.computeTargetId });
+      if (typeof event.computeTargetId === "string") {
+        setGatewayStaticTraceIds({
+          [GatewayTraceIdKey.ComputeTargetId]: event.computeTargetId,
+        });
+      }
       // Connected (again): AgentFlow gets the runner's AGENTFLOW.md as it is now.
       capabilitiesReporter?.report({ force: true }).catch(() => undefined);
       // AgentFlow is reachable again: finish the loops it could not be told about.

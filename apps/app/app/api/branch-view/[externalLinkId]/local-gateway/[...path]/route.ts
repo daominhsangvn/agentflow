@@ -9,6 +9,7 @@ import {
   BranchViewLocalHeader,
 } from "@repo/api/src/types/branch-view-local";
 import { auth } from "@repo/auth/server";
+import { log } from "@repo/observability/log";
 import type {
   RelayEncodedBody,
   RelayHttpRequestPayload,
@@ -215,6 +216,10 @@ async function handleWithBoundary(
         { status: error.status }
       );
     }
+    log.error("branch_view.local_relay_failed", {
+      reason: "relay_request_failed",
+      error,
+    });
     return NextResponse.json(
       { error: "Branch View local relay request failed" },
       { status: 502 }

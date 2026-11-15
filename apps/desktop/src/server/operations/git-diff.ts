@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import type { ProcessManager } from "../process-manager.js";
 import { assertPathAllowed, DirectoryNotAllowedError } from "../security.js";
@@ -121,6 +122,10 @@ export function registerGitDiffRoutes(
       }
       json(context, 200, workingDiff);
     } catch (error) {
+      gatewayLog.error(LOG_TAG, "reading the git diff failed", {
+        reason: "git_diff_failed",
+        error,
+      });
       const message = error instanceof Error ? error.message : "Unknown error";
       json(context, 500, { error: `Failed to get diff: ${message}` });
     }
@@ -246,6 +251,7 @@ async function handleWorkingDiff(
     try {
       newContent = await fs.readFile(fullFilePath, "utf-8");
     } catch {
+      // observability: probe — the file may be absent or unreadable
       newContent = "";
     }
   }
@@ -289,6 +295,7 @@ async function canonicalizePath(rawPath: string): Promise<string> {
   try {
     return await fs.realpath(rawPath);
   } catch {
+    // observability: probe — the path may not exist yet
     return path.resolve(rawPath);
   }
 }
@@ -302,3 +309,5 @@ async function runGit(
     timeoutMs: GIT_GATEWAY_EXEC_TIMEOUT_MS,
   });
 }
+
+const LOG_TAG = "git-diff";

@@ -4,7 +4,10 @@ import {
   SeverityNumber,
 } from "@opentelemetry/api-logs";
 import type { KeylessTelemetrySignal } from "@repo/shared-platform/keyless-telemetry";
-import { gatewayLog } from "../main/logging/gateway-logger.js";
+import {
+  gatewayLog,
+  resolveGatewayLogThreshold,
+} from "../main/logging/gateway-logger.js";
 import { createApiOtlpTelemetryTransport } from "../main/telemetry/api-otlp-telemetry-transport.js";
 import {
   createDesktopOtelRuntime,
@@ -20,8 +23,10 @@ import type {
   TelemetryEventPayload,
   TelemetrySeverity,
 } from "../main/telemetry/telemetry-protocol.js";
+import { GatewayTraceIdKey } from "../server/gateway-trace-context.js";
 import { BUILD_APP_VERSION } from "../shared/build-info.js";
 import type { HeadlessRunnerConfig } from "./headless-config.js";
+import { createRunnerLogRecordSink } from "./headless-log-bridge.js";
 
 const LOG_TAG = "headless-telemetry";
 export const RUNNER_SERVICE_NAME = "af-runner";
@@ -32,8 +37,8 @@ const SHUTDOWN_TIMEOUT_MS = 3000;
 /** Attribute keys; the desktop does not depend on `@repo/observability`. */
 export const RunnerTelemetryAttribute = {
   Category: "af.telemetry.category",
-  ComputeTargetId: "af.compute_target_id",
-  LoopId: "af.loop_id",
+  ComputeTargetId: GatewayTraceIdKey.ComputeTargetId,
+  LoopId: GatewayTraceIdKey.LoopId,
   CommandId: "af.command_id",
   OperationId: "af.operation_id",
   JobId: "af.job_id",
@@ -84,10 +89,12 @@ export function startHeadlessTelemetry(input: {
     telemetryTransport: transport,
   });
   let started = false;
+  gatewayLog.setThreshold(resolveGatewayLogThreshold(env));
   const ready = runtime
     .start()
     .then(() => {
       started = true;
+      gatewayLog.setRecordSink(createRunnerLogRecordSink());
       runtime.emitAppLifecycleEvent({
         event: DesktopAppLifecycleEvent.Start,
         operatingMode: DesktopAppOperatingMode.Multiplayer,
@@ -116,6 +123,7 @@ async function stopRuntime(
     if (!isStarted()) {
       return;
     }
+    gatewayLog.setRecordSink(undefined);
     runtime.emitAppLifecycleEvent({
       event: DesktopAppLifecycleEvent.Shutdown,
       operatingMode: DesktopAppOperatingMode.Multiplayer,
@@ -131,7 +139,7 @@ async function stopRuntime(
       clearTimeout(timer);
     }
   } catch {
-    // Best-effort telemetry never affects the caller.
+    // observability: telemetry — best-effort telemetry never affects the caller
   }
 }
 
@@ -139,12 +147,12 @@ function emitLogRecord(event: TelemetryEventPayload): void {
   try {
     logs.getLogger(RUNNER_LOGGER_NAME).emit({
       severityNumber: SEVERITY_NUMBERS[event.severity],
-      severityText: event.severity,
+      severityText: event.severity.toUpperCase(),
       body: event.message.slice(0, MESSAGE_MAX_LENGTH),
       attributes: buildAttributes(event),
     });
   } catch {
-    // Best-effort telemetry never affects the caller.
+    // observability: telemetry — best-effort telemetry never affects the caller
   }
 }
 

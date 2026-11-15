@@ -7,6 +7,7 @@ import {
   RunnerCommandMode,
 } from "@repo/api/src/types/runner-capabilities";
 import { withDb } from "@repo/database";
+import { log } from "@repo/observability/log";
 import { createProviderContext } from "@/lib/integrations/connection-service";
 import { loadProjectConnectionRuntime } from "@/lib/integrations/project-connections";
 import { readChannel } from "./channel";
@@ -162,7 +163,11 @@ async function ticketAttachmentNames(
       channel.item
     );
     return item.attachments.map((attachment) => attachment.name);
-  } catch {
+  } catch (error) {
+    log.warn("orchestrator.ticket_attachments_failed", {
+      reason: "fetch_item_failed",
+      error,
+    });
     return null;
   }
 }

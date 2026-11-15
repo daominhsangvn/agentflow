@@ -61,12 +61,14 @@ export async function readBoundedJsonBody(
     }
     bodyText = capped.value;
   } catch {
+    // observability: body read failure is answered 400, request_completed captures it
     return { rawBody: null, response: badRequestResponse("Invalid JSON body") };
   }
 
   try {
     return { rawBody: JSON.parse(bodyText) as unknown, response: null };
   } catch {
+    // observability: invalid JSON body is answered 400, request_completed captures it
     return { rawBody: null, response: badRequestResponse("Invalid JSON body") };
   }
 }
@@ -116,6 +118,7 @@ export async function readBoundedMaybeGzipJsonBody(
   try {
     capped = await readCappedRequestBytes(request, maxBytes);
   } catch {
+    // observability: aborted compressed upload is answered 400, request_completed captures it
     // The compressed request stream errored or was cancelled mid-read (client
     // disconnect, aborted upload). Mirror the legacy `readBoundedJsonBody`
     // path and return the route's 400 envelope rather than letting the reject
@@ -138,6 +141,7 @@ export async function readBoundedMaybeGzipJsonBody(
       maxOutputLength: SYNC_DECOMPRESSED_BYTE_CEILING,
     }).toString("utf8");
   } catch {
+    // observability: malformed gzip or oversize body is answered 400, request_completed captures it
     // Malformed gzip OR an over-ceiling decompressed size (zip-bomb guard):
     // reject as a bad request rather than crashing the ingest path.
     return {
@@ -149,6 +153,7 @@ export async function readBoundedMaybeGzipJsonBody(
   try {
     return { rawBody: JSON.parse(jsonText) as unknown, response: null };
   } catch {
+    // observability: invalid JSON body is answered 400, request_completed captures it
     return { rawBody: null, response: badRequestResponse("Invalid JSON body") };
   }
 }

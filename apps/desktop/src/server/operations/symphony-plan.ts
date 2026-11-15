@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import { DirectoryNotAllowedError } from "../security.js";
 import { json } from "./response-utils.js";
@@ -124,6 +125,10 @@ export function registerSymphonyPlanRoutes(
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
+        gatewayLog.error(PLAN_TAG, "failed to read plan", {
+          reason: "plan_read_failed",
+          error,
+        });
         json(context, 500, { error: `Failed to read plan: ${message}` });
       }
     }
@@ -193,3 +198,5 @@ function generateMarkdownFromPlan(plan: Record<string, unknown>): string {
 
   return parts.join("\n");
 }
+
+const PLAN_TAG = "symphony-plan";

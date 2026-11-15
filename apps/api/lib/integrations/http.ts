@@ -114,6 +114,7 @@ function isAllowedUrl(url: string): boolean {
   try {
     return ALLOWED_PROTOCOLS.has(new URL(url).protocol);
   } catch {
+    // observability: (a) parse fallback — an invalid URL is not allowed
     return false;
   }
 }
@@ -153,6 +154,7 @@ function parseJsonBody(headers: Headers, text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
+    // observability: (a) parse fallback — a non-JSON body has no parsed value
     return undefined;
   }
 }

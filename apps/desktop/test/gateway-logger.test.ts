@@ -7,6 +7,8 @@ import {
   ConsoleChannel,
   type ConsoleSink,
   GatewayLogger,
+  type GatewayLogRecord,
+  GatewayLogSeverity,
   installConsoleStreamErrorGuard,
   type LogEntry,
 } from "../src/main/logging/gateway-logger.js";
@@ -487,5 +489,92 @@ describe("isOutputStreamBrokenPipeError", () => {
       isOutputStreamBrokenPipeError(epipe, [{ writableEnded: true }]),
       true
     );
+  });
+});
+
+describe("GatewayLogger levels, meta and record sink", () => {
+  function makeLeveled(env: NodeJS.ProcessEnv) {
+    const lines: string[] = [];
+    const records: GatewayLogRecord[] = [];
+    const write = (_prefix: unknown, message: unknown) => {
+      lines.push(String(message));
+    };
+    const logger = new GatewayLogger(
+      () => undefined,
+      { log: write, warn: write, error: write },
+      env
+    );
+    logger.setRecordSink((record) => {
+      records.push(record);
+    });
+    return { logger, lines, records };
+  }
+
+  test("a warn threshold drops info from console and sink but keeps it in the buffer", () => {
+    const { logger, lines, records } = makeLeveled({ LOG_LEVEL: "WARN" });
+    logger.info("t", "quiet");
+    logger.warn("t", "loud");
+    assert.deepEqual(lines, ["loud"]);
+    assert.deepEqual(
+      records.map((record) => record.message),
+      ["loud"]
+    );
+    assert.deepEqual(
+      logger.getEntries().map((entry) => entry.message),
+      ["quiet", "loud"]
+    );
+  });
+
+  test("LOG_LEVEL=debug emits debug without verbose", () => {
+    const { logger, records } = makeLeveled({ LOG_LEVEL: "debug" });
+    logger.debug("t", () => "detail");
+    assert.equal(records[0]?.severity, GatewayLogSeverity.Debug);
+    assert.equal(records[0]?.message, "detail");
+  });
+
+  test("verbose mode prints debug lines to the console and the sink", () => {
+    const { logger, lines, records } = makeLeveled({});
+    logger.setVerbose(true);
+    logger.debug("t", "detail");
+    assert.ok(lines.includes("detail"));
+    assert.equal(records.at(-1)?.severity, GatewayLogSeverity.Debug);
+  });
+
+  test("console error text is redacted", () => {
+    const { logger, lines } = makeLeveled({});
+    logger.error("t", "failed", { error: new Error("mail bob@example.com") });
+    assert.ok(!lines[0]?.includes("bob@example.com"));
+  });
+
+  test("debug stays off by default", () => {
+    const { logger, records } = makeLeveled({});
+    logger.debug("t", "detail");
+    assert.equal(records.length, 0);
+  });
+
+  test("the sink receives severity, tag, message and meta", () => {
+    const { logger, records } = makeLeveled({});
+    logger.error("tag-a", "failed", { loopId: "l1" });
+    assert.equal(records[0]?.severity, GatewayLogSeverity.Error);
+    assert.equal(records[0]?.tag, "tag-a");
+    assert.equal(records[0]?.message, "failed");
+    assert.deepEqual(records[0]?.meta, { loopId: "l1" });
+  });
+
+  test("a throwing sink does not throw and reports once", () => {
+    const { logger, lines } = makeLeveled({});
+    logger.setRecordSink(() => {
+      throw new Error("sink down");
+    });
+    logger.info("t", "one");
+    logger.info("t", "two");
+    assert.equal(lines.filter((line) => line.includes("sink down")).length, 1);
+  });
+
+  test("the console summary includes loopId and the error message", () => {
+    const { logger, lines } = makeLeveled({});
+    logger.warn("t", "oops", { loopId: "l9", error: new Error("boom") });
+    assert.ok((lines[0] ?? "").includes('"loopId":"l9"'));
+    assert.ok((lines[0] ?? "").includes("Error: boom"));
   });
 });

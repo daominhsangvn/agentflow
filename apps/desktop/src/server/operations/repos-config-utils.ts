@@ -53,6 +53,7 @@ export async function loadReposConfig(configDir: string): Promise<ReposConfig> {
       settings: parsed.settings ?? {},
     };
   } catch {
+    // observability: parse fallback — a missing or invalid config starts empty
     const emptyConfig: ReposConfig = { repos: [], settings: {} };
     await saveReposConfig(emptyConfig, configDir);
     return emptyConfig;
@@ -186,6 +187,7 @@ async function detectSimpleDeployment(
       ...(startCommand ? { startCommand } : {}),
     };
   } catch {
+    // observability: probe — package.json is optional
     return undefined;
   }
 }

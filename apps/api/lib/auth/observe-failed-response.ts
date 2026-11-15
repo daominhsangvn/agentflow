@@ -30,7 +30,7 @@ export async function observeFailedResponse(
     if (status < CLIENT_ERROR_STATUS) {
       return;
     }
-    const reason = truncate(
+    const reason = truncateReason(
       (await readErrorReason(response)) ?? `HTTP ${status}`
     );
     const isServerError = status >= SERVER_ERROR_STATUS;
@@ -50,22 +50,27 @@ export async function observeFailedResponse(
       log.info("request.failed", meta);
     }
   } catch {
-    // Telemetry must never affect the response.
+    // observability: telemetry code itself — it must never affect the response (no recursion)
   }
 }
 
 /** Record an exception a wrapper turns into a 500 on the span and in the logs. */
-export function observeThrownError(message: string, error: unknown): void {
+export function observeThrownError(
+  message: string,
+  error: unknown,
+  meta?: Record<string, unknown>
+): void {
   try {
     recordError(error);
     const source = error instanceof Error ? error : new Error(String(error));
     log.error(message, {
+      ...meta,
       "error.name": source.name,
       "error.message": source.message,
       "error.stack": source.stack,
     });
   } catch {
-    // Telemetry must never affect the response.
+    // observability: telemetry code itself — it must never affect the response (no recursion)
   }
 }
 
@@ -78,6 +83,11 @@ async function readErrorReason(response: Response): Promise<string | null> {
   if (!text) {
     return null;
   }
+  return parseErrorReason(text);
+}
+
+/** Extract the `error` message from a JSON error body, or null when it has none. */
+export function parseErrorReason(text: string): string | null {
   try {
     const parsed = errorBodySchema.safeParse(JSON.parse(text));
     if (!parsed.success) {
@@ -86,6 +96,7 @@ async function readErrorReason(response: Response): Promise<string | null> {
     const { error } = parsed.data;
     return typeof error === "string" ? error : error.message;
   } catch {
+    // observability: probe — a non-JSON body simply has no reason
     return null;
   }
 }
@@ -111,7 +122,8 @@ async function readCapped(response: Response): Promise<string | null> {
   return null;
 }
 
-function truncate(reason: string): string {
+/** Redact and cap a failure reason for telemetry. */
+export function truncateReason(reason: string): string {
   return redactSensitiveText(reason).slice(0, MAX_REASON_LENGTH);
 }
 
@@ -119,6 +131,7 @@ function resolvePath(url: string | undefined): string {
   try {
     return new URL(url ?? "/", "http://api.internal").pathname;
   } catch {
+    // observability: parse fallback — the path is only a log label
     return "/";
   }
 }

@@ -69,6 +69,7 @@ export type WireCommandPayload = {
   signaturePayload?: string;
   publicKeyFingerprint?: string;
   traceparent?: string;
+  baggage?: string;
 };
 
 export type DesktopHelloNackPayload = {

@@ -96,6 +96,15 @@ export async function openPlanWorkDir(
     try {
       input.log(await restorePlanState(target, input));
     } catch (error) {
+      gatewayLog.warn(
+        "plan-state",
+        `loopId=${input.loop.loopId} plan state not restored: ${errorMessage(error)}`,
+        {
+          reason: "plan_state_restore_failed",
+          loopId: input.loop.loopId,
+          error,
+        }
+      );
       input.log(
         `Plan state: not restored (${errorMessage(error)}); using the local work directory`
       );
@@ -180,6 +189,7 @@ export function isLocalHarnessSession(
       existsSync(path.join(projectsDir, project, `${sessionId}.jsonl`))
     );
   } catch {
+    // observability: probe — the Claude projects directory may not exist
     return false;
   }
 }

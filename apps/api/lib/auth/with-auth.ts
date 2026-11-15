@@ -164,6 +164,7 @@ export function withAuth<TResponse, TRoute extends string = string>(
       response = await handler(authContext, request, routeContext.params);
       return response;
     } catch (error) {
+      // observability: authErrorResponse records the error via observeThrownError
       response = authErrorResponse("Authentication failed", error);
       return response;
     } finally {

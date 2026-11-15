@@ -64,6 +64,12 @@ import {
   taskFilesFromStep,
 } from "./task-files";
 import { checkTaskCommand, checkTaskNeeds } from "./task-guards";
+import {
+  logTaskFailed,
+  logTaskQueued,
+  logTaskSettled,
+  logTaskStarted,
+} from "./task-log";
 import { buildTaskPrompt, stepAttachGlob } from "./task-prompt";
 import {
   mergeTaskResult,
@@ -245,6 +251,7 @@ async function runStartTask(input: StartTaskInput): Promise<
       select: { id: true },
     })
   );
+  logTaskQueued(input, task.id, runner.computeTargetId);
   if (input.resumeTaskId && !input.fork) {
     await clearOpenQuestions(input);
   }
@@ -440,6 +447,13 @@ async function launchLoop(task: TaskRow): Promise<Result<string, string>> {
       },
     });
   } catch (error) {
+    log.warn("orchestrator.task_loop_create_failed", {
+      taskId: task.id,
+      caseId: task.caseId,
+      organizationId: task.organizationId,
+      reason: "loop_create_failed",
+      error,
+    });
     return await loopCreateFailure(task, error);
   }
   if (created.status === LoopStatus.Blocked) {
@@ -536,6 +550,9 @@ async function markStarted(
       },
     })
   );
+  if (updated.count === 1) {
+    logTaskStarted(taskId, loopId);
+  }
   return updated.count === 1;
 }
 
@@ -727,13 +744,13 @@ async function settleTask(
     })
   );
   if (updated.count === 1) {
+    logTaskSettled(taskId, loopId, succeeded);
     await recordAskedQuestions(taskId, result.questions);
   }
   return updated.count === 1;
 }
 
 async function failTask(taskId: string, error: string): Promise<void> {
-  log.warn(`${LOG_PREFIX} task failed`, { taskId, error });
   const stored = await withDb((db) =>
     db.orchestratorTask.findUnique({
       where: { id: taskId },
@@ -745,7 +762,7 @@ async function failTask(taskId: string, error: string): Promise<void> {
     questions: [],
     error: error.slice(0, ERROR_MAX),
   });
-  await withDb((db) =>
+  const failed = await withDb((db) =>
     db.orchestratorTask.updateMany({
       where: {
         id: taskId,
@@ -760,6 +777,9 @@ async function failTask(taskId: string, error: string): Promise<void> {
       },
     })
   );
+  if (failed.count === 1) {
+    logTaskFailed(taskId, error);
+  }
 }
 
 const loopErrorSchema = z.object({ message: z.string() });

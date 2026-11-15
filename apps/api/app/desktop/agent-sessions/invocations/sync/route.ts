@@ -102,6 +102,7 @@ async function readInvocationSyncBody(
   try {
     return { rawBody: JSON.parse(cappedBody.value) as unknown, response: null };
   } catch {
+    // observability: invalid JSON body is answered 400, request_completed captures it
     return { rawBody: null, response: badRequestResponse("Invalid JSON body") };
   }
 }

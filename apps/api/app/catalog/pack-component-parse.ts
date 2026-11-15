@@ -75,6 +75,7 @@ function parseMcpJson(text: string): ParsedComponent[] {
       content: `${JSON.stringify({ name, ...config }, null, 2)}\n`,
     }));
   } catch {
+    // observability: (a) parse fallback — a malformed pack manifest has no components
     return [];
   }
 }

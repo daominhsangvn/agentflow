@@ -688,7 +688,12 @@ async function readRunSpanContext(runId: string): Promise<{
         select: { source: true, organizationId: true, projectId: true },
       })
     );
-  } catch {
+  } catch (error) {
+    log.warn("workflow.run_source_read_failed", {
+      workflowRunId: runId,
+      reason: "run_read_failed",
+      error,
+    });
     return null;
   }
 }

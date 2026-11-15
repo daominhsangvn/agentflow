@@ -55,7 +55,7 @@ export async function POST(
         bodyAdditionalRepos = parsed.data.additionalRepos;
       }
     } catch {
-      // Body absent or not valid JSON — use DB value as fallback
+      // observability: parse fallback — body absent or invalid, DB value is used
     }
 
     // Body-provided additionalRepos must be a strict subset of the loop's

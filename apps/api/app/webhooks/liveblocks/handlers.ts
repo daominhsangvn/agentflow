@@ -302,6 +302,7 @@ function getOrganizationId(roomId: string): string | null {
     const { organizationId } = parseArtifactRoomId(roomId);
     return organizationId;
   } catch {
+    // observability: parse fallback — an unparsable room id has no organization
     return null;
   }
 }

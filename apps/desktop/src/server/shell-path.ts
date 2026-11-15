@@ -5,6 +5,7 @@ import { access } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { gatewayLog } from "../main/logging/gateway-logger.js";
 import type { BinaryResolveSource } from "../shared/cli-binary-tools.js";
 import { gatewayTraceEnv } from "./gateway-trace-context.js";
 import { pluginDirsEnv } from "./operations/bundled-plugins.js";
@@ -104,6 +105,22 @@ function windowsSearchPath(env: NodeJS.ProcessEnv): string {
     .join(path.delimiter);
 }
 
+const SHELL_PATH_LOG_TAG = "shell-path";
+const warnedShellPathProbes = new Set<string>();
+
+function warnShellPathProbeOnce(args: readonly string[], error: unknown): void {
+  const key = args.join(" ");
+  if (warnedShellPathProbes.has(key)) {
+    return;
+  }
+  warnedShellPathProbes.add(key);
+  gatewayLog.warn(
+    SHELL_PATH_LOG_TAG,
+    `Login-shell PATH probe failed (${key}); trying the next variant`,
+    { reason: "login_shell_path_probe_failed", error }
+  );
+}
+
 function shellPathCommand(): string {
   return `echo ${PATH_SENTINEL_START}\${PATH}${PATH_SENTINEL_END}`;
 }
@@ -138,8 +155,10 @@ async function resolveShellPathFromShell(
       if (resolved.trim().length > 0) {
         return resolved;
       }
-    } catch {
+    } catch (error) {
+      // observability: probe failure is warned once by warnShellPathProbeOnce
       // Timed out or the shell errored under this arg variant — try the next.
+      warnShellPathProbeOnce(args, error);
     }
   }
   return shellPathFallback(env);
@@ -162,8 +181,10 @@ function resolveShellPathFromShellSync(env: NodeJS.ProcessEnv): string {
       if (resolved.trim().length > 0) {
         return resolved;
       }
-    } catch {
+    } catch (error) {
+      // observability: probe failure is warned once by warnShellPathProbeOnce
       // Timed out or the shell errored under this arg variant — try the next.
+      warnShellPathProbeOnce(args, error);
     }
   }
   return shellPathFallback(env);
@@ -262,15 +283,15 @@ export async function getShellEnv(
 }
 
 /**
- * Hand the current gateway trace to the spawned CLI (TRACEPARENT plus
- * af.loop_id in OTEL_RESOURCE_ATTRIBUTES, appended to any existing value) and
+ * Hand the current gateway trace to the spawned CLI (TRACEPARENT plus the
+ * af.* ids in OTEL_RESOURCE_ATTRIBUTES, appended to any existing value) and
  * drop the runner's own OTEL_SERVICE_NAME, which would otherwise label Claude
  * Code's telemetry as the runner.
  */
 function applyGatewayTraceEnv(shellEnv: Record<string, string>): void {
   const { OTEL_RESOURCE_ATTRIBUTES: resourceAttributes, ...traceEnv } =
     gatewayTraceEnv();
-  if (!traceEnv.TRACEPARENT) {
+  if (!(traceEnv.TRACEPARENT || resourceAttributes)) {
     return;
   }
   Object.assign(shellEnv, traceEnv);
@@ -389,7 +410,7 @@ export async function resolveExecutablesOnPath(
         await access(candidate, constants.X_OK);
         hits.push(candidate);
       } catch {
-        // not found or not executable
+        // observability: probe — a missing or non-executable candidate is a normal state
       }
     }
   }
@@ -421,7 +442,7 @@ export function resolveExecutablesOnPathSync(
         accessSync(candidate, constants.X_OK);
         hits.push(candidate);
       } catch {
-        // not found or not executable
+        // observability: probe — a missing or non-executable candidate is a normal state
       }
     }
   }
@@ -549,7 +570,7 @@ async function resolveFromKnownLocations(
       await access(candidate, constants.X_OK);
       return candidate;
     } catch {
-      // does not exist or not executable — try next
+      // observability: probe — a missing or non-executable candidate is a normal state
     }
   }
   return null;
@@ -561,7 +582,7 @@ function resolveFromKnownLocationsSync(logicalName: BinaryName): string | null {
       accessSync(candidate, constants.X_OK);
       return candidate;
     } catch {
-      // does not exist or not executable — try next
+      // observability: probe — a missing or non-executable candidate is a normal state
     }
   }
   return null;
@@ -582,6 +603,7 @@ export async function resolveBinaryFromLoginShell(
       await access(override, constants.X_OK);
       return { path: override, source: "override" };
     } catch {
+      // observability: probe — the result source override_invalid reports it
       return { path: override, source: "override_invalid" };
     }
   }
@@ -620,6 +642,7 @@ export function resolveBinaryFromLoginShellSync(
       accessSync(override, constants.X_OK);
       return { path: override, source: "override" };
     } catch {
+      // observability: probe — the result source override_invalid reports it
       return { path: override, source: "override_invalid" };
     }
   }

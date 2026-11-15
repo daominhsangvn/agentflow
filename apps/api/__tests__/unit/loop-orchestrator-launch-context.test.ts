@@ -21,6 +21,23 @@ vi.mock("@repo/observability/log", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+const mockSetActiveSpanAttributes = vi.fn();
+vi.mock("@repo/observability/span", async (importActual) => {
+  const actual =
+    await importActual<typeof import("@repo/observability/span")>();
+  return {
+    ...actual,
+    setActiveSpanAttributes: (...args: unknown[]) =>
+      mockSetActiveSpanAttributes(...args),
+  };
+});
+
+const mockResolveLoopTelemetryIds = vi.fn();
+vi.mock("@/lib/loops/loop-telemetry-ids", () => ({
+  resolveLoopTelemetryIds: (...args: unknown[]) =>
+    mockResolveLoopTelemetryIds(...args),
+}));
+
 vi.mock("@repo/database", () => ({
   withDb: Object.assign(vi.fn(), { tx: vi.fn() }),
   EvaluationReportType: { PLAN: "PLAN", CODE: "CODE" },
@@ -135,6 +152,7 @@ import {
 import { issueLoopRunnerToken } from "@repo/auth/loop-runner-jwt";
 import { withDb } from "@repo/database";
 import { getInstallationAccessToken } from "@repo/github";
+import { AfAttribute } from "@repo/observability/af-attributes";
 import { githubService } from "@/app/integrations/github/service";
 import { loopsService } from "@/app/loops/service";
 import { apiKeyService } from "@/app/settings/api-key-service";
@@ -193,6 +211,7 @@ describe("resolveLoopLaunchContext — token resolution for ECS launches", () =>
     mockRunEcsTask.mockResolvedValue("ecs-task-arn");
     mockLoopsService.updateStatus.mockResolvedValue(undefined);
     mockWithDb.mockResolvedValue({ slug: "my-artifact" });
+    mockResolveLoopTelemetryIds.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -517,5 +536,40 @@ describe("launchLoop — db.loop.updateMany JTI pin before dispatch", () => {
     expect(dbUpdateIdx).toBeGreaterThanOrEqual(0);
     expect(dispatchIdx).toBeGreaterThanOrEqual(0);
     expect(dbUpdateIdx).toBeLessThan(dispatchIdx);
+  });
+});
+
+describe("launchLoop — telemetry ids on the loop.launch span", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.API_BASE_URL = "https://api.test";
+    mockApiKeyService.resolveApiKey.mockResolvedValue("sk-anthropic-key");
+    mockGithubService.findInstallationForRepoFullName.mockResolvedValue(
+      "installation-123"
+    );
+    mockGetInstallationAccessToken.mockResolvedValue("ghs-github-token");
+    mockRunEcsTask.mockResolvedValue("ecs-task-arn");
+    mockLoopsService.updateStatus.mockResolvedValue(undefined);
+    mockWithDb.mockResolvedValue({ slug: "my-artifact" });
+  });
+
+  it("sets the resolved case id on the active span during launch", async () => {
+    mockResolveLoopTelemetryIds.mockResolvedValue({
+      [AfAttribute.CaseId]: "case-1",
+    });
+    mockLoopsService.findById.mockResolvedValue(
+      buildLoop({
+        status: LoopStatus.Pending,
+        computeTargetId: null,
+        repo: { fullName: "org/repo", branch: "main" },
+      })
+    );
+
+    await launchLoop("loop-1", "org-1");
+
+    expect(mockResolveLoopTelemetryIds).toHaveBeenCalledWith("loop-1");
+    expect(mockSetActiveSpanAttributes).toHaveBeenCalledWith({
+      [AfAttribute.CaseId]: "case-1",
+    });
   });
 });

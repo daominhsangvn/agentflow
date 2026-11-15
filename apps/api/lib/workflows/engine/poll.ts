@@ -172,6 +172,7 @@ async function pollConnection(
       connectionId: connection.id,
       organizationId: connection.organizationId,
       provider: loaded.provider.key,
+      reason: "poll_failed",
       error: message,
     });
     setSpanOutcome(AfOutcome.Error, message, span);

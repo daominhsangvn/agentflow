@@ -59,7 +59,7 @@ export async function POST(request: Request): Promise<Response> {
         return NextResponse.json({ challenge: jsonBody.challenge });
       }
     } catch {
-      // Not JSON — continue to slash command handling
+      // observability: parse fallback — not JSON, continue to slash command handling
     }
 
     // Parse URLSearchParams-encoded slash command body

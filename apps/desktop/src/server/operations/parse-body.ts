@@ -10,6 +10,7 @@ export function parseBody(
   try {
     return JSON.parse(context.body) as Record<string, unknown>;
   } catch {
+    // observability: a — parse fallback, the fallback is the handling
     return null;
   }
 }

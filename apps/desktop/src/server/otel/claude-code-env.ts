@@ -158,6 +158,7 @@ function readReceiverStatus(
   try {
     rawStatus = getReceiverStatus();
   } catch {
+    // observability: telemetry — the Unavailable status carries the thrown reason
     return {
       state: ClaudeCodeOtelReceiverState.Unavailable,
       reason: ClaudeCodeOtelUnavailableReason.ReceiverStatusThrown,

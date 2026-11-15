@@ -19,7 +19,7 @@ import {
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { inspect, promisify } from "node:util";
+import { promisify } from "node:util";
 import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import { expandHomePath } from "../../shared/path-utils.js";
 import {
@@ -34,6 +34,7 @@ import {
 import { assertPathAllowed, DirectoryNotAllowedError } from "../security.js";
 import { getShellEnv } from "../shell-path.js";
 import { pluginDirArgs } from "./bundled-plugins.js";
+import { loopError, loopLog } from "./loop-log.js";
 import { isPluginInstalled } from "./plugin-cache.js";
 import { getResolvedClaudePath, getResolvedGitPath } from "./symphony-loop.js";
 
@@ -71,26 +72,6 @@ export const CLONE_GIT_TIMEOUT = 300_000;
 // ---------------------------------------------------------------------------
 // Logging helpers (shared with symphony-loop.ts)
 // ---------------------------------------------------------------------------
-
-export function loopLog(loopId: string, ...args: unknown[]): void {
-  const short = loopId.slice(0, 8);
-  gatewayLog.info("symphony-loop", `[${short}] ${formatLoopLogArgs(args)}`);
-}
-
-export function loopError(loopId: string, ...args: unknown[]): void {
-  const short = loopId.slice(0, 8);
-  gatewayLog.error("symphony-loop", `[${short}] ${formatLoopLogArgs(args)}`);
-}
-
-function formatLoopLogArgs(args: unknown[]): string {
-  return args
-    .map((arg) =>
-      typeof arg === "string"
-        ? arg
-        : inspect(arg, { depth: 4, breakLength: 120 })
-    )
-    .join(" ");
-}
 
 export class SymphonyDirNotConfiguredError extends Error {
   constructor() {
@@ -168,7 +149,7 @@ function findEnvFiles(dir: string, results: string[] = []): string[] {
       }
     }
   } catch {
-    // Can't read directory
+    // observability: probe — an unreadable directory yields no env files
   }
   return results;
 }
@@ -184,8 +165,8 @@ function copyEnvLocalFiles(repoPath: string, worktreePath: string): void {
     const destPath = path.join(worktreePath, relativePath);
     try {
       copyFileSync(absPath, destPath);
-    } catch {
-      // Can't copy file (dest dir may not exist in worktree, permission issue, etc.)
+    } catch (error: unknown) {
+      logUtilsWarning("env_file_copy_failed", error);
     }
   }
 }
@@ -233,7 +214,8 @@ export function fetchOrigin(repoPath: string): void {
       stdio: "pipe",
       timeout: NETWORK_GIT_TIMEOUT,
     });
-  } catch {
+  } catch (error) {
+    logUtilsWarning("git_fetch_offline", error);
     // Offline — continue with local state
   }
 }
@@ -294,7 +276,8 @@ export function restoreWorktreeState(
         }
       }
       rmSync(savedClaudeAgentsDir, { recursive: true, force: true });
-    } catch {
+    } catch (error) {
+      logUtilsWarning("worktree_agents_restore_failed", error);
       // Best effort -- backup preserved if restore failed
     }
   }
@@ -305,7 +288,8 @@ export function restoreWorktreeState(
       mkdirSync(destAgentFlow, { recursive: true });
       cpSync(savedAgentFlowDir, destAgentFlow, { recursive: true });
       rmSync(savedAgentFlowDir, { recursive: true, force: true });
-    } catch {
+    } catch (error) {
+      logUtilsWarning("worktree_state_restore_failed", error);
       // Best effort -- backup preserved if restore failed
     }
   }
@@ -333,7 +317,7 @@ function addWorktree(repoPath: string, worktreeDir: string, ref: string): void {
       timeout: LOCAL_GIT_TIMEOUT,
     });
   } catch {
-    // Best effort
+    // observability: best-effort cleanup — pruning stale worktree entries
   }
 
   try {
@@ -368,7 +352,7 @@ function checkoutBranch(worktreeDir: string, branchName: string): void {
     });
     return;
   } catch {
-    // Branch may not exist locally yet
+    // observability: probe — the branch may not exist locally yet
   }
   try {
     execFileSync(
@@ -382,7 +366,7 @@ function checkoutBranch(worktreeDir: string, branchName: string): void {
     );
     return;
   } catch {
-    // Branch may be checked out in another worktree
+    // observability: probe — the branch may be checked out in another worktree
   }
   try {
     execFileSync(
@@ -395,7 +379,7 @@ function checkoutBranch(worktreeDir: string, branchName: string): void {
       }
     );
   } catch {
-    // Best effort — continue with whatever is checked out
+    // observability: best-effort — continue with whatever is checked out
   }
 }
 
@@ -413,7 +397,7 @@ function fastForwardBranch(worktreeDir: string, branchName: string): void {
     );
     return;
   } catch {
-    // ff-only failed (diverged) — try rebase if working tree is clean
+    // observability: expected — ff-only fails when the branch diverged
   }
   try {
     execFileSync(getResolvedGitPath(), ["diff", "--quiet"], {
@@ -431,7 +415,8 @@ function fastForwardBranch(worktreeDir: string, branchName: string): void {
       stdio: "pipe",
       timeout: NETWORK_GIT_TIMEOUT,
     });
-  } catch {
+  } catch (error) {
+    logUtilsWarning("git_rebase_failed", error);
     // Dirty working tree or rebase failed — continue with current state
   }
 }
@@ -453,7 +438,7 @@ export function resolveRef(
       });
       return candidate;
     } catch {
-      // Try next candidate
+      // observability: probe — try the next candidate ref
     }
   }
   return null;
@@ -528,6 +513,7 @@ export function ensureWorktreeForReview(
   } catch (err) {
     // A concurrent request may have won the race — if the worktree now exists, use it
     if (!existsSync(path.join(worktreeDir, ".git"))) {
+      logUtilsWarning("worktree_create_failed", err);
       return {
         status: 500,
         message: `Failed to create worktree: ${err instanceof Error ? err.message : "unknown error"}`,
@@ -594,6 +580,7 @@ export function readProcessPidSync(worktreeDir: string): number | null {
     const pid = Number.parseInt(pidContent.trim(), 10);
     return Number.isNaN(pid) ? null : pid;
   } catch {
+    // observability: probe — a missing or unreadable pid file yields null
     return null;
   }
 }
@@ -606,6 +593,7 @@ export function isProcessRunning(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch {
+    // observability: probe — signal 0 fails when the process is gone
     return false;
   }
 }
@@ -634,6 +622,7 @@ export function readLaunchMetadata(worktreeDir: string): LaunchMetadata | null {
     const content = readFileSync(metaPath, "utf-8");
     return parseLaunchMetadataContent(content);
   } catch {
+    // observability: parse fallback — missing or invalid launch metadata yields null
     return null;
   }
 }
@@ -657,6 +646,7 @@ export async function readLaunchMetadataAsync(
     const content = await readFile(metaPath, "utf-8");
     return parseLaunchMetadataContent(content);
   } catch {
+    // observability: parse fallback — missing or invalid launch metadata yields null
     return null;
   }
 }
@@ -725,10 +715,14 @@ export function acquireLaunchLock(lockDir: string): { fd: number } | null {
     } catch (writeErr) {
       try {
         closeSync(fd);
-      } catch {}
+      } catch {
+        // observability: best-effort cleanup — the fd may already be closed
+      }
       try {
         unlinkSync(lockPath);
-      } catch {}
+      } catch {
+        // observability: best-effort cleanup — the lock file may already be removed
+      }
       throw writeErr;
     }
     return { fd };
@@ -747,12 +741,12 @@ export function releaseLaunchLock(lockDir: string, fd: number): void {
   try {
     closeSync(fd);
   } catch {
-    /* already closed */
+    // observability: best-effort cleanup — already closed
   }
   try {
     unlinkSync(path.join(lockDir, "launch.lock"));
   } catch {
-    /* already removed */
+    // observability: best-effort cleanup — already removed
   }
 }
 
@@ -787,12 +781,13 @@ export function cleanStaleLock(lockDir: string): void {
       unlinkSync(lockPath);
     }
   } catch {
+    // observability: best-effort — fall back to the lock age check
     try {
       if (isLockFileOld(lockPath)) {
         unlinkSync(lockPath);
       }
     } catch {
-      /* concurrent removal */
+      // observability: best-effort cleanup — concurrent removal
     }
   }
 }
@@ -802,6 +797,7 @@ function isLockFileOld(lockPath: string): boolean {
     const age = Date.now() - statSync(lockPath).mtimeMs;
     return age > STALE_LOCK_AGE_MS;
   } catch {
+    // observability: probe — a missing lock file is not old
     return false;
   }
 }
@@ -841,6 +837,7 @@ export function hasBootstrapArtifacts(dir: string): boolean {
     const files = readdirSync(agentsDir);
     return files.some((f) => f.endsWith(".md"));
   } catch {
+    // observability: probe — a missing agents dir means no agents
     return false;
   }
 }
@@ -1058,4 +1055,8 @@ export async function runBootstrapIfNeeded(
       ),
     };
   }
+}
+
+function logUtilsWarning(reason: string, error: unknown): void {
+  gatewayLog.warn("symphony-utils", reason, { reason, error });
 }

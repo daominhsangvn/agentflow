@@ -26,7 +26,11 @@ import { withDb } from "@repo/database";
 import { getInstallationAccessToken } from "@repo/github";
 import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
-import { setSpanOutcome, withSpan } from "@repo/observability/span";
+import {
+  setActiveSpanAttributes,
+  setSpanOutcome,
+  withSpan,
+} from "@repo/observability/span";
 import { truncateUtf8 } from "@repo/observability/truncate-utf8";
 import { bulkIngestAgents } from "@/app/catalog/service";
 import { resolveComputeTargetClaudeRuntime } from "@/app/compute-targets/model-provider-service";
@@ -67,6 +71,7 @@ import { buildContextPackInMemory } from "./loop-context-pack";
 import { buildDesktopLoopExecutionBody } from "./loop-desktop";
 import { resolveLaunchRepositories } from "./loop-launch-repositories";
 import { getStateKeyPrefix, scrubContextPackSecrets } from "./loop-state";
+import { resolveLoopTelemetryIds } from "./loop-telemetry-ids";
 
 type RunnerReplayContext = {
   tokenJti: string;
@@ -545,6 +550,7 @@ export function launchLoop(
     { [AfAttribute.LoopId]: loopId, [AfAttribute.OrgId]: organizationId },
     async (span) => {
       const loop = await getPendingLoopOrThrow(loopId, organizationId);
+      setActiveSpanAttributes(await resolveLoopTelemetryIds(loopId));
 
       // Pre-dispatch guard: if the command requires a parent loop's state and the
       // parent state is unavailable, fail the loop immediately rather than letting

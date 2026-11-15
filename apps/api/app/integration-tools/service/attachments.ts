@@ -190,6 +190,7 @@ export function cleanFileName(raw: string): string | null {
   try {
     decoded = decodeURIComponent(raw);
   } catch {
+    // observability: (a) parse fallback — a name that is not URI-encoded is used as sent
     // Not URI-encoded: used as sent.
   }
   const base = decoded.split(PATH_SEPARATOR_RE).pop() ?? "";

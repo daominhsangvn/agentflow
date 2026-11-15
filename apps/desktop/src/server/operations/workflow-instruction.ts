@@ -445,6 +445,7 @@ function parseResultLine(line: string): ClaudeResultLine | null {
   try {
     value = JSON.parse(line);
   } catch {
+    // observability: parse fallback — a non-JSON output line is skipped
     return null;
   }
   const parsed = claudeResultLineSchema.safeParse(value);
