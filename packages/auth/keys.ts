@@ -23,6 +23,8 @@ export const keys = () =>
       AUTH_MICROSOFT_CLIENT_SECRET: z.string().min(1).optional(),
       // Defaults to "common" (multi-tenant) when unset.
       AUTH_MICROSOFT_TENANT_ID: z.string().min(1).optional(),
+      // "true" accepts the email claim without a verified assertion (tenant rule stays).
+      AUTH_MICROSOFT_TRUST_EMAIL: z.enum(["true", "false"]).optional(),
     },
     client: {
       NEXT_PUBLIC_LOGO_URL: z.url().optional(),
@@ -36,6 +38,7 @@ export const keys = () =>
       AUTH_MICROSOFT_CLIENT_ID: process.env.AUTH_MICROSOFT_CLIENT_ID,
       AUTH_MICROSOFT_CLIENT_SECRET: process.env.AUTH_MICROSOFT_CLIENT_SECRET,
       AUTH_MICROSOFT_TENANT_ID: process.env.AUTH_MICROSOFT_TENANT_ID,
+      AUTH_MICROSOFT_TRUST_EMAIL: process.env.AUTH_MICROSOFT_TRUST_EMAIL,
       NEXT_PUBLIC_LOGO_URL: process.env.NEXT_PUBLIC_LOGO_URL,
     },
   });

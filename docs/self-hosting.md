@@ -114,7 +114,12 @@ only when both sides have proven control of it.
   the tenant owns the email domain) or `AUTH_MICROSOFT_TENANT_ID` is a specific
   tenant id, which means you trust that one directory. With tenant `common`
   (or `organizations` / `consumers`) and no `xms_edov` claim, Microsoft
-  sign-up and linking are refused.
+  sign-up and linking are refused. When your directory's users carry no
+  verified-email claim (cloud-only users often have neither `email_verified` nor
+  `verified_primary_email`), set `AUTH_MICROSOFT_TRUST_EMAIL=true` together with
+  a specific `AUTH_MICROSOFT_TENANT_ID`: the `email` claim is then trusted as is.
+  Only do this for a directory whose admins you trust to set users' emails; the
+  tenant rule still applies, so it has no effect on `common` without `xms_edov`.
 - Local side: a password account whose email was never verified is not joined
   to a Microsoft identity; sign-in fails with `account_not_linked`. Sign in with
   the password, verify the email in Profile, then connect Microsoft.
