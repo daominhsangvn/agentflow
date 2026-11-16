@@ -36,7 +36,21 @@ function pathValue(payload: unknown, path: string[]): unknown {
 
 function matches(row: Row, where: Where): boolean {
   for (const [key, expected] of Object.entries(where)) {
-    if (key === "id") {
+    if (key === "OR") {
+      if (!(expected as Where[]).some((branch) => matches(row, branch))) {
+        return false;
+      }
+    } else if (key === "conversationId" && typeof expected === "object") {
+      const ids = (expected as { in: string[] }).in;
+      if (!ids.includes(row.conversationId as string)) {
+        return false;
+      }
+    } else if (key === "createdAt" && typeof expected === "object") {
+      const lt = (expected as { lt: Date }).lt;
+      if (!(row.createdAt < lt)) {
+        return false;
+      }
+    } else if (key === "id") {
       const not = (expected as { not?: string }).not;
       if (not !== undefined && row.id === not) {
         return false;
@@ -86,6 +100,9 @@ vi.mock("@repo/database", () => {
         mocks.messages.push(row);
         return Promise.resolve(row);
       },
+    },
+    orchestratorConversation: {
+      findMany: () => Promise.resolve([{ id: "conversation-1" }]),
     },
     orchestratorTask: {
       findFirst: () => Promise.resolve({ ...mocks.task }),
@@ -144,6 +161,52 @@ function turn(ask: string[] = ["teams"], approvals = false): TurnContext {
     workflowName: "wf",
     features: approvals ? { approvalsRequired: true } : {},
   } as unknown as TurnContext;
+}
+
+function addAskB(): void {
+  mocks.messages.push({
+    ...base(),
+    id: "ask-2",
+    createdAt: new Date(2026, 0, 1, 10, 1),
+    origin: OrchestratorMessageOrigin.Internal,
+    kind: OrchestratorMessageKind.Reply,
+    externalRef: "reply-2",
+    payload: {
+      teamsAsk: {
+        channelId: "19:a",
+        connectionKey: "teams",
+        threadRef: ASK_REF,
+        mentions: [AN, BINH],
+        questions: [{ taskId: "task-2", questionId: "q1" }],
+      },
+    },
+  });
+}
+
+function addThreadSummary(
+  id: string,
+  minute: number,
+  askRef: string,
+  taskId: string
+): void {
+  mocks.messages.push({
+    ...base(),
+    id,
+    createdAt: new Date(2026, 0, 1, 10, minute),
+    origin: OrchestratorMessageOrigin.Internal,
+    kind: OrchestratorMessageKind.Reply,
+    externalRef: `bot-${id}`,
+    payload: {
+      teamsAskReply: {
+        askRef,
+        threadRef: ASK_REF,
+        mentions: [AN, BINH],
+        summary: [
+          { taskId, questionId: "q1", question: "Q1?", answer: `A ${taskId}` },
+        ],
+      },
+    },
+  });
 }
 
 function base(): Pick<Row, "organizationId" | "conversationId"> {
@@ -404,5 +467,56 @@ describe("confirmTeamsAskAnswers", () => {
 
     expect(mocks.task.openQuestionCount).toBe(0);
     expect(recorded()).toHaveLength(2);
+  });
+
+  describe("with two asks in one thread", () => {
+    beforeEach(() => {
+      mocks.task = { openQuestionCount: 1 };
+      addAsk();
+      addAskB();
+      addThreadSummary("sa", 5, ASK_REF, TASK_ID);
+      addThreadSummary("sb", 6, "reply-2", "task-2");
+      addConfirmation("c1", 10);
+    });
+
+    it("confirms only the newest ask's summary", async () => {
+      const outcome = await confirmTeamsAskAnswers(turn(), {
+        askRef: "reply-2",
+        confirmationRef: "c1",
+      });
+
+      expect(outcome).toMatchObject({
+        ok: true,
+        output: { recorded: true, taskId: "task-2" },
+      });
+      expect(recorded()).toHaveLength(1);
+      expect(recorded()[0]?.payload).toMatchObject({ taskId: "task-2" });
+    });
+
+    it("refuses to confirm another ask's older summary", async () => {
+      const outcome = await confirm("c1");
+
+      expect(outcome).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("another ask in this thread"),
+      });
+      expect(recorded()).toHaveLength(0);
+    });
+
+    it("confirms ask A when the confirmation sits between the summaries", async () => {
+      addConfirmation("c0", 5.5);
+      mocks.messages.find((row) => row.id === "msg-c0")!.createdAt = new Date(
+        2026,
+        0,
+        1,
+        10,
+        5,
+        30
+      );
+
+      const outcome = await confirm("c0");
+
+      expect(outcome).toMatchObject({ ok: true, output: { taskId: TASK_ID } });
+    });
   });
 });

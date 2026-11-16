@@ -16,12 +16,14 @@ import { z } from "zod";
 import { getPrismaErrorCode } from "@/lib/db-utils";
 import { coverTaskQuestions } from "@/lib/orchestrator/cover-questions";
 import {
+  askThreadRef,
   isAskedPerson,
   readTeamsAskReply,
   readTeamsAskThread,
   type TeamsAskPayload,
   type TeamsAskSummaryEntry,
 } from "@/lib/orchestrator/teams-ask";
+import { caseConversationIds } from "@/lib/orchestrator/teams-ask-threads";
 import { findTeamsAskPost } from "./teams-ask-post";
 import {
   notGranted,
@@ -48,6 +50,7 @@ export const TeamsAskConfirmRefusal = {
   ConfirmationNotFound: "confirmation_not_found",
   OtherThread: "confirmation_other_thread",
   BeforeSummary: "confirmation_before_summary",
+  OtherAskSummary: "confirmation_other_ask_summary",
   NotAsked: "confirmer_not_asked",
 } as const;
 export type TeamsAskConfirmRefusal =
@@ -60,6 +63,7 @@ type Confirmation = {
   actor: string | null;
   actorId: string | null;
   askRef: string | null;
+  threadRef: string | null;
 };
 type Checked = {
   ask: TeamsAskPayload;
@@ -118,31 +122,47 @@ async function checkConfirmation(
       `${ask.connectionKey}: ask is not granted: add it under agent.orchestrator.connections (docs/orchestrator.md).`
     );
   }
-  const summary = await findLatestSummary(context, input.askRef);
+  const conversationIds = await caseConversationIds(context);
+  const summary = await findLatestSummary(
+    context,
+    conversationIds,
+    input.askRef
+  );
   if (!summary) {
     return fail(
       TeamsAskConfirmRefusal.SummaryMissing,
       "Post the answers with teams_ask_reply answers first; then wait for an asked person to confirm."
     );
   }
-  const confirmation = await findConfirmation(context, input.confirmationRef);
+  const confirmation = await findConfirmation(
+    context,
+    conversationIds,
+    input.confirmationRef
+  );
   if (!confirmation) {
     return fail(
       TeamsAskConfirmRefusal.ConfirmationNotFound,
       `confirmationRef ${input.confirmationRef} is not a message of this case.`
     );
   }
-  const problem = checkConfirmer(ask, summary, confirmation, input.askRef);
+  const problem = await checkConfirmer(
+    context,
+    conversationIds,
+    { ask, summary, confirmation },
+    input.askRef
+  );
   return problem ?? { ok: true, checked: { ask, summary, confirmation } };
 }
 
-function checkConfirmer(
-  ask: TeamsAskPayload,
-  summary: Summary,
-  confirmation: Confirmation,
+async function checkConfirmer(
+  context: TurnContext,
+  conversationIds: string[],
+  checked: Checked,
   askRef: string
-): Guard | null {
-  if (confirmation.askRef !== askRef) {
+): Promise<Guard | null> {
+  const { ask, summary, confirmation } = checked;
+  const threadRef = askThreadRef(ask, askRef);
+  if (confirmation.threadRef !== threadRef) {
     return fail(
       TeamsAskConfirmRefusal.OtherThread,
       "That message is not in the thread of this ask."
@@ -152,6 +172,18 @@ function checkConfirmer(
     return fail(
       TeamsAskConfirmRefusal.BeforeSummary,
       "That message came before your latest summary: ask the asked people to confirm it."
+    );
+  }
+  const newest = await findThreadSummaryBefore(
+    context,
+    conversationIds,
+    threadRef,
+    confirmation.createdAt
+  );
+  if (newest && newest.id !== summary.id) {
+    return fail(
+      TeamsAskConfirmRefusal.OtherAskSummary,
+      `That message answers the summary of another ask in this thread (askRef ${newest.askRef}): confirm that ask, or ask the asked people to confirm this one.`
     );
   }
   if (!isAskedPerson(ask, confirmation.actorId)) {
@@ -171,13 +203,14 @@ function fail(reason: string, message: string): Guard {
 /** The newest bot post in the ask thread that carries a summary of answers. */
 async function findLatestSummary(
   context: TurnContext,
+  conversationIds: string[],
   askRef: string
 ): Promise<Summary | null> {
   const rows = await withDb((db) =>
     db.orchestratorMessage.findMany({
       where: {
         organizationId: context.organizationId,
-        conversationId: context.conversationId,
+        conversationId: { in: conversationIds },
         origin: OrchestratorMessageOrigin.Internal,
         kind: OrchestratorMessageKind.Reply,
         payload: { path: ["teamsAskReply", "askRef"], equals: askRef },
@@ -198,13 +231,14 @@ async function findLatestSummary(
 
 async function findConfirmation(
   context: TurnContext,
+  conversationIds: string[],
   confirmationRef: string
 ): Promise<Confirmation | null> {
   const row = await withDb((db) =>
     db.orchestratorMessage.findFirst({
       where: {
         organizationId: context.organizationId,
-        conversationId: context.conversationId,
+        conversationId: { in: conversationIds },
         externalRef: confirmationRef,
         origin: OrchestratorMessageOrigin.External,
       },
@@ -221,7 +255,47 @@ async function findConfirmation(
     actor: row.actor,
     actorId: thread?.actorId ?? null,
     askRef: thread?.askRef ?? null,
+    threadRef: thread?.threadRef ?? thread?.askRef ?? null,
   };
+}
+
+/** The newest summary posted in the thread before the confirming message, whichever ask. */
+async function findThreadSummaryBefore(
+  context: TurnContext,
+  conversationIds: string[],
+  threadRef: string,
+  before: Date
+): Promise<{ id: string; askRef: string } | null> {
+  const rows = await withDb((db) =>
+    db.orchestratorMessage.findMany({
+      where: {
+        organizationId: context.organizationId,
+        conversationId: { in: conversationIds },
+        origin: OrchestratorMessageOrigin.Internal,
+        kind: OrchestratorMessageKind.Reply,
+        createdAt: { lt: before },
+        OR: [
+          {
+            payload: {
+              path: ["teamsAskReply", "threadRef"],
+              equals: threadRef,
+            },
+          },
+          { payload: { path: ["teamsAskReply", "askRef"], equals: threadRef } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      take: SUMMARIES_SCANNED,
+      select: { id: true, payload: true },
+    })
+  );
+  for (const row of rows) {
+    const reply = readTeamsAskReply(row.payload);
+    if (reply?.summary && reply.summary.length > 0) {
+      return { id: row.id, askRef: reply.askRef };
+    }
+  }
+  return null;
 }
 
 async function recordConfirmedAnswers(

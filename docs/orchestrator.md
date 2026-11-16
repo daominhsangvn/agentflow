@@ -109,7 +109,7 @@ asked where it belongs:
 | The event | Its conversation (`channelKey`) |
 |---|---|
 | A reply to an anchor (a message the orchestrator posted, or a comment an agent asked a question in) | the anchor's conversation |
-| A reply in a `teams_ask` thread (anchor `artifact = "teams_ask"`) | the asking conversation when it mentions the bot (anyone in the channel), as a `via="teams"` message recording the writer and whether they were asked; it answers nothing until confirmed. Without a bot mention it is dropped |
+| A reply in a `teams_ask` thread (anchor `artifact = "teams_ask"`) | the asking conversation when it mentions the bot (anyone in the channel), as a `via="teams"` message recording the writer and whether they were asked; it is routed to the newest open ask of the thread that mentions the writer (else the newest open ask) and answers nothing until confirmed. Without a bot mention it is dropped |
 | A Teams message (post or reply) | the Teams thread: `microsoft_teams:<thread key>` |
 | A Jira comment replying to another comment | that comment thread: `jira:<KEY>:comment:<parent id>` |
 | A Jira mention on the issue | the issue's top level: `jira:<KEY>:item` |
@@ -272,14 +272,17 @@ nothing is uploaded, the files are kept on the message
 ## Asking people in Teams (`teams_ask`)
 
 Granted with `agent.orchestrator.connections.<teams key>: [ask]`. The tool posts a
-NEW message in a Teams channel (not a reply in the ticket's thread) that
-@mentions people, and brings their answers back to the case that asked.
+message in a Teams channel (not a reply in the ticket's thread) that
+@mentions people, and brings their answers back to the case that asked. A case
+has one thread per ask channel: the first ask opens it with a new post, later asks
+from the same case to the same channel are replies in that thread, each with its
+own `askRef`.
 
 ```yaml
 connections:
   teams: [ask]
 instructions: |
-  Backend questions: teams_ask in channel qa-backend; requirement questions: in ba.
+  Backend questions go to people in the qa-backend channel; requirement questions in ba.
   Emails: Lan (QA) lan@example.com, Minh (BA) minh@example.com.
 ```
 
@@ -300,6 +303,9 @@ instructions: |
   result), `attachments` (task files), `connection` (only when two connections
   share a channel name). A message may reference files, but Teams takes no
   uploads: the files are listed as links to the case page, with a link to the case.
+  The thread is reused when the case, channel and connection match an earlier ask
+  and its root anchor still exists; otherwise (or when posting in the thread fails
+  with a non-retryable error) a new post is created.
 - **People.** The email is the person's UPN or mail. The bot looks each one up in
   the channel's team (Bot Connector `GET /v3/conversations/{channel}/members/{upn}`,
   falling back to `GET .../pagedmembers`) and posts with
@@ -309,30 +315,38 @@ instructions: |
 - **serviceUrl.** The newest one a verified Teams delivery of that connection
   carried, else the global `https://smba.trafficmanager.net/teams/`.
 - **Record.** The post is stored as an internal `reply` message (payload
-  `teamsAsk`: channel, mentions, questions) and an anchor with
-  `artifact = "teams_ask"` (`TEAMS_ASK_ANCHOR_ARTIFACT`, `lib/orchestrator/teams-ask.ts`)
-  on the root message; with one question the anchor carries its task and question.
+  `teamsAsk`: channel, mentions, questions, `threadRef`) with `externalRef` = the
+  `askRef` (the root message id for a new post, the reply id for a continued
+  thread). The anchor with `artifact = "teams_ask"`
+  (`TEAMS_ASK_ANCHOR_ARTIFACT`, `lib/orchestrator/teams-ask.ts`) is written only on
+  the root message; with one question it carries its task and question. Thread
+  lookups live in `lib/orchestrator/teams-ask-threads.ts` and are case-wide (every
+  conversation of the case).
 - **Replies.** Teams sends the bot every channel message (RSC), so the thread is
   filtered only on the bot mention (`checkTeamsAskReply`). A message without it is
   dropped for every workflow and logged with a reason
   (`ask_reply_without_bot_mention`, `ask_message_missing`). An accepted message
   becomes a message `via="teams"` on the asking case with payload
-  `teamsAskThread {askRef, actorId, asked}` (who wrote it, and whether they were
-  among the people asked). It wakes the case but changes no `openQuestionCount`:
+  `teamsAskThread {askRef, threadRef, taskId, actorId, asked}` (who wrote it, and
+  whether they were among the people asked). It is routed to the newest open ask of
+  the thread that mentions the writer, else the newest open ask (`asked` is false then); an ask is closed once an `answers_recorded` message covers it. It wakes the case but changes no `openQuestionCount`:
   a reply answers nothing until confirmed.
 - **Talking in the thread.** `teams_ask_reply {askRef, text, mentions?, answers?}`
-  posts in an existing ask thread via
+  posts in the thread root of that ask (`teamsAskReply.threadRef`) via
   `POST /v3/conversations/{channel;messageid=root}/activities`. It is recorded as a
-  `reply` with payload `teamsAskReply`. With `answers` it is the summary to
+  `reply` with payload `teamsAskReply`. Answers are kept per ask's task. With `answers` it is the summary to
   confirm (`mentions` default to the asked people). It is allowed under
   `approvals: required`, like `teams_ask`.
-- **Confirmation.** `teams_ask_confirm {askRef, confirmationRef}` checks four
-  things: the confirming message is on this conversation, is in that ask thread,
-  came after the bot's latest summary there, and its author matches an original
-  mention (`aadObjectId` or `id`). It then records an `answers_recorded` message
+- **Confirmation.** `teams_ask_confirm {askRef, confirmationRef}` checks five
+  things: the confirming message is on this case (any of its conversations), is in
+  that ask's thread (matched by `threadRef`), came after the ask's latest summary,
+  its author matches an original mention of the asked person (`aadObjectId` or
+  `id`), and the newest summary before it in the thread belongs to this ask
+  (`confirmation_other_ask_summary`). It then records an `answers_recorded` message
   (payload `answers`, `taskId`, `questionId(s)`) with the summary's answers and
   subtracts only the questions not yet answered
-  (`lib/orchestrator/cover-questions.ts`). Any other confirmation is refused and
+  (`lib/orchestrator/cover-questions.ts`). A confirmation confirms only the newest summary in the thread
+  before it. Any other confirmation is refused and
   audited as `tool_refused`. Repeating a confirm is a no-op. Confirmation is by
   text only (no card buttons): the model judges "yes", the server enforces who,
   where and when.
@@ -341,7 +355,8 @@ instructions: |
   trigger is ignored, with no reply and no case. Covered by the "teams_ask
   threads" tests in `lib/orchestrator/__tests__/inbound.test.ts`; the new tools by
   `app/orchestrator-tools/__tests__/service-teams-ask-thread.test.ts` and
-  `service-teams-ask-confirm.test.ts`.
+  `service-teams-ask-confirm.test.ts`; the thread helpers by
+  `lib/orchestrator/__tests__/teams-ask-threads.test.ts`.
 
 ## Tasks and waits
 

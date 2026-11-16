@@ -300,12 +300,17 @@ describe("a personal step's agent", () => {
     const asks = personalStepInstructions(step(), workDir);
     assert.ok(asks.includes(COMMAND_QUESTIONS_LINE));
     assert.ok(!asks.includes(COMMAND_DECIDES_LINE));
+    assert.match(asks, APPROVE_RE);
+    assert.match(asks, REQUEST_CHANGES_RE);
+    assert.match(asks, WHO_APPROVED_RE);
     const decides = personalStepInstructions(
       step({ askQuestions: false }),
       workDir
     );
     assert.ok(decides.includes(COMMAND_DECIDES_LINE));
     assert.ok(!decides.includes(COMMAND_QUESTIONS_LINE));
+    assert.match(decides, NEVER_APPROVE_RE);
+    assert.doesNotMatch(decides, REQUEST_CHANGES_RE);
   });
 
   test("gets its instructions in the system prompt and no AgentFlow integration tools", async () => {
@@ -448,3 +453,8 @@ describe("named attach roots in a personal step", () => {
     );
   });
 });
+
+const APPROVE_RE = /Approve/;
+const REQUEST_CHANGES_RE = /Request changes/;
+const WHO_APPROVED_RE = /who approved/;
+const NEVER_APPROVE_RE = /Never approve, sign off or confirm/;

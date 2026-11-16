@@ -13,6 +13,7 @@ import {
   PROJECT_CONNECTION_ID,
   PROJECT_ID,
 } from "@/__tests__/support/orchestrator/orchestrator-db.test-fake";
+import { continuedAskRows } from "@/__tests__/support/orchestrator/teams-ask-rows.test-fixtures";
 import type { LoadedConnection } from "@/lib/integrations/connection-service";
 import { TeamsTriggerType } from "@/lib/integrations/providers/microsoft-teams/constants";
 import type { InboundEvent } from "@/lib/integrations/types";
@@ -921,6 +922,72 @@ describe("routeToOrchestrator", () => {
         teamsAskThread: { asked: false },
       });
       expect(fake.tasks[0]?.openQuestionCount).toBe(1);
+    });
+
+    function pushContinuedAsk(conversationId: string, recordedRefs: string[]) {
+      fake.messages.push(
+        ...continuedAskRows(conversationId, ASK_ROOT, recordedRefs)
+      );
+    }
+
+    it("routes a thread message to the newest open ask", async () => {
+      const conversationId = await setUpAsk(["q1"]);
+      pushContinuedAsk(conversationId, [ASK_ROOT]);
+      await route(
+        teamsReply("aad-binh", TeamsTriggerType.BotMentioned, "t-2"),
+        []
+      );
+      expect(fake.messages.at(-1)?.payload).toMatchObject({
+        teamsAskThread: {
+          askRef: "reply-2",
+          threadRef: ASK_ROOT,
+          taskId: "task-2",
+          asked: true,
+        },
+      });
+    });
+
+    it("routes a writer mentioned only in the older open ask to that ask", async () => {
+      const conversationId = await setUpAsk(["q1"]);
+      pushContinuedAsk(conversationId, []);
+      await route(
+        teamsReply("aad-an", TeamsTriggerType.BotMentioned, "t-3"),
+        []
+      );
+      expect(fake.messages.at(-1)?.payload).toMatchObject({
+        teamsAskThread: { askRef: ASK_ROOT, asked: true },
+      });
+    });
+
+    it("falls back to the newest ask when all are recorded", async () => {
+      const conversationId = await setUpAsk(["q1"]);
+      pushContinuedAsk(conversationId, [ASK_ROOT, "reply-2"]);
+      await route(
+        teamsReply("aad-binh", TeamsTriggerType.BotMentioned, "t-4"),
+        []
+      );
+      expect(fake.messages.at(-1)?.payload).toMatchObject({
+        teamsAskThread: { askRef: "reply-2", taskId: "task-2" },
+      });
+    });
+
+    it("finds an ask recorded in another conversation of the case", async () => {
+      const conversationId = await setUpAsk(["q1"]);
+      const { caseId } =
+        fake.conversations.find((r) => r.id === conversationId) ?? {};
+      fake.conversations.push({
+        id: "conv-other",
+        organizationId: ORG_ID,
+        caseId,
+      });
+      pushContinuedAsk("conv-other", []);
+      await route(
+        teamsReply("aad-binh", TeamsTriggerType.BotMentioned, "t-5"),
+        []
+      );
+      expect(fake.messages.at(-1)?.payload).toMatchObject({
+        teamsAskThread: { askRef: "reply-2" },
+      });
     });
   });
 });

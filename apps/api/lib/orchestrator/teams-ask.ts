@@ -10,6 +10,7 @@ export const teamsAskPayloadSchema = z.looseObject({
   teamsAsk: z.object({
     channelId: z.string(),
     connectionKey: z.string().optional(),
+    threadRef: z.string().optional(),
     mentions: z.array(teamsAskMentionSchema).min(1),
     questions: z.array(
       z.object({ taskId: z.string(), questionId: z.string() })
@@ -80,6 +81,8 @@ export function isAskedPerson(
 export const teamsAskThreadPayloadSchema = z.looseObject({
   teamsAskThread: z.object({
     askRef: z.string(),
+    threadRef: z.string().optional(),
+    taskId: z.string().nullable().optional(),
     actorId: z.string().nullable(),
     asked: z.boolean(),
   }),
@@ -109,6 +112,7 @@ export type TeamsAskSummaryEntry = z.infer<typeof teamsAskSummaryEntrySchema>;
 export const teamsAskReplyPayloadSchema = z.looseObject({
   teamsAskReply: z.object({
     askRef: z.string(),
+    threadRef: z.string().optional(),
     mentions: z.array(teamsAskMentionSchema),
     summary: z.array(teamsAskSummaryEntrySchema).nullable(),
   }),
@@ -121,4 +125,14 @@ export type TeamsAskReplyPost = z.infer<
 export function readTeamsAskReply(payload: unknown): TeamsAskReplyPost | null {
   const parsed = teamsAskReplyPayloadSchema.safeParse(payload);
   return parsed.success ? parsed.data.teamsAskReply : null;
+}
+
+/** The Teams thread root an ask lives in; old asks have no threadRef and are their own root. */
+export function askThreadRef(ask: TeamsAskPayload, askRef: string): string {
+  return ask.threadRef ?? askRef;
+}
+
+/** The task whose questions an ask relayed, or null when it relayed none. */
+export function askTaskId(ask: TeamsAskPayload): string | null {
+  return ask.questions[0]?.taskId ?? null;
 }

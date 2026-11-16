@@ -168,6 +168,25 @@ describe("parseTeamsRequest", () => {
     expect(parsed.events[0]?.dedupKey).toContain(":reply:");
   });
 
+  it("reads lists from the text/html attachment instead of the flattened text", async () => {
+    const parsed = await parse(
+      activity({
+        text: "<at>AgentFlow</at> AnswersFirstSecond",
+        attachments: [
+          {
+            contentType: "text/html",
+            content:
+              '<p><at id="0">AgentFlow</at> Answers</p><ol><li>First</li><li>Second</li></ol>',
+          },
+        ],
+      })
+    );
+
+    expect(parsed.events[0]?.message?.text).toBe(
+      "Answers\n\n1. First\n2. Second"
+    );
+  });
+
   it.each([
     [
       "a new post that does not mention the bot",

@@ -17,9 +17,10 @@ import {
   TEAMS_ASK_BODY_MAX_LENGTH,
 } from "@/lib/integrations/providers/microsoft-teams/channel-ask";
 import { readTaskResult } from "@/lib/orchestrator/task-result";
-import type {
-  TeamsAskPayload,
-  TeamsAskSummaryEntry,
+import {
+  askThreadRef,
+  type TeamsAskPayload,
+  type TeamsAskSummaryEntry,
 } from "@/lib/orchestrator/teams-ask";
 import {
   loadTeamsAskChannels,
@@ -73,6 +74,7 @@ type Prepared = {
   summary: TeamsAskSummaryEntry[] | null;
   body: string;
   emails: string[];
+  threadRef: string;
 };
 
 export function replyInTeamsAsk(
@@ -93,7 +95,7 @@ export function replyInTeamsAsk(
         setSpanOutcome(AfOutcome.Rejected, prepared.error.reason, span);
         return prepared.error.outcome;
       }
-      const { ask, channel, summary, body, emails } = prepared.value;
+      const { ask, channel, summary, body, emails, threadRef } = prepared.value;
       const teams = await loadTeams(context.organizationId, channel);
       if (!teams.ok) {
         setSpanOutcome(AfOutcome.Rejected, "connection_not_loaded", span);
@@ -110,6 +112,7 @@ export function replyInTeamsAsk(
         body,
         mentions: ask.mentions,
         summary,
+        threadRef,
       };
       const storedId = summary ? await storeSummary(context, record) : null;
       if (summary && !storedId) {
@@ -124,7 +127,7 @@ export function replyInTeamsAsk(
       const posted = await postTeamsAskThreadReply(teams.value.context, {
         serviceUrl,
         channelId: ask.channelId,
-        rootMessageId: input.askRef,
+        rootMessageId: threadRef,
         emails,
         known: ask.mentions,
         text: body,
@@ -149,7 +152,13 @@ export function replyInTeamsAsk(
           });
       return {
         ok: true,
-        output: replyOutput(input.askRef, posted.value, summary, recorded),
+        output: replyOutput(
+          input.askRef,
+          threadRef,
+          posted.value,
+          summary,
+          recorded
+        ),
       };
     }
   );
@@ -211,6 +220,7 @@ async function prepareReply(
     summary: summary.value,
     body,
     emails,
+    threadRef: askThreadRef(ask, input.askRef),
   });
 }
 
@@ -223,6 +233,8 @@ async function buildSummary(
   if (!answers) {
     return Result.ok(null);
   }
+  // questionIds are per task, so answers are checked against the ask's own
+  // task only and a summary never mixes tasks.
   const first = ask.questions[0];
   if (!first) {
     return refusal(
@@ -292,6 +304,7 @@ type ReplyRecord = {
   messageId?: string | null;
   mentions: TeamsAskPayload["mentions"];
   summary: TeamsAskSummaryEntry[] | null;
+  threadRef: string;
 };
 
 async function recordReplySafely(
@@ -333,6 +346,7 @@ function createReplyRow(
           via: OrchestratorMessageVia.Teams,
           teamsAskReply: {
             askRef: record.askRef,
+            threadRef: record.threadRef,
             mentions: record.mentions,
             summary: record.summary,
           },
@@ -413,6 +427,7 @@ async function completeSummary(
             via: OrchestratorMessageVia.Teams,
             teamsAskReply: {
               askRef: record.askRef,
+              threadRef: record.threadRef,
               mentions: posted.mentions,
               summary: record.summary,
             },
@@ -438,6 +453,7 @@ async function completeSummary(
 
 function replyOutput(
   askRef: string,
+  threadRef: string,
   posted: { messageId: string | null; mentions: TeamsAskPayload["mentions"] },
   summary: TeamsAskSummaryEntry[] | null,
   recorded: boolean
@@ -446,6 +462,7 @@ function replyOutput(
     posted: true,
     reference: posted.messageId,
     askRef,
+    threadRef,
     mentioned: posted.mentions.map((mention) => mention.name),
     awaitingConfirmation: summary !== null,
     ...(recorded ? {} : { recorded: false }),

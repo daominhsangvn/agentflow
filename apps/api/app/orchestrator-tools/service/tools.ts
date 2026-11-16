@@ -477,7 +477,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.TeamsAsk,
     title: "Ask people in Teams",
     description:
-      "Posts a new message in one of the allowed Teams ask channels (listed in your instructions; pick it as your rules say) and @mentions each email (take them from your rules; refused when someone is not in the team). The tool adds the @mentions itself: text must not name or @ the people. questions: the questions of one task it relays; messages in that thread that @mention the bot come back as discussion (via teams, ask=<reference>); they answer nothing until confirmed (teams_ask_reply answers, then teams_ask_confirm). attachments are listed as links to the case page (Teams takes no files). The post is recorded on the case. connection only when two Teams connections share a channel name.",
+      "Asks in one of the allowed Teams ask channels (listed in your instructions; pick it as your rules say) and @mentions each email (take them from your rules; refused when someone is not in the team). The tool adds the @mentions itself: text must not name or @ the people. questions: the questions of one task it relays; messages in that thread that @mention the bot come back as discussion (via teams, ask=<reference>); they answer nothing until confirmed (teams_ask_reply answers, then teams_ask_confirm). attachments are listed as links to the case page (Teams takes no files). One thread per case and channel: when this case already asked in that channel the message is a reply in that thread, else a new post; it returns its own reference (askRef) and thread: new|continued. connection only when two Teams connections share a channel name.",
     inputSchema: {
       type: "object",
       properties: {
@@ -522,7 +522,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.TeamsAskReply,
     title: "Reply in a Teams ask thread",
     description:
-      "Posts in the thread of a teams_ask post of this case (askRef = the reference teams_ask returned): answer questions, discuss, or with answers [{questionId, answer}] post your summary of the answers for the asked people to confirm (AgentFlow lists the questions and answers and mentions the asked people). mentions optional. Allowed under approvals: required (it does not write on the ticket).",
+      "Posts in the thread of an ask of this case (askRef = the ask a thread message names (ask=…) or the reference teams_ask returned): answer questions, discuss, or with answers [{questionId, answer}] post your summary of the answers for the asked people to confirm (AgentFlow lists the questions and answers and mentions the asked people). answers are for that ask's task only. mentions optional. Allowed under approvals: required (it does not write on the ticket).",
     inputSchema: {
       type: "object",
       properties: {
@@ -560,7 +560,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.TeamsAskConfirm,
     title: "Confirm answers in a Teams ask thread",
     description:
-      "Records the answers of your latest summary in that ask thread once a person the original ask mentioned confirmed it in a later message there (confirmationRef = that message's ref). Refused for anyone else, for a message before the summary, or another thread. Only then do the questions count as answered.",
+      "Records the answers of your latest summary in that ask thread once a person the original ask mentioned confirmed it in a later message there (confirmationRef = that message's ref). Refused for anyone else, for a message before the summary, or another thread. It confirms the newest summary in the thread before the confirming message; another ask's summary is refused. Only then do the questions count as answered.",
     inputSchema: {
       type: "object",
       properties: {

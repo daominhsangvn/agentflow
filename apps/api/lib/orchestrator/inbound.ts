@@ -28,12 +28,13 @@ import {
 } from "./channel";
 import { coverTaskQuestions } from "./cover-questions";
 import {
+  askTaskId,
   checkTeamsAskReply,
   describeTeamsAskIgnored,
-  readTeamsAsk,
   TEAMS_ASK_ANCHOR_ARTIFACT,
   type TeamsAskThreadMessage,
 } from "./teams-ask";
+import { findThreadAsks, pickThreadAsk } from "./teams-ask-threads";
 import { ticketChangeMessage } from "./ticket-change";
 import {
   loadOrchestratorWorkflows,
@@ -54,7 +55,8 @@ import {
  * An anchor an agent's own comment made (questions.json commentId) routes a reply the same
  * way, and the message carries the task and question it answers.
  * A teams_ask thread message from anyone who mentions the bot is recorded as
- * discussion; answers count only after teams_ask_confirm.
+ * discussion; answers count only after teams_ask_confirm. It belongs to the newest
+ * open ask of its thread.
  */
 
 const PRISMA_UNIQUE_VIOLATION = "P2002";
@@ -541,17 +543,18 @@ async function askTargets(
   parentId: string
 ): Promise<RouteTarget[]> {
   const { event } = input;
-  const message = await withDb((db) =>
-    db.orchestratorMessage.findFirst({
-      where: {
-        conversationId: conversation.id,
-        externalRef: parentId,
-        origin: OrchestratorMessageOrigin.Internal,
-      },
-      select: { payload: true },
-    })
+  const asks = await findThreadAsks(
+    {
+      organizationId: input.connection.record.organizationId,
+      caseId: conversation.case.id,
+    },
+    parentId
   );
-  const checked = checkTeamsAskReply(event, readTeamsAsk(message?.payload));
+  const chosen = pickThreadAsk(asks, event.actor?.id);
+  setActiveSpanAttributes({
+    "af.orchestrator.teams_ask_thread_asks": asks.length,
+  });
+  const checked = checkTeamsAskReply(event, chosen?.ask ?? null);
   if (!checked.ok) {
     log.info(`${LOG_PREFIX} teams_ask reply ignored`, {
       reason: checked.reason,
@@ -565,11 +568,16 @@ async function askTargets(
     return [];
   }
   setActiveSpanAttributes({ "af.orchestrator.teams_ask_asked": checked.asked });
+  if (!chosen) {
+    return [];
+  }
   return [
     {
       ...toKnownTarget(conversation, false),
       teamsAskThread: {
-        askRef: parentId,
+        askRef: chosen.askRef,
+        threadRef: parentId,
+        taskId: askTaskId(chosen.ask),
         actorId: event.actor?.id ?? null,
         asked: checked.asked,
       },

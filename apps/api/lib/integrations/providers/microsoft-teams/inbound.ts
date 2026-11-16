@@ -21,7 +21,7 @@ import {
   teamsBotId,
 } from "./constants";
 import { acquireEntraToken, BOT_FRAMEWORK_SCOPE } from "./entra-token";
-import { activityText, firstLine } from "./message-text";
+import { activityHtml, activityText, firstLine } from "./message-text";
 import {
   encodeThreadExternalId,
   isTeamsMessageId,
@@ -78,6 +78,7 @@ const activitySchema = z.looseObject({
     tenantId: z.string().nullish(),
   }),
   text: z.string().nullish(),
+  attachments: z.array(z.unknown()).nullish(),
   entities: z.array(z.unknown()).nullish(),
   channelData: z
     .looseObject({
@@ -201,7 +202,11 @@ async function buildMentionEvent(
     rootMessageId: facts.rootMessageId,
     messageId: facts.messageId,
   };
-  const text = activityText(activity.text, facts.botMentionTexts);
+  const text = activityText(
+    activity.text,
+    activityHtml(activity.attachments),
+    facts.botMentionTexts
+  );
   const title = firstLine(text).slice(0, TITLE_MAX_LENGTH) || "Teams request";
   const requester = activity.from ?? null;
   return {

@@ -480,13 +480,13 @@ function describeTeamsAsk(
     (channel) => `  - ${describeAskChannels([channel])}`
   );
   return [
-    `- Ask people in Microsoft Teams (${keys}): ${tool} posts a new message in one of the allowed ask channels and @mentions people by email. Allowed ask channels (channel = name, connection key):`,
+    `- Ask people in Microsoft Teams (${keys}): ${tool} asks in one of the allowed ask channels and @mentions people by email. AgentFlow keeps one Teams thread per case and channel: when this case already asked in that channel, the new question is posted as a reply in that thread, otherwise as a new post. You do not choose: call ${tool} for every question or decision that needs people in Teams; each call returns its own reference. Allowed ask channels (channel = name, connection key):`,
     ...lines,
     `  Pick the channel as your rules say (e.g. backend questions → qa-backend, requirement questions → ba) and pass it as channel; any other channel is refused. When your rules name no channel for this kind of question and there is more than one, ask on the ticket or the case page instead. Take each email from your rules (e.g. their table of Jira users or roles to emails); never guess an address — when your rules name no email for that person, ask on the ticket or the case page instead. Relay a task's questions with questions [{taskId, questionId}] (one task per post); attach task files with attachments (Teams shows them as links to the case page). The tool adds the @mentions itself: write the text without naming or @-ing the people.`,
-    `  Messages in an ask thread come as <message via="teams" ask="<reference>" asked="yes|no" ref="…">, from anyone in the channel who @mentions the bot. They are discussion, not answers, and nothing is recorded from them.`,
-    `  Answer questions and discuss in that thread with ${replyTool} askRef (mentions optional), not with ${OrchestratorToolName.Reply}.`,
-    `  When a message gives the answers, post your summary with ${replyTool} answers [{questionId, answer}]. AgentFlow lists them and asks the asked people to confirm. Then ${OrchestratorToolName.WaitHuman}.`,
-    `  Only a later message in that thread with asked="yes" can confirm. When it says yes, call ${confirmTool} askRef, with confirmationRef = that message's ref. When it corrects the answers, post a new summary. Messages with asked="no" are input, not decisions: never confirm on them.`,
+    `  Messages in an ask thread come as <message via="teams" ask="<reference>" ask-task="<task>" asked="yes|no" ref="…">, from anyone in the channel who @mentions the bot. ask is the newest ask of that thread still waiting for answers that mentions the writer (else the newest one still waiting), and ask-task the task whose questions it relayed. They are discussion, not answers, and nothing is recorded from them.`,
+    `  Answer people in the thread they wrote in: a message in an ask thread with ${replyTool} askRef = its ask (mentions optional), never with ${OrchestratorToolName.Reply} or a new ${tool}; a message in this conversation's own thread, also a thread someone just started, with ${OrchestratorToolName.Reply}.`,
+    `  When a message gives the answers, post your summary with ${replyTool} askRef answers [{questionId, answer}]. The questionIds are those of that ask's task only (q1 of another task is another question: answer it with that ask's own askRef). AgentFlow lists them and asks the asked people to confirm. Then ${OrchestratorToolName.WaitHuman}.`,
+    `  Only a later message in that thread with asked="yes" can confirm. When it says yes, call ${confirmTool} askRef, with confirmationRef = that message's ref. A confirmation confirms the newest summary in the thread before it: use that summary's askRef. When it corrects the answers, post a new summary. Messages with asked="no" are input, not decisions: never confirm on them.`,
     `  After ${confirmTool}, keep the answers in the notes (${OrchestratorToolName.CaseUpdateNotes}) and resume the task (${OrchestratorToolName.TaskRun} resumeTaskId, no fork) once it has no open questions.`,
   ];
 }
@@ -496,5 +496,8 @@ function askThreadAttributes(payload: unknown): string {
   if (!thread) {
     return "";
   }
-  return ` ask="${escapeAttribute(thread.askRef)}" asked="${thread.asked ? "yes" : "no"}"`;
+  const task = thread.taskId
+    ? ` ask-task="${escapeAttribute(thread.taskId)}"`
+    : "";
+  return ` ask="${escapeAttribute(thread.askRef)}"${task} asked="${thread.asked ? "yes" : "no"}"`;
 }

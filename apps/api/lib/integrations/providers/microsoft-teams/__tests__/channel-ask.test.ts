@@ -50,6 +50,8 @@ describe("postTeamsAsk", () => {
     );
     const result = await ask(fake, ["an@x.com"]);
     expect(result.ok && result.value.rootMessageId).toBe("1700");
+    expect(result.ok && result.value.messageId).toBe("1700");
+    expect(result.ok && result.value.inThread).toBe(false);
     const post = fake.requests.find((r) => r.url.endsWith("/v3/conversations"));
     const body = post?.body as {
       isGroup: boolean;
@@ -61,6 +63,33 @@ describe("postTeamsAsk", () => {
     expect(body.channelData.tenant.id).toBeTruthy();
     expect(body.activity.text).toContain(body.activity.entities[0]?.text);
     expect(body.activity.text).toContain("Which timeout?");
+  });
+
+  it("replies in the case's thread when threadRootId is given", async () => {
+    const thread = `/v3/conversations/${encodeURIComponent(`${CHANNEL};messageid=1700`)}/activities`;
+    const fake = routedHttp(
+      tokenRoute,
+      memberRoute("an@x.com", an),
+      (request) =>
+        request.url.endsWith(thread) ? jsonResponse({ id: "1750" }) : undefined
+    );
+    const result = await postTeamsAsk(
+      makeTeamsContext({ http: fake.http, bot: true }),
+      {
+        serviceUrl: SERVICE_URL,
+        channelId: CHANNEL,
+        emails: ["an@x.com"],
+        text: "Which timeout?",
+        threadRootId: "1700",
+      }
+    );
+    expect(result.ok && result.value.inThread).toBe(true);
+    expect(result.ok && result.value.rootMessageId).toBe("1700");
+    expect(result.ok && result.value.messageId).toBe("1750");
+    expect(fake.requests.some((r) => r.url.endsWith(thread))).toBe(true);
+    expect(fake.requests.some((r) => r.url.endsWith("/v3/conversations"))).toBe(
+      false
+    );
   });
 
   it("drops a leading @Name or Name: of a mentioned person from the text", async () => {
