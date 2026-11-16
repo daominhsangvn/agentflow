@@ -57,6 +57,13 @@ jobs:
             exit 1
           fi
 
+      # Same as deploy/runner/Dockerfile: the desktop telemetry runtime imports
+      # these packages through their dist/ exports, which a clean checkout lacks.
+      - name: Build workspace packages
+        run: |
+          pnpm -C packages/telemetry-contract build:code
+          pnpm -C packages/shared-platform build
+
       - name: Package for Linux
         run: pnpm -C apps/desktop package:headless
         env:
