@@ -85,6 +85,7 @@ const OUTPUT_KINDS: ReadonlySet<OrchestratorMessageKind> = new Set([
   OrchestratorMessageKind.ToolRefused,
   OrchestratorMessageKind.Document,
   OrchestratorMessageKind.HandoffSent,
+  OrchestratorMessageKind.AnswersRecorded,
   OrchestratorMessageKind.StatusChanged,
   OrchestratorMessageKind.LabelAdded,
   OrchestratorMessageKind.LabelRemoved,

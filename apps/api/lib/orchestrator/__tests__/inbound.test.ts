@@ -848,18 +848,18 @@ describe("routeToOrchestrator", () => {
       const reasons: string[] = [];
       const routed = await routeToOrchestrator({
         connection: connection(),
-        event: teamsReply("aad-other", TeamsTriggerType.BotMentioned, "t-9"),
+        event: teamsReply("aad-other", "microsoft_teams.thread_reply", "t-9"),
         projectConnectionId: PROJECT_CONNECTION_ID,
         workflows: [],
         onIgnored: (detail) => reasons.push(detail),
       });
       expect(routed).toEqual([]);
       expect(reasons).toEqual([
-        "Teams ask thread: the reply is not from a person the question was asked to",
+        "Teams ask thread: the reply does not mention the bot",
       ]);
     });
 
-    it("routes a bot-mentioning reply from the asked person to the asking conversation", async () => {
+    it("routes a bot-mentioning reply from the asked person as discussion", async () => {
       const conversationId = await setUpAsk(["q1"]);
 
       const [routed] = await route(
@@ -868,12 +868,15 @@ describe("routeToOrchestrator", () => {
       );
 
       expect(routed?.conversationId).toBe(conversationId);
-      expect(fake.messages.at(-1)?.payload).toMatchObject({
+      const payload = fake.messages.at(-1)?.payload;
+      expect(payload).toMatchObject({
         via: OrchestratorMessageVia.Teams,
-        taskId: "task-1",
-        questionId: "q1",
+        teamsAskThread: { askRef: ASK_ROOT, actorId: "aad-an", asked: true },
       });
-      expect(fake.tasks[0]?.openQuestionCount).toBe(0);
+      expect(payload).not.toHaveProperty("taskId");
+      expect(payload).not.toHaveProperty("questionId");
+      expect(payload).not.toHaveProperty("questionIds");
+      expect(fake.tasks[0]?.openQuestionCount).toBe(1);
     });
 
     it("accepts the asked person by their Teams id", async () => {
@@ -883,34 +886,16 @@ describe("routeToOrchestrator", () => {
         []
       );
       expect(routed).toHaveLength(1);
+      expect(fake.messages.at(-1)?.payload).toMatchObject({
+        teamsAskThread: { asked: true },
+      });
     });
 
-    it("covers every relayed question with the first accepted reply", async () => {
+    it("changes no count for a reply to a multi-question ask", async () => {
       await setUpAsk(["q1", "q2"]);
       await route(teamsReply("aad-an", TeamsTriggerType.BotMentioned), []);
-      expect(fake.tasks[0]?.openQuestionCount).toBe(0);
-      expect(fake.messages.at(-1)?.payload).toMatchObject({
-        questionIds: ["q1", "q2"],
-      });
-    });
-
-    it("does not subtract a question that was already answered elsewhere", async () => {
-      const conversationId = await setUpAsk(["q1", "q2"]);
-      const task = fake.tasks[0];
-      if (task) {
-        task.openQuestionCount = 3;
-      }
-      fake.messages.push({
-        id: "ticket-answer",
-        conversationId,
-        organizationId: ORG_ID,
-        origin: OrchestratorMessageOrigin.External,
-        dedupKey: "ticket-answer",
-        createdAt: new Date(),
-        payload: { taskId: "task-1", questionId: "q1" },
-      });
-      await route(teamsReply("aad-an", TeamsTriggerType.BotMentioned), []);
       expect(fake.tasks[0]?.openQuestionCount).toBe(2);
+      expect(fake.messages.at(-1)?.payload).not.toHaveProperty("questionIds");
     });
 
     it("drops a thread reply that does not mention the bot", async () => {
@@ -925,14 +910,17 @@ describe("routeToOrchestrator", () => {
       expect(fake.tasks[0]?.openQuestionCount).toBe(1);
     });
 
-    it("drops a bot mention from someone who was not asked, whatever workflow matched", async () => {
-      await setUpAsk(["q1"]);
-      const before = fake.messages.length;
+    it("routes a bot mention from someone who was not asked, whatever workflow matched", async () => {
+      const conversationId = await setUpAsk(["q1"]);
       const routed = await route(
         teamsReply("aad-binh", TeamsTriggerType.BotMentioned)
       );
-      expect(routed).toEqual([]);
-      expect(fake.messages).toHaveLength(before);
+      expect(routed).toHaveLength(1);
+      expect(routed[0]?.conversationId).toBe(conversationId);
+      expect(fake.messages.at(-1)?.payload).toMatchObject({
+        teamsAskThread: { asked: false },
+      });
+      expect(fake.tasks[0]?.openQuestionCount).toBe(1);
     });
   });
 });

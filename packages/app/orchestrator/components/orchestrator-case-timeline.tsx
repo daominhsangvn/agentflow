@@ -98,6 +98,7 @@ const MESSAGE_KIND_LABELS: Record<OrchestratorMessageKind, string> = {
   [OrchestratorMessageKind.Handoff]: "Change request",
   [OrchestratorMessageKind.HandoffSent]: "Handed off",
   [OrchestratorMessageKind.TaskAsked]: "Asked on item",
+  [OrchestratorMessageKind.AnswersRecorded]: "Answers recorded",
 };
 const CLAMP_CHARS = 600;
 const SHORT_ID_CHARS = 8;

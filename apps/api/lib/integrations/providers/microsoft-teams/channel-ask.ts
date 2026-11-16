@@ -7,11 +7,13 @@ import {
   describeConnectorFailure,
   getConversationMember,
   listConversationMembers,
+  sendToConversation,
   type TeamsMember,
 } from "./bot-connector";
 import { readBotCredentials, type TeamsProviderContext } from "./connection";
 import { acquireEntraToken, BOT_FRAMEWORK_SCOPE } from "./entra-token";
 import { mentionDisplayName } from "./reply-action";
+import { threadConversationId } from "./thread-ref";
 
 /**
  * The orchestrator's teams_ask: a new message in a channel that mentions
@@ -19,7 +21,7 @@ import { mentionDisplayName } from "./reply-action";
  */
 
 /** Teams drops bot messages above ~28 KB. */
-const ASK_BODY_MAX_LENGTH = 20_000;
+export const TEAMS_ASK_BODY_MAX_LENGTH = 20_000;
 const ROSTER_PAGES_MAX = 10;
 
 export const teamsAskMentionSchema = z.object({
@@ -54,28 +56,15 @@ export async function postTeamsAsk(
   input: AskInput
 ): Promise<Result<AskPosted, AskFailure>> {
   try {
-    const bot = readBotCredentials(context.connection);
-    if (!(bot.ok && bot.value)) {
-      return failure(
-        "The Teams connection has no bot: enter its App ID, tenant ID and client secret.",
-        false
-      );
-    }
-    const token = await acquireEntraToken(
-      context.http,
-      bot.value,
-      BOT_FRAMEWORK_SCOPE,
-      context.now()
-    );
-    if (!token.ok) {
-      return failure(token.error.message, token.error.retryable);
-    }
-    const access: AskAccess = {
+    const opened = await openAskAccess(
       context,
-      serviceUrl: input.serviceUrl,
-      token: token.value,
-      conversationId: input.channelId,
-    };
+      input.serviceUrl,
+      input.channelId
+    );
+    if (!opened.ok) {
+      return opened;
+    }
+    const { access, tenantId } = opened.value;
     const resolved = await resolveMentions(
       access,
       input.emails.map((email) => email.toLowerCase())
@@ -85,8 +74,8 @@ export async function postTeamsAsk(
     }
     const created = await createChannelThread(context.http, {
       serviceUrl: input.serviceUrl,
-      token: token.value,
-      tenantId: bot.value.tenantId,
+      token: access.token,
+      tenantId,
       channelId: input.channelId,
       activity: buildAskActivity(input.text, resolved.value),
     });
@@ -103,6 +92,38 @@ export async function postTeamsAsk(
       true
     );
   }
+}
+
+async function openAskAccess(
+  context: TeamsProviderContext,
+  serviceUrl: URL,
+  channelId: string
+): Promise<Result<{ access: AskAccess; tenantId: string }, AskFailure>> {
+  const bot = readBotCredentials(context.connection);
+  if (!(bot.ok && bot.value)) {
+    return failure(
+      "The Teams connection has no bot: enter its App ID, tenant ID and client secret.",
+      false
+    );
+  }
+  const token = await acquireEntraToken(
+    context.http,
+    bot.value,
+    BOT_FRAMEWORK_SCOPE,
+    context.now()
+  );
+  if (!token.ok) {
+    return failure(token.error.message, token.error.retryable);
+  }
+  return Result.ok({
+    access: {
+      context,
+      serviceUrl,
+      token: token.value,
+      conversationId: channelId,
+    },
+    tenantId: bot.value.tenantId,
+  });
 }
 
 async function resolveMentions(
@@ -205,11 +226,18 @@ function buildAskActivity(
   text: string,
   mentions: TeamsAskMention[]
 ): JsonObject {
+  if (mentions.length === 0) {
+    return {
+      type: "message",
+      textFormat: "markdown",
+      text: truncateText(text, TEAMS_ASK_BODY_MAX_LENGTH),
+    };
+  }
   const tags = mentions.map((mention) => `<at>${mention.name}</at>`);
   return {
     type: "message",
     textFormat: "markdown",
-    text: `${tags.join(" ")}\n\n${truncateText(stripLeadingMentions(text, mentions), ASK_BODY_MAX_LENGTH)}`,
+    text: `${tags.join(" ")}\n\n${truncateText(stripLeadingMentions(text, mentions), TEAMS_ASK_BODY_MAX_LENGTH)}`,
     entities: mentions.map((mention) => ({
       type: "mention",
       text: `<at>${mention.name}</at>`,
@@ -250,4 +278,66 @@ function escapeRegExp(value: string): string {
 
 function failure(error: string, retryable: boolean): Result<never, AskFailure> {
   return Result.err({ error, retryable });
+}
+
+export async function postTeamsAskThreadReply(
+  context: TeamsProviderContext,
+  input: {
+    serviceUrl: URL;
+    channelId: string;
+    rootMessageId: string;
+    emails: string[];
+    known: TeamsAskMention[];
+    text: string;
+  }
+): Promise<
+  Result<{ messageId: string | null; mentions: TeamsAskMention[] }, AskFailure>
+> {
+  try {
+    const opened = await openAskAccess(
+      context,
+      input.serviceUrl,
+      input.channelId
+    );
+    if (!opened.ok) {
+      return opened;
+    }
+    const { access } = opened.value;
+    const emails = input.emails.map((email) => email.toLowerCase());
+    const reused = new Map(
+      input.known.map((mention) => [mention.email.toLowerCase(), mention])
+    );
+    const resolved = await resolveMentions(
+      access,
+      emails.filter((email) => !reused.has(email))
+    );
+    if (!resolved.ok) {
+      return resolved;
+    }
+    for (const mention of resolved.value) {
+      reused.set(mention.email.toLowerCase(), mention);
+    }
+    const mentions = emails.flatMap((email) => reused.get(email) ?? []);
+    const sent = await sendToConversation(context.http, {
+      serviceUrl: input.serviceUrl,
+      token: access.token,
+      conversationId: threadConversationId(
+        input.channelId,
+        input.rootMessageId
+      ),
+      activity: buildAskActivity(input.text, mentions),
+    });
+    if (!sent.ok) {
+      return failure(
+        describeConnectorFailure(sent.error),
+        sent.error.retryable
+      );
+    }
+    return Result.ok({ messageId: sent.value.id, mentions });
+  } catch (error) {
+    return failure(
+      error instanceof Error ? error.message : String(error),
+      true
+    );
+  }
 }

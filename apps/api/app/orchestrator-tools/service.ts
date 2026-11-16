@@ -83,6 +83,14 @@ import {
   writeOnItem,
 } from "./service/source-writes";
 import { askInTeams, teamsAskInputSchema } from "./service/teams-ask";
+import {
+  confirmTeamsAskAnswers,
+  teamsAskConfirmInputSchema,
+} from "./service/teams-ask-confirm";
+import {
+  replyInTeamsAsk,
+  teamsAskReplyInputSchema,
+} from "./service/teams-ask-thread";
 import { messageThread } from "./service/threads";
 import { buildInstructions, visibleTools } from "./service/tools";
 import {
@@ -551,6 +559,26 @@ const HANDLERS: Record<string, Handler> = {
     return await askInTeams(context, parsed.data);
   },
 
+  [OrchestratorToolName.TeamsAskReply]: async (context, input) => {
+    const parsed = teamsAskReplyInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        "askRef (the reference teams_ask returned), text, optional mentions (emails), optional answers ([{questionId, answer}])."
+      );
+    }
+    return await replyInTeamsAsk(context, parsed.data);
+  },
+
+  [OrchestratorToolName.TeamsAskConfirm]: async (context, input) => {
+    const parsed = teamsAskConfirmInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return refused(
+        "askRef, confirmationRef (the ref of the confirming message in that thread)."
+      );
+    }
+    return await confirmTeamsAskAnswers(context, parsed.data);
+  },
+
   [OrchestratorToolName.PagePublish]: async (context, input) => {
     const parsed = pagePublishInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -890,6 +918,8 @@ const SUPERSEDABLE_TOOLS: ReadonlySet<string> = new Set<string>([
   OrchestratorToolName.CaseNotify,
   OrchestratorToolName.CaseHandoff,
   OrchestratorToolName.TeamsAsk,
+  OrchestratorToolName.TeamsAskReply,
+  OrchestratorToolName.TeamsAskConfirm,
 ]);
 
 function decisionText(

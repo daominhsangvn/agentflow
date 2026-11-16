@@ -33,7 +33,11 @@ import {
 } from "@/lib/orchestrator/teams-ask-channels";
 import { scrubProviderError } from "@/lib/workflows/engine/errors";
 import { REPLY_ATTACHMENTS_MAX } from "./attachments";
-import { REPLY_MAX, TEAMS_ASK_MENTIONS_MAX } from "./limits";
+import {
+  REPLY_MAX,
+  TEAMS_ASK_MENTIONS_MAX,
+  TEAMS_ASK_QUESTIONS_MAX,
+} from "./limits";
 import {
   caseLink,
   notGranted,
@@ -46,7 +50,6 @@ import {
 
 const LOG_PREFIX = "[orchestrator-tools]";
 const PRISMA_UNIQUE_VIOLATION = "P2002";
-const QUESTIONS_MAX = 20;
 const DELIVERIES_SCANNED = 20;
 
 export const teamsAskInputSchema = z.object({
@@ -61,7 +64,7 @@ export const teamsAskInputSchema = z.object({
     .array(
       z.object({ taskId: z.string().min(1), questionId: z.string().min(1) })
     )
-    .max(QUESTIONS_MAX)
+    .max(TEAMS_ASK_QUESTIONS_MAX)
     .default([]),
   attachments: z
     .array(taskFileRefSchema)
@@ -187,7 +190,7 @@ async function checkQuestions(
   return null;
 }
 
-async function loadTeams(
+export async function loadTeams(
   organizationId: string,
   channel: TeamsAskChannelOption
 ): Promise<Result<LoadedTeams, string>> {
@@ -233,7 +236,7 @@ async function buildBody(
 const deliveryPayloadSchema = z.looseObject({ serviceUrl: z.string() });
 
 /** The newest serviceUrl a verified delivery carried, else the global one. */
-async function findServiceUrl(
+export async function findServiceUrl(
   organizationId: string,
   connectionId: string
 ): Promise<URL> {
