@@ -7,6 +7,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  caseDetailPollInterval,
   isCaseActive,
   useOrchestratorCase,
   useOrchestratorCaseLoops,
@@ -238,5 +239,35 @@ describe("workflowCasesPollInterval", () => {
         { ...idle, waitingFor: OrchestratorCaseWaitingFor.Turn },
       ])
     ).toBe(5000);
+  });
+});
+
+describe("caseDetailPollInterval", () => {
+  const idle = { turnRunning: false, activeTaskCount: 0 };
+
+  it("does not poll without data", () => {
+    expect(caseDetailPollInterval(undefined)).toBe(false);
+  });
+
+  it("polls fast while a turn or task is live", () => {
+    expect(
+      caseDetailPollInterval({
+        turnRunning: true,
+        activeTaskCount: 0,
+        status: OrchestratorCaseStatus.Open,
+      })
+    ).toBe(5000);
+  });
+
+  it("keeps polling an idle open case so new messages show", () => {
+    expect(
+      caseDetailPollInterval({ ...idle, status: OrchestratorCaseStatus.Open })
+    ).toBe(10_000);
+  });
+
+  it("polls a closed case slowly", () => {
+    expect(
+      caseDetailPollInterval({ ...idle, status: OrchestratorCaseStatus.Closed })
+    ).toBe(30_000);
   });
 });

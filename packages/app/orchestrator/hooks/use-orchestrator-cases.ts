@@ -8,6 +8,7 @@ import {
   type OrchestratorCaseListQuery,
   type OrchestratorCaseLoops,
   type OrchestratorCaseMessagePosted,
+  OrchestratorCaseStatus,
   type OrchestratorCaseSummary,
   OrchestratorCaseWaitingFor,
   type PostOrchestratorCaseMessageInput,
@@ -27,6 +28,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 const CASE_POLL_INTERVAL_MS = 5000;
 const CASE_BACKGROUND_POLL_MS = 30_000;
+const CASE_IDLE_POLL_MS = 10_000;
 
 export const orchestratorCaseKeys = {
   all: ["orchestrator-cases"] as const,
@@ -67,8 +69,12 @@ export function useOrchestratorCase(caseId: string, enabled = true) {
     queryKey: orchestratorCaseKeys.detail(caseId),
     queryFn: () => apiClient.get<OrchestratorCaseDetail>(casePath(caseId)),
     enabled: enabled && !!caseId,
-    refetchInterval: (query) =>
-      isCaseActive(query.state.data) ? CASE_POLL_INTERVAL_MS : false,
+    refetchInterval: (query) => {
+      if (query.state.status === "error") {
+        return false;
+      }
+      return caseDetailPollInterval(query.state.data);
+    },
   });
 }
 
@@ -341,4 +347,27 @@ export function useDeleteOrchestratorCase(caseId: string) {
     },
     ...mutationErrorOptions("Couldn't delete the case"),
   });
+}
+
+/**
+ * Fast while a turn or task runs; an idle open case still polls so a message
+ * that arrives from a channel or an agent shows without a page refresh.
+ */
+export function caseDetailPollInterval(
+  detail:
+    | Pick<
+        OrchestratorCaseSummary,
+        "turnRunning" | "activeTaskCount" | "status"
+      >
+    | undefined
+): number | false {
+  if (!detail) {
+    return false;
+  }
+  if (isCaseActive(detail)) {
+    return CASE_POLL_INTERVAL_MS;
+  }
+  return detail.status === OrchestratorCaseStatus.Open
+    ? CASE_IDLE_POLL_MS
+    : CASE_BACKGROUND_POLL_MS;
 }
