@@ -469,9 +469,7 @@ describe("classifyBinaryError and classifyBinaryRemediation via route", () => {
     tempDirs.push(emptyDir);
 
     // Place an executable "git" at a known location (tempDir/git).
-    const fakeGit = path.join(tempDir, "git");
-    await writeFile(fakeGit, "#!/bin/sh\nexit 0\n");
-    await chmod(fakeGit, 0o755);
+    const fakeGit = await writeFakeGit(tempDir, 0o755);
 
     // Override: only git has our fake path; all others are empty.
     _setKnownBinaryLocationsForTesting({
@@ -522,9 +520,7 @@ describe("classifyBinaryError and classifyBinaryRemediation via route", () => {
     tempDirs.push(emptyDir);
 
     // Place a non-executable "git" at a known location.
-    const fakeGit = path.join(tempDir, "git");
-    await writeFile(fakeGit, "#!/bin/sh\nexit 0\n");
-    await chmod(fakeGit, 0o644);
+    const fakeGit = await writeFakeGit(tempDir, 0o644);
 
     _setKnownBinaryLocationsForTesting({
       git: [fakeGit],
@@ -586,9 +582,7 @@ describe("classifyBinaryError and classifyBinaryRemediation via route", () => {
     const emptyDir = await mkdtemp(path.join(os.tmpdir(), "hc-empty-c-"));
     tempDirs.push(emptyDir);
 
-    const fakeGit = path.join(tempDir, "git");
-    await writeFile(fakeGit, "#!/bin/sh\nexit 0\n");
-    await chmod(fakeGit, 0o755);
+    const fakeGit = await writeFakeGit(tempDir, 0o755);
 
     _setKnownBinaryLocationsForTesting({
       git: [fakeGit],
@@ -911,3 +905,16 @@ describe("_applyPluginVersionChecksForTesting version enrichment", () => {
     assert.equal(codeCheck.passed, true);
   });
 });
+
+// On win32 the known-location candidates are expanded with PATHEXT suffixes, so
+// the fixture needs a PATHEXT name (git.cmd); POSIX keeps the extensionless shebang file.
+async function writeFakeGit(dir: string, mode: number): Promise<string> {
+  const isWin = process.platform === "win32";
+  const fakeGit = path.join(dir, isWin ? "git.cmd" : "git");
+  await writeFile(
+    fakeGit,
+    isWin ? "@echo off\r\nexit /b 0\r\n" : "#!/bin/sh\nexit 0\n"
+  );
+  await chmod(fakeGit, mode);
+  return fakeGit;
+}

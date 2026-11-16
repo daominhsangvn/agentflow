@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   prepareWindowsTools,
   type WindowsToolsDeps,
+  windowsBinaryPaths,
   windowsToolOverrides,
 } from "../src/headless/headless-windows-tools.js";
 import {
@@ -78,4 +79,16 @@ test("writes no shim for a tool that is missing", async () => {
     python3: null,
     jq: null,
   });
+});
+
+test("windowsBinaryPaths hands the detected Python to the gateway", () => {
+  const shimsDir = path.join(DATA_DIR, "shims");
+  assert.deepEqual(
+    windowsBinaryPaths({ shimsDir, gitBash: null, python: PYTHON, jq: null }),
+    { python3: PYTHON }
+  );
+  assert.deepEqual(
+    windowsBinaryPaths({ shimsDir, gitBash: null, python: null, jq: null }),
+    {}
+  );
 });
