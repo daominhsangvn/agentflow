@@ -50,7 +50,7 @@ A **task** is one run of one declared command. The agent cannot talk to the orch
 ## What the agent must not do
 
 - **Ask people directly**: no `AskUserQuestion`, no "Proceed? (y/n)", no terminal prompt, no Slack, Teams or Jira comment asking something, unless the command comments the question itself and writes the comment's id as `commentId` in `questions.json`. Nobody is at the terminal, and the orchestrator would not know a question was asked.
-  AgentFlow already guards against a command written for the terminal: every run denies `AskUserQuestion`, and the agent is told that wherever its command says to ask the user, wait for a reply or confirm, it writes the questions to `questions.json` and stops (`asks: true`) or decides and notes it (otherwise). A command written to ask in the terminal usually works unchanged; the blocks below make it reliable and keep its questions well written.
+  AgentFlow already guards against a command written for the terminal: every run denies `AskUserQuestion`, and the agent is told that wherever its command says to ask the user, wait for a reply or confirm, it writes the questions to `questions.json` and stops (`asks: true`) or decides and notes it (otherwise). An approval or sign-off at the end of a command ("approve the spec", "confirm the commit") is handled the same way: with `asks: true` it becomes a question with the options Approve / Request changes; otherwise the agent never approves on people's behalf, leaves the gate open and says in its answer what people must approve. A command written to ask in the terminal usually works unchanged; the blocks below make it reliable and keep its questions well written.
 - **Report directly**: no comment or attachment on the ticket, even with the person's own Jira MCP server. The orchestrator decides what is posted where.
 - **Wait** inside a run, poll, or plan to come back later. Write the questions and stop.
 - **Stop or start other work**: cancelling tasks and starting other Agents is the orchestrator's job. Say what should happen next in the answer.
@@ -109,6 +109,8 @@ the answer. A risky choice with no safe default becomes a question.
 ```
 
 A command that already has an `--auto` flag: write it in the command's `args` in `AGENTFLOW.md` (`<KEY> [--auto]`) so the orchestrator passes it.
+
+**Approvals at the end of a command.** An approval or sign-off gate such as "Ask the user to approve the spec" is not a confirmation to skip: in a command declared `asks: true` it becomes a question with the options "Approve" and "Request changes". When the task resumes with an approval, the prompt names who approved; the agent applies the approval the way the command says and records that name in the artifact. A command without `asks` never approves: it leaves the gate open and lists in the answer what people must approve.
 
 ### Input files
 
@@ -174,6 +176,10 @@ You run unattended; nobody reads this terminal.
   confirmation. Decide with the command's defaults, or write the open
   questions to $AGENTFLOW_WORKDIR/questions.json
   ([{"id":"q1","question":"...","options":["..."]}]) and stop.
+- A closing approval or sign-off is a question too: write it to
+  questions.json with the options "Approve" and "Request changes". Never
+  approve on people's behalf; when resumed with an approval from a named
+  person, apply it and record who approved in the artifact.
 - Never contact people yourself (no Jira, Slack or Teams comments to ask or
   to report). AgentFlow's orchestrator does that.
 - Inputs are in $AGENTFLOW_WORKDIR/inputs/. A missing input: the first line

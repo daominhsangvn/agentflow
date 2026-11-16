@@ -3,6 +3,16 @@ title: "Release notes"
 description: "What changed in the self-hosted AgentFlow."
 ---
 
+## 2026-11-16
+
+- Asking people in Teams: an Orchestrator Agent granted a Teams key `ask` asks people in the project connection's **Ask channels** (`teams_ask`), discusses in the thread (`teams_ask_reply`) and records the answers only after an asked person confirms its summary (`teams_ask_confirm`). A case keeps one thread per ask channel. See [Microsoft Teams](/docs/integrations/microsoft-teams#asking-people-orchestrated-workflows).
+- An approval or sign-off at the end of a personal Agent's command becomes a question with Approve / Request changes (`asks: true`); without `asks` the agent never approves on people's behalf. See [Integrate an existing agent](/docs/guides/setup/integrate-existing-agent).
+- `jira.issue_status_changed` takes a `labels` filter. See [Triggers and actions](/docs/guides/setup/triggers-and-actions).
+- `AUTH_MICROSOFT_TRUST_EMAIL=true` trusts the Microsoft `email` claim for a specific tenant whose users carry no verified-email claim. See [Server environment variables](/docs/reference/server-env).
+- Logging: `LOG_LEVEL` on the server and the Agent. Agents send their traces, logs and metrics to the API by default (`AGENTFLOW_RUNNER_TELEMETRY=false` opts out), which forwards them to SigNoz when an OpenTelemetry endpoint is set.
+- On Windows the Agent and its System Check find Python 3 as `python3`, `python` or `py -3`.
+- Fixes: open cases keep refreshing so new messages show without reloading; Teams messages are read from their HTML content; Teams ask channel ids keep their case.
+
 ## 2026-11-01
 
 Self-hosted edition as it stands.

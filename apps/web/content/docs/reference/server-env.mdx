@@ -64,6 +64,7 @@ Generate a key with `node -e "console.log(require('crypto').randomBytes(32).toSt
 | `AUTH_DEFAULT_ORGANIZATION_NAME`, `AUTH_DEFAULT_ORGANIZATION_SLUG` | `AgentFlow`, `agentflow` | The default organization of the first account on an empty install |
 | `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET` | none | Both set: enables Microsoft Entra ID sign-in. Redirect URI `<BETTER_AUTH_URL>/api/auth/callback/microsoft` |
 | `AUTH_MICROSOFT_TENANT_ID` | `common` | Entra tenant. Add the optional ID-token claims `email`, `xms_edov`, `verified_primary_email`, `verified_secondary_email`; with `common` and no `xms_edov`, Microsoft sign-up and linking are refused. A specific tenant id trusts that directory |
+| `AUTH_MICROSOFT_TRUST_EMAIL` | off | `true` trusts the `email` claim as is, for a directory whose users carry no verified-email claim (cloud-only users often have neither `email_verified` nor `verified_primary_email`). Needs a specific `AUTH_MICROSOFT_TENANT_ID`; it has no effect on `common` without `xms_edov`. Only for a directory whose admins you trust to set users' emails |
 | `AGENTFLOW_ADMIN_EMAIL`, `AGENTFLOW_ADMIN_PASSWORD` | none | Production Compose only (read by the `bootstrap-admin` job, required there): the first owner, created when no user exists. Password: at least 8 characters |
 | `AGENTFLOW_ADMIN_NAME` | `Administrator` | Production Compose only: display name of that owner |
 
@@ -89,6 +90,20 @@ The API process runs a small scheduler: workflows every `WORKFLOW_TICK_SECONDS`,
 | `STALE_SESSION_AGE_HOURS` | `24` | Ends sessions still marked active after their machine stopped reporting |
 | `SELF_HOSTED_CRON_DISABLED` | off | `true` turns the in-process scheduler off, for an external scheduler that calls the `/cron/*` routes. `CRON_SECRET` must then be set |
 | `CRON_SECRET` | generated per process | Authenticates the `/cron/*` routes |
+
+## Logging and telemetry
+
+The API, web app and MCP server export traces, logs and metrics with the standard OpenTelemetry variables; the production Compose file sets them for its SigNoz stack. Setup, dashboards and alerts: [Production server](/docs/guides/setup/production-server).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | The on/off switch: unset means no export. `http://localhost:4318` from the host, `http://signoz-otel-collector:4318` in Compose. Agents export through the API, so they need it set on the API |
+| `OTEL_SERVICE_NAME` | set by Compose | Service name in SigNoz: `af-api`, `af-app` or `af-mcp` |
+| `OTEL_RESOURCE_ATTRIBUTES` | none | Extra attributes, such as `deployment.environment.name=production` |
+| `OTEL_TRACES_SAMPLER_ARG` | `1` | Head sampling ratio |
+| `OTEL_SDK_DISABLED` | off | `true`: no export even when an endpoint is set |
+| `LOG_FORMAT` | `json` in production | `json` or `pretty` on stdout |
+| `LOG_LEVEL` | `info` in production, `debug` elsewhere | Minimum level: `debug`, `info`, `warn` or `error` |
 
 ## Local Git
 

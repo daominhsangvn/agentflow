@@ -39,6 +39,24 @@ A personal Agent may comment its question on the ticket with the person's own ac
 - A task question marked already asked on the item: do not post it again; wait for the reply; resume the task when all its questions are answered.
 ```
 
+## Asking people in Teams
+
+Questions can go to the people who know the answer, in a Teams channel, instead of the ticket. The workflow grants the Teams key `ask`, the Teams project connection lists the **Ask channels**, and the rules say which questions go where and give the people's emails ([Microsoft Teams](/docs/integrations/microsoft-teams#asking-people-orchestrated-workflows)).
+
+1. A task ends with questions. The orchestrator asks them with `teams_ask` in the channel the rules name, @mentioning the people. A case keeps one thread per channel: a later ask of the case is a reply in it.
+2. People reply in the thread and @mention the bot. The orchestrator can answer them and discuss with `teams_ask_reply`.
+3. When the answers are clear, it posts a summary of them (`teams_ask_reply` with `answers`) for the asked people to confirm.
+4. One of the asked people confirms in a later message. The orchestrator records it with `teams_ask_confirm`: only then do the questions count as answered, and the task resumes when every question has an answer.
+
+```text
+## Questions in Teams
+- Backend questions go to people in the qa-backend channel; requirement questions in ba.
+  Emails: Lan (QA) lan@example.com, Minh (BA) minh@example.com.
+- Answer people in the thread they wrote in. Before recording answers, post a summary and wait for an asked person to confirm it.
+```
+
+The server checks the confirmation: who wrote it (a person the ask mentioned), where (that ask's thread) and when (after the newest summary). Anyone in the channel can take part in the discussion, but only an asked person's confirmation records answers.
+
 ## Answer on the case page
 
 Anyone in the organization can answer a task's questions on the case page (**Send answers**) or message the orchestrator. The orchestrator answers on the case page and posts on the ticket only when the rules say so ([Cases](/docs/guides/operate/cases#answer-questions)).

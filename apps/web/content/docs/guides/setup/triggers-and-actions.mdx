@@ -111,7 +111,7 @@ Starts a run when an issue is assigned to the bot, gets one of the labels and/or
 
 #### `jira.issue_status_changed`
 
-Starts when a person moves a Jira issue to another status (from / to filters, case-insensitive names). Needs webhook delivery with the Issue updated event; the bot's own transitions are ignored.
+Starts when a person moves a Jira issue to another status (from / to filters, case-insensitive names). Labels, project and issue type filter the issue at that moment; changing them does not start a run. Needs webhook delivery with the Issue updated event, or Poll with poll scope "Every change"; the bot's own transitions are ignored.
 
 | Option | Type | Default | What it does |
 |---|---|---|---|
@@ -119,6 +119,7 @@ Starts when a person moves a Jira issue to another status (from / to filters, ca
 | `to` | list |  | Status names. Leave empty for any. |
 | `projectKeys` | list |  | Project keys, e.g. PROJ. Leave empty for any project. |
 | `issueTypes` | list |  | e.g. Story, Bug, Task. Leave empty for any issue type. |
+| `labels` | list |  | Only issues that have at least one of these labels, e.g. `ai-ready`. Leave empty for no label filter. |
 
 ### Actions
 

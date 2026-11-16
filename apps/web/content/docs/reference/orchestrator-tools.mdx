@@ -25,6 +25,9 @@ The tool `runners_list` lists Agents: the name keeps the old word.
 | `edit_reply` | Replaces the text of a message this conversation posted, for example the summary of a plan once a new version is out. It takes no files | `reference`, `text`, `version` |
 | `request_decision` | Asks for an approval (a plan, a go to implement): posts the question with the case's link, where an admin approves or rejects. With a `draft`, AgentFlow posts the comment and makes the move itself once it is approved. Under `approvals: required` only `where: case_page` is allowed. End the turn with `wait_human` | `question`; `where`; `draft` (`comment` with `text`, `replyTo`, `attachments`; `transitionName`) |
 | `record_decision` | Records a decision someone gave in the thread on a pending decision: who, approved or not, and what they said. Under `approvals: required` it cannot approve a decision with a draft (only an admin's Approve button does); rejecting works | `decisionId`, `approved`, `decidedBy`, `comment` |
+| `teams_ask` | Asks people in a Teams ask channel and @mentions them. A case has one thread per ask channel: the first ask is a new post, later asks of the case in that channel are replies in it. Each ask returns its own `askRef`. Refused for a channel that is not an ask channel of the granted connections, or a person who is not in the channel's team | `mentions` (emails), `text`, `channel` (optional when only one ask channel is granted), `questions` (`[{taskId, questionId}]`, one task per ask), `attachments` (listed as links to the case page; Teams takes no uploads), `connection` |
+| `teams_ask_reply` | Posts in the thread of an ask: answers people, discusses, or with `answers` posts the summary of the answers for the asked people to confirm | `askRef`, `text`, `mentions` (default the asked people), `answers` (`[{questionId, answer}]`) |
+| `teams_ask_confirm` | Records the answers of the latest summary once a person the ask mentioned confirmed it in a later message of that thread. Refused for anyone else, for a message before the summary, for another thread, or when the newest summary before the confirmation belongs to another ask. Repeating it does nothing | `askRef`, `confirmationRef` (the confirming message) |
 
 ## Tasks and waiting
 
@@ -62,6 +65,7 @@ The writes are opt-in per workflow, in `agent.orchestrator.connections`. Without
 | `page_get` | a Confluence key is granted `read` or `publish` |
 | `page_publish` | a Confluence key is granted `publish` |
 | `pull_request_open` | `pull_requests` includes `open` |
+| `teams_ask`, `teams_ask_reply`, `teams_ask_confirm` | a Microsoft Teams key is granted `ask`; saving the workflow is refused when that project connection has no Ask channel. Allowed under `approvals: required` |
 | all others | always |
 
 `comment` and `attach` in `source` control writing comments and attaching files on the ticket. See [Connection grants](/docs/guides/setup/connection-grants) and [Orchestrator setup](/docs/guides/setup/orchestrator).
@@ -72,6 +76,7 @@ agent:
     connections:
       source: [comment, attach, transition, label, link]
       confluence: [publish]
+      teams: [ask]
       pull_requests: [open]
 ```
 

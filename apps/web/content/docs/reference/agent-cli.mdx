@@ -46,6 +46,8 @@ Exit codes: `2` for an invalid configuration (the message names the variable), `
 | `AGENTFLOW_MCP_URL` | the one the API names | MCP endpoint Agents use for [Agent tools](/docs/reference/agent-tools). Set it when the Agent reaches the MCP server under another address, such as `http://host.docker.internal:3010/mcp` from a container |
 | `AGENTFLOW_PLUGINS_DIR` | set by the image and the service; else `agent-plugins` next to `runner.mjs` | The `agent-plugins` directory, loaded into Claude Code with `--plugin-dir` |
 | `AGENTFLOW_GIT_BASH_PATH` | found next to `git.exe` | Windows: Git for Windows' `bin\bash.exe`, which runs the scripts |
+| `AGENTFLOW_RUNNER_TELEMETRY` | `true` | Sends the Agent's traces, logs and metrics to the API, which forwards them to its OpenTelemetry endpoint (SigNoz). `false` opts out. When the API has no `OTEL_EXPORTER_OTLP_ENDPOINT` it answers 404 and the Agent stops sending |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. Verbose mode or `debug` prints debug lines |
 
 Credentials:
 
