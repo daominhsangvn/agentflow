@@ -384,8 +384,13 @@ describe("expandTilde and SHELL fallback", () => {
     tempDirs.push(emptyDir);
 
     // executable git at known location, not in PATH
-    const fakeGit = path.join(tempDir, "git");
-    await writeFile(fakeGit, "#!/bin/sh\nexit 0\n");
+    // On Windows only PATHEXT names count as executables, so the fixture needs one.
+    const isWin = process.platform === "win32";
+    const fakeGit = path.join(tempDir, isWin ? "git.cmd" : "git");
+    await writeFile(
+      fakeGit,
+      isWin ? "@echo off\r\nexit /b 0\r\n" : "#!/bin/sh\nexit 0\n"
+    );
     await chmod(fakeGit, 0o755);
 
     _setKnownBinaryLocationsForTesting({

@@ -396,6 +396,7 @@ describe("jira.issue_status_changed", () => {
   const moved = event(JiraTriggerType.IssueStatusChanged, {
     [JiraEventAttribute.ProjectKey]: "PROJ",
     [JiraEventAttribute.IssueType]: "Story",
+    [JiraEventAttribute.Labels]: ["ai-ready", "backend"],
     [JiraEventAttribute.FromStatus]: "PRD Review",
     [JiraEventAttribute.ToStatus]: "Ready for Dev",
   });
@@ -411,7 +412,7 @@ describe("jira.issue_status_changed", () => {
   it("declares its fields and has no manual run", () => {
     expect(
       jiraIssueStatusChangedTrigger.configFields.map((field) => field.key)
-    ).toEqual(["from", "to", "projectKeys", "issueTypes"]);
+    ).toEqual(["from", "to", "projectKeys", "issueTypes", "labels"]);
     expect(jiraIssueStatusChangedTrigger.manualRun).toBeUndefined();
   });
 
@@ -439,5 +440,43 @@ describe("jira.issue_status_changed", () => {
   it("applies the project filter", () => {
     expect(statusMatches({ projectKeys: ["OTHER"] })).toBe(false);
     expect(statusMatches({ projectKeys: ["PROJ"] })).toBe(true);
+  });
+
+  it("requires any of the labels, case-insensitively", () => {
+    expect(statusMatches({ labels: ["AI-READY"] })).toBe(true);
+    expect(statusMatches({ labels: ["frontend", "backend"] })).toBe(true);
+    expect(statusMatches({ labels: ["frontend"] })).toBe(false);
+  });
+
+  it("ANDs the labels with the status and issue type filters", () => {
+    const config = {
+      to: ["Ready for Dev"],
+      labels: ["ai-ready"],
+      issueTypes: ["Story"],
+    };
+    expect(statusMatches(config)).toBe(true);
+    expect(statusMatches({ ...config, issueTypes: ["Bug"] })).toBe(false);
+    expect(statusMatches({ ...config, to: ["Done"] })).toBe(false);
+  });
+
+  it("does not start on a label change without a status change", () => {
+    const labeled = event(JiraTriggerType.IssueLabeled, {
+      [JiraEventAttribute.Labels]: ["ai-ready"],
+      [JiraEventAttribute.AddedLabels]: ["ai-ready"],
+    });
+    const config = jiraIssueStatusChangedConfigSchema.parse({
+      to: ["Ready for Dev"],
+      labels: ["ai-ready"],
+    });
+    expect(
+      jiraIssueStatusChangedTrigger.matches(labeled, config, connection)
+    ).toBe(false);
+  });
+
+  it("rejects labels with spaces", () => {
+    const parsed = jiraIssueStatusChangedConfigSchema.safeParse({
+      labels: ["ai ready"],
+    });
+    expect(parsed.success).toBe(false);
   });
 });

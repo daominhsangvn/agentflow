@@ -1,6 +1,4 @@
 import { execFile } from "node:child_process";
-import fs, { constants } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
@@ -17,15 +15,24 @@ import type { OperationDispatcher } from "../operation-dispatcher.js";
 import type { ProcessManager } from "../process-manager.js";
 import {
   getShellEnv,
-  KNOWN_BINARY_LOCATIONS,
   resolveBinaryFromLoginShell,
-  resolveExecutablesOnPath,
+  resolvePython3FromLoginShell,
 } from "../shell-path.js";
 import {
   checkAppVersion,
   classifyGatewayBuild,
   compareStrictSemver,
 } from "./health-check-app-version.js";
+import {
+  classifyBinaryError,
+  classifyBinaryRemediation,
+  collectBinaryDebug,
+  getInstallRemediation,
+  KNOWN_CLAUDE_LOCATIONS,
+  KNOWN_GIT_LOCATIONS,
+  KNOWN_PYTHON3_LOCATIONS,
+  setKnownBinaryLocationsOverride,
+} from "./health-check-binary-diagnostics.js";
 import {
   applyClaudeCliBlockedChecks,
   CLAUDE_CLI_CHECK_ID,
@@ -703,15 +710,6 @@ export async function _applyPluginVersionChecksForTesting(
 }
 
 /**
- * Per-binary override of the hardcoded KNOWN_*_LOCATIONS arrays consulted
- * by collectBinaryDebug. Used to make tests host-independent: a test that
- * asserts on "Not found" can pass `{ claude: [] }` so the host's actual
- * Homebrew/local install does not leak into `foundAt[]`. Production never
- * sets this.
- */
-let knownLocationsForTest: Record<string, string[]> | null = null;
-
-/**
  * @internal Test-only. Override the KNOWN_*_LOCATIONS arrays per-binary so
  * a test can assert on a clean "no-installed-binary-anywhere" state without
  * being defeated by the host machine's Homebrew/native installs. Pass
@@ -720,209 +718,12 @@ let knownLocationsForTest: Record<string, string[]> | null = null;
 export function _setKnownBinaryLocationsForTesting(
   override: Record<string, string[]> | null
 ): void {
-  knownLocationsForTest = override;
-}
-
-function effectiveKnownLocations(
-  binaryName: string,
-  defaults: string[]
-): string[] {
-  return knownLocationsForTest?.[binaryName] ?? defaults;
+  setKnownBinaryLocationsOverride(override);
 }
 
 function parseVersion(output: string): string | undefined {
   const match = VERSION_REGEX.exec(output);
   return match?.[1];
-}
-
-// Canonical known-install-location lists live in shell-path.ts, where they
-// also drive the resolver's known-location tier (FEA-3742). Re-derive the
-// per-binary diagnostics arrays from that single source so the resolver and
-// the "found at X but not on PATH" diagnostics never drift.
-const KNOWN_CLAUDE_LOCATIONS: string[] = KNOWN_BINARY_LOCATIONS.claude ?? [];
-const KNOWN_GIT_LOCATIONS: string[] = KNOWN_BINARY_LOCATIONS.git ?? [];
-const KNOWN_PYTHON3_LOCATIONS: string[] = KNOWN_BINARY_LOCATIONS.python3 ?? [];
-
-function getInstallRemediation(
-  binaryName: string,
-  platform: NodeJS.Platform
-): string {
-  const isMac = platform === "darwin";
-  const isLinux = platform === "linux";
-  switch (binaryName) {
-    case "claude":
-      return "Install: npm install -g @anthropic-ai/claude-code";
-    case "codex":
-      return "Install: npm install -g @openai/codex";
-    case "git":
-      if (isMac) {
-        return "Install: xcode-select --install";
-      }
-      if (isLinux) {
-        return "Install via your package manager (e.g. apt install git, dnf install git)";
-      }
-      return "Install Git: see https://git-scm.com";
-    case "gh":
-      if (isMac) {
-        return "Install: brew install gh (or see https://cli.github.com)";
-      }
-      if (isLinux) {
-        return "Install the GitHub CLI: see https://github.com/cli/cli/blob/trunk/docs/install_linux.md";
-      }
-      return "Install the GitHub CLI: see https://cli.github.com";
-    case "python3":
-      if (isMac) {
-        return "Install Python 3.10 or later: brew install python@3.13 (or see https://python.org)";
-      }
-      if (isLinux) {
-        return "Install Python 3.10 or later via your package manager (e.g. apt install python3)";
-      }
-      return "Install Python 3.10 or later: see https://python.org";
-    default:
-      return `Install ${binaryName}`;
-  }
-}
-
-function expandTilde(loc: string): string {
-  if (loc.startsWith("~/")) {
-    return os.homedir() + loc.slice(1);
-  }
-  if (loc === "~") {
-    return os.homedir();
-  }
-  return loc;
-}
-
-async function collectBinaryDebug(
-  binaryName: string,
-  spawnError: CommandError,
-  knownLocations: string[]
-): Promise<NonNullable<CheckResult["debug"]>> {
-  const env = await getShellEnv();
-  const shellPath = env.PATH ?? "";
-
-  const pathHits = await resolveExecutablesOnPath(binaryName, shellPath);
-  const seen = new Set<string>(pathHits);
-
-  // Sweep PATH directories and known install locations, distinguishing
-  // executable hits from files that exist but are not executable. The
-  // latter drive EACCES diagnostics so remediation points at the actual
-  // broken file rather than some other executable location.
-  const pathSegmentCandidates = shellPath
-    .split(path.delimiter)
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .map((segment) => path.join(segment, binaryName));
-  const candidates = [
-    ...pathSegmentCandidates,
-    ...effectiveKnownLocations(binaryName, knownLocations).map((loc) =>
-      expandTilde(loc)
-    ),
-  ];
-
-  const knownHits: string[] = [];
-  const nonExecutableHits: string[] = [];
-  for (const candidate of candidates) {
-    if (seen.has(candidate)) {
-      continue;
-    }
-    seen.add(candidate);
-    try {
-      await fs.access(candidate, constants.F_OK);
-    } catch {
-      // observability: b — probe, absence is a normal state
-      continue; // does not exist
-    }
-    try {
-      await fs.access(candidate, constants.X_OK);
-      knownHits.push(candidate);
-    } catch {
-      // observability: b — probe, absence is a normal state
-      nonExecutableHits.push(candidate);
-    }
-  }
-
-  return {
-    errorCode: spawnError.code,
-    stderr: spawnError.stderr,
-    resolvedPath: shellPath.slice(0, 1024),
-    shell: path.basename(process.env.SHELL ?? ""),
-    platform: process.platform,
-    foundAt: [...pathHits, ...knownHits],
-    ...(nonExecutableHits.length > 0
-      ? { nonExecutableAt: nonExecutableHits }
-      : {}),
-  };
-}
-
-function classifyBinaryError(
-  binaryName: string,
-  spawnError: CommandError,
-  debug: NonNullable<CheckResult["debug"]>
-): string {
-  const { errorCode } = debug;
-  const foundAt = debug.foundAt ?? [];
-  const nonExecutableAt = debug.nonExecutableAt ?? [];
-
-  if (errorCode === "ENOENT") {
-    if (foundAt.length > 0) {
-      return `Found at ${foundAt[0]} but not on PATH`;
-    }
-    return "Not found";
-  }
-
-  if (errorCode === "EACCES" || errorCode === "EPERM") {
-    // Prefer a path that actually has the permission problem over any
-    // unrelated executable hit, so the error points at the real offender.
-    const brokenPath = nonExecutableAt[0] ?? foundAt[0];
-    if (brokenPath) {
-      return `Found at ${brokenPath} but not executable`;
-    }
-    return "Permission denied";
-  }
-
-  if (errorCode === "ETIMEDOUT") {
-    if (foundAt.length > 0) {
-      return `Timed out running ${foundAt[0]} --version`;
-    }
-    return `Timed out running ${binaryName} --version`;
-  }
-
-  const raw = `${spawnError.code}: ${spawnError.stderr || spawnError.message}`;
-  return raw.slice(0, 80);
-}
-
-function classifyBinaryRemediation(
-  binaryName: string,
-  _spawnError: CommandError,
-  debug: NonNullable<CheckResult["debug"]>
-): string {
-  const { errorCode } = debug;
-  const foundAt = debug.foundAt ?? [];
-  const nonExecutableAt = debug.nonExecutableAt ?? [];
-  const shell = debug.shell || "shell";
-  const platform = debug.platform ?? process.platform;
-
-  if (errorCode === "ENOENT") {
-    if (foundAt.length > 0) {
-      return `Add ${path.dirname(foundAt[0])} to PATH in your ${shell} rc, then restart the app`;
-    }
-    return getInstallRemediation(binaryName, platform);
-  }
-
-  if (errorCode === "EACCES" || errorCode === "EPERM") {
-    const brokenPath = nonExecutableAt[0] ?? foundAt[0];
-    if (brokenPath) {
-      return `chmod +x ${brokenPath}`;
-    }
-    return `Check executable permissions on your ${binaryName} install`;
-  }
-
-  if (errorCode === "ETIMEDOUT") {
-    return `Try \`${binaryName} --version\` in a terminal -- it may be hanging on startup`;
-  }
-
-  return "See diagnostics tab for details";
 }
 
 async function checkGit(
@@ -1036,11 +837,8 @@ async function checkPython3(
   override?: string,
   deadline?: PluginRemediationDeadline
 ): Promise<CheckResult> {
-  const REMEDIATION =
-    process.platform === "darwin"
-      ? "Install Python 3.10 or later: brew install python@3.13"
-      : "Install Python 3.10 or later: sudo apt-get install python3 (or your distro's package manager)";
-  const resolved = await resolveBinaryFromLoginShell("python3", override);
+  const REMEDIATION = getInstallRemediation("python3", process.platform);
+  const resolved = await resolvePython3FromLoginShell(override);
   if (resolved.source === "override_invalid") {
     return {
       id: "python3",

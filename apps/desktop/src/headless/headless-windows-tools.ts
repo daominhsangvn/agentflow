@@ -13,29 +13,23 @@
  *   shims/python/sitecustomize.py   on PYTHONPATH: Python prints `\n`
  */
 
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
+import type { BinaryPaths } from "../server/operations/binary-paths.js";
 import {
   findGitBash,
   toShellPath,
   WINDOWS_SHIMS_DIR_ENV,
 } from "../server/platform-shell.js";
-import { resolveExecutablesOnPath } from "../server/shell-path.js";
+import {
+  findPython3Executable,
+  type Python3Probe,
+  probePython3Executable,
+  resolveExecutablesOnPath,
+} from "../server/shell-path.js";
 
-const execFileAsync = promisify(execFile);
-const PROBE_TIMEOUT_MS = 10_000;
 const SHIMS_DIR_NAME = "shims";
 const SHIM_MODE = 0o755;
-const FIRST_LINE_RE = /^[^\r\n]*/;
-
-/** Commands tried, in order, to find a working Python 3. */
-const PYTHON_CANDIDATES: readonly (readonly string[])[] = [
-  ["python3"],
-  ["python"],
-  ["py", "-3"],
-];
 
 const SITECUSTOMIZE = `# Written by the AgentFlow runner (Windows). Bash reads what Python prints,
 # and a "\\r" before each newline would end up in every $(python3 ...) value.
@@ -59,10 +53,7 @@ export type WindowsTools = {
 export type WindowsToolsDeps = {
   env: NodeJS.ProcessEnv;
   /** sys.executable of a Python 3 run as `command args`, or null. */
-  probePython: (
-    command: string,
-    args: readonly string[]
-  ) => Promise<string | null>;
+  probePython: Python3Probe;
   findOnPath: (name: string) => Promise<string | null>;
   isFile: (file: string) => boolean;
   writeFile: (file: string, content: string) => void;
@@ -78,7 +69,7 @@ export async function prepareWindowsTools(
   deps: WindowsToolsDeps = defaultWindowsToolsDeps()
 ): Promise<WindowsTools> {
   const shimsDir = path.join(dataDir, SHIMS_DIR_NAME);
-  const python = await findPython(deps);
+  const python = await findPython3Executable(deps.probePython);
   const jq = await deps.findOnPath("jq");
   if (python) {
     deps.writeFile(path.join(shimsDir, "python3"), execShim(python, []));
@@ -106,16 +97,6 @@ export function windowsToolOverrides(
   return { bash: tools.gitBash, python3: tools.python, jq: tools.jq };
 }
 
-async function findPython(deps: WindowsToolsDeps): Promise<string | null> {
-  for (const [command, ...args] of PYTHON_CANDIDATES) {
-    const executable = await deps.probePython(command, args);
-    if (executable) {
-      return executable;
-    }
-  }
-  return null;
-}
-
 /** A bash script that replaces itself with `target` (LF line endings). */
 function execShim(target: string, args: string[]): string {
   // Shims exist on Windows only, where bash takes `C:/...` paths.
@@ -128,7 +109,7 @@ function execShim(target: string, args: string[]): string {
 function defaultWindowsToolsDeps(): WindowsToolsDeps {
   return {
     env: process.env,
-    probePython: probePythonExecutable,
+    probePython: probePython3Executable,
     findOnPath: async (name) =>
       (await resolveExecutablesOnPath(name, process.env.PATH ?? ""))[0] ?? null,
     isFile: (file) => fs.existsSync(file),
@@ -139,28 +120,7 @@ function defaultWindowsToolsDeps(): WindowsToolsDeps {
   };
 }
 
-/**
- * Runs the candidate and asks it for its own path. The Microsoft Store
- * aliases (`python.exe` / `python3.exe` in WindowsApps) exist even when no
- * Python is installed and fail here, so they are never picked.
- */
-async function probePythonExecutable(
-  command: string,
-  args: readonly string[]
-): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync(
-      command,
-      [
-        ...args,
-        "-c",
-        "import sys; assert sys.version_info >= (3,); print(sys.executable)",
-      ],
-      { timeout: PROBE_TIMEOUT_MS, windowsHide: true }
-    );
-    return FIRST_LINE_RE.exec(stdout.trim())?.[0] || null;
-  } catch {
-    // observability: probe — a missing interpreter is a normal state
-    return null;
-  }
+/** Gateway binary paths for the tools the runner detected (the health check and loop resolver use them). */
+export function windowsBinaryPaths(tools: WindowsTools): BinaryPaths {
+  return tools.python ? { python3: tools.python } : {};
 }

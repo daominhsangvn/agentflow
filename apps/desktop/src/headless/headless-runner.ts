@@ -33,6 +33,7 @@ import {
   GatewayTraceIdKey,
   setGatewayStaticTraceIds,
 } from "../server/gateway-trace-context.js";
+import type { BinaryPaths } from "../server/operations/binary-paths.js";
 import {
   getBundledPluginDirs,
   getBundledPluginVersion,
@@ -89,7 +90,8 @@ export type HeadlessRunner = {
 
 export async function startHeadlessRunner(
   config: HeadlessRunnerConfig,
-  capabilities: ComputeTargetCapabilities
+  capabilities: ComputeTargetCapabilities,
+  options: HeadlessRunnerOptions = {}
 ): Promise<HeadlessRunner> {
   fs.mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
   const gatewayId = new GatewayIdentityStore(config.dataDir).loadSync();
@@ -163,6 +165,7 @@ export async function startHeadlessRunner(
     getGatewayAuthToken: () => gatewayAuthToken,
     getAllowedDirectories: () => allowedDirectories,
     getSymphonyDir: () => symphonyDir,
+    getBinaryPaths: () => ({ ...options.binaryPaths }),
     evaluateApproval: approveRunnerRequest,
     machineName: config.runnerName,
     version: BUILD_APP_VERSION,
@@ -419,3 +422,8 @@ function handleStatusChange(
     gatewayLog.warn(LOG_TAG, `Connection degraded: ${error}`);
   }
 }
+
+export type HeadlessRunnerOptions = {
+  /** Paths the runner detected; host overrides, if any, win. */
+  binaryPaths?: BinaryPaths;
+};

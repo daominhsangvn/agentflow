@@ -83,6 +83,16 @@ const ISSUE_TYPES_FIELD: IntegrationFieldDescriptor = {
   defaultValue: [],
 };
 
+const LABELS_FILTER_FIELD: IntegrationFieldDescriptor = {
+  key: "labels",
+  label: "Labels (any of)",
+  kind: IntegrationFieldKind.StringList,
+  description:
+    "Only issues that have at least one of these labels. Leave empty for no label filter.",
+  placeholder: "ai-ready",
+  defaultValue: [],
+};
+
 export const jiraIssueAssignedTrigger = defineTrigger<
   JiraIssueAssignedConfig,
   JiraConnectionConfig
@@ -92,19 +102,7 @@ export const jiraIssueAssignedTrigger = defineTrigger<
   description:
     "Starts a run when a Jira issue is created with, or changed to, the connection's bot account as assignee.",
   configSchema: jiraIssueAssignedConfigSchema,
-  configFields: [
-    PROJECT_KEYS_FIELD,
-    ISSUE_TYPES_FIELD,
-    {
-      key: "labels",
-      label: "Labels (any of)",
-      kind: IntegrationFieldKind.StringList,
-      description:
-        "Only issues that have at least one of these labels. Leave empty for no label filter.",
-      placeholder: "ai-ready",
-      defaultValue: [],
-    },
-  ],
+  configFields: [PROJECT_KEYS_FIELD, ISSUE_TYPES_FIELD, LABELS_FILTER_FIELD],
   manualRun: { label: "Issue key", placeholder: "PROJ-123" },
   matches: (event, config) =>
     matchesIssueFilters(event, config) &&
@@ -375,6 +373,8 @@ export const jiraIssueStatusChangedConfigSchema = z.object({
   to: filterListSchema,
   projectKeys: filterListSchema,
   issueTypes: filterListSchema,
+  /** Any of these labels on the issue when its status changes. */
+  labels: labelListSchema,
 });
 export type JiraIssueStatusChangedConfig = z.infer<
   typeof jiraIssueStatusChangedConfigSchema
@@ -387,7 +387,7 @@ export const jiraIssueStatusChangedTrigger = defineTrigger<
   key: JiraTriggerType.IssueStatusChanged,
   displayName: "Issue status changed",
   description:
-    'Starts when a person moves a Jira issue to another status (from / to filters, case-insensitive names). Needs webhook delivery with the Issue updated event, or Poll with poll scope "Every change"; the bot\'s own transitions are ignored.',
+    'Starts when a person moves a Jira issue to another status (from / to filters, case-insensitive names). Labels, project and issue type filter the issue at that moment; changing them does not start a run. Needs webhook delivery with the Issue updated event, or Poll with poll scope "Every change"; the bot\'s own transitions are ignored.',
   configSchema: jiraIssueStatusChangedConfigSchema,
   configFields: [
     {
@@ -408,9 +408,11 @@ export const jiraIssueStatusChangedTrigger = defineTrigger<
     },
     PROJECT_KEYS_FIELD,
     ISSUE_TYPES_FIELD,
+    LABELS_FILTER_FIELD,
   ],
   matches: (event, config) =>
     matchesIssueFilters(event, config) &&
+    matchesAny(config.labels, readList(event, JiraEventAttribute.Labels)) &&
     matchesAny(config.from, readList(event, JiraEventAttribute.FromStatus)) &&
     matchesAny(config.to, readList(event, JiraEventAttribute.ToStatus)),
 });

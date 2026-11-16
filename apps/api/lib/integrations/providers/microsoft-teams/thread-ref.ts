@@ -121,9 +121,20 @@ export function teamsMessageLink(
  * project connections claim.
  */
 export function parseChannelReference(input: string): Result<string, string> {
+  const parsed = parseChannelReferenceExact(input);
+  return parsed.ok ? Result.ok(parsed.value.toLowerCase()) : parsed;
+}
+
+/**
+ * Like parseChannelReference, but the id as written: Bot Connector channel
+ * ids are case-sensitive.
+ */
+export function parseChannelReferenceExact(
+  input: string
+): Result<string, string> {
   const trimmed = input.trim();
   if (CHANNEL_ID_RE.test(trimmed)) {
-    return Result.ok(trimmed.toLowerCase());
+    return Result.ok(trimmed);
   }
   const url = URL.parse(trimmed);
   if (!(url && TEAMS_LINK_HOSTS.has(url.hostname.toLowerCase()))) {
@@ -136,7 +147,7 @@ export function parseChannelReference(input: string): Result<string, string> {
   }
   const channelId = safeDecode(encoded);
   return CHANNEL_ID_RE.test(channelId)
-    ? Result.ok(channelId.toLowerCase())
+    ? Result.ok(channelId)
     : Result.err(TEAMS_INVALID_CHANNEL_ERROR);
 }
 

@@ -327,7 +327,9 @@ ConnectionStrings__DefaultConnection=Server=localhost;Database=App_Agent;Trusted
   `$(...)`. The runner writes shims to `<data dir>\shims` and puts them first
   on the loops' PATH: `python3` (the first of `python3`, `python`, `py -3`
   that runs Python 3), `jq` (with `--binary`), and a `sitecustomize.py` on
-  `PYTHONPATH` that makes Python print `\n`. Loops also get `PYTHONUTF8=1`.
+  `PYTHONPATH` that makes Python print `\n`. Loops also get `PYTHONUTF8=1`. The runner also hands this Python to the
+  System Check, which on Windows (runner and desktop app) otherwise detects
+  Python the same way (`python3`, `python`, `py -3`).
 - Git Bash rewrites arguments that look like POSIX paths for the native
   programs it starts (`/writing-plans LD-7` would reach `claude.exe` as
   `C:/Program Files/Git/writing-plans LD-7`). A step whose prompt starts with

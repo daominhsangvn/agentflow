@@ -86,6 +86,7 @@ import {
 } from "./headless-windows-service.js";
 import {
   prepareWindowsTools,
+  windowsBinaryPaths,
   windowsToolOverrides,
 } from "./headless-windows-tools.js";
 
@@ -176,9 +177,10 @@ async function main(): Promise<void> {
   }
 
   // Before the preflight: it reads PATH, which then starts with the shims.
-  const executables = isWindows()
-    ? windowsToolOverrides(await prepareWindowsTools(config.dataDir))
-    : {};
+  const windowsTools = isWindows()
+    ? await prepareWindowsTools(config.dataDir)
+    : null;
+  const executables = windowsTools ? windowsToolOverrides(windowsTools) : {};
   const report = await runHeadlessPreflight(
     config.workspaceDir,
     defaultPreflightDeps(executables)
@@ -194,7 +196,9 @@ async function main(): Promise<void> {
   }
 
   await setUpClaudeCode(config, report);
-  const runner = await startHeadlessRunner(config, toCapabilities(report));
+  const runner = await startHeadlessRunner(config, toCapabilities(report), {
+    binaryPaths: windowsTools ? windowsBinaryPaths(windowsTools) : {},
+  });
   installShutdownHandlers(runner);
 }
 

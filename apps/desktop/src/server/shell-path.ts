@@ -699,3 +699,115 @@ async function resolveIntoShellPathCache(
     }
   }
 }
+
+/** Runs `command args` and returns the Python 3 `sys.executable` it reports, or null. */
+export type Python3Probe = (
+  command: string,
+  args: readonly string[]
+) => Promise<string | null>;
+
+/** Commands tried, in order, to find a working Python 3. */
+export const PYTHON3_CANDIDATES: readonly (readonly string[])[] = [
+  ["python3"],
+  ["python"],
+  ["py", "-3"],
+];
+
+const PYTHON3_PROBE_TIMEOUT_MS = 10_000;
+const FIRST_LINE_RE = /^[^\r\n]*/;
+const WINDOWS_APPS_DIR_RE = /[\\/]Microsoft[\\/]WindowsApps[\\/]/i;
+
+/**
+ * Runs the candidate and asks it for its own path. The Microsoft Store
+ * aliases (`python.exe` / `python3.exe` in WindowsApps) exist even when no
+ * Python is installed and fail here, so they are never picked.
+ */
+export async function probePython3Executable(
+  command: string,
+  args: readonly string[]
+): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      command,
+      [
+        ...args,
+        "-c",
+        "import sys; assert sys.version_info >= (3,); print(sys.executable)",
+      ],
+      { timeout: PYTHON3_PROBE_TIMEOUT_MS, windowsHide: true }
+    );
+    return FIRST_LINE_RE.exec(stdout.trim())?.[0] || null;
+  } catch {
+    // observability: probe — a missing interpreter is a normal state
+    return null;
+  }
+}
+
+/** First working Python 3 among PYTHON3_CANDIDATES, as its sys.executable. */
+export async function findPython3Executable(
+  probe: Python3Probe = probePython3Executable
+): Promise<string | null> {
+  for (const [command, ...args] of PYTHON3_CANDIDATES) {
+    const executable = await probe(command, args);
+    if (executable) {
+      return executable;
+    }
+  }
+  return null;
+}
+
+export type Python3ResolveDeps = {
+  platform: NodeJS.Platform;
+  resolve: (
+    name: BinaryName,
+    override?: string
+  ) => Promise<BinaryResolveResult>;
+  findPython3: () => Promise<string | null>;
+};
+
+let python3ResolveDepsForTest: Python3ResolveDeps | null = null;
+
+/** @internal Test-only: steer resolvePython3FromLoginShell; pass null to reset. */
+export function _setPython3ResolveDepsForTesting(
+  deps: Python3ResolveDeps | null
+): void {
+  python3ResolveDepsForTest = deps;
+}
+
+/**
+ * Resolves python3. On Windows a python.org install ships `python.exe` only,
+ * so when PATH resolution misses (or lands on a Store stub) the candidates
+ * python3, python, py -3 are probed.
+ */
+export async function resolvePython3FromLoginShell(
+  override?: string,
+  deps?: Python3ResolveDeps
+): Promise<BinaryResolveResult> {
+  const active =
+    deps ?? python3ResolveDepsForTest ?? defaultPython3ResolveDeps();
+  const resolved = await active.resolve("python3", override);
+  if (
+    override ||
+    !isWindows(active.platform) ||
+    !needsWindowsPython3Detection(resolved)
+  ) {
+    return resolved;
+  }
+  const detected = await active.findPython3();
+  return detected ? { path: detected, source: "known_location" } : resolved;
+}
+
+function needsWindowsPython3Detection(resolved: BinaryResolveResult): boolean {
+  return (
+    resolved.source === "fallback" ||
+    WINDOWS_APPS_DIR_RE.exec(resolved.path) !== null
+  );
+}
+
+function defaultPython3ResolveDeps(): Python3ResolveDeps {
+  return {
+    platform: process.platform,
+    resolve: resolveBinaryFromLoginShell,
+    findPython3: () => findPython3Executable(),
+  };
+}

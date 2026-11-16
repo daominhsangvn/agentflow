@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, test } from "node:test";
 import { CheckSeverity } from "@agentflow-ai/loops-api/compute-target";
+import { windowsBinaryPaths } from "../src/headless/headless-windows-tools.js";
 import { OperationDispatcher } from "../src/server/operation-dispatcher.js";
+import type { BinaryPaths } from "../src/server/operations/binary-paths.js";
 import { _setRunCommandForTesting } from "../src/server/operations/health-check.js";
 import { CLAUDE_AUTH_CHECK_ID } from "../src/server/operations/health-check-claude-auth.js";
 import type { SystemCheckHostOptions } from "../src/server/operations/health-check-runner.js";
@@ -23,17 +27,22 @@ afterEach(() => {
 });
 
 /** The System Check routes of a gateway on `host`, with every binary present. */
-function register(host: SystemCheckHostOptions | undefined) {
+function register(
+  host: SystemCheckHostOptions | undefined,
+  getBinaryPaths?: () => BinaryPaths
+) {
   _setRunCommandForTesting(() => Promise.resolve({ stdout: "1.0.0" }));
   const dispatcher = new OperationDispatcher();
   registerSystemCheckRoutes(dispatcher, {
     processManager: {} as unknown as ProcessManager,
     getSymphonyDir: () => os.tmpdir(),
-    getBinaryPaths: () => ({
-      claude: "/usr/bin/true",
-      git: "/usr/bin/true",
-      python3: "/usr/bin/true",
-    }),
+    getBinaryPaths:
+      getBinaryPaths ??
+      (() => ({
+        claude: "/usr/bin/true",
+        git: "/usr/bin/true",
+        python3: "/usr/bin/true",
+      })),
     getAppVersion: () => RUNNER_VERSION,
     isPackagedBuild: () => false,
     host,
@@ -94,6 +103,46 @@ describe("System Check on a headless runner", () => {
     assert.equal(version?.severity, CheckSeverity.Passed);
     assert.equal(version?.error, undefined);
     assert.ok(version?.version?.startsWith(`${RUNNER_VERSION} (local build`));
+  });
+
+  test("uses the Python the runner detected", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "runner-python-"));
+    const tmpPython = path.join(dir, "python-runner");
+    fs.writeFileSync(tmpPython, "#!/bin/sh\n", { mode: 0o755 });
+    const calls: { cmd: string; args: string[] }[] = [];
+    const dispatcher = register({ headlessRunner: true }, () => ({
+      claude: "/usr/bin/true",
+      git: "/usr/bin/true",
+      ...windowsBinaryPaths({
+        shimsDir: dir,
+        gitBash: null,
+        python: tmpPython,
+        jq: null,
+      }),
+    }));
+    _setRunCommandForTesting((cmd, args) => {
+      calls.push({ cmd, args });
+      return Promise.resolve({
+        stdout: cmd === tmpPython ? "Python 3.12.4" : "1.0.0",
+      });
+    });
+    try {
+      const payload = parsePayload(
+        await dispatchHealthCheck(dispatcher, {
+          expectedMcpUrl: EXPECTED_MCP_URL,
+          latestVersion: "9.9.9",
+        })
+      );
+      const row = findCheck(payload, "python3");
+      assert.equal(row?.passed, true);
+      assert.ok(
+        calls.some(
+          (c) => c.cmd === tmpPython && c.args.join(" ") === "--version"
+        )
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("leaves the desktop app's System Check as it was: MCP rows probed", async () => {
