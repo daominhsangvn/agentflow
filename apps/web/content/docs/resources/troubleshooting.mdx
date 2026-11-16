@@ -18,7 +18,7 @@ description: "Symptoms, causes and fixes for the server, Agents, integrations an
 |---|---|---|
 | Agent exits with code 2 and `Invalid configuration: ...` | A variable is missing or invalid; the message names it. | Fix the variable. See [Agent CLI](/docs/reference/agent-cli). |
 | `AGENTFLOW_API_URL: Origin must use https ...` | The Agent reaches the API over plain http on a non-local host. | Use https, or list the host in `AGENTFLOW_ALLOW_HTTP_HOSTS`. |
-| Agent exits with code 3 and `Cannot start: missing required tools ...` | `bash`, `git`, `claude`, `jq` or `python3` is not on the PATH, the plugins are not found, or the workspace is not writable. | Install the missing tool or fix the workspace path. |
+| Agent exits with code 3 and `Cannot start: missing required tools ...` | `bash`, `git`, `claude`, `jq` or `python3` is not on the PATH, the plugins are not found, or the workspace is not writable. | Install the missing tool or fix the workspace path. On Windows, Python 3 is found as `python3`, `python` or `py -3`, in that order; the Microsoft Store placeholders are skipped, so install Python itself. The System Check finds Python the same way. |
 | `Connection degraded: ...` | The API is unreachable or rejects the key (revoked, or missing `write` scope). The Agent keeps retrying. | Check the API URL and issue a new key. |
 | Agent shows offline | The Agent stopped or lost its connection. | Look at Needs attention on Home and at the [Agents page](/docs/guides/operate/agents), then restart the Agent. |
 | Saving a workflow says an Agent "is not one of the Agents of project ..." | The default, rule or orchestrator Agent is not added to a trigger project that has Agents. | Add it in Project → Agents, or name one of the project's Agents. |

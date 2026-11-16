@@ -19,7 +19,29 @@ One connection has two independent parts, and at least one must be set:
 | secret `clientSecret` | The bot's app registration secret |
 | `inbound.mode` | `webhook`: the inbound URL is the Azure Bot's messaging endpoint, so it must be public HTTPS (behind NAT, use a tunnel and `PUBLIC_WEBHOOK_BASE_URL`) |
 
-Project setting: `channels` (links or ids) lists where mentioning the bot starts this project's workflows. Empty means the project only posts.
+Project settings:
+
+- `channels` (links or ids) lists where mentioning the bot starts this project's workflows. Empty means the project only posts.
+- **Ask channels** (`askChannels`) lists where an Orchestrator Agent may ask people, one entry per channel: `name = <channel link or id>`. The name may be left out for a channel link (the channel's name is used); a bare id needs one. Names are unique per connection. An ask channel is claimed by the project like a mention channel, so a channel another project claims is refused. Keep ask channels out of the `channels` filter of non-orchestrated `bot_mentioned` triggers. Private channels are not supported.
+
+## Asking people (orchestrated workflows)
+
+A workflow that grants the Teams key `ask` (`agent.orchestrator.connections.teams: [ask]`) lets its Orchestrator Agent ask people in an ask channel. The rules choose the channel by name and give the people's emails; the Agent never guesses an email.
+
+```yaml
+connections:
+  teams: [ask]
+instructions: |
+  Backend questions go to people in the qa-backend channel; requirement questions in ba.
+  Emails: Lan (QA) lan@example.com, Minh (BA) minh@example.com.
+```
+
+- **One thread per case and channel.** The first ask of a case opens a new post that @mentions the people; later asks of the same case to the same channel are replies in that thread. A new post is made when the thread's first message is gone or posting in the thread fails.
+- **Replies need the bot mention.** A message in the thread that does not @mention the bot is ignored. Anyone in the channel can write; the case records who wrote and whether that person was asked. A reply goes to the newest open ask of the thread that mentions its writer, else to the newest open ask.
+- **Nothing is answered until confirmed.** The Orchestrator Agent may discuss in the thread, then posts a summary of the answers. The answers are recorded on the case only when one of the people that ask mentioned confirms that summary in a later message of the thread. A confirmation from anyone else, or one written before the summary, is refused. A confirmation confirms only the newest summary before it.
+- A bot mention in a thread with no ask and no matching trigger opens nothing: no reply, no case.
+
+Tools: [`teams_ask`, `teams_ask_reply`, `teams_ask_confirm`](/docs/reference/orchestrator-tools). Rules: [Questions and answers](/docs/guides/recipes/questions-and-answers#asking-people-in-teams).
 
 ## Triggers
 
