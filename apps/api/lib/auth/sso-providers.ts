@@ -34,6 +34,7 @@ export const SSO_PROVIDER_REGISTRY: Record<
         return null;
       }
       const tenantId = env.AUTH_MICROSOFT_TENANT_ID || DEFAULT_MICROSOFT_TENANT;
+      const trustEmail = env.AUTH_MICROSOFT_TRUST_EMAIL === "true";
       return {
         clientId,
         clientSecret,
@@ -43,7 +44,11 @@ export const SSO_PROVIDER_REGISTRY: Record<
         // callback; refuse them (404 ID_TOKEN_NOT_SUPPORTED).
         disableIdTokenSignIn: true,
         mapProfileToUser: (profile: MicrosoftEntraIDProfile) => ({
-          emailVerified: isMicrosoftEmailVerified(profile, tenantId),
+          emailVerified: isMicrosoftEmailVerified(
+            profile,
+            tenantId,
+            trustEmail
+          ),
         }),
       };
     },
@@ -76,6 +81,8 @@ export function buildSocialProviders(
  * Microsoft says the tenant owns the email's domain (`xms_edov`) or the
  * operator pinned one specific tenant. Guards against "nOAuth": in a
  * multi-tenant app a foreign tenant can set any `email` value.
+ * `trustEmail` (`AUTH_MICROSOFT_TRUST_EMAIL=true`) accepts the `email` claim
+ * without a verified assertion; the tenant rule still applies.
  */
 export function isMicrosoftEmailVerified(
   profile: Partial<
@@ -88,7 +95,8 @@ export function isMicrosoftEmailVerified(
       | "xms_edov"
     >
   >,
-  tenantId: string
+  tenantId: string,
+  trustEmail = false
 ): boolean {
   const email = profile.email?.toLowerCase();
   if (!email) {
@@ -98,7 +106,7 @@ export function isMicrosoftEmailVerified(
     ...(profile.verified_primary_email ?? []),
     ...(profile.verified_secondary_email ?? []),
   ].some((item) => item.toLowerCase() === email);
-  const asserted = profile.email_verified === true || listed;
+  const asserted = trustEmail || profile.email_verified === true || listed;
   if (!asserted) {
     return false;
   }

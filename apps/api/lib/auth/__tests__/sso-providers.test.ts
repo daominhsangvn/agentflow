@@ -68,6 +68,18 @@ describe("isMicrosoftEmailVerified", () => {
     expect(isMicrosoftEmailVerified({ email: EMAIL }, TENANT_GUID)).toBe(false);
   });
 
+  it("accepts an unasserted email in a pinned tenant when trusted", () => {
+    expect(isMicrosoftEmailVerified({ email: EMAIL }, TENANT_GUID, true)).toBe(
+      true
+    );
+  });
+
+  it("rejects a trusted email without xms_edov on a multi-tenant app", () => {
+    expect(isMicrosoftEmailVerified({ email: EMAIL }, "common", true)).toBe(
+      false
+    );
+  });
+
   it("rejects a missing email", () => {
     expect(
       isMicrosoftEmailVerified(
