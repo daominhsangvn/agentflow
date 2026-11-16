@@ -1637,7 +1637,9 @@ Triggers:
 - `jira.issue_status_changed` — the `status` changelog item (`fromString` /
   `toString` names) of an admin webhook, or an Automation body with
   `changelog.items`. Filters: `from`, `to` (any of, case-insensitive),
-  `projectKeys`, `issueTypes`. `dedupKey = {key}:status:{changelogId |
+  `projectKeys`, `issueTypes`, `labels` (the issue has any of them when the
+  status changes). Only the status change starts a run: changing labels or
+  the issue type never does. `dedupKey = {key}:status:{changelogId |
   automation-{deliveryId}}`. Webhook, or poll with `project_changes`; the bot's own transitions are
   ignored; no manual run. A process-mode workflow gets one run per change; an
   orchestrated one gets a `status_changed` message on `jira:<KEY>:item`.
@@ -1675,6 +1677,7 @@ triggers:
       to: [Done, Closed]
       projectKeys: [PROJ]
       issueTypes: [Story]
+      labels: [ai-ready]        # the issue has any of them; omit for any
   - connection: jira-shop
     type: jira.issue_labeled
     config:
