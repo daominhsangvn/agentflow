@@ -74,6 +74,8 @@ export const OrchestratorMessageKind = {
   HandoffSent: "handoff_sent",
   /** A task's agent asked questions on the item itself (questions.json commentId); the Case's record. Internal, never wakes a turn on its own. */
   TaskAsked: "task_asked",
+  /** Answers people confirmed in a teams_ask thread (teams_ask_confirm); Internal, never wakes a turn. */
+  AnswersRecorded: "answers_recorded",
 } as const;
 export type OrchestratorMessageKind =
   (typeof OrchestratorMessageKind)[keyof typeof OrchestratorMessageKind];
@@ -260,6 +262,8 @@ export const OrchestratorToolName = {
   CaseLookup: "case_lookup",
   CaseHandoff: "case_handoff",
   TeamsAsk: "teams_ask",
+  TeamsAskReply: "teams_ask_reply",
+  TeamsAskConfirm: "teams_ask_confirm",
 } as const;
 export type OrchestratorToolName =
   (typeof OrchestratorToolName)[keyof typeof OrchestratorToolName];
@@ -621,7 +625,7 @@ export type OrchestratorCaseListQuery = z.infer<
 /** A message written on the case page in AgentFlow, or a reply shown there. */
 export const OrchestratorMessageVia = {
   AgentFlow: "agentflow",
-  /** An answer given in a teams_ask thread. */
+  /** A message in a teams_ask thread, or the orchestrator's post there. */
   Teams: "teams",
 } as const;
 export type OrchestratorMessageVia =

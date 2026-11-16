@@ -478,5 +478,43 @@ describe("buildTurnPrompt writes", () => {
       expect(prompt).toContain('task="t1" question="q1"');
       expect(prompt).toContain('questions="q1,q2"');
     });
+
+    it("renders a teams_ask thread message with ask and asked attributes", () => {
+      const prompt = buildTurnPrompt({
+        ...BASE,
+        messages: [
+          {
+            origin: OrchestratorMessageOrigin.External,
+            kind: OrchestratorMessageKind.Message,
+            actor: "An",
+            text: "yes",
+            externalRef: "m-9",
+            createdAt: new Date("2026-10-23T08:00:00.000Z"),
+            payload: {
+              via: OrchestratorMessageVia.Teams,
+              teamsAskThread: {
+                askRef: "root-1",
+                actorId: "aad-x",
+                asked: false,
+              },
+            },
+          },
+        ],
+      });
+      expect(prompt).toContain('via="teams"');
+      expect(prompt).toContain('ask="root-1"');
+      expect(prompt).toContain('asked="no"');
+    });
+
+    it("explains the ask thread tools and confirmation rules", () => {
+      const prompt = buildTurnPrompt({
+        ...BASE,
+        grants,
+        teamsAskChannels: channels,
+      });
+      expect(prompt).toContain(OrchestratorToolName.TeamsAskReply);
+      expect(prompt).toContain(OrchestratorToolName.TeamsAskConfirm);
+      expect(prompt).toContain('asked="yes"');
+    });
   });
 });

@@ -18,6 +18,7 @@ import { WORKFLOW_INSTRUCTIONS_MAX } from "@repo/api/src/types/workflow";
 import { readAnsweredQuestion } from "./asked-questions";
 import type { ConversationChannel } from "./channel";
 import { readMessageToAgent } from "./message-to-agent";
+import { readTeamsAskThread } from "./teams-ask";
 import {
   describeAskChannels,
   type TeamsAskChannelOption,
@@ -239,7 +240,8 @@ function formatMessage(message: TurnPromptMessage): string {
   const questions = answered?.questionIds
     ? ` questions="${escapeAttribute(answered.questionIds.join(","))}"`
     : "";
-  return `<message from="${escapeAttribute(from)}" kind="${message.kind}"${via}${to}${ref}${task}${question}${questions} at="${message.createdAt.toISOString()}">\n${message.text.slice(0, MESSAGE_MAX)}\n</message>`;
+  const ask = askThreadAttributes(message.payload);
+  return `<message from="${escapeAttribute(from)}" kind="${message.kind}"${via}${to}${ref}${ask}${task}${question}${questions} at="${message.createdAt.toISOString()}">\n${message.text.slice(0, MESSAGE_MAX)}\n</message>`;
 }
 
 function escapeAttribute(value: string): string {
@@ -295,7 +297,7 @@ function describeWrites(
   if (approvalsRequired) {
     lines.push(
       "",
-      `approvals: required — ${OrchestratorToolName.Reply} where: thread, ${OrchestratorToolName.EditReply} and the source_item_* writes are refused; everything on the ticket goes through ${OrchestratorToolName.RequestDecision} with a draft and where: case_page (where: thread is refused); only an admin's Approve button approves a draft, so ${OrchestratorToolName.RecordDecision} approved: true is refused for it (rejecting works). End the turn with wait_human.`
+      `approvals: required — ${OrchestratorToolName.Reply} where: thread, ${OrchestratorToolName.EditReply} and the source_item_* writes are refused; everything on the ticket goes through ${OrchestratorToolName.RequestDecision} with a draft and where: case_page (where: thread is refused); only an admin's Approve button approves a draft, so ${OrchestratorToolName.RecordDecision} approved: true is refused for it (rejecting works). ${OrchestratorToolName.TeamsAsk}, ${OrchestratorToolName.TeamsAskReply} and ${OrchestratorToolName.TeamsAskConfirm} stay allowed (they do not write on the ticket). End the turn with wait_human.`
     );
   }
   lines.push(
@@ -466,6 +468,8 @@ function describeTeamsAsk(
     return [];
   }
   const tool = OrchestratorToolName.TeamsAsk;
+  const replyTool = OrchestratorToolName.TeamsAskReply;
+  const confirmTool = OrchestratorToolName.TeamsAskConfirm;
   if (channels.length === 0) {
     return [
       `- ${tool}: no ask channel is set on the Teams project connection; do not call it.`,
@@ -479,6 +483,18 @@ function describeTeamsAsk(
     `- Ask people in Microsoft Teams (${keys}): ${tool} posts a new message in one of the allowed ask channels and @mentions people by email. Allowed ask channels (channel = name, connection key):`,
     ...lines,
     `  Pick the channel as your rules say (e.g. backend questions → qa-backend, requirement questions → ba) and pass it as channel; any other channel is refused. When your rules name no channel for this kind of question and there is more than one, ask on the ticket or the case page instead. Take each email from your rules (e.g. their table of Jira users or roles to emails); never guess an address — when your rules name no email for that person, ask on the ticket or the case page instead. Relay a task's questions with questions [{taskId, questionId}] (one task per post); attach task files with attachments (Teams shows them as links to the case page). The tool adds the @mentions itself: write the text without naming or @-ing the people.`,
-    `  Answers come back as messages with via="teams" task=… question=…; treat them like answers on the item (notes, resume the task once all its questions are answered).`,
+    `  Messages in an ask thread come as <message via="teams" ask="<reference>" asked="yes|no" ref="…">, from anyone in the channel who @mentions the bot. They are discussion, not answers, and nothing is recorded from them.`,
+    `  Answer questions and discuss in that thread with ${replyTool} askRef (mentions optional), not with ${OrchestratorToolName.Reply}.`,
+    `  When a message gives the answers, post your summary with ${replyTool} answers [{questionId, answer}]. AgentFlow lists them and asks the asked people to confirm. Then ${OrchestratorToolName.WaitHuman}.`,
+    `  Only a later message in that thread with asked="yes" can confirm. When it says yes, call ${confirmTool} askRef, with confirmationRef = that message's ref. When it corrects the answers, post a new summary. Messages with asked="no" are input, not decisions: never confirm on them.`,
+    `  After ${confirmTool}, keep the answers in the notes (${OrchestratorToolName.CaseUpdateNotes}) and resume the task (${OrchestratorToolName.TaskRun} resumeTaskId, no fork) once it has no open questions.`,
   ];
+}
+
+function askThreadAttributes(payload: unknown): string {
+  const thread = readTeamsAskThread(payload);
+  if (!thread) {
+    return "";
+  }
+  return ` ask="${escapeAttribute(thread.askRef)}" asked="${thread.asked ? "yes" : "no"}"`;
 }

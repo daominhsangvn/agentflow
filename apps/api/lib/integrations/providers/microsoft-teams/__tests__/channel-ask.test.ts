@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { postTeamsAsk } from "../channel-ask";
+import { postTeamsAsk, postTeamsAskThreadReply } from "../channel-ask";
 import { clearEntraTokenCache } from "../entra-token";
 import {
   jsonResponse,
@@ -168,5 +168,68 @@ describe("postTeamsAsk", () => {
     );
     const result = await ask(fake, ["an@x.com"]);
     expect(!result.ok && result.error.error).toContain("HTTP 401");
+  });
+});
+
+describe("postTeamsAskThreadReply", () => {
+  const THREAD = `/v3/conversations/${encodeURIComponent(`${CHANNEL};messageid=1700`)}/activities`;
+  const sendRoute: RouteHandler = (request) =>
+    request.url.endsWith(THREAD) ? jsonResponse({ id: "1701" }) : undefined;
+  const known = [
+    { email: "an@x.com", id: "29:an", aadObjectId: "aad-an", name: "An" },
+  ];
+
+  function reply(
+    fake: ReturnType<typeof routedHttp>,
+    emails: string[],
+    mentions = known
+  ) {
+    return postTeamsAskThreadReply(
+      makeTeamsContext({ http: fake.http, bot: true }),
+      {
+        serviceUrl: SERVICE_URL,
+        channelId: CHANNEL,
+        rootMessageId: "1700",
+        emails,
+        known: mentions,
+        text: "Thanks",
+      }
+    );
+  }
+
+  beforeEach(() => {
+    clearEntraTokenCache();
+  });
+
+  it("posts inside the thread conversation", async () => {
+    const fake = routedHttp(tokenRoute, sendRoute);
+    const result = await reply(fake, []);
+    expect(result.ok && result.value.messageId).toBe("1701");
+    expect(fake.requests.some((r) => r.url.endsWith(THREAD))).toBe(true);
+  });
+
+  it("reuses known mentions without a member lookup", async () => {
+    const fake = routedHttp(tokenRoute, sendRoute);
+    const result = await reply(fake, ["An@X.com"]);
+    expect(result.ok && result.value.mentions[0]?.id).toBe("29:an");
+    expect(fake.requests.some((r) => r.url.includes("/members"))).toBe(false);
+  });
+
+  it("refuses an unknown email that is not in the team", async () => {
+    const fake = routedHttp(tokenRoute, sendRoute, (request) =>
+      request.url.includes(PAGED) ? jsonResponse({ members: [] }) : undefined
+    );
+    const result = await reply(fake, ["ghost@x.com"]);
+    expect(!result.ok && result.error.error).toContain("ghost@x.com");
+    expect(fake.requests.some((r) => r.url.endsWith(THREAD))).toBe(false);
+  });
+
+  it("sends no entities with zero mentions", async () => {
+    const fake = routedHttp(tokenRoute, sendRoute);
+    await reply(fake, []);
+    const post = fake.requests.find((r) => r.url.endsWith(THREAD));
+    const body = post?.body as { text: string; entities?: unknown };
+    expect(body.text).toBe("Thanks");
+    expect(body.entities).toBeUndefined();
   });
 });

@@ -109,7 +109,7 @@ asked where it belongs:
 | The event | Its conversation (`channelKey`) |
 |---|---|
 | A reply to an anchor (a message the orchestrator posted, or a comment an agent asked a question in) | the anchor's conversation |
-| A reply in a `teams_ask` thread (anchor `artifact = "teams_ask"`) | the asking conversation, only when it mentions the bot and comes from a mentioned person; otherwise dropped |
+| A reply in a `teams_ask` thread (anchor `artifact = "teams_ask"`) | the asking conversation when it mentions the bot (anyone in the channel), as a `via="teams"` message recording the writer and whether they were asked; it answers nothing until confirmed. Without a bot mention it is dropped |
 | A Teams message (post or reply) | the Teams thread: `microsoft_teams:<thread key>` |
 | A Jira comment replying to another comment | that comment thread: `jira:<KEY>:comment:<parent id>` |
 | A Jira mention on the issue | the issue's top level: `jira:<KEY>:item` |
@@ -250,7 +250,7 @@ says what the orchestrator may write. Default `{}`.
 | `source` | `comment`, `attach` (needs `comment`), `transition`, `label`, `link` | `reply` / `edit_reply` / `request_decision` (`where: thread`) on the ticket; `reply attachments`; `source_item_transition`; `source_item_label`; `source_item_link`; the `draft` of `request_decision` (its comment needs `comment`, its files `attach`, its move `transition`) |
 | a Confluence key | `read` or `[publish]` | `page_get` and page files; `page_publish` (publish implies read). With several granted connections the call names `connection` |
 | `pull_requests` | `[open]` | `pull_request_open` |
-| a Teams key | `[ask]` | `teams_ask` (see "Asking people in Teams"). Not combined with `publish` on one key |
+| a Teams key | `[ask]` | `teams_ask`, `teams_ask_reply`, `teams_ask_confirm` (see "Asking people in Teams"). Not combined with `publish` on one key |
 
 A Teams thread takes only `comment`. Saving checks the grants
 (`workflow-validation.ts` `checkOrchestratorGrants`): every `source` operation
@@ -313,16 +313,35 @@ instructions: |
   `artifact = "teams_ask"` (`TEAMS_ASK_ANCHOR_ARTIFACT`, `lib/orchestrator/teams-ask.ts`)
   on the root message; with one question the anchor carries its task and question.
 - **Replies.** Teams sends the bot every channel message (RSC), so the thread is
-  filtered (`checkTeamsAskReply`): a reply counts only when it @mentions the bot
-  AND comes from a person the post mentioned. Others are dropped for every
-  workflow and logged with a reason (`ask_reply_without_bot_mention`,
-  `ask_reply_from_someone_not_asked`). An accepted reply becomes
-  a message `via="teams"` on the asking case, with the task and question; with
-  several questions the first accepted reply answers them all.
+  filtered only on the bot mention (`checkTeamsAskReply`). A message without it is
+  dropped for every workflow and logged with a reason
+  (`ask_reply_without_bot_mention`, `ask_message_missing`). An accepted message
+  becomes a message `via="teams"` on the asking case with payload
+  `teamsAskThread {askRef, actorId, asked}` (who wrote it, and whether they were
+  among the people asked). It wakes the case but changes no `openQuestionCount`:
+  a reply answers nothing until confirmed.
+- **Talking in the thread.** `teams_ask_reply {askRef, text, mentions?, answers?}`
+  posts in an existing ask thread via
+  `POST /v3/conversations/{channel;messageid=root}/activities`. It is recorded as a
+  `reply` with payload `teamsAskReply`. With `answers` it is the summary to
+  confirm (`mentions` default to the asked people). It is allowed under
+  `approvals: required`, like `teams_ask`.
+- **Confirmation.** `teams_ask_confirm {askRef, confirmationRef}` checks four
+  things: the confirming message is on this conversation, is in that ask thread,
+  came after the bot's latest summary there, and its author matches an original
+  mention (`aadObjectId` or `id`). It then records an `answers_recorded` message
+  (payload `answers`, `taskId`, `questionId(s)`) with the summary's answers and
+  subtracts only the questions not yet answered
+  (`lib/orchestrator/cover-questions.ts`). Any other confirmation is refused and
+  audited as `tool_refused`. Repeating a confirm is a no-op. Confirmation is by
+  text only (no card buttons): the model judges "yes", the server enforces who,
+  where and when.
 - **Spam.** The bot mention alone opens nothing: a bot mention in a random Teams
   thread (a new post or a reply) with no `teams_ask` anchor and no matching
   trigger is ignored, with no reply and no case. Covered by the "teams_ask
-  threads" tests in `lib/orchestrator/__tests__/inbound.test.ts`.
+  threads" tests in `lib/orchestrator/__tests__/inbound.test.ts`; the new tools by
+  `app/orchestrator-tools/__tests__/service-teams-ask-thread.test.ts` and
+  `service-teams-ask-confirm.test.ts`.
 
 ## Tasks and waits
 

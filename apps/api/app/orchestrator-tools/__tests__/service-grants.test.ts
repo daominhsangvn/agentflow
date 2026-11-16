@@ -209,20 +209,22 @@ describe("orchestrator grants", () => {
     if (!without.ok) {
       throw new Error("unauthorized");
     }
-    expect(without.value.tools.map((tool) => tool.name)).not.toContain(
-      OrchestratorToolName.TeamsAsk
-    );
+    const withoutNames = without.value.tools.map((tool) => tool.name);
+    expect(withoutNames).not.toContain(OrchestratorToolName.TeamsAsk);
+    expect(withoutNames).not.toContain(OrchestratorToolName.TeamsAskReply);
+    expect(withoutNames).not.toContain(OrchestratorToolName.TeamsAskConfirm);
 
     mocks.connections = { teams: ["ask"] };
     const granted = await orchestratorToolService.describe(TOKEN);
     if (!granted.ok) {
       throw new Error("unauthorized");
     }
-    expect(granted.value.tools.map((tool) => tool.name)).toContain(
-      OrchestratorToolName.TeamsAsk
-    );
+    const grantedNames = granted.value.tools.map((tool) => tool.name);
+    expect(grantedNames).toContain(OrchestratorToolName.TeamsAsk);
+    expect(grantedNames).toContain(OrchestratorToolName.TeamsAskReply);
+    expect(grantedNames).toContain(OrchestratorToolName.TeamsAskConfirm);
     expect(granted.value.instructions).toContain(
-      "Teams ask: teams (teams_ask)"
+      "Teams ask: teams (teams_ask, teams_ask_reply, teams_ask_confirm)"
     );
   });
 });

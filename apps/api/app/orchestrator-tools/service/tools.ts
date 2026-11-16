@@ -2,6 +2,7 @@ import { LOOP_STEP_INPUTS_MAX } from "@agentflow-ai/loops-api/loop-step";
 import type { IntegrationToolDescriptor } from "@repo/api/src/types/integration-tools";
 import {
   ORCHESTRATOR_ASKED_HUMAN_MAX,
+  ORCHESTRATOR_CASE_MESSAGE_MAX,
   OrchestratorDocumentKind,
   OrchestratorReplyTarget,
   OrchestratorToolName,
@@ -30,6 +31,7 @@ import {
   REPLY_MAX,
   TASK_PROMPT_MAX,
   TEAMS_ASK_MENTIONS_MAX,
+  TEAMS_ASK_QUESTIONS_MAX,
   WAIT_TASKS_MAX,
   WAIT_TIMEOUT_MAX_MINUTES,
 } from "./limits";
@@ -99,7 +101,11 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     inputSchema: {
       type: "object",
       properties: {
-        add: { type: "array", maxItems: 20, items: { type: "string" } },
+        add: {
+          type: "array",
+          maxItems: TEAMS_ASK_QUESTIONS_MAX,
+          items: { type: "string" },
+        },
         remove: { type: "array", maxItems: 20, items: { type: "string" } },
       },
       additionalProperties: false,
@@ -471,7 +477,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.TeamsAsk,
     title: "Ask people in Teams",
     description:
-      "Posts a new message in one of the allowed Teams ask channels (listed in your instructions; pick it as your rules say) and @mentions each email (take them from your rules; refused when someone is not in the team). The tool adds the @mentions itself: text must not name or @ the people. questions: the questions of one task it relays; only replies in that thread that @mention the bot and come from a mentioned person come back, as messages with task/question. attachments are listed as links to the case page (Teams takes no files). The post is recorded on the case. connection only when two Teams connections share a channel name.",
+      "Posts a new message in one of the allowed Teams ask channels (listed in your instructions; pick it as your rules say) and @mentions each email (take them from your rules; refused when someone is not in the team). The tool adds the @mentions itself: text must not name or @ the people. questions: the questions of one task it relays; messages in that thread that @mention the bot come back as discussion (via teams, ask=<reference>); they answer nothing until confirmed (teams_ask_reply answers, then teams_ask_confirm). attachments are listed as links to the case page (Teams takes no files). The post is recorded on the case. connection only when two Teams connections share a channel name.",
     inputSchema: {
       type: "object",
       properties: {
@@ -508,6 +514,60 @@ export const TOOLS: IntegrationToolDescriptor[] = [
         connection: { type: "string" },
       },
       required: ["mentions", "text"],
+      additionalProperties: false,
+    },
+    annotations: POSTS,
+  },
+  {
+    name: OrchestratorToolName.TeamsAskReply,
+    title: "Reply in a Teams ask thread",
+    description:
+      "Posts in the thread of a teams_ask post of this case (askRef = the reference teams_ask returned): answer questions, discuss, or with answers [{questionId, answer}] post your summary of the answers for the asked people to confirm (AgentFlow lists the questions and answers and mentions the asked people). mentions optional. Allowed under approvals: required (it does not write on the ticket).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        askRef: { type: "string", minLength: 1, maxLength: 255 },
+        text: { type: "string", minLength: 1, maxLength: REPLY_MAX },
+        mentions: {
+          type: "array",
+          items: { type: "string", format: "email" },
+          maxItems: TEAMS_ASK_MENTIONS_MAX,
+        },
+        answers: {
+          type: "array",
+          maxItems: TEAMS_ASK_QUESTIONS_MAX,
+          items: {
+            type: "object",
+            properties: {
+              questionId: { type: "string", minLength: 1, maxLength: 255 },
+              answer: {
+                type: "string",
+                minLength: 1,
+                maxLength: ORCHESTRATOR_CASE_MESSAGE_MAX,
+              },
+            },
+            required: ["questionId", "answer"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["askRef", "text"],
+      additionalProperties: false,
+    },
+    annotations: POSTS,
+  },
+  {
+    name: OrchestratorToolName.TeamsAskConfirm,
+    title: "Confirm answers in a Teams ask thread",
+    description:
+      "Records the answers of your latest summary in that ask thread once a person the original ask mentioned confirmed it in a later message there (confirmationRef = that message's ref). Refused for anyone else, for a message before the summary, or another thread. Only then do the questions count as answered.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        askRef: { type: "string", minLength: 1, maxLength: 255 },
+        confirmationRef: { type: "string", minLength: 1, maxLength: 255 },
+      },
+      required: ["askRef", "confirmationRef"],
       additionalProperties: false,
     },
     annotations: POSTS,
@@ -568,6 +628,8 @@ export function visibleTools(
       case OrchestratorToolName.PullRequestOpen:
         return grants.pullRequestOpen;
       case OrchestratorToolName.TeamsAsk:
+      case OrchestratorToolName.TeamsAskReply:
+      case OrchestratorToolName.TeamsAskConfirm:
         return grants.ask.size > 0;
       case OrchestratorToolName.CaseLookup:
         return features.caseLookup;
@@ -603,7 +665,7 @@ function describeGrants(grants: OrchestratorGrantSet): string {
   }
   if (grants.ask.size > 0) {
     parts.push(
-      `Teams ask: ${[...grants.ask].join(", ")} (${OrchestratorToolName.TeamsAsk})`
+      `Teams ask: ${[...grants.ask].join(", ")} (${OrchestratorToolName.TeamsAsk}, ${OrchestratorToolName.TeamsAskReply}, ${OrchestratorToolName.TeamsAskConfirm})`
     );
   }
   if (parts.length === 0) {
@@ -626,7 +688,7 @@ function describeFeatures(features: OrchestratorToolFeatures): string {
   }
   if (features.approvalsRequired) {
     parts.push(
-      `Approvals are required: ${OrchestratorToolName.Reply} on the thread, ${OrchestratorToolName.EditReply} and the source_item_* writes are refused; put the comment or the move in ${OrchestratorToolName.RequestDecision}'s draft, where: case_page; AgentFlow carries it out once an admin presses Approve (${OrchestratorToolName.RecordDecision} cannot approve a draft).`
+      `Approvals are required: ${OrchestratorToolName.Reply} on the thread, ${OrchestratorToolName.EditReply} and the source_item_* writes are refused; put the comment or the move in ${OrchestratorToolName.RequestDecision}'s draft, where: case_page; AgentFlow carries it out once an admin presses Approve (${OrchestratorToolName.RecordDecision} cannot approve a draft). ${OrchestratorToolName.TeamsAsk}, ${OrchestratorToolName.TeamsAskReply} and ${OrchestratorToolName.TeamsAskConfirm} stay allowed.`
     );
   }
   return parts.length > 0 ? ` ${parts.join(" ")}` : "";
