@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   options: [] as Row[],
   postTeamsAsk: vi.fn(),
   findCaseTaskFiles: vi.fn(),
+  findCaseAskThread: vi.fn(),
 }));
 
 vi.mock("@repo/database", () => {
@@ -75,6 +76,9 @@ vi.mock(
     postTeamsAsk: mocks.postTeamsAsk,
   })
 );
+vi.mock("@/lib/orchestrator/teams-ask-threads", () => ({
+  findCaseAskThread: mocks.findCaseAskThread,
+}));
 vi.mock("@/lib/orchestrator/task-files", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/orchestrator/task-files")>()),
   findCaseTaskFiles: mocks.findCaseTaskFiles,
@@ -138,9 +142,12 @@ beforeEach(() => {
     questions: [{ id: "q1", question: "?" }],
   };
   mocks.findCaseTaskFiles.mockResolvedValue(Result.ok([]));
+  mocks.findCaseAskThread.mockResolvedValue(null);
   mocks.postTeamsAsk.mockResolvedValue(
     Result.ok({
       rootMessageId: "root-1",
+      messageId: "root-1",
+      inThread: false,
       conversationId: "c",
       mentions: [MENTION],
     })
@@ -261,6 +268,85 @@ describe("teams_ask", () => {
     const result = await askInTeams(turn(), input({ channel: "ba" }));
     expect(result).toMatchObject({ ok: false, retryable: true });
     expect(mocks.messages).toHaveLength(0);
+  });
+
+  it("posts a new thread and anchors it when the case has none", async () => {
+    const result = await askInTeams(
+      turn(),
+      input({
+        channel: "ba",
+        questions: [{ taskId: TASK_ID, questionId: "q1" }],
+      })
+    );
+    expect(mocks.postTeamsAsk.mock.calls[0]?.[1].threadRootId).toBeUndefined();
+    expect(mocks.anchors).toHaveLength(1);
+    expect(mocks.messages[0]).toMatchObject({
+      payload: { teamsAsk: { threadRef: "root-1" } },
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      output: { reference: "root-1", thread: "new" },
+    });
+  });
+
+  it("replies in the case's thread for the same channel", async () => {
+    mocks.findCaseAskThread.mockResolvedValue("root-1");
+    mocks.postTeamsAsk.mockResolvedValue(
+      Result.ok({
+        rootMessageId: "root-1",
+        conversationId: "c",
+        messageId: "reply-2",
+        inThread: true,
+        mentions: [MENTION],
+      })
+    );
+    const result = await askInTeams(turn(), input({ channel: "ba" }));
+    expect(mocks.postTeamsAsk.mock.calls[0]?.[1].threadRootId).toBe("root-1");
+    expect(mocks.messages[0]).toMatchObject({
+      externalRef: "reply-2",
+      payload: { teamsAsk: { threadRef: "root-1" } },
+    });
+    expect(mocks.anchors).toHaveLength(0);
+    expect(result).toMatchObject({
+      ok: true,
+      output: {
+        reference: "reply-2",
+        threadRef: "root-1",
+        thread: "continued",
+      },
+    });
+  });
+
+  it("starts a new thread in another channel", async () => {
+    mocks.findCaseAskThread.mockImplementation(
+      (_scope: unknown, channel: { channelId: string }) =>
+        Promise.resolve(
+          channel.channelId === "19:a@thread.tacv2" ? "root-a" : null
+        )
+    );
+    await askInTeams(turn(), input({ channel: "ba" }));
+    expect(mocks.postTeamsAsk.mock.calls[0]?.[1].threadRootId).toBeUndefined();
+  });
+
+  it("falls back to a new post when the thread reply fails non-retryably", async () => {
+    mocks.findCaseAskThread.mockResolvedValue("root-gone");
+    mocks.postTeamsAsk.mockResolvedValueOnce(
+      Result.err({ error: "Root deleted", retryable: false })
+    );
+    const result = await askInTeams(turn(), input({ channel: "ba" }));
+    expect(mocks.postTeamsAsk).toHaveBeenCalledTimes(2);
+    expect(mocks.postTeamsAsk.mock.calls[1]?.[1].threadRootId).toBeUndefined();
+    expect(result).toMatchObject({ ok: true, output: { thread: "new" } });
+  });
+
+  it("returns a retryable thread reply failure without fallback", async () => {
+    mocks.findCaseAskThread.mockResolvedValue("root-1");
+    mocks.postTeamsAsk.mockResolvedValue(
+      Result.err({ error: "Teams is busy", retryable: true })
+    );
+    const result = await askInTeams(turn(), input({ channel: "ba" }));
+    expect(mocks.postTeamsAsk).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: false, retryable: true });
   });
 
   it("names the tool", () => {

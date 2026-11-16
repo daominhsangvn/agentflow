@@ -142,6 +142,13 @@ the reply. If the choice is risky and has no safe default, make it a question
 If the command already has an `--auto` flag, declare it in `AGENTFLOW.md`
 `args` so the orchestrator passes it.
 
+**Approvals at the end of a command.** An approval or sign-off gate such as
+"Ask the user to approve the spec" becomes a question with the options
+Approve / Request changes when the command declares `asks: true`. An approval
+in the resumed prompt names who approved; the agent applies it and records
+that name in the artifact. Without `asks` the agent never approves: it leaves
+the gate open and lists what people must approve in the reply.
+
 ### 3.4 Input files
 
 ```markdown
@@ -222,6 +229,10 @@ You run unattended; nobody reads this terminal.
   confirmation. Decide with the command's defaults, or write the open
   questions to $AGENTFLOW_WORKDIR/questions.json
   ([{"id":"q1","question":"...","options":["..."]}]) and stop.
+- A closing approval or sign-off is a question too: write it to
+  questions.json with the options "Approve" and "Request changes". Never
+  approve on people's behalf; when resumed with an approval from a named
+  person, apply it and record who approved in the artifact.
 - Never contact people yourself (no Jira/Slack/Teams comments to ask or to
   report). AgentFlow's orchestrator does that.
 - Inputs are in $AGENTFLOW_WORKDIR/inputs/. Missing input: first line of the

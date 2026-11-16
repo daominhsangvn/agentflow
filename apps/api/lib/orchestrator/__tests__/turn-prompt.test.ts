@@ -515,6 +515,32 @@ describe("buildTurnPrompt writes", () => {
       expect(prompt).toContain(OrchestratorToolName.TeamsAskReply);
       expect(prompt).toContain(OrchestratorToolName.TeamsAskConfirm);
       expect(prompt).toContain('asked="yes"');
+      expect(prompt).toContain("one Teams thread per case");
+      expect(prompt).toContain("Answer people in the thread they wrote in");
+    });
+
+    it("renders the ask task of a thread message only when it has one", () => {
+      const message = (taskId?: string) => ({
+        origin: OrchestratorMessageOrigin.External,
+        kind: OrchestratorMessageKind.Message,
+        actor: "An",
+        text: "yes",
+        externalRef: "m-9",
+        createdAt: new Date("2026-10-23T08:00:00.000Z"),
+        payload: {
+          via: OrchestratorMessageVia.Teams,
+          teamsAskThread: {
+            askRef: "root-1",
+            actorId: "aad-x",
+            asked: true,
+            ...(taskId ? { taskId } : {}),
+          },
+        },
+      });
+      const withTask = buildTurnPrompt({ ...BASE, messages: [message("t2")] });
+      expect(withTask).toContain('ask="root-1" ask-task="t2" asked="yes"');
+      const without = buildTurnPrompt({ ...BASE, messages: [message()] });
+      expect(without).not.toContain("ask-task=");
     });
   });
 });

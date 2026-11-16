@@ -275,9 +275,10 @@ function isDirectory(file: string): boolean {
 /**
  * Commands and skills are often written for a person at the terminal: where
  * they say to ask the user or wait for a confirmation, an unattended step
- * asks through questions.json (askQuestions) or decides.
+ * asks through questions.json (askQuestions) or decides. A closing approval
+ * or sign-off the command asks people for counts as a question too.
  */
 export const COMMAND_QUESTIONS_LINE =
-  "- Your command or skill may have been written for a person at the terminal. Wherever it says to ask the user, use AskUserQuestion, wait for a reply or confirm before going on, write those questions to the questions file above and stop instead; first do the work that does not depend on the answers.";
+  '- Your command or skill may have been written for a person at the terminal. Wherever it says to ask the user, use AskUserQuestion, wait for a reply or confirm before going on, write those questions to the questions file above and stop instead; first do the work that does not depend on the answers. This includes how it ends: an approval, sign-off or confirmation it asks people for (e.g. "approve the spec", "confirm the commit") is a question too: write it to the questions file with the options "Approve" and "Request changes", and stop. When a later prompt brings an approval from a named person, that is the user explicitly telling you to approve: apply it the way your command or skill says an approval is applied, and record who approved (their name or email) in the artifact.';
 export const COMMAND_DECIDES_LINE =
-  "- Your command or skill may have been written for a person at the terminal. Wherever it says to ask the user, use AskUserQuestion, wait for a reply or confirm before going on, make the most reasonable choice instead and note it in your answer.";
+  "- Your command or skill may have been written for a person at the terminal. Wherever it says to ask the user, use AskUserQuestion, wait for a reply or confirm before going on, make the most reasonable choice instead and note it in your answer. Never approve, sign off or confirm on people's behalf: leave such a gate open and say in your answer what people must approve.";

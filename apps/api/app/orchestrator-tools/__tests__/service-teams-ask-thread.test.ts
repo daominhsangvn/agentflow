@@ -29,6 +29,9 @@ vi.mock("@repo/database", () => {
         Promise.resolve(mocks.taskResult ? { result: mocks.taskResult } : null),
     },
     integrationDelivery: { findMany: () => Promise.resolve([]) },
+    orchestratorConversation: {
+      findMany: () => Promise.resolve([{ id: "conversation-1" }]),
+    },
     orchestratorMessage: {
       findFirst: () => Promise.resolve(mocks.askPost),
       create: (args: { data: Row }) => {
@@ -128,6 +131,21 @@ function askPost(connectionKey = "teams"): Row {
         connectionKey,
         mentions: [MENTION],
         questions: [{ taskId: TASK_ID, questionId: "q1" }],
+      },
+    },
+  };
+}
+
+function continuedAsk(taskId: string): Row {
+  const base = askPost();
+  const payload = base.payload as { teamsAsk: Row };
+  return {
+    ...base,
+    payload: {
+      teamsAsk: {
+        ...payload.teamsAsk,
+        threadRef: "root-1",
+        questions: [{ taskId, questionId: "q1" }],
       },
     },
   };
@@ -284,6 +302,49 @@ describe("teams_ask_reply", () => {
     );
     expect(result).toMatchObject({ ok: false, retryable: true });
     expect(mocks.postThreadReply).not.toHaveBeenCalled();
+  });
+
+  it("replies to a continued ask in the thread root", async () => {
+    mocks.askPost = continuedAsk("task-2");
+    const result = await replyInTeamsAsk(turn(), input({ askRef: "reply-2" }));
+    expect(result).toMatchObject({
+      ok: true,
+      output: { askRef: "reply-2", threadRef: "root-1" },
+    });
+    expect(mocks.postThreadReply.mock.calls[0]?.[1]).toMatchObject({
+      rootMessageId: "root-1",
+    });
+    expect(mocks.messages[0]).toMatchObject({
+      payload: { teamsAskReply: { askRef: "reply-2", threadRef: "root-1" } },
+    });
+  });
+
+  it("answers are checked against the ask's own task", async () => {
+    mocks.askPost = continuedAsk("task-2");
+    const result = await replyInTeamsAsk(
+      turn(),
+      input({
+        askRef: "reply-2",
+        answers: [{ questionId: "q1", answer: "30s" }],
+      })
+    );
+    expect(result).toMatchObject({ ok: true });
+    expect(mocks.messages[0]).toMatchObject({
+      payload: {
+        teamsAskReply: { summary: [{ taskId: "task-2", questionId: "q1" }] },
+      },
+    });
+    const refused = await replyInTeamsAsk(
+      turn(),
+      input({
+        askRef: "reply-2",
+        answers: [{ questionId: "q2", answer: "30s" }],
+      })
+    );
+    expect(refused).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("q2"),
+    });
   });
 
   it("is allowed when approvals are required", async () => {

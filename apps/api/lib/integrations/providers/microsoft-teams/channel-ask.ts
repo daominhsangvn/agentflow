@@ -16,8 +16,9 @@ import { mentionDisplayName } from "./reply-action";
 import { threadConversationId } from "./thread-ref";
 
 /**
- * The orchestrator's teams_ask: a new message in a channel that mentions
- * people, found in the channel's team by email. Never throws.
+ * The orchestrator's teams_ask: a new message in a channel, or a reply in the
+ * case's existing thread, that mentions people found in the channel's team by
+ * email. Never throws.
  */
 
 /** Teams drops bot messages above ~28 KB. */
@@ -38,10 +39,13 @@ type AskInput = {
   channelId: string;
   emails: string[];
   text: string;
+  threadRootId?: string;
 };
 type AskPosted = {
   rootMessageId: string;
   conversationId: string;
+  messageId: string | null;
+  inThread: boolean;
   mentions: TeamsAskMention[];
 };
 type AskAccess = {
@@ -72,26 +76,87 @@ export async function postTeamsAsk(
     if (!resolved.ok) {
       return resolved;
     }
-    const created = await createChannelThread(context.http, {
-      serviceUrl: input.serviceUrl,
-      token: access.token,
-      tenantId,
-      channelId: input.channelId,
-      activity: buildAskActivity(input.text, resolved.value),
-    });
-    if (!created.ok) {
-      return failure(
-        describeConnectorFailure(created.error),
-        created.error.retryable
+    const activity = buildAskActivity(input.text, resolved.value);
+    if (input.threadRootId) {
+      return await replyInAskThread(
+        context,
+        input,
+        input.threadRootId,
+        access.token,
+        activity,
+        resolved.value
       );
     }
-    return Result.ok({ ...created.value, mentions: resolved.value });
+    return await createAskThread(
+      context,
+      input,
+      access.token,
+      tenantId,
+      activity,
+      resolved.value
+    );
   } catch (error) {
     return failure(
       error instanceof Error ? error.message : String(error),
       true
     );
   }
+}
+
+async function replyInAskThread(
+  context: TeamsProviderContext,
+  input: AskInput,
+  threadRootId: string,
+  token: string,
+  activity: JsonObject,
+  mentions: TeamsAskMention[]
+): Promise<Result<AskPosted, AskFailure>> {
+  const conversationId = threadConversationId(input.channelId, threadRootId);
+  const sent = await sendToConversation(context.http, {
+    serviceUrl: input.serviceUrl,
+    token,
+    conversationId,
+    activity,
+  });
+  if (!sent.ok) {
+    return failure(describeConnectorFailure(sent.error), sent.error.retryable);
+  }
+  return Result.ok({
+    rootMessageId: threadRootId,
+    conversationId,
+    messageId: sent.value.id,
+    inThread: true,
+    mentions,
+  });
+}
+
+async function createAskThread(
+  context: TeamsProviderContext,
+  input: AskInput,
+  token: string,
+  tenantId: string,
+  activity: JsonObject,
+  mentions: TeamsAskMention[]
+): Promise<Result<AskPosted, AskFailure>> {
+  const created = await createChannelThread(context.http, {
+    serviceUrl: input.serviceUrl,
+    token,
+    tenantId,
+    channelId: input.channelId,
+    activity,
+  });
+  if (!created.ok) {
+    return failure(
+      describeConnectorFailure(created.error),
+      created.error.retryable
+    );
+  }
+  return Result.ok({
+    ...created.value,
+    messageId: created.value.rootMessageId,
+    inThread: false,
+    mentions,
+  });
 }
 
 async function openAskAccess(

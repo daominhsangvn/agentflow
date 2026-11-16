@@ -115,6 +115,7 @@ export function createOrchestratorDbFake() {
           questionId: anchor.questionId ?? null,
           conversation: {
             id: conversation?.id,
+            caseId: conversation?.caseId,
             projectId: conversation?.projectId,
             case: conversation ? caseOf(conversation) : undefined,
           },
