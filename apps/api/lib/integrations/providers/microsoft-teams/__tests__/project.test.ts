@@ -20,10 +20,10 @@ describe("teams project settings askChannels", () => {
     expect(parsed.askChannels).toEqual([]);
   });
 
-  it("stores name = lower-cased id and re-parses to itself", () => {
+  it("stores lower-cased name = id as written and re-parses to itself", () => {
     const parsed = parse([`QA-Backend = ${ID}`]);
     expect(parsed.success && parsed.data.askChannels).toEqual([
-      "qa-backend = 19:abc@thread.tacv2",
+      "qa-backend = 19:ABC@thread.tacv2",
     ]);
     const again = parse(parsed.success ? parsed.data.askChannels : []);
     expect(again.success && again.data.askChannels).toEqual(
@@ -35,6 +35,14 @@ describe("teams project settings askChannels", () => {
     const parsed = parse([LINK]);
     expect(parsed.success && parsed.data.askChannels).toEqual([
       "qa-backend = 19:def@thread.tacv2",
+    ]);
+  });
+
+  it("keeps the case of an id encoded in a link", () => {
+    const link = `https://teams.microsoft.com/l/channel/${encodeURIComponent("19:FtSyUu@thread.tacv2")}/QA%20Backend?groupId=1`;
+    const parsed = parse([link]);
+    expect(parsed.success && parsed.data.askChannels).toEqual([
+      "qa-backend = 19:FtSyUu@thread.tacv2",
     ]);
   });
 
@@ -53,6 +61,7 @@ describe("teams project settings askChannels", () => {
       false
     );
     expect(parse([`a = ${ID}`, `b = ${ID}`]).success).toBe(false);
+    expect(parse([`a = ${ID}`, "b = 19:abc@thread.tacv2"]).success).toBe(false);
   });
 
   it("refuses an invalid channel", () => {
@@ -73,6 +82,9 @@ describe("teams project settings askChannels", () => {
       teamsClaimedChannels(settings)
     );
     expect(teamsAskChannels(settings).map((c) => c.alias)).toEqual(["a", "b"]);
+    expect(teamsAskChannels(settings)[0]?.channelId).toBe(
+      "19:ABC@thread.tacv2"
+    );
   });
 });
 

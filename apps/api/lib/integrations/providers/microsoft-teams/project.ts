@@ -10,6 +10,7 @@ import {
   channelNameOfLink,
   normalizeChannelReference,
   parseChannelReference,
+  parseChannelReferenceExact,
 } from "./thread-ref";
 
 /**
@@ -110,7 +111,7 @@ export function parseAskChannelEntry(
     : first;
   const aliasPart = separator < 0 ? null : entry.slice(0, separator).trim();
   const reference = separator < 0 ? entry : entry.slice(separator + 1);
-  const channel = parseChannelReference(reference);
+  const channel = parseChannelReferenceExact(reference);
   if (!channel.ok) {
     return Result.err(channel.error);
   }
@@ -156,7 +157,9 @@ export function teamsClaimedChannels(
   return [
     ...new Set([
       ...settings.channels,
-      ...teamsAskChannels(settings).map((channel) => channel.channelId),
+      ...teamsAskChannels(settings).map((channel) =>
+        channel.channelId.toLowerCase()
+      ),
     ]),
   ];
 }
@@ -180,11 +183,12 @@ function askChannelsProblem(entries: string[]): string | null {
     if (aliases.has(channel.alias)) {
       return `askChannels: the name "${channel.alias}" is used twice.`;
     }
-    if (ids.has(channel.channelId)) {
+    const id = channel.channelId.toLowerCase();
+    if (ids.has(id)) {
       return `askChannels: ${channel.channelId} is listed twice.`;
     }
     aliases.add(channel.alias);
-    ids.add(channel.channelId);
+    ids.add(id);
   }
   return null;
 }

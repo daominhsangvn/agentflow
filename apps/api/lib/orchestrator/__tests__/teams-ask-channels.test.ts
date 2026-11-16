@@ -20,7 +20,7 @@ const QA: TeamsAskChannelOption = {
 };
 const BA: TeamsAskChannelOption = {
   alias: "ba",
-  channelId: "19:ba@thread.tacv2",
+  channelId: "19:Ba@thread.tacv2",
   connectionKey: "teams",
   projectConnectionId: "pc-1",
 };
@@ -64,6 +64,13 @@ describe("resolveTeamsAskChannel", () => {
   it("matches a channel id", () => {
     const result = resolveTeamsAskChannel([QA, BA], {
       channel: "19:BA@thread.tacv2",
+    });
+    expect(result.ok && result.value).toEqual(BA);
+  });
+
+  it("matches a channel id given in lower case", () => {
+    const result = resolveTeamsAskChannel([QA, BA], {
+      channel: "19:ba@thread.tacv2",
     });
     expect(result.ok && result.value).toEqual(BA);
   });

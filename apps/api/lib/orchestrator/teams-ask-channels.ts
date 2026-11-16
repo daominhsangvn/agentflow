@@ -95,7 +95,7 @@ function matchChannel(
   const found = pool.filter(
     (option) =>
       option.alias === alias ||
-      (reference.ok && option.channelId === reference.value)
+      (reference.ok && option.channelId.toLowerCase() === reference.value)
   );
   if (found.length === 0) {
     return Result.err(
