@@ -13,15 +13,22 @@ import type { GraphMessage } from "./graph-client";
 
 const AT_TAG_RE = /<at\b[^>]*\bid\s*=\s*"?(\d+)"?[^>]*>([\s\S]*?)<\/at>/gi;
 const ANY_AT_TAG_RE = /<at\b[^>]*>([\s\S]*?)<\/at>/gi;
+const AT_TAG_NAME_RE = /<at\b[^>]*>([\s\S]*?)<\/at>/i;
 const ATTACHMENT_TAG_RE = /<attachment\b[^>]*>\s*<\/attachment>/gi;
 const LINE_BREAK_RE = /\r?\n/;
 const CARD_CONTENT_TYPE_PREFIX = "application/vnd.microsoft.card.";
 const CARD_TEXT_MAX_BLOCKS = 50;
 const TEXT_CONTENT_TYPE = "text";
+const HTML_CONTENT_TYPE = "text/html";
 
 const cardNodeSchema = z.looseObject({
   type: z.string().optional(),
   text: z.string().optional(),
+});
+
+const htmlAttachmentSchema = z.looseObject({
+  contentType: z.string(),
+  content: z.string(),
 });
 
 /** Who wrote a message, for transcripts. */
@@ -72,19 +79,48 @@ export function graphMessageMarkdown(
 
 /**
  * The text of an incoming activity (the mention), without the bot's mention
- * tags. Used for the run's title before the thread is read.
+ * tags. Teams flattens `text` (list items and paragraphs run together), so
+ * the `text/html` attachment's HTML is read when present. There a mention
+ * carries attributes (`<at id="0">Name</at>`) that the mention entity's text
+ * (`<at>Name</at>`) lacks, so bot mentions are also matched by name.
  */
 export function activityText(
   text: string | null | undefined,
+  html: string | null | undefined,
   botMentionTexts: readonly string[]
 ): string {
-  let html = text ?? "";
+  let body = html?.trim() ? html : (text ?? "");
+  const botNames = new Set<string>();
   for (const mention of botMentionTexts) {
     if (mention) {
-      html = html.replaceAll(mention, "");
+      body = body.replaceAll(mention, "");
+      const name = AT_TAG_NAME_RE.exec(mention)?.[1]?.trim();
+      if (name) {
+        botNames.add(name);
+      }
     }
   }
-  return htmlToMarkdown(html.replaceAll(ANY_AT_TAG_RE, "@$1")).trim();
+  return htmlToMarkdown(
+    body.replaceAll(ANY_AT_TAG_RE, (_tag, name: string) =>
+      botNames.has(name.trim()) ? "" : `@${name}`
+    )
+  ).trim();
+}
+
+/** The HTML body Teams attaches to a message activity, if any. */
+export function activityHtml(
+  attachments: readonly unknown[] | null | undefined
+): string | null {
+  for (const attachment of attachments ?? []) {
+    const parsed = htmlAttachmentSchema.safeParse(attachment);
+    if (
+      parsed.success &&
+      parsed.data.contentType.toLowerCase() === HTML_CONTENT_TYPE
+    ) {
+      return parsed.data.content;
+    }
+  }
+  return null;
 }
 
 /** First non-empty line, for titles. */
