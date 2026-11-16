@@ -363,3 +363,6 @@ __pycache__/
 
 # Copied by apps/app/scripts/copy-file-viewer-assets.mjs
 apps/app/public/file-viewer/
+
+# Local workshop material
+docs/workshop/ip-migration/
