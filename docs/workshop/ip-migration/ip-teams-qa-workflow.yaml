@@ -1,0 +1,43 @@
+name: IP Teams Q&A
+enabled: true
+project: Itinerary Planning
+triggers:
+  - connection: microsoft-teams
+    type: microsoft_teams.bot_mentioned
+    config:
+      channels: []
+agent:
+  runAs: admin@qnois.xyz
+  runner: af-orch
+  mode: orchestrated
+  stopOnOpenQuestions: true
+  titleTemplate: "{{source.key}}: {{source.title}}"
+  instructions: |
+    ## Teams Q&A
+    - Each Teams thread is its own case. Answer in the thread the person wrote in: the thread they asked in, or the new thread they started. Do not attach files: post links.
+    - First decide what the message is about:
+      1. It names a BREP ticket (e.g. BREP-123): read that ticket's case and answer from it (status, plan/spec, branch, review rounds, QC results, open questions). No case yet: say the ticket has no case yet.
+      2. A general question about Itinerary Planning: answer it. When the answer needs the code, ask ShawnDao-PRO-1 a read-only question and answer from its result.
+      3. Unclear: ask one short question (which ticket or what topic).
+    - Never start work that writes, never change code, never act on a ticket's case from here.
+    - The Agents' questions about a ticket are answered in that ticket's own Teams thread, by the people mentioned there. If someone answers such a question here, tell them to reply in that thread and mention the bot.
+    - On "record this in BREP-<n>": read this thread, ask people on the case page to approve a summary of it, and wait. When it is approved, send that summary to BREP-<n>'s case. Never send anything without an approved summary.
+    - When the question is answered and no one asks more: close the case with a one-line summary.
+
+    ## Language
+    - Answer in the language of the question (default Vietnamese).
+  orchestrator:
+    concurrency: supersede
+    debounceSeconds: 10
+    turnTimeoutMinutes: 10
+    cancelOn:
+      - status_changed
+      - label_removed
+    mentionOnly: true
+    caseLookup: true
+    caseHandoff: true
+    approvals: optional
+    connections:
+      source:
+        - comment
+actions: []

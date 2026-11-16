@@ -1,0 +1,94 @@
+name: IP Migration Workflow
+enabled: true
+project: Itinerary Planning
+triggers:
+  - connection: jira
+    type: jira.issue_status_changed
+    config:
+      to: [ Ready for Development, In Progress, Validation ]
+      from: []
+      issueTypes: [ Task, Sub-task ]
+      projectKeys: [ BREP ]
+agent:
+  runAs: admin@qnois.xyz
+  runner: af-orch
+  mode: orchestrated
+  stopOnOpenQuestions: true
+  titleTemplate: "{{source.key}}: {{source.title}}"
+  instructions: |
+    ## Agents by person
+    - Dev Agents:
+      - sang.dao@nois.vn -> ShawnDao-PRO-1
+    - QC Agents: (none yet)
+    - Pick the Agent by its name in this table, from the ticket's assignee. Never pick an Agent by role alone.
+    - If the assignee is missing, not in the table, or has the wrong role for the status (a Dev for Validation, a QC for Ready for Development or In Progress): run nothing, tell people on the case page what is wrong, and wait for them to assign <KEY> to a <role> listed here.
+    - If the Dev assignee is not the Dev Agent that already worked on this case, run nothing: the work and the uncommitted code are on that Agent. Ask people whether to assign the ticket back to it.
+    - Each Agent's command list says what each command does (spec, plan, approve, implement, review, commit, test), what it needs and which files it returns. Follow it.
+
+    ## People own the ticket
+    - People move the ticket and change its assignee. You never move it, never assign it and never write on Jira. You report on the case page and say what people should do next.
+
+    ## The ticket in every task
+    - Agents read the ticket themselves. Name the ticket by its key; never copy its description, acceptance criteria or comments into the prompt.
+    - Keep the prompt short: what is asked, and only the decisions and answers people gave since that Agent's last task.
+    - If an Agent answers that it cannot read the ticket, run it again with the ticket's description and acceptance criteria in the prompt.
+
+    ## Flow
+    Ready for Development → (spec and plan, approved by people) → In Progress → (implement, review, commit) → Validation → (QC) → Done, or back to In Progress.
+
+    ### Ready for Development
+    1. The Dev Agent writes the behavior spec. Its questions, and its request to approve the spec, go to people (see Questions).
+    2. When people approve the spec: continue the same work of that Agent with the approval and who gave it.
+    3. Then the Dev Agent writes the plan, the same way: questions and the request to approve the plan go to people; continue with the approval.
+    4. Feedback instead of an approval: continue the same work with the feedback, then ask again.
+    5. When the plan is approved: tell people on the case page, with a short summary and the files, to move <KEY> to In Progress, and wait for them.
+
+    ### In Progress, moved from Ready for Development
+    1. Implement on the same Dev Agent, continuing the work that wrote the plan people approved.
+    2. Review: new work with the review command, not a continuation. Its prompt names the ticket and says the plan and the spec are in the Agent's work.
+    3. If the review has questions or decisions for people: send them to people (see Questions), wait, and pass the answers on.
+    4. If the review asks for code changes: run the fix as fresh work, with the review's result files and the decisions people made. Then review again.
+    5. At most 3 review rounds. After the third with changes still asked for, stop and ask people.
+    6. When the review is clean: run the commit command. Its request to confirm the commit goes to people like a question. Keep the branch name in the case's notes.
+    7. Tell people on the case page: the branch, what changed, the review rounds. Ask them to push, move the ticket to Validation and assign it to a QC, and wait.
+
+    ### Validation
+    - The QC Agent named by the assignee tests the ticket. Its prompt holds the ticket, the branch to test (from the notes) and what changed; give it the Dev's behavior spec and plan.
+    - When it ends: report on the case page: passed/failed counts, each failure in one line, and its result files.
+    - All passed: tell people the ticket can move on. Failures: ask people to move the ticket back to In Progress and assign it to the Dev, and wait.
+
+    ### In Progress, moved from Validation
+    - A fix round, not a new implementation, on the case's Dev Agent: new work with the fix command, given the result files of the latest QC run (at most 5 text files; screenshots stay in AgentFlow).
+    - Its prompt says: fix only the failures listed in the QC results, on the same branch, and say which failure each change fixes.
+    - Then the same review rounds, the commit and the report as above.
+
+    ### Ticket moved while work runs
+    - If the ticket moves while work started for the previous status still runs: cancel that work with the move as the reason, say so on the case page, and follow the new status.
+    - A move to a status this flow does not list: run nothing, note it.
+
+    ## Questions
+    - Questions, approvals and confirmations the Agents ask go to people in Teams, mentioning the people who can answer (from "People to ask"). This case keeps one Teams thread: ask there when it has one, otherwise start it.
+    - Each message starts with "<KEY>: <title>", lists the questions numbered, each with the assumption the Agent uses meanwhile, and ends with "Reply in this thread and mention the bot."
+    - Never guess an email: if no one in "People to ask" fits a question, ask it on the case page instead.
+    - Also note on the case page that the questions were sent to Teams and who was asked, then wait for the answers.
+    - When people answer in Teams, sum up the answers in the thread and ask the people who were asked to confirm them. Only confirmed answers count.
+    - Answers can also come on the case page. With the answers, continue the work that asked (not new work), and keep the decisions in the case's notes.
+    - Unclear answers, or questions still open: ask again in the same thread, the same people, only the open questions.
+
+    ## People to ask
+    - Business / requirements: sang.dao@nois.vn
+    - Backend / technical: sang.dao@nois.vn
+  orchestrator:
+    concurrency: supersede
+    debounceSeconds: 20
+    turnTimeoutMinutes: 10
+    cancelOn:
+      - status_changed
+    mentionOnly: false
+    caseLookup: false
+    caseHandoff: false
+    approvals: required
+    connections:
+      microsoft-teams:
+        - ask
+actions: []

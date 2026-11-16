@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quy trình migrate V1 → V2: Automation + Agent + Teams</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --fg: #1d1d1f; --muted: #6b6b70; --card: #ffffff; --line: #dedcd6;
+    --jira: #2b59c3; --af: #7a3fb0; --agent: #1f8a5b; --teams: #b4541a; --human: #444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 20px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif; }
+  section { display: none; position: absolute; inset: 0; padding: 48px 64px 64px; overflow: auto; }
+  section.active { display: block; }
+  section.center.active { display: flex; flex-direction: column; justify-content: center; }
+  h1 { font-size: 48px; margin: 0 0 14px; letter-spacing: -0.5px; }
+  h2 { font-size: 32px; margin: 0 0 6px; }
+  h3 { font-size: 20px; margin: 0 0 8px; }
+  .kicker { text-transform: uppercase; font-size: 13px; letter-spacing: 1.5px; color: var(--af); font-weight: 600; margin-bottom: 6px; }
+  .sub { color: var(--muted); font-size: 19px; margin: 0 0 22px; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 0.85em; background: #ecebe6; padding: 1px 5px; border-radius: 4px; }
+  ul { margin: 6px 0; padding-left: 22px; } li { margin: 6px 0; }
+  .grid { display: grid; gap: 18px; } .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; font-size: 18px; }
+
+  /* Swimlane overview */
+  .swim { display: grid; grid-template-columns: 130px repeat(6, 1fr); gap: 6px; font-size: 15px; }
+  .swim .hd { font-weight: 700; font-size: 15px; padding: 8px 10px; background: #1d1d1f; color: #fff; border-radius: 8px; text-align: center; }
+  .swim .hd small { display: block; font-weight: 400; opacity: 0.75; font-size: 12px; }
+  .swim .lane { font-weight: 700; display: flex; align-items: center; padding: 8px 10px; border-radius: 8px; color: #fff; }
+  .swim .c { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 64px; }
+  .swim .c.empty { background: transparent; border: 1px dashed var(--line); }
+  .l-jira { background: var(--jira); } .l-af { background: var(--af); } .l-agent { background: var(--agent); }
+  .l-teams { background: var(--teams); } .l-human { background: var(--human); }
+  .swim .c.jira { border-left: 4px solid var(--jira); } .swim .c.af { border-left: 4px solid var(--af); }
+  .swim .c.agent { border-left: 4px solid var(--agent); } .swim .c.teams { border-left: 4px solid var(--teams); }
+  .swim .c.human { border-left: 4px solid var(--human); }
+  .loopback { margin-top: 10px; font-size: 15px; color: var(--muted); }
+
+  /* Sequence flows */
+  .flow { display: flex; align-items: stretch; margin: 6px 0 18px; }
+  .step { flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: 16px; }
+  .step .who { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 4px; }
+  .step b { display: block; font-size: 17px; margin-bottom: 2px; }
+  .arrow { align-self: center; padding: 0 8px; color: var(--muted); font-size: 24px; }
+  .jira { border-top: 5px solid var(--jira); } .jira .who { color: var(--jira); }
+  .af { border-top: 5px solid var(--af); } .af .who { color: var(--af); }
+  .agent { border-top: 5px solid var(--agent); } .agent .who { color: var(--agent); }
+  .teams { border-top: 5px solid var(--teams); } .teams .who { color: var(--teams); }
+  .human { border-top: 5px solid var(--human); } .human .who { color: var(--human); }
+  .note { border-left: 5px solid var(--teams); background: #fbeadf; padding: 12px 16px; border-radius: 8px; font-size: 17px; }
+  .legend { display: flex; gap: 18px; font-size: 14px; color: var(--muted); margin-bottom: 14px; }
+  .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+  table { border-collapse: collapse; width: 100%; background: var(--card); font-size: 17px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #efeee9; }
+  .footer { position: fixed; bottom: 14px; left: 64px; right: 64px; display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; }
+  @media print { section { display: block !important; position: relative; page-break-after: always; height: 100vh; } .footer { display: none; } }
+</style>
+</head>
+<body>
+
+<!-- Title -->
+<section class="center">
+  <div class="kicker">Itinerary Planning · V1 → V2</div>
+  <h1>Quy trình migrate V1 → V2<br/>Automation + Agent + Teams</h1>
+  <p class="sub" style="font-size:22px">Mục tiêu: thống nhất một quy trình chung, từ ticket Jira tới khi ticket hoàn thành</p>
+  <div class="legend">
+    <span style="--c: var(--jira)">Jira</span>
+    <span style="--c: var(--af)">Automation (AgentFlow)</span>
+    <span style="--c: var(--agent)">Agent (Dev / QC)</span>
+    <span style="--c: var(--teams)">Teams</span>
+    <span style="--c: var(--human)">Người (App)</span>
+  </div>
+</section>
+
+<!-- 1. Overview -->
+<section>
+  <div class="kicker">Phần 1 · Tổng quan</div>
+  <h2>Từ ticket Jira tới ticket hoàn thành</h2>
+  <p class="sub">Người đổi status trên Jira; automation chạy bước tương ứng; Agent làm việc và dừng lại khi cần người.</p>
+  <div class="swim">
+    <div></div>
+    <div class="hd">① Ready for Dev<small>Spec &amp; plan</small></div>
+    <div class="hd">② Review<small>Duyệt spec/plan</small></div>
+    <div class="hd">③ In Progress<small>Implement</small></div>
+    <div class="hd">④ Commit<small>Chốt code</small></div>
+    <div class="hd">⑤ Validation<small>QC test</small></div>
+    <div class="hd">⑥ Done<small>Hoàn thành</small></div>
+
+    <div class="lane l-jira">Jira</div>
+    <div class="c jira">Người chuyển ticket sang Ready for Dev, assign Dev</div>
+    <div class="c empty"></div>
+    <div class="c jira">Người chuyển sang In Progress</div>
+    <div class="c empty"></div>
+    <div class="c jira">Người push/PR, chuyển sang Validation, assign QC</div>
+    <div class="c jira">Người chuyển sang Done</div>
+
+    <div class="lane l-af">Automation</div>
+    <div class="c af">Mở case, chọn Dev Agent theo assignee</div>
+    <div class="c af">Đưa góp ý về cho Agent</div>
+    <div class="c af">Chạy implement → review → fix (tối đa 3 vòng)</div>
+    <div class="c af">Báo branch, những gì đã thay đổi</div>
+    <div class="c af">Giao branch, spec, plan cho QC Agent</div>
+    <div class="c af">Đóng case</div>
+
+    <div class="lane l-agent">Agent</div>
+    <div class="c agent">Dev: đọc ticket và code V1, viết behavior spec và plan V2</div>
+    <div class="c agent">Dev: sửa spec/plan theo góp ý</div>
+    <div class="c agent">Dev: code trên V2, tự review, fix</div>
+    <div class="c agent">Dev: commit local (không push)</div>
+    <div class="c agent">QC: test theo spec, báo pass/fail</div>
+    <div class="c empty"></div>
+
+    <div class="lane l-teams">Teams</div>
+    <div class="c teams">Câu hỏi về yêu cầu, hành vi V1</div>
+    <div class="c empty"></div>
+    <div class="c teams">Câu hỏi về thiết kế khi review cần người quyết</div>
+    <div class="c teams">Xin xác nhận commit</div>
+    <div class="c empty"></div>
+    <div class="c empty"></div>
+
+    <div class="lane l-human">Người (App)</div>
+    <div class="c human">Nhận email "cần người"</div>
+    <div class="c human">Đọc và duyệt spec/plan trên App</div>
+    <div class="c human">Trả lời câu hỏi</div>
+    <div class="c human">Xem diff và quyết định của AI, xác nhận</div>
+    <div class="c human">Xem kết quả test</div>
+    <div class="c human">—</div>
+  </div>
+  <p class="loopback">↺ QC fail → người chuyển ticket về <b>In Progress</b> và assign lại Dev → Dev Agent chỉ fix các failure → review → commit → Validation lần nữa.</p>
+</section>
+
+<!-- 1b. Rules of the overview -->
+<section>
+  <div class="kicker">Phần 1 · Tổng quan</div>
+  <h2>Ai giữ quyền gì</h2>
+  <p class="sub">Nguyên tắc chung cho mọi bước ở slide trước</p>
+  <div class="grid g3">
+    <div class="card" style="border-top:5px solid var(--human)"><h3>Người</h3><ul>
+      <li>Chuyển status, assign</li><li>Duyệt spec/plan</li><li>Xác nhận commit</li><li>Push, mở PR, merge</li></ul></div>
+    <div class="card" style="border-top:5px solid var(--af)"><h3>Automation</h3><ul>
+      <li>Chọn Agent theo assignee</li><li>Chạy bước theo status</li><li>Chuyển câu hỏi và câu trả lời</li><li>Hủy việc đang chạy khi ticket bị chuyển status</li></ul></div>
+    <div class="card" style="border-top:5px solid var(--agent)"><h3>Agent</h3><ul>
+      <li>Spec, plan, code, review, test</li><li>Không tự duyệt</li><li>Không ghi lên Jira</li><li>Không push</li></ul></div>
+  </div>
+  <div class="note" style="margin-top:24px">Sau mỗi bước, Agent dừng ở trạng thái "cần người": case hiện trên App và email được gửi tới người phụ trách.</div>
+</section>
+
+<!-- 2. Questioning workflows -->
+<section>
+  <div class="kicker">Phần 2 · Hỏi &amp; trả lời</div>
+  <h2>Các luồng hỏi đáp</h2>
+  <p class="sub">Hai chiều: Agent hỏi người, và người hỏi Agent</p>
+  <div class="grid g2">
+    <div class="card" style="border-top:5px solid var(--agent)">
+      <h3>A. Agent hỏi người</h3>
+      <ul>
+        <li><b>A1</b> Câu hỏi khi làm spec/plan hoặc implement</li>
+        <li><b>A2</b> Câu trả lời chưa rõ → hỏi lại</li>
+        <li><b>A3</b> Xin quyết định: review sau 3 vòng, xác nhận commit</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top:5px solid var(--teams)">
+      <h3>B. Người hỏi Agent (kênh Q&amp;A)</h3>
+      <ul>
+        <li><b>B1</b> Ticket đang tới đâu?</li>
+        <li><b>B2</b> Câu hỏi về Itinerary Planning</li>
+        <li><b>B3</b> Ghi kết luận của thread vào ticket</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note" style="margin-top:24px">Quy ước chung: trả lời trong thread Teams và <b>@mention bot</b>. Không mention thì bot không nhận.</div>
+</section>
+
+<!-- A1 -->
+<section>
+  <div class="kicker">A1 · Agent hỏi người</div>
+  <h2>Agent thiếu thông tin</h2>
+  <p class="sub">Ví dụ: yêu cầu không rõ, Jira và Confluence mâu thuẫn, không chắc nên giữ hay đổi hành vi của V1</p>
+  <div class="flow">
+    <div class="step agent"><div class="who">Agent</div><b>Dừng lại</b>Liệt kê câu hỏi, mỗi câu kèm assumption đang dùng tạm</div>
+    <div class="arrow">→</div>
+    <div class="step af"><div class="who">Automation</div><b>Chọn người</b>Business → BA/PO<br/>Technical → tech lead</div>
+    <div class="arrow">→</div>
+    <div class="step teams"><div class="who">Teams</div><b>Post vào channel</b>"BREP-xxx: tiêu đề", câu hỏi đánh số, mention người được chọn</div>
+    <div class="arrow">→</div>
+    <div class="step human"><div class="who">Người</div><b>Trả lời trong thread</b>và @mention bot (hoặc trả lời trên App)</div>
+    <div class="arrow">→</div>
+    <div class="step agent"><div class="who">Agent</div><b>Làm tiếp</b>với câu trả lời; quyết định được ghi lại trên case</div>
+  </div>
+  <ul>
+    <li>Không có ai phù hợp để hỏi → hỏi trên App, không đoán người.</li>
+    <li>Chỉ người được mention mới trả lời được; reply của người khác bị bỏ qua.</li>
+  </ul>
+</section>
+
+<!-- A2 -->
+<section>
+  <div class="kicker">A2 · Agent hỏi người</div>
+  <h2>Câu trả lời chưa rõ hoặc còn thiếu</h2>
+  <div class="flow">
+    <div class="step human"><div class="who">Người</div><b>Trả lời một phần</b>Ví dụ trả lời câu 1 và 3, bỏ qua câu 2</div>
+    <div class="arrow">→</div>
+    <div class="step af"><div class="who">Automation</div><b>Kiểm tra</b>Câu nào đã có trả lời, câu nào còn mở</div>
+    <div class="arrow">→</div>
+    <div class="step teams"><div class="who">Teams</div><b>Hỏi lại cùng người đó</b>Chỉ những câu còn mở</div>
+    <div class="arrow">→</div>
+    <div class="step agent"><div class="who">Agent</div><b>Làm tiếp</b>khi đã đủ câu trả lời</div>
+  </div>
+  <div class="note">Trong lúc chờ, ticket hiện "cần người" trên App và có email nhắc. Bot không trả lời lại trong thread Teams; mọi thông tin khác nằm trên App.</div>
+</section>
+
+<!-- A3 -->
+<section>
+  <div class="kicker">A3 · Agent xin quyết định</div>
+  <h2>Những chỗ cần người quyết</h2>
+  <table>
+    <tr><th>Tình huống</th><th>Agent hỏi gì</th><th>Người trả lời ở đâu</th><th>Sau đó</th></tr>
+    <tr><td>Spec/plan xong</td><td>"Review plan/spec của BREP-xxx"</td><td>App (góp ý hoặc duyệt)</td><td>Agent sửa, hoặc người chuyển sang In Progress</td></tr>
+    <tr><td>Review cần quyết định thiết kế</td><td>Các lựa chọn và assumption</td><td>Teams</td><td>Agent fix theo quyết định</td></tr>
+    <tr><td>Hết 3 vòng review vẫn còn lỗi</td><td>"Tiếp tục hay dừng?"</td><td>App</td><td>Theo quyết định của người</td></tr>
+    <tr><td>Trước khi commit</td><td>Diff và các quyết định AI đã đưa ra</td><td>Teams / App</td><td>Commit local, báo branch</td></tr>
+    <tr><td>Sai assignee hoặc sai Agent</td><td>"Assign BREP-xxx cho …"</td><td>Jira</td><td>Chạy lại khi đúng người</td></tr>
+  </table>
+</section>
+
+<!-- B1 -->
+<section>
+  <div class="kicker">B1 · Người hỏi Agent</div>
+  <h2>"@bot BREP-123 tới đâu rồi?"</h2>
+  <div class="flow">
+    <div class="step teams"><div class="who">Teams</div><b>Mention bot</b>trong kênh Q&amp;A, nhắc tới ticket</div>
+    <div class="arrow">→</div>
+    <div class="step af"><div class="who">Automation</div><b>Đọc case của ticket</b>Chỉ đọc</div>
+    <div class="arrow">→</div>
+    <div class="step teams"><div class="who">Teams</div><b>Trả lời trong thread</b>Status, spec/plan, branch, số vòng review, kết quả QC, câu hỏi còn mở, kèm link sang App</div>
+  </div>
+  <div class="note">Ticket chưa có case → bot nói rõ là chưa có. Câu hỏi không rõ → bot hỏi lại một câu ngắn (ticket nào, chủ đề gì).</div>
+</section>
+
+<!-- B2 -->
+<section>
+  <div class="kicker">B2 · Người hỏi Agent</div>
+  <h2>"@bot Itinerary xử lý X thế nào?"</h2>
+  <div class="flow">
+    <div class="step teams"><div class="who">Teams</div><b>Câu hỏi chung</b>về Itinerary Planning (V1 hoặc V2)</div>
+    <div class="arrow">→</div>
+    <div class="step af"><div class="who">Automation</div><b>Trả lời được ngay?</b>Có → trả lời luôn</div>
+    <div class="arrow">→</div>
+    <div class="step agent"><div class="who">Dev Agent</div><b>Cần xem code</b>→ task chỉ đọc trên máy dev</div>
+    <div class="arrow">→</div>
+    <div class="step teams"><div class="who">Teams</div><b>Trả lời trong thread</b>bằng ngôn ngữ của người hỏi</div>
+  </div>
+  <div class="note">Kênh Q&amp;A không sửa code, không tác động lên ticket. Ai trả lời câu hỏi của Agent nhầm vào thread này sẽ được nhắc chuyển sang đúng thread của câu hỏi đó.</div>
+</section>
+
+<!-- B3 -->
+<section>
+  <div class="kicker">B3 · Từ thảo luận tới ticket</div>
+  <h2>"@bot ghi cái này vào BREP-123"</h2>
+  <div class="flow">
+    <div class="step teams"><div class="who">Teams</div><b>Team thống nhất</b>một điểm trong thread Q&amp;A</div>
+    <div class="arrow">→</div>
+    <div class="step af"><div class="who">Automation</div><b>Tóm tắt thread</b>tạo yêu cầu duyệt trên App</div>
+    <div class="arrow">→</div>
+    <div class="step human"><div class="who">Người</div><b>Duyệt</b>bản tóm tắt</div>
+    <div class="arrow">→</div>
+    <div class="step af"><div class="who">Automation</div><b>Gửi sang case BREP-123</b>Gửi đúng nội dung đã duyệt, một lần</div>
+    <div class="arrow">→</div>
+    <div class="step agent"><div class="who">Dev Agent</div><b>Dùng ở bước sau</b>Quyết định nằm trong notes của ticket</div>
+  </div>
+  <div class="note">Không có duyệt thì không có gì được chuyển sang ticket. Kênh hỏi đáp mở cho mọi người, còn thông tin vào ticket luôn có người kiểm soát.</div>
+</section>
+
+<!-- Agreement -->
+<section>
+  <div class="kicker">Cần thống nhất</div>
+  <h2>Các điểm cần chốt</h2>
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card"><h3>Con người</h3><ul>
+      <li>Mỗi dev / QC ứng với Agent nào</li>
+      <li>Ai trả lời câu hỏi business, ai trả lời câu hỏi technical</li>
+      <li>Ai duyệt spec/plan (người, hay AI approver cho trường hợp đơn giản)</li>
+      <li>Thời gian trả lời câu hỏi trên Teams mong muốn</li></ul></div>
+    <div class="card"><h3>Quy trình</h3><ul>
+      <li>Ticket nào đi qua automation (label <code>migration</code>?)</li>
+      <li>Ai push branch, mở PR, và vào lúc nào</li>
+      <li>Validation làm thế nào khi QC Agent chưa sẵn sàng</li>
+      <li>Channel để Agent hỏi, channel cho kênh Q&amp;A</li></ul></div>
+  </div>
+</section>
+
+<!-- Appendix: 24h -->
+<section>
+  <div class="kicker">Phụ lục</div>
+  <h2>Những gì vừa sẵn sàng (24h qua)</h2>
+  <ul style="margin-top:16px">
+    <li><b>Teams</b>: câu hỏi của Agent đã post được lên channel (sửa lỗi channel id); câu trả lời hiện ngay trên App.</li>
+    <li><b>Jira</b>: lọc trigger theo label.</li>
+    <li><b>Đăng nhập</b>: SSO Microsoft cho tenant không gửi email đã verify.</li>
+    <li><b>Máy dev Windows</b>: runner 0.16.75, nhận đúng Python 3 khi health check.</li>
+    <li><b>Theo dõi</b>: truy vết từng ticket trên SigNoz, email khi Agent cần người, xem spec/plan ngay trong App.</li>
+  </ul>
+</section>
+
+<section class="center">
+  <div class="kicker">Hết</div>
+  <h1>Thảo luận</h1>
+  <p class="sub">Hỏi Agent ngay trong Teams: <code>@bot</code> + câu hỏi</p>
+</section>
+
+<div class="footer"><span>Migrate V1 → V2 · Automation + Agent + Teams</span><span id="counter"></span></div>
+
+<script>
+  const slides = [...document.querySelectorAll("section")];
+  let i = 0;
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle("active", k === i));
+    document.getElementById("counter").textContent = `${i + 1} / ${slides.length}`;
+    history.replaceState(null, "", `#${i + 1}`);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (["ArrowRight", "PageDown", " "].includes(e.key)) { e.preventDefault(); show(i + 1); }
+    if (["ArrowLeft", "PageUp"].includes(e.key)) { e.preventDefault(); show(i - 1); }
+  });
+  document.addEventListener("click", (e) => show(e.clientX > innerWidth / 2 ? i + 1 : i - 1));
+  show((parseInt(location.hash.slice(1), 10) || 1) - 1);
+</script>
+</body>
+</html>
