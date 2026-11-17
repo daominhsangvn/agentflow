@@ -110,6 +110,7 @@ describe("NewWorkflowView", () => {
 
     expect(screen.getByTestId("workflow-editor")).toBeInTheDocument();
     expect(mocks.editor).toHaveBeenCalledWith({
+      assistant: expect.any(Function),
       computeTargets: {
         options: [toComputeTargetOption(makeTarget())],
         isLoading: false,
@@ -138,7 +139,16 @@ describe("WorkflowDetailPageView", () => {
         workflowId: WORKFLOW_ID,
         isAdmin: false,
         connectionsSettingsPath: CONNECTIONS_PATH,
+        assistant: undefined,
       })
+    );
+  });
+
+  it("offers the assistant to admins only", () => {
+    render(<WorkflowDetailPageView isAdmin workflowId={WORKFLOW_ID} />);
+
+    expect(mocks.detail).toHaveBeenCalledWith(
+      expect.objectContaining({ assistant: expect.any(Function) })
     );
   });
 });

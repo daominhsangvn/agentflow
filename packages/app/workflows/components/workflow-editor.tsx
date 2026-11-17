@@ -2,6 +2,7 @@
 
 import type { IntegrationConnection } from "@repo/api/src/types/integration";
 import type { Workflow } from "@repo/api/src/types/workflow";
+import type { ProposeWorkflowOutput } from "@repo/api/src/types/workflow-builder-schemas";
 // Cross-slice: triggers and actions are offered from the integrations slice's
 // provider catalog and the org's connections; that slice also owns the inline
 // mutation and query errors shared by both slices.
@@ -33,7 +34,14 @@ import { toast } from "@repo/design-system/components/ui/sonner";
 import { useNavigation } from "@repo/navigation/use-navigation";
 import { useOrgPath } from "@repo/navigation/use-org-path";
 import { AlertTriangleIcon, InfoIcon, Loader2Icon } from "lucide-react";
-import { lazy, Suspense, useMemo, useState } from "react";
+import {
+  lazy,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useMemo,
+  useState,
+} from "react";
 import { useCreateWorkflow, useUpdateWorkflow } from "../hooks/use-workflows";
 import {
   projectAgentOptions,
@@ -44,6 +52,7 @@ import {
   WorkflowMutationErrorTitle,
 } from "../lib/workflow-labels";
 import { parseWorkflowYaml } from "../lib/workflow-yaml";
+import { validateWorkflowProposal } from "../lib/workflow-yaml-proposal";
 import type { WorkflowYamlCatalog } from "../lib/workflow-yaml-schema";
 import { newWorkflowYaml, workflowToYaml } from "../lib/workflow-yaml-write";
 import { WorkflowActionsPreview } from "./workflow-actions-preview";
@@ -60,6 +69,8 @@ export type WorkflowEditorProps = {
   computeTargets: WorkflowComputeTargetChoices;
   /** Org-relative Settings path of the Connections section, for the "manage connections" hint. */
   connectionsSettingsPath?: string;
+  /** Optional AI assistant for admins: it renders the YAML editor it is handed, next to its own panel; absent = unchanged editor. */
+  assistant?: (context: WorkflowEditorAssistantContext) => ReactNode;
 };
 
 /**
@@ -180,6 +191,7 @@ function WorkflowYamlForm({
   workflow,
   isAdmin,
   connectionsSettingsPath,
+  assistant,
   catalog,
   connections,
   unavailable,
@@ -197,6 +209,10 @@ function WorkflowYamlForm({
   const result = useMemo(
     () => parseWorkflowYaml(text, catalog, workflow),
     [text, catalog, workflow]
+  );
+  const validate = useCallback(
+    (yaml: string) => validateWorkflowProposal(yaml, catalog, workflow),
+    [catalog, workflow]
   );
   const projectId = result.input?.projectId ?? workflow?.project?.id ?? "";
   // Repositories are only suggested for `repository:` keys (agent.repository,
@@ -254,6 +270,24 @@ function WorkflowYamlForm({
     });
   };
 
+  // The assistant, when there is one, places this next to its own panel.
+  const yamlEditor = (
+    <Suspense
+      fallback={
+        <pre className="max-h-[36rem] overflow-auto rounded-md border p-3 font-mono text-xs">
+          {text}
+        </pre>
+      }
+    >
+      <LazyWorkflowYamlEditor
+        completionData={completionData}
+        onChange={setText}
+        readOnly={readOnly}
+        value={text}
+      />
+    </Suspense>
+  );
+
   return (
     <form
       aria-label={workflow ? `Edit ${workflow.name}` : "New workflow"}
@@ -290,20 +324,15 @@ function WorkflowYamlForm({
         message="Connections are named by their project key: add Jira, Azure DevOps or Microsoft Teams to a project on its Integrations tab (the organization connection is set up in Settings). connection: http needs none."
         settingsPath={connectionsSettingsPath}
       />
-      <Suspense
-        fallback={
-          <pre className="max-h-[36rem] overflow-auto rounded-md border p-3 font-mono text-xs">
-            {text}
-          </pre>
-        }
-      >
-        <LazyWorkflowYamlEditor
-          completionData={completionData}
-          onChange={setText}
-          readOnly={readOnly}
-          value={text}
-        />
-      </Suspense>
+      {readOnly || !assistant
+        ? yamlEditor
+        : assistant({
+            workflowId: workflow?.id ?? null,
+            text,
+            setText,
+            validate,
+            editor: yamlEditor,
+          })}
       {result.input ? (
         <WorkflowActionsPreview
           actions={result.input.actions}
@@ -453,3 +482,13 @@ function getSubmitLabel(isEdit: boolean, isPending: boolean): string {
 }
 
 const REPOSITORY_KEY_RE = /^\s*repository:/m;
+
+/** What the optional assistant sees of the editor: its text, a way to replace it, the YAML check and the editor to render. */
+export type WorkflowEditorAssistantContext = {
+  workflowId: string | null;
+  text: string;
+  setText: (next: string) => void;
+  validate: (yaml: string) => ProposeWorkflowOutput;
+  /** The YAML editor itself; the assistant must render it exactly once. */
+  editor: ReactNode;
+};

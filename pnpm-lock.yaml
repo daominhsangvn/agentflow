@@ -351,6 +351,9 @@ importers:
       '@agentflow-ai/loops-api':
         specifier: workspace:*
         version: link:../../packages/loops-api
+      '@ai-sdk/react':
+        specifier: ^3.0.177
+        version: 3.0.179(react@19.2.8)(zod@4.3.6)
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -444,6 +447,9 @@ importers:
       '@vercel/edge-config':
         specifier: ^1.4.3
         version: 1.4.3(@opentelemetry/api@1.9.1)(next@16.2.6(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))
+      ai:
+        specifier: ^6.0.175
+        version: 6.0.175(zod@4.3.6)
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0

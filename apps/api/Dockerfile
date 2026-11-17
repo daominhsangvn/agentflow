@@ -45,6 +45,10 @@ RUN --mount=type=cache,id=af-e2e-pnpm-store,target=/pnpm/store,sharing=locked \
     turbo_version="$(node -p "require('./package.json').devDependencies.turbo.match(/[0-9.]+/)[0]")" && \
     pnpm dlx "turbo@${turbo_version}" prune api --docker
 
+# The curated docs are not part of the pruned workspace closure, so the
+# workflow builder knowledge bundle is generated here from the full tree.
+RUN node apps/api/scripts/bundle-workflow-builder-knowledge.mjs --root /repo --out /repo/out/full/apps/api/generated/workflow-builder-knowledge.json
+
 # --- Builder: install + build (next build + server import-smoke) ---
 # Production dependencies only: the runtime image copies these instead of the
 # builder's full install (dev tools, test runners, type packages).
@@ -148,6 +152,40 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3002
+# Claude Code CLI for the platform agent (used by the workflow builder assistant;
+# inert unless PLATFORM_AGENT_SETTINGS_FILE is set at runtime). Installed from the
+# signed apt repository, as in deploy/runner/Dockerfile.
+#   CLAUDE_CODE_CHANNEL: "latest" (default), "stable", or "none" to leave Claude
+#     Code out of the image.
+#   CLAUDE_CODE_VERSION: optional exact release (for example 2.1.322); installed
+#     with `claude install`, which verifies the checksum, under
+#     /root/.local/share/claude/versions, where the api finds it. Empty or
+#     "latest" keeps the apt version.
+ARG CLAUDE_CODE_CHANNEL=latest
+ARG CLAUDE_CODE_VERSION=
+# Fingerprint of the Claude Code release signing key (docs: code.claude.com/docs/en/setup).
+ARG CLAUDE_CODE_KEY_FINGERPRINT=31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
+RUN set -eux; \
+    if [ "$CLAUDE_CODE_CHANNEL" = none ]; then exit 0; fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
+    install -d -m 0755 /etc/apt/keyrings; \
+    curl -fsSL https://downloads.claude.ai/keys/claude-code.asc \
+      -o /etc/apt/keyrings/claude-code.asc; \
+    gpg --show-keys --with-colons /etc/apt/keyrings/claude-code.asc \
+      | grep -q "^fpr:*${CLAUDE_CODE_KEY_FINGERPRINT}:"; \
+    echo "deb [signed-by=/etc/apt/keyrings/claude-code.asc] https://downloads.claude.ai/claude-code/apt/${CLAUDE_CODE_CHANNEL} ${CLAUDE_CODE_CHANNEL} main" \
+      > /etc/apt/sources.list.d/claude-code.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends claude-code; \
+    if [ -n "$CLAUDE_CODE_VERSION" ] && [ "$CLAUDE_CODE_VERSION" != latest ]; then \
+      DISABLE_AUTOUPDATER=1 claude install "$CLAUDE_CODE_VERSION"; \
+      "/root/.local/share/claude/versions/$CLAUDE_CODE_VERSION" --version \
+        | grep -q "^$CLAUDE_CODE_VERSION "; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*; \
+    claude --version
+ENV DISABLE_AUTOUPDATER=1
 # `tsx server.ts` needs production node_modules + workspace source + build
 # outputs: the built .next, the generated Prisma client and the dist of the
 # packages that export it.

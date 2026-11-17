@@ -25,6 +25,17 @@
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**", "public/file-viewer/**"]
     },
+    "api#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/docs/workflows.md",
+        "$TURBO_ROOT$/docs/orchestrator-guide.md",
+        "$TURBO_ROOT$/docs/workshop/**",
+        "$TURBO_ROOT$/apps/web/content/docs/**"
+      ],
+      "outputs": [".next/**", "!.next/cache/**", "generated/**"]
+    },
     "mcp#build": {
       "dependsOn": ["^build", "@agentflow-ai/loops-api#build"],
       "inputs": ["$TURBO_DEFAULT$", "!**/*.md"],

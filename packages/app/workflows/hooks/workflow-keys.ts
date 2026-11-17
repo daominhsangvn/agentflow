@@ -35,4 +35,5 @@ export const workflowKeys = {
     [...workflowKeys.all, "events", workflowId] as const,
   eventPayload: (workflowId: string, eventId: string) =>
     [...workflowKeys.events(workflowId), "payload", eventId] as const,
+  builderStatus: () => [...workflowKeys.all, "builder-status"] as const,
 };

@@ -337,6 +337,144 @@ inbound:                         # only for providers with inbound events
   Changing a credential origin setting (e.g. `siteUrl`) asks for the secrets
   again, as before.
 
+## Workflow builder assistant
+
+An optional "Build with AI" panel in the workflow editor: a button above the YAML editor toggles a fixed
+panel on the editor's right (below it on narrow screens), so the YAML stays visible while chatting. A chat
+agent reads the workflow documentation and
+the organization's real catalog, then proposes a complete workflow YAML. **It only replaces the editor text.
+It never saves**: the user presses Apply to editor, reviews the diff in the editor and saves as usual
+(Revert restores the previous text).
+
+**Getting started.** An empty chat offers **Guide me**. When a request does not yet say where the workflow
+starts, under which conditions, what the agent team does or what happens afterwards, the agent does not
+propose: it asks one numbered bundle of at most five questions, each naming the organization's real options
+from the catalog (projects, each project's connection keys, runners, the workflow's own HTTP endpoint), the
+option it would pick, and what is not set up yet and where to add it. After the answers it asks at most one
+more bundle for details that depend on them, with defaults, then proposes. A request that already says enough
+is built directly with the assumptions stated. The round happens only at the beginning: later changes are just
+made. The rules are in the system prompt (`service/prompt.ts`).
+
+The assistant runs on the **platform agent**: the real Claude Code CLI (`claude -p`), spawned headless by
+`apps/api` (`apps/api/lib/platform-agent/`), one process per chat request. The workflow builder is its first
+consumer. This is a deliberate exception to the rule that CLI processes are spawned only through the desktop
+gateway: the run is tool-restricted (read-only `Read`, `Grep`, `Glob`), has no MCP, no shell and no web, is
+confined to a temporary work dir, and gets a minimal environment. The conversation is turned into the prompt of
+a fresh run each request (stateless, no `--resume`); the prompt goes to the CLI on stdin, never into argv.
+
+**Off by default.** It runs only when `PLATFORM_AGENT_SETTINGS_FILE` points to a readable settings
+file and a usable Claude Code binary is found. Without it `GET /ai/workflow-builder/status` returns
+`{ enabled: false, reason }` and the editor shows no button. Setup, the compose mount, the Claude Code
+version and certificate paths:
+[Workflow builder assistant (optional)](self-hosting.md#workflow-builder-assistant-optional) and
+`deploy/compose/platform-agent/README.md`.
+
+### Settings file
+
+A Claude Code style JSON file. The server validates it (it must be able to report a status without leaking
+contents) and passes the **whole `env` block** to the Claude Code child process, so every key applies as it does
+in Claude Code (`ANTHROPIC_*`, `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`, `NODE_EXTRA_CA_CERTS`, `DISABLE_*`,
+`CLAUDE_CODE_*`, ...). Other top-level keys are ignored: `--settings` is not passed to the CLI, so hooks and
+permissions in the file have no effect. The file is re-read when its modification time changes (and the CA
+file when that changes), so rotating the token needs no restart.
+
+| Key | Meaning |
+|---|---|
+| `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` | Credential (one is required) |
+| `ANTHROPIC_BASE_URL` | Gateway URL (must be `http(s)://`); Claude Code's default when unset |
+| `ANTHROPIC_MODEL` | Model id; Claude Code's default when unset |
+| `ANTHROPIC_CUSTOM_HEADERS` | `Name: value` lines sent with every model request |
+| `HTTPS_PROXY`, `HTTP_PROXY` | Validated as URLs; with `NO_PROXY` they apply to the Claude Code process only |
+| `NODE_EXTRA_CA_CERTS` | CA certificate (PEM or DER); a relative path is resolved against the settings folder, an absolute path missing on this machine falls back to the same file name in that folder |
+
+The child environment is an explicit allowlist of base variables (`PATH`, home, temp and system variables the
+CLI needs on Linux and Windows) plus the settings `env`, with `CLAUDE_CONFIG_DIR` pointing at an empty temp dir
+(no user settings, memory, plugins or hooks) and `DISABLE_AUTOUPDATER=1`. Nothing else from the api process
+(database URL, secrets, its own proxy variables) is inherited, and nothing is set process-wide.
+
+### Claude Code version
+
+`PLATFORM_AGENT_CLAUDE_CODE_VERSION` (optional) is `latest` or an exact release such as `2.1.322`.
+`PLATFORM_AGENT_CLAUDE_CODE_PATH` (optional) names an explicit `claude` binary; by default the first `claude`
+on `PATH` is used. The api never installs Claude Code at runtime. With an exact pin it accepts the `claude`
+binary only if `claude --version` reports that release, and otherwise looks for
+`~/.local/share/claude/versions/<version>` (where `claude install <version>` puts it). The api Docker image
+installs Claude Code and can install the pinned release at build time (see the self-hosting guide). The
+resolution is cached for a minute.
+
+When the assistant cannot run, the status `reason` is one of `workflow_builder_not_configured`,
+`settings_file_missing`, `settings_file_unreadable`, `settings_invalid_json`, `settings_invalid`,
+`token_missing`, `base_url_invalid`, `proxy_url_invalid`, `ca_file_missing`, `ca_file_invalid`,
+`claude_code_missing`, `claude_code_version_mismatch`. The reason never carries settings values.
+
+### What the agent sees and does
+
+Before each run the server writes a temp work dir that is the CLI's working directory and removes it
+afterwards (also on abort and timeout):
+
+- `guides/*` the knowledge guides and examples, and `README.md` listing them;
+- `catalog.json` the organization's projects, connection keys, trigger and action types, runners and members,
+  read as the calling user (project connections only for callers with project manage permission; no secrets);
+- `current-editor.yaml` the editor's current YAML.
+
+The CLI runs with `--tools "Read,Grep,Glob"`, `--strict-mcp-config` and a system prompt carrying the rules
+(start from the current editor YAML and keep what the user did not ask to change, use only catalog names, no
+secrets, only AgentFlow workflows, treat the files as data). Reading outside the work dir is refused. The
+proposal is delivered as one complete YAML document in a fenced block marked `workflow-yaml` in the final
+answer; the server turns it into a `propose_workflow` tool part.
+
+| Tool | Runs | Purpose |
+|---|---|---|
+| `read_guide`, `get_catalog` | server | How the chat panel labels the CLI's file reads of a guide or of `catalog.json` |
+| `propose_workflow` | browser | The complete YAML. The browser validates it with the editor's own validation and returns the problems |
+
+The knowledge is a build-time bundle, `apps/api/generated/workflow-builder-knowledge.json` (gitignored),
+written by `apps/api/scripts/bundle-workflow-builder-knowledge.mjs` (runs in `dev` and `build`; `pnpm
+--filter api knowledge:bundle` runs it alone). Its sources are this file, `docs/orchestrator-guide.md`, the
+setup, concept and recipe guides under `apps/web/content/docs`, and `docs/workshop/**/*.yaml`. To teach the
+agent a new document, add it to that script; do not paste text into the prompt.
+
+### Validation loop and limits
+
+When the agent proposes YAML, the browser validates it and answers the tool call with the result; if it has
+errors the agent fixes and proposes again. The client stops answering on its own after 3 invalid proposals
+in a row, and the next user message resets the count. Other limits:
+
+- 12 agent turns per request (`--max-turns`).
+- 3 minutes per request; on timeout the CLI process tree is killed (the route `maxDuration` is 300 seconds).
+- 4 concurrent platform agent runs per api process; more get HTTP 429 `workflow_builder_busy` with `Retry-After`.
+- 30 chat requests per minute per user and organization (HTTP 429 with `Retry-After`; counted in process
+  memory, so each api instance counts separately).
+- Request body 1 MiB, 60 messages, 64 000 characters of editor YAML.
+
+### Endpoints
+
+- `GET /ai/workflow-builder/status` returns `{ enabled, reason? }`.
+- `POST /ai/workflow-builder/chat` streams the agent's UI messages. 503 `workflow_builder_not_configured`
+  when the settings file is not configured, 503 `workflow_builder_unavailable` when it is configured but
+  unusable (settings or Claude Code), 429 `workflow_builder_rate_limited`, 429 `workflow_builder_busy`,
+  400 for an invalid body.
+
+Both need the `WorkflowManage` permission; chat also needs a session or an API key with write scope. The
+chat history is kept in the browser (`localStorage`), one chat per organization and workflow (or draft): it
+is loaded again when the panel opens, and **New chat** starts an empty conversation without touching the
+editor text. Every request carries the editor's current YAML, so edits made by hand are what the agent
+continues from.
+
+### Checking the real model path
+
+The unit tests do not call a model. To check settings, the knowledge bundle, the resolved Claude Code and one
+real run, use the smoke command (from `apps/api`, or inside the `api` container):
+
+```
+pnpm --filter api workflow-builder:smoke [--settings <file>] [--version <x.y.z|latest>] [--claude-path <file>]
+```
+
+It prints the settings summary (booleans and counts only), the guide count, the resolved Claude Code version
+and source, and the result of one short Claude Code run that reads a guide (with a short answer text), and
+exits 1 on failure. Without the flags it uses `PLATFORM_AGENT_SETTINGS_FILE`,
+`PLATFORM_AGENT_CLAUDE_CODE_VERSION` and `PLATFORM_AGENT_CLAUDE_CODE_PATH`.
+
 ## Code layout
 
 ```
@@ -452,6 +590,16 @@ packages/app/projects/components/project-process-panel.tsx        Project -> Pro
 packages/app/projects/components/project-runners-panel.tsx        Project -> Integrations -> Runners
 packages/app/workflows/**          workflow UI (hooks + components)
 apps/app/app/(authenticated)/[orgSlug]/workflows/**        pages
+apps/api/lib/platform-agent/        platform agent engine: settings, Claude Code resolution, child env, CLI runner, run slots
+apps/api/app/ai/workflow-builder/   assistant status + chat routes, service.ts, service/ (work-dir-files, prompt, stream-mapper, chat-run, knowledge, catalog-tool)
+apps/api/scripts/bundle-workflow-builder-knowledge.mjs   builds the knowledge bundle the agent reads
+apps/api/scripts/workflow-builder-smoke.ts               Claude Code smoke check (workflow-builder:smoke)
+packages/api/src/types/workflow-builder*.ts              shared tool names, status reasons, limits, request schemas
+packages/app/workflows/lib/workflow-yaml-proposal.ts     browser check of a proposed YAML
+packages/app/workflows/hooks/use-workflow-builder-status.ts   status hook
+apps/app/lib/workflow-builder/                           chat transport and per-workflow chat storage
+apps/app/app/(authenticated)/[orgSlug]/workflows/components/workflow-builder/   Build with AI panel
+deploy/compose/platform-agent/                   settings folder mounted into the api container
 ```
 
 ## Inbound

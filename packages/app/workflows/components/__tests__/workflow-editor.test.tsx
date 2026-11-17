@@ -164,6 +164,7 @@ const RUNNERS: WorkflowComputeTargetChoices = {
 const HTTP_CONNECTION_ID = "12121212-1212-4121-8121-121212121212";
 const NEW_WORKFLOW_ID = "13131313-1313-4131-8131-131313131313";
 const FIX_PROBLEMS_RE = /Fix the problems above/;
+const ASSIST_RE = /^assist/;
 const SAVE_RE = /Save workflow/;
 const CREATE_RE = /Create workflow/;
 const DISCARD_RE = /Discard changes/;
@@ -370,6 +371,46 @@ describe("WorkflowEditor (YAML)", () => {
     expect(screen.getByText(READ_ONLY_RE)).toBeInTheDocument();
     expect(yamlBox()).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: SAVE_RE })).toBeNull();
+  });
+
+  it("hands the assistant the editor text and lets it replace it", async () => {
+    const assistant = vi.fn(
+      ({
+        text,
+        setText,
+        editor,
+      }: {
+        text: string;
+        setText: (next: string) => void;
+        editor: ReactNode;
+      }) => (
+        <>
+          <button onClick={() => setText("name: from assistant")} type="button">
+            assist {text.length}
+          </button>
+          {editor}
+        </>
+      )
+    );
+    await renderEditor({ assistant });
+
+    await userEvent.click(screen.getByRole("button", { name: ASSIST_RE }));
+
+    expect(yamlBox().value).toBe("name: from assistant");
+    expect(assistant).toHaveBeenCalled();
+    expect(assistant.mock.calls[0][0]).toMatchObject({ workflowId: null });
+  });
+
+  it("does not render the assistant for members", async () => {
+    const assistant = vi.fn(() => <p>assistant</p>);
+    await renderEditor({
+      assistant,
+      workflow: makeWorkflow(),
+      isAdmin: false,
+    });
+
+    expect(assistant).not.toHaveBeenCalled();
+    expect(screen.queryByText("assistant")).toBeNull();
   });
 
   it("shows the URL and secret of a saved workflow's own HTTP endpoint", async () => {

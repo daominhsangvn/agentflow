@@ -103,6 +103,10 @@ services:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?set NEXT_PUBLIC_APP_URL in deploy/compose/.env}
         NEXT_PUBLIC_WEB_URL: ${NEXT_PUBLIC_WEB_URL:?set NEXT_PUBLIC_WEB_URL in deploy/compose/.env}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL in deploy/compose/.env}
+        # Claude Code for the platform agent (build args only: the runtime
+        # PLATFORM_AGENT_CLAUDE_CODE_VERSION reaches the container through env_file).
+        CLAUDE_CODE_CHANNEL: ${PLATFORM_AGENT_CLAUDE_CODE_CHANNEL:-latest}
+        CLAUDE_CODE_VERSION: ${PLATFORM_AGENT_CLAUDE_CODE_VERSION:-}
     image: *api-image
     restart: unless-stopped
     env_file:
@@ -135,6 +139,9 @@ services:
       - "127.0.0.1:${API_PORT:-3002}:3002"
     volumes:
       - local_git_token:/run/local-git:ro
+      # Optional platform agent settings (used by the workflow builder assistant;
+      # inert unless PLATFORM_AGENT_SETTINGS_FILE is set in .env).
+      - ${PLATFORM_AGENT_DIR:-./platform-agent}:/run/platform-agent:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 15s
