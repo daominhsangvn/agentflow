@@ -90,6 +90,9 @@ The API process runs a small scheduler: workflows every `WORKFLOW_TICK_SECONDS`,
 | `STALE_SESSION_AGE_HOURS` | `24` | Ends sessions still marked active after their machine stopped reporting |
 | `SELF_HOSTED_CRON_DISABLED` | off | `true` turns the in-process scheduler off, for an external scheduler that calls the `/cron/*` routes. `CRON_SECRET` must then be set |
 | `CRON_SECRET` | generated per process | Authenticates the `/cron/*` routes |
+| `PLATFORM_AGENT_SETTINGS_FILE` | unset (platform agent off) | Path of a Claude Code style `settings.json` for the platform agent (headless Claude Code run by the api); its whole `env` block is passed to Claude Code. Its first consumer is the optional "Build with AI" workflow assistant, for example `/run/platform-agent/settings.json` in the compose setup. The assistant only replaces the editor text and never saves. Check it with `pnpm --filter api workflow-builder:smoke` |
+| `PLATFORM_AGENT_CLAUDE_CODE_VERSION` | unset (any installed Claude Code) | `latest` or an exact release such as `2.1.322`. An exact pin must be installed (on `PATH` or under `~/.local/share/claude/versions/<version>`); the api never installs it at runtime. In the compose setup it is also an api image build arg |
+| `PLATFORM_AGENT_CLAUDE_CODE_PATH` | unset (first `claude` on `PATH`) | Explicit path of the `claude` binary for the platform agent |
 
 ## Logging and telemetry
 

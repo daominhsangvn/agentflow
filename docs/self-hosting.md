@@ -165,6 +165,30 @@ Jira Cloud and Azure DevOps webhooks must reach the API over public HTTPS
 (`PUBLIC_WEBHOOK_BASE_URL`). On a machine without a public URL, set the
 connection to **poll** mode instead.
 
+## Workflow builder assistant (optional)
+
+Admins can get an AI assistant in the workflow editor that proposes workflow YAML. It runs on the **platform
+agent**, the real Claude Code CLI spawned headless by the `api` service; the workflow builder is its first
+consumer. It is off by default and existing deployments are unaffected. To enable it, put a Claude Code style
+`settings.json` (its `env` block: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, optional custom headers,
+proxies, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`; every key is passed to Claude Code) in
+`deploy/compose/platform-agent/` together with any CA certificate, then set
+`PLATFORM_AGENT_SETTINGS_FILE=/run/platform-agent/settings.json` in `deploy/compose/.env` and
+recreate the `api` service. `PLATFORM_AGENT_DIR` picks another host folder. The file is re-read when it
+changes, so token rotation needs no restart.
+
+The `api` image installs Claude Code from the signed apt repository at build time. Build args (set through
+`deploy/compose/.env`): `PLATFORM_AGENT_CLAUDE_CODE_CHANNEL` (`latest` default, `stable`, or `none` to leave
+Claude Code out of the image) and `PLATFORM_AGENT_CLAUDE_CODE_VERSION` (an exact release such as `2.1.322`,
+installed with `claude install` next to the apt version). To pin the version, set
+`PLATFORM_AGENT_CLAUDE_CODE_VERSION` in `.env` and rebuild the api image; the same variable is read at runtime
+and the assistant reports `claude_code_version_mismatch` or `claude_code_missing` in its status when the
+installed binary does not match. The api never installs Claude Code at runtime. `PLATFORM_AGENT_CLAUDE_CODE_PATH`
+names an explicit binary (rarely needed). Verify with
+`docker compose -f deploy/compose/docker-compose.prod.yml exec api pnpm --filter api workflow-builder:smoke`.
+See [deploy/compose/platform-agent/README.md](../deploy/compose/platform-agent/README.md) and
+[Workflow builder assistant](workflows.md#workflow-builder-assistant).
+
 ## Document collaboration (optional)
 
 Live co-editing, presence and inline comment threads in the document editors

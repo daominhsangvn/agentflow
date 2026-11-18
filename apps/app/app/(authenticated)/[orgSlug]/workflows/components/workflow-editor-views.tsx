@@ -1,13 +1,17 @@
 "use client";
 
 import { WorkflowDetailView } from "@repo/app/workflows/components/workflow-detail-view";
-import { WorkflowEditor } from "@repo/app/workflows/components/workflow-editor";
+import {
+  WorkflowEditor,
+  type WorkflowEditorAssistantContext,
+} from "@repo/app/workflows/components/workflow-editor";
 import { Button } from "@repo/design-system/components/ui/button";
 import { EmptyState } from "@repo/design-system/components/ui/empty-state";
 import { Link } from "@repo/navigation/link";
 import { useOrgPath } from "@repo/navigation/use-org-path";
 import { ShieldIcon } from "lucide-react";
 import { useWorkflowComputeTargetChoices } from "./use-workflow-compute-targets";
+import { WorkflowBuilderAssistant } from "./workflow-builder/workflow-builder-assistant";
 import { WORKFLOW_CONNECTIONS_SETTINGS_PATH } from "./workflow-connections-path";
 
 /**
@@ -44,6 +48,7 @@ export function WorkflowDetailPageView({
 
   return (
     <WorkflowDetailView
+      assistant={isAdmin ? renderWorkflowBuilderAssistant : undefined}
       computeTargets={computeTargets}
       connectionsSettingsPath={WORKFLOW_CONNECTIONS_SETTINGS_PATH}
       isAdmin={isAdmin}
@@ -58,9 +63,16 @@ function NewWorkflowEditor() {
 
   return (
     <WorkflowEditor
+      assistant={renderWorkflowBuilderAssistant}
       computeTargets={computeTargets}
       connectionsSettingsPath={WORKFLOW_CONNECTIONS_SETTINGS_PATH}
       isAdmin
     />
   );
+}
+
+function renderWorkflowBuilderAssistant(
+  context: WorkflowEditorAssistantContext
+) {
+  return <WorkflowBuilderAssistant context={context} />;
 }

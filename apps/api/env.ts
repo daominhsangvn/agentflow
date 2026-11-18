@@ -1,5 +1,6 @@
 import { keys as ai } from "@repo/ai/keys";
 import { keys as analytics } from "@repo/analytics/keys";
+import { claudeCodeVersionSchema } from "@repo/api/src/types/compute-target-model-provider";
 import { keys as auth } from "@repo/auth/keys";
 import { keys as collaboration } from "@repo/collaboration/server/keys";
 import { keys as database } from "@repo/database/keys";
@@ -55,6 +56,19 @@ export const env = createEnv({
      * production. Never set in prod.
      */
     TEAMS_EMULATOR_URL: z.url().optional(),
+    /**
+     * Opt-in: path to a Claude Code style settings.json for the platform agent (headless
+     * Claude Code runs; first consumer: the workflow builder assistant). Its `env` block is
+     * passed to Claude Code. Unset keeps the agent off.
+     */
+    PLATFORM_AGENT_SETTINGS_FILE: z.string().min(1).optional(),
+    /**
+     * `latest` or an exact release such as 2.1.322. Exact pins must be installed; the api
+     * never installs Claude Code at runtime.
+     */
+    PLATFORM_AGENT_CLAUDE_CODE_VERSION: claudeCodeVersionSchema.optional(),
+    /** Explicit claude binary; default: first `claude` on PATH. */
+    PLATFORM_AGENT_CLAUDE_CODE_PATH: z.string().min(1).optional(),
   },
   client: {},
   runtimeEnv: {
@@ -65,5 +79,10 @@ export const env = createEnv({
     SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN,
     SLACK_SIGNING_SECRET: process.env.SLACK_SIGNING_SECRET,
     TEAMS_EMULATOR_URL: process.env.TEAMS_EMULATOR_URL,
+    PLATFORM_AGENT_SETTINGS_FILE: process.env.PLATFORM_AGENT_SETTINGS_FILE,
+    PLATFORM_AGENT_CLAUDE_CODE_VERSION:
+      process.env.PLATFORM_AGENT_CLAUDE_CODE_VERSION,
+    PLATFORM_AGENT_CLAUDE_CODE_PATH:
+      process.env.PLATFORM_AGENT_CLAUDE_CODE_PATH,
   },
 });

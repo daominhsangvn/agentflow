@@ -15,3 +15,8 @@ node_modules
 **/playwright-report
 deploy/compose/.env
 .harness
+
+# Local assistant credentials and CA files (settings.json, certificates); the image builds need none of it
+deploy/compose/platform-agent
+# Git-ignored local workshop material: keep it out of the workflow builder knowledge bundle
+docs/workshop/ip-migration

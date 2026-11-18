@@ -32,7 +32,7 @@ import { useDeleteWorkflow, useWorkflow } from "../hooks/use-workflows";
 import { getManualRunTriggers } from "../lib/workflow-catalog";
 import type { WorkflowComputeTargetChoices } from "../lib/workflow-editor-options";
 import { describeWorkflowCaseActivity } from "../lib/workflow-labels";
-import { WorkflowEditor } from "./workflow-editor";
+import { WorkflowEditor, type WorkflowEditorProps } from "./workflow-editor";
 import { WorkflowEventHistory } from "./workflow-events-table";
 import { WorkflowRunNowDialog } from "./workflow-run-now-dialog";
 import { WorkflowRunHistory } from "./workflow-runs-table";
@@ -52,6 +52,8 @@ export type WorkflowDetailViewProps = {
   isAdmin: boolean;
   computeTargets: WorkflowComputeTargetChoices;
   connectionsSettingsPath?: string;
+  /** Optional AI assistant for the editor (admins only); absent = unchanged. */
+  assistant?: WorkflowEditorProps["assistant"];
 };
 
 /**
@@ -64,6 +66,7 @@ export function WorkflowDetailView({
   isAdmin,
   computeTargets,
   connectionsSettingsPath,
+  assistant,
 }: Readonly<WorkflowDetailViewProps>) {
   const workflow = useWorkflow(workflowId);
   const buildOrgPath = useOrgPath();
@@ -104,6 +107,7 @@ export function WorkflowDetailView({
 
   return (
     <WorkflowDetailContent
+      assistant={assistant}
       computeTargets={computeTargets}
       connectionsSettingsPath={connectionsSettingsPath}
       isAdmin={isAdmin}
@@ -117,7 +121,9 @@ function WorkflowDetailContent({
   isAdmin,
   computeTargets,
   connectionsSettingsPath,
+  assistant,
 }: Readonly<{
+  assistant: WorkflowEditorProps["assistant"];
   workflow: Workflow;
   isAdmin: boolean;
   computeTargets: WorkflowComputeTargetChoices;
@@ -227,6 +233,7 @@ function WorkflowDetailContent({
         </TabsList>
         <TabsContent className="mt-3" value={WorkflowDetailTab.Configuration}>
           <WorkflowEditor
+            assistant={assistant}
             computeTargets={computeTargets}
             connectionsSettingsPath={connectionsSettingsPath}
             isAdmin={isAdmin}
