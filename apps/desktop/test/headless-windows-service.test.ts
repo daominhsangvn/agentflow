@@ -27,7 +27,7 @@ function spec(
   programDir = PROGRAM
 ): ServiceSpec {
   return {
-    id: serviceId(projectKey),
+    id: serviceId(projectKey?.toLowerCase() ?? null),
     instanceDataDir: BASE,
     projectKey,
     nodePath: "node.exe",
@@ -98,9 +98,9 @@ function fakeDeps(options: {
 
 test("service id and display name", () => {
   assert.equal(serviceId(null), "agentflow-agent");
-  assert.equal(serviceId("PRO-1"), "agentflow-agent-pro-1");
+  assert.equal(serviceId("an-pro-1"), "agentflow-agent-an-pro-1");
   assert.equal(serviceDisplayName(null), "AgentFlow Agent");
-  assert.equal(serviceDisplayName("PRO-1"), "AgentFlow Agent (PRO-1)");
+  assert.equal(serviceDisplayName("an-pro-1"), "AgentFlow Agent (an-pro-1)");
 });
 
 test("personal service xml has project, env and escapes", () => {
@@ -223,19 +223,19 @@ test("programFolderWarning", () => {
   assert.equal(programFolderWarning("/opt/agent", dirs), null);
 });
 
-test("a server-keyed Agent gets its own service id, name and --server argument", () => {
-  const id = serviceId("PRO-1", "host-3002");
-  assert.equal(id, "agentflow-agent-pro-1-host-3002");
-  assert.equal(
-    serviceDisplayName("PRO-1", "host-3002"),
-    "AgentFlow Agent (PRO-1 @ host-3002)"
-  );
+test("each named Agent gets its own service id, name and --name argument", () => {
+  const id = serviceId("an-pro-1");
+  const other = serviceId("binh-pro-1");
+  assert.notEqual(id, other);
+  assert.notEqual(id, serviceId(null));
+  assert.notEqual(other, serviceId(null));
   const xml = renderServiceXml({
     ...spec("PRO-1"),
     id,
-    server: "host-3002",
+    agentName: "an-pro-1",
   });
-  assert.ok(xml.includes("--project PRO-1 --server host-3002"));
+  assert.ok(xml.includes("--project PRO-1 --name an-pro-1"));
+  assert.ok(xml.includes("AgentFlow Agent (an-pro-1)"));
   assert.ok(xml.includes(`value="${id}"`));
-  assert.ok(!renderServiceXml(spec("PRO-1")).includes("--server"));
+  assert.ok(!renderServiceXml(spec("PRO-1")).includes("--name"));
 });

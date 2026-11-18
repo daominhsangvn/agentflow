@@ -50,19 +50,40 @@ import {
 export const COMPUTE_TARGET_STALE_MS = 90_000;
 export const DESKTOP_SECURITY_UPGRADE_PROTOCOL_VERSION = 1;
 
-export type ComputeTargetGatewayConflict = "gateway_conflict";
+export const ComputeTargetConflict = {
+  Gateway: "gateway_conflict",
+  MachineNameInUse: "machine_name_in_use",
+} as const;
+export type ComputeTargetConflict =
+  (typeof ComputeTargetConflict)[keyof typeof ComputeTargetConflict];
+
+/** Distributed so the per-conflict type guards narrow the remaining success branch. */
+export type ComputeTargetResult<T> =
+  | DomainResult<T, ComputeTargetGatewayConflict>
+  | DomainResult<T, ComputeTargetMachineNameInUse>;
+
+export type ComputeTargetGatewayConflict = typeof ComputeTargetConflict.Gateway;
+export type ComputeTargetMachineNameInUse =
+  typeof ComputeTargetConflict.MachineNameInUse;
 
 export function isComputeTargetGatewayConflictResult(
-  result: DomainResult<unknown, ComputeTargetGatewayConflict>
+  result: DomainResult<unknown, ComputeTargetConflict>
 ): result is { ok: false; error: ComputeTargetGatewayConflict } {
-  return !result.ok && result.error === "gateway_conflict";
+  return !result.ok && result.error === ComputeTargetConflict.Gateway;
 }
 
-function computeTargetGatewayConflictResult<T>(): DomainResult<
-  T,
-  ComputeTargetGatewayConflict
-> {
-  return Result.err("gateway_conflict");
+export function isComputeTargetMachineNameInUseResult(
+  result: DomainResult<unknown, ComputeTargetConflict>
+): result is { ok: false; error: ComputeTargetMachineNameInUse } {
+  return !result.ok && result.error === ComputeTargetConflict.MachineNameInUse;
+}
+
+function computeTargetGatewayConflictResult<T>(): ComputeTargetResult<T> {
+  return Result.err(ComputeTargetConflict.Gateway);
+}
+
+function computeTargetMachineNameInUseResult<T>(): ComputeTargetResult<T> {
+  return Result.err(ComputeTargetConflict.MachineNameInUse);
 }
 
 type ComputeTargetRecord = {
@@ -535,9 +556,7 @@ async function updateOwnedComputeTargetInTransaction({
   organizationId: string;
   userId: string;
   payload: UpdateComputeTargetInput;
-}): Promise<
-  DomainResult<ComputeTargetRecord | null, ComputeTargetGatewayConflict>
-> {
+}): Promise<ComputeTargetResult<ComputeTargetRecord | null>> {
   if (
     await hasGatewayConflictForOwnedUpdate({
       tx,
@@ -583,7 +602,7 @@ export const computeTargetsService = {
     organizationId: string,
     userId: string,
     payload: RegisterComputeTargetInput
-  ): Promise<DomainResult<ComputeTarget, ComputeTargetGatewayConflict>> {
+  ): Promise<ComputeTargetResult<ComputeTarget>> {
     return withResultSpan(
       "compute_target.register",
       { [AfAttribute.OrgId]: organizationId, [AfAttribute.UserId]: userId },
@@ -676,22 +695,23 @@ export const computeTargetsService = {
     userId: string,
     payload: UpdateComputeTargetInput,
     clerkUserId?: string | null
-  ): Promise<DomainResult<ComputeTarget | null, ComputeTargetGatewayConflict>> {
+  ): Promise<ComputeTargetResult<ComputeTarget | null>> {
     try {
-      const updateResult: DomainResult<
-        ComputeTargetRecord | null,
-        ComputeTargetGatewayConflict
-      > = await withDb.tx((tx) =>
-        updateOwnedComputeTargetInTransaction({
-          tx,
-          id,
-          organizationId,
-          userId,
-          payload,
-        })
-      );
+      const updateResult: ComputeTargetResult<ComputeTargetRecord | null> =
+        await withDb.tx((tx) =>
+          updateOwnedComputeTargetInTransaction({
+            tx,
+            id,
+            organizationId,
+            userId,
+            payload,
+          })
+        );
 
       if (isComputeTargetGatewayConflictResult(updateResult)) {
+        return updateResult;
+      }
+      if (isComputeTargetMachineNameInUseResult(updateResult)) {
         return updateResult;
       }
       if (!updateResult.value) {
@@ -730,6 +750,9 @@ export const computeTargetsService = {
       }
       if (isGatewayUniqueConstraintViolation(error)) {
         return computeTargetGatewayConflictResult<ComputeTarget | null>();
+      }
+      if (isMachineNameUniqueConstraintViolation(error)) {
+        return computeTargetMachineNameInUseResult<ComputeTarget | null>();
       }
       throw error;
     }
@@ -1172,6 +1195,27 @@ function isGatewayUniqueConstraintTarget(target: unknown): boolean {
   return false;
 }
 
+const COMPUTE_TARGET_MACHINE_NAME_UNIQUE_TARGETS = new Set([
+  "compute_targets_user_id_machine_name_key",
+  "machineName",
+  "machine_name",
+]);
+
+function isMachineNameUniqueConstraintViolation(error: unknown): boolean {
+  const target = getPrismaP2002Target(error);
+  return isMachineNameUniqueConstraintTarget(target);
+}
+
+function isMachineNameUniqueConstraintTarget(target: unknown): boolean {
+  if (typeof target === "string") {
+    return COMPUTE_TARGET_MACHINE_NAME_UNIQUE_TARGETS.has(target);
+  }
+  if (Array.isArray(target)) {
+    return target.some(isMachineNameUniqueConstraintTarget);
+  }
+  return false;
+}
+
 const COMPUTE_TARGET_ONLINE_ATTRIBUTE = "af.compute_target.online";
 /** Runs `fn` in a span and marks the span failed when it returns a failure Result. */
 function withResultSpan<T, E>(
@@ -1192,16 +1236,72 @@ function withResultSpan<T, E>(
   });
 }
 
+function isOnlineWithOtherGateway(
+  target: { gatewayId?: string | null; isOnline: boolean; lastSeenAt: Date },
+  gatewayId: string | undefined,
+  now: Date
+): boolean {
+  const staleBefore = new Date(now.getTime() - COMPUTE_TARGET_STALE_MS);
+  return (
+    Boolean(target.gatewayId) &&
+    target.gatewayId !== gatewayId &&
+    target.isOnline &&
+    target.lastSeenAt >= staleBefore
+  );
+}
+
+async function reclaimMachineNameTarget({
+  db,
+  machineTarget,
+  payload,
+  capabilities,
+  now,
+}: {
+  db: TransactionClient;
+  machineTarget: ComputeTargetRecord;
+  payload: RegisterComputeTargetInput;
+  capabilities: JsonObject;
+  now: Date;
+}): Promise<ComputeTargetResult<ComputeTargetRecord>> {
+  if (isOnlineWithOtherGateway(machineTarget, payload.gatewayId, now)) {
+    return computeTargetMachineNameInUseResult<ComputeTargetRecord>();
+  }
+  const nextFields = {
+    gatewayId: payload.gatewayId,
+    platform: payload.platform,
+    capabilities,
+    supportedOperations: payload.supportedOperations,
+  };
+  const shouldInvalidateHealthCheck = hasMaterialHealthCheckFieldChanged(
+    machineTarget,
+    nextFields
+  );
+  const updated = await db.computeTarget.update({
+    where: { id: machineTarget.id },
+    data: {
+      ...nextFields,
+      isOnline: true,
+      lastSeenAt: now,
+    },
+  });
+  if (shouldInvalidateHealthCheck) {
+    await db.computeTargetHealthCheck.deleteMany({
+      where: { computeTargetId: machineTarget.id },
+    });
+  }
+  return Result.ok<ComputeTargetRecord, ComputeTargetGatewayConflict>(updated);
+}
+
 async function registerComputeTarget(
   organizationId: string,
   userId: string,
   payload: RegisterComputeTargetInput
-): Promise<DomainResult<ComputeTarget, ComputeTargetGatewayConflict>> {
+): Promise<ComputeTargetResult<ComputeTarget>> {
   const now = new Date();
   const capabilities = buildCapabilitiesPayload(payload);
 
   if (payload.gatewayId) {
-    let target: DomainResult<ComputeTargetRecord, ComputeTargetGatewayConflict>;
+    let target: ComputeTargetResult<ComputeTargetRecord>;
     try {
       target = await withDb.tx(async (db) => {
         const conflictingGateway = await db.computeTarget.findFirst({
@@ -1260,30 +1360,13 @@ async function registerComputeTarget(
           },
         });
         if (machineTarget) {
-          const nextFields = {
-            gatewayId: payload.gatewayId,
-            platform: payload.platform,
+          return reclaimMachineNameTarget({
+            db,
+            machineTarget,
+            payload,
             capabilities,
-            supportedOperations: payload.supportedOperations,
-          };
-          const shouldInvalidateHealthCheck =
-            hasMaterialHealthCheckFieldChanged(machineTarget, nextFields);
-          const updated = await db.computeTarget.update({
-            where: { id: machineTarget.id },
-            data: {
-              ...nextFields,
-              isOnline: true,
-              lastSeenAt: now,
-            },
+            now,
           });
-          if (shouldInvalidateHealthCheck) {
-            await db.computeTargetHealthCheck.deleteMany({
-              where: { computeTargetId: machineTarget.id },
-            });
-          }
-          return Result.ok<ComputeTargetRecord, ComputeTargetGatewayConflict>(
-            updated
-          );
         }
 
         await db.computeTargetHealthCheck.deleteMany({
@@ -1332,7 +1415,7 @@ async function registerComputeTarget(
       throw error;
     }
 
-    if (isComputeTargetGatewayConflictResult(target)) {
+    if (!target.ok) {
       return target;
     }
 

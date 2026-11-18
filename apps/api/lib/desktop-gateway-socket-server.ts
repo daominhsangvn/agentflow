@@ -19,6 +19,7 @@ import { checkPersonalAgentProject } from "../app/compute-targets/personal-agent
 import {
   computeTargetsService,
   isComputeTargetGatewayConflictResult,
+  isComputeTargetMachineNameInUseResult,
 } from "../app/compute-targets/service";
 import { usersService } from "../app/users/service";
 import { getDesktopManagedPopRequestFailure } from "./auth/desktop-managed-pop";
@@ -357,11 +358,13 @@ export async function handleSocketHello(
       log.warn("desktop.gateway.hello.personal_project_not_found", {
         socketId: socket.id,
         organizationId: authContext.organizationId,
+        userId: authContext.userId,
       });
     } else {
       log.warn("desktop.gateway.hello.personal_project_check_failed", {
         socketId: socket.id,
         organizationId: authContext.organizationId,
+        userId: authContext.userId,
         reason: projectStage.reason,
         error: projectStage.cause,
       });
@@ -441,6 +444,24 @@ export async function handleSocketHello(
       socket.disconnect(true);
       return;
     }
+    if (isComputeTargetMachineNameInUseResult(updated)) {
+      log.warn("desktop.gateway.hello.machine_name_in_use", {
+        reason: "machine_name_in_use",
+        socketId: socket.id,
+        organizationId: authContext.organizationId,
+        userId: authContext.userId,
+        computeTargetId: targetId ?? null,
+        machineName: payload.machineName,
+      });
+      socket.emit(
+        "desktop.hello.nack",
+        toEnvelope<DesktopHelloNackPayload>({
+          reason: DesktopHelloNackReason.MachineNameInUse,
+        })
+      );
+      socket.disconnect(true);
+      return;
+    }
     if (!updated.value) {
       targetId = undefined;
     }
@@ -488,6 +509,24 @@ export async function handleSocketHello(
       return;
     }
     if (isComputeTargetGatewayConflictResult(target)) {
+      socket.disconnect(true);
+      return;
+    }
+    if (isComputeTargetMachineNameInUseResult(target)) {
+      log.warn("desktop.gateway.hello.machine_name_in_use", {
+        reason: "machine_name_in_use",
+        socketId: socket.id,
+        organizationId: authContext.organizationId,
+        userId: authContext.userId,
+        computeTargetId: targetId ?? null,
+        machineName: payload.machineName,
+      });
+      socket.emit(
+        "desktop.hello.nack",
+        toEnvelope<DesktopHelloNackPayload>({
+          reason: DesktopHelloNackReason.MachineNameInUse,
+        })
+      );
       socket.disconnect(true);
       return;
     }

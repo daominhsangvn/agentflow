@@ -1,6 +1,6 @@
 /**
  * @file headless-uninstall.ts
- * @description `node runner.mjs uninstall [--project <key> [--server <host>]]`: removes the
+ * @description `node runner.mjs uninstall [--project <key>] [--name <agent name>]`: removes the
  * Agent's Windows service and, when asked, its local settings and data.
  * Kept apart from headless-main.ts so it can be unit tested with injected
  * dependencies. See docs/runner.md "Option D: Windows".
@@ -14,9 +14,9 @@ import { PERSONAL_DATA_DIR_NAME } from "./headless-env.js";
 import {
   defaultInstanceDirFs,
   type InstanceDirFs,
-  parsePersonalDirName,
-  personalAgentOptions,
-  resolvePersonalInstance,
+  listPersonalAgents,
+  NAME_OPTION,
+  resolvePersonalAgent,
 } from "./headless-instance-dir.js";
 import { isInstanceLockHeld } from "./headless-instance-lock.js";
 import {
@@ -45,17 +45,17 @@ export async function runUninstall(
   options: {
     baseDataDir: string;
     projectKey: string | null;
-    server?: string | null;
+    agentName?: string | null;
   },
   deps: UninstallDeps
 ): Promise<number> {
-  const { baseDataDir, projectKey } = options;
+  const { baseDataDir } = options;
   const target = uninstallTarget(options, deps);
   if ("error" in target) {
     deps.say(target.error);
     return 1;
   }
-  const { dir, id } = target;
+  const { dir, id, personal } = target;
   if (deps.isWindows) {
     const outcome = await deps.removeService({
       id,
@@ -73,7 +73,7 @@ export async function runUninstall(
   const wantsDelete = await deps.confirm(
     `Delete this Agent's settings and data (${dir})? AgentFlow will see a new computer at the next setup. yes/no`
   );
-  if (wantsDelete && !deleteInstanceData(dir, baseDataDir, projectKey, deps)) {
+  if (wantsDelete && !deleteInstanceData(dir, baseDataDir, personal, deps)) {
     return 1;
   }
   deps.say(
@@ -104,7 +104,7 @@ export function defaultUninstallDeps(
 function deleteInstanceData(
   dir: string,
   baseDataDir: string,
-  projectKey: string | null,
+  personal: boolean,
   deps: UninstallDeps
 ): boolean {
   if (deps.isLockHeld(dir)) {
@@ -113,7 +113,7 @@ function deleteInstanceData(
     );
     return false;
   }
-  if (projectKey) {
+  if (personal) {
     deps.removeDir(dir);
     deps.say(`Deleted ${dir}`);
     return true;
@@ -133,14 +133,11 @@ function deleteInstanceData(
     }
   }
   deps.say(`Deleted the Agent data in ${dir}`);
-  const remaining = deps.listDir(
-    path.join(baseDataDir, PERSONAL_DATA_DIR_NAME)
-  );
+  const remaining = listPersonalAgents(baseDataDir, deps);
   if (remaining.length > 0) {
-    const commands = remaining.map((name) => {
-      const parsed = parsePersonalDirName(name);
-      return `uninstall-runner.cmd ${personalAgentOptions(parsed.projectKey, parsed.server)}`;
-    });
+    const commands = remaining.map(
+      (agent) => `uninstall-runner.cmd ${NAME_OPTION} ${agent.slug}`
+    );
     deps.say(
       `Personal Agents still installed here; uninstall each with: ${commands.join(", ")}`
     );
@@ -152,26 +149,28 @@ function uninstallTarget(
   options: {
     baseDataDir: string;
     projectKey: string | null;
-    server?: string | null;
+    agentName?: string | null;
   },
   deps: UninstallDeps
-): { dir: string; id: string } | { error: string } {
+): { dir: string; id: string; personal: boolean } | { error: string } {
   const { baseDataDir, projectKey } = options;
-  if (!projectKey) {
-    return { dir: baseDataDir, id: serviceId(null) };
+  const name = options.agentName ?? null;
+  if (!(projectKey || name)) {
+    return { dir: baseDataDir, id: serviceId(null), personal: false };
   }
-  const result = resolvePersonalInstance(
-    { baseDataDir, projectKey, server: options.server ?? null },
-    deps
-  );
+  const result = resolvePersonalAgent({ baseDataDir, projectKey, name }, deps);
   if (!result.ok) {
     return { error: result.error };
   }
-  const { instance } = result;
+  const { agent } = result;
+  if (agent === null) {
+    return {
+      error: `No personal Agent of ${projectKey} is set up on this computer.`,
+    };
+  }
   return {
-    dir: instance.dataDir,
-    id:
-      deps.installedServiceId(instance.dataDir) ??
-      serviceId(projectKey, instance.server),
+    dir: agent.dataDir,
+    id: deps.installedServiceId(agent.dataDir) ?? serviceId(agent.slug),
+    personal: true,
   };
 }

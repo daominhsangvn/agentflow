@@ -4,7 +4,7 @@
  * holds the runner's gateway identity (its compute target in AgentFlow), job
  * store and loop tokens; two processes on one directory would register as
  * the same computer and finalize each other's loops. It is not a limit on
- * runners: each personal runner has its own directory (project and server), and another
+ * runners: each personal runner has its own directory (agent name, --name), and another
  * auto runner only needs its own AGENTFLOW_RUNNER_DATA_DIR.
  */
 
@@ -44,7 +44,7 @@ export function acquireInstanceLock(
     if (holder !== null && holder !== pid && isRunning(holder)) {
       return {
         ok: false,
-        error: `Another runner (process ${holder}) already uses ${dataDir}, and two runners on one data directory would be the same computer in AgentFlow. Stop it, or give this one its own data directory (AGENTFLOW_RUNNER_DATA_DIR) or project (--project) / server (--server).`,
+        error: `Another runner (process ${holder}) already uses ${dataDir}, and two runners on one data directory would be the same computer in AgentFlow. Stop it, or give this one its own data directory (AGENTFLOW_RUNNER_DATA_DIR) or agent name (--name).`,
       };
     }
     fs.rmSync(file, { force: true });

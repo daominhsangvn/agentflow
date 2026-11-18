@@ -14,6 +14,7 @@ import {
   defaultRunnerName,
   defaultWorkspaceDir,
   needsSetup,
+  type PersonalAgentSetup,
   readRunnerConfigFile,
   renderRunnerConfig,
   runnerConfigFile,
@@ -257,12 +258,12 @@ test("askRunnerSettings in personal mode asks for the project instead of a works
       API_URL,
       API_KEY,
       "pro-1",
+      "",
       path.join(projectDir, "missing"),
       projectDir,
       "maybe",
       "",
       "yes",
-      "",
       "Dev (LeaveDesk, An)",
       "",
     ]);
@@ -341,8 +342,8 @@ test("askRunnerSettings in personal mode: none clears the role and a role with #
         API_URL,
         API_KEY,
         "pro-1",
-        projectDir,
         "",
+        projectDir,
         "",
         "",
         ...roleAnswers,
@@ -369,6 +370,117 @@ test("askRunnerSettings in personal mode: none clears the role and a role with #
     const retried = await run(["Dev # An", "Dev (An)"]);
     assert.equal(retried.result[HeadlessRunnerEnv.RunnerRole], "Dev (An)");
     assert.equal(retried.said.length, 3);
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+function personalContext(
+  answers: string[],
+  personalAgents: PersonalAgentSetup,
+  current: Record<string, string | undefined> = {}
+) {
+  const said: string[] = [];
+  const { ask, questions } = scriptedAsk(answers);
+  const context: SetupContext = {
+    ask,
+    say: (line) => said.push(line),
+    current,
+    username: "an",
+    homeDir: HOME,
+    personalAgents,
+  };
+  return { context, said, questions };
+}
+
+test("personal setup asks the name again when checkName refuses it", async () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-name-"));
+  try {
+    const { context, said } = personalContext(
+      [
+        API_URL,
+        API_KEY,
+        "pro-1",
+        "taken",
+        "free-one",
+        projectDir,
+        "",
+        "",
+        "",
+        "",
+      ],
+      {
+        list: () => [],
+        checkName: (_key, name) => (name === "taken" ? "name is taken" : null),
+        load: () => null,
+      }
+    );
+    const result = await askRunnerSettings(context, RunnerMode.Personal);
+    assert.equal(result[HeadlessRunnerEnv.RunnerName], "free-one");
+    assert.ok(said.includes("  name is taken"));
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("personal setup pre-fills folder and port from the loaded Agent", async () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-load-"));
+  try {
+    const { context, questions } = personalContext(
+      [API_URL, API_KEY, "pro-1", "an-pro-1", "", "", "", "", ""],
+      {
+        list: () => ["an-pro-1"],
+        checkName: () => null,
+        load: () => ({
+          [HeadlessRunnerEnv.ProjectDir]: projectDir,
+          [HeadlessRunnerEnv.GatewayPort]: "4100",
+        }),
+      }
+    );
+    const result = await askRunnerSettings(context, RunnerMode.Personal);
+    assert.equal(result[HeadlessRunnerEnv.ProjectDir], projectDir);
+    assert.equal(result[HeadlessRunnerEnv.GatewayPort], "4100");
+    const folder = questions.find((entry) =>
+      entry.question.startsWith("Project folder")
+    );
+    assert.equal(folder?.shownDefault, projectDir);
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("a new personal Agent defaults to a random port even when current has one", async () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-new-"));
+  try {
+    const { context, questions } = personalContext(
+      [API_URL, API_KEY, "pro-1", "brand-new", projectDir, "", "", "", ""],
+      { list: () => [], checkName: () => null, load: () => null },
+      { [HeadlessRunnerEnv.GatewayPort]: "4100" }
+    );
+    const result = await askRunnerSettings(context, RunnerMode.Personal);
+    const port = questions.find((entry) =>
+      entry.question.startsWith("Local gateway port")
+    );
+    assert.equal(port?.shownDefault, "random");
+    assert.equal(result[HeadlessRunnerEnv.GatewayPort], "");
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("personal setup says which Agents of the key exist", async () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-list-"));
+  try {
+    const { context, said } = personalContext(
+      [API_URL, API_KEY, "pro-1", "another", projectDir, "", "", "", ""],
+      { list: () => ["a", "b"], checkName: () => null, load: () => null }
+    );
+    await askRunnerSettings(context, RunnerMode.Personal);
+    assert.ok(
+      said.some((line) =>
+        line.includes("PRO-1 has personal Agents on this computer: a, b.")
+      )
+    );
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }

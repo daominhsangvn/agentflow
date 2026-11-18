@@ -1,130 +1,226 @@
 /**
  * @file headless-instance-dir.ts
- * @description Which data directory a personal Agent uses. One per project
- * key and AgentFlow server: the first Agent of a key keeps `personal/<KEY>`,
- * a later Agent of the same key for another server gets `personal/<KEY>@<slug>`.
- * Pure helpers; file system reads are injected through InstanceDirFs.
+ * @description Which data directory a personal Agent uses. One per agent name:
+ * `<data dir>/personal/<agent slug>`, flat. The project an Agent belongs to is
+ * the AGENTFLOW_RUNNER_PROJECT_KEY of that directory's runner.env. Pure
+ * helpers; file system reads are injected through InstanceDirFs.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 
-import { HeadlessRunnerEnv, PERSONAL_DATA_DIR_NAME } from "./headless-env.js";
-import { readRunnerConfigFile, runnerConfigFile } from "./headless-setup.js";
+import {
+  HeadlessRunnerEnv,
+  normalizeProjectKey,
+  PERSONAL_DATA_DIR_NAME,
+} from "./headless-env.js";
+import {
+  asciiName,
+  readRunnerConfigFile,
+  runnerConfigFile,
+} from "./headless-setup.js";
 
-export const SERVER_OPTION = "--server";
+export const NAME_OPTION = "--name";
 const PROJECT_OPTION_NAME = "--project";
-const SERVER_SLUG_RE = /^[a-z0-9][a-z0-9.-]*$/;
-const SERVER_SEPARATOR = "@";
+const AGENT_SLUG_MAX_LENGTH = 40;
+const DIGITS_RE = /^\d+$/;
+const EDGE_DASHES_RE = /^-+|-+$/g;
+
+export type AgentSettings = {
+  projectKey: string | null;
+  runnerName: string | null;
+};
 
 export type InstanceDirFs = {
   exists(dir: string): boolean;
   /** Entry names of a directory; [] when it does not exist. */
   listDir(dir: string): string[];
-  /** AGENTFLOW_API_URL of `<dir>/runner.env`, null when absent. */
-  readApiUrl(dir: string): string | null;
+  /** Project key and runner name of `<dir>/runner.env`; null fields when absent. */
+  readAgentSettings(dir: string): AgentSettings;
 };
 
-export type PersonalInstance = {
+export type PersonalAgent = {
+  slug: string;
+  projectKey: string | null;
+  runnerName: string | null;
   dataDir: string;
-  projectKey: string;
-  /** Non-null only for a `KEY@slug` dir: what must be passed as --server. */
-  server: string | null;
 };
 
-export type PersonalInstanceResult =
-  | { ok: true; instance: PersonalInstance }
+export type ResolvePersonalAgentResult =
+  | { ok: true; agent: PersonalAgent | null }
   | { ok: false; error: string };
 
-/** A short, file-name safe name of an AgentFlow server from its API URL. */
-export function serverSlug(apiUrl: string): string | null {
-  let url: URL;
-  try {
-    url = new URL(apiUrl.trim());
-  } catch {
-    // observability: parse fallback — an invalid API URL has no slug
-    return null;
-  }
-  const host = url.hostname
+export type ChooseAgentResult =
+  | { ok: true; agent: PersonalAgent; picked: boolean }
+  | { ok: "ask"; candidates: PersonalAgent[] }
+  | { ok: false; error: string };
+
+/** The folder-safe slug of an agent name; null when it has no letter or digit. */
+export function agentNameSlug(name: string): string | null {
+  const slug = asciiName(name)
     .toLowerCase()
-    .replaceAll(/[[\]]/g, "")
-    .replaceAll(":", "-");
-  const slug = url.port ? `${host}-${url.port}` : host;
-  return SERVER_SLUG_RE.test(slug) ? slug : null;
+    .slice(0, AGENT_SLUG_MAX_LENGTH)
+    .replaceAll(EDGE_DASHES_RE, "");
+  return slug === "" ? null : slug;
 }
 
-/** The slug of a --server value: a host, host:port, slug or full API URL. */
-export function normalizeServerOption(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  return serverSlug(trimmed.includes("://") ? trimmed : `http://${trimmed}`);
-}
-
-export function personalInstanceDir(
-  baseDataDir: string,
-  projectKey: string,
-  server: string | null
+/**
+ * The default of the setup Name question: the saved name when its slug is the
+ * slug of the typed `--name` (the Agent already exists, keep its spelling),
+ * else the typed name.
+ */
+export function setupNameDefault(
+  typedName: string,
+  savedName: string | undefined
 ): string {
-  const name = server
-    ? `${projectKey}${SERVER_SEPARATOR}${server}`
-    : projectKey;
-  return path.join(baseDataDir, PERSONAL_DATA_DIR_NAME, name);
-}
-
-export function parsePersonalDirName(name: string): {
-  projectKey: string;
-  server: string | null;
-} {
-  const at = name.indexOf(SERVER_SEPARATOR);
-  if (at < 0) {
-    return { projectKey: name, server: null };
+  const saved = savedName?.trim();
+  if (saved && agentNameSlug(saved) === agentNameSlug(typedName)) {
+    return saved;
   }
-  return { projectKey: name.slice(0, at), server: name.slice(at + 1) };
+  return typedName;
 }
 
-/** `--project K` plus ` --server S` when the Agent is keyed by server. */
+export function personalAgentDir(baseDataDir: string, slug: string): string {
+  return path.join(baseDataDir, PERSONAL_DATA_DIR_NAME, slug);
+}
+
+/** `--name slug` when there is a slug, else `--project K` (used in hints). */
 export function personalAgentOptions(
   projectKey: string,
-  server: string | null
+  slug: string | null
 ): string {
-  const project = `${PROJECT_OPTION_NAME} ${projectKey}`;
-  return server ? `${project} ${SERVER_OPTION} ${server}` : project;
+  return slug
+    ? `${NAME_OPTION} ${slug}`
+    : `${PROJECT_OPTION_NAME} ${projectKey}`;
 }
 
-export function resolvePersonalInstance(
-  options: { baseDataDir: string; projectKey: string; server: string | null },
+/** The personal Agents set up on this computer, sorted by slug. */
+export function listPersonalAgents(
+  baseDataDir: string,
   fsApi: InstanceDirFs
-): PersonalInstanceResult {
-  if (options.server) {
-    return resolveWithServer(options, options.server, fsApi);
+): PersonalAgent[] {
+  const root = path.join(baseDataDir, PERSONAL_DATA_DIR_NAME);
+  return fsApi
+    .listDir(root)
+    .filter((entry) => agentNameSlug(entry) === entry)
+    .map((slug) => ({ slug, dataDir: path.join(root, slug) }))
+    .filter((entry) => fsApi.exists(entry.dataDir))
+    .sort((a, b) => a.slug.localeCompare(b.slug))
+    .map((entry) => ({ ...entry, ...fsApi.readAgentSettings(entry.dataDir) }));
+}
+
+export function agentsOfProject(
+  agents: PersonalAgent[],
+  projectKey: string
+): PersonalAgent[] {
+  return agents.filter((agent) => agent.projectKey === projectKey);
+}
+
+export function findPersonalAgent(
+  baseDataDir: string,
+  slug: string,
+  fsApi: InstanceDirFs
+): PersonalAgent | null {
+  return (
+    listPersonalAgents(baseDataDir, fsApi).find(
+      (agent) => agent.slug === slug
+    ) ?? null
+  );
+}
+
+export function resolvePersonalAgent(
+  options: {
+    baseDataDir: string;
+    projectKey: string | null;
+    name: string | null;
+  },
+  fsApi: InstanceDirFs
+): ResolvePersonalAgentResult {
+  if (options.name !== null) {
+    return resolveByName(options, options.name, fsApi);
   }
-  return resolveWithoutServer(options, fsApi);
+  if (options.projectKey === null) {
+    return { ok: true, agent: null };
+  }
+  return resolveByProject(options.baseDataDir, options.projectKey, fsApi);
 }
 
-/** Where setup stores an Agent that talks to apiUrl. */
-export function personalSetupTarget(
-  options: { baseDataDir: string; projectKey: string; apiUrl: string },
-  fsApi: InstanceDirFs
-): PersonalInstance {
-  const { baseDataDir, projectKey } = options;
-  const legacy = personalInstanceDir(baseDataDir, projectKey, null);
-  const legacyInstance = { dataDir: legacy, projectKey, server: null };
-  const slug = serverSlug(options.apiUrl);
+/**
+ * Which of a key's Agents starts. One Agent is used as is. With several, a
+ * terminal picks the single one not running or asks; without a terminal the
+ * choice must be explicit (--name), so a unit never starts another Agent.
+ */
+export function chooseAgentToStart(
+  projectKey: string,
+  agents: PersonalAgent[],
+  isRunning: (dataDir: string) => boolean,
+  interactive: boolean
+): ChooseAgentResult {
+  if (agents.length === 1) {
+    return { ok: true, agent: agents[0], picked: false };
+  }
+  if (!interactive) {
+    const choices = agents
+      .map((agent) => {
+        const running = isRunning(agent.dataDir) ? " (running)" : "";
+        return `${NAME_OPTION} ${agent.slug}${running}`;
+      })
+      .join(" or ");
+    return {
+      ok: false,
+      error: `Several personal Agents of ${projectKey} are set up on this computer: start one with ${choices}`,
+    };
+  }
+  const free = agents.filter((agent) => !isRunning(agent.dataDir));
+  if (free.length === 0) {
+    const names = agents.map((agent) => agent.slug).join(", ");
+    return {
+      ok: false,
+      error: `Every personal Agent of ${projectKey} on this computer is already running: ${names}`,
+    };
+  }
+  if (free.length === 1) {
+    return { ok: true, agent: free[0], picked: true };
+  }
+  return { ok: "ask", candidates: free };
+}
+
+/** A 1-based number or a name (compared by slug) from the candidates. */
+export function parseAgentChoice(
+  answer: string,
+  candidates: PersonalAgent[]
+): PersonalAgent | null {
+  const text = answer.trim();
+  if (DIGITS_RE.test(text)) {
+    return candidates[Number(text) - 1] ?? null;
+  }
+  const slug = agentNameSlug(text);
   if (slug === null) {
-    return legacyInstance;
+    return null;
   }
-  const keyed = personalInstanceDir(baseDataDir, projectKey, slug);
-  const keyedInstance = { dataDir: keyed, projectKey, server: slug };
-  if (fsApi.exists(keyed)) {
-    return keyedInstance;
+  return candidates.find((agent) => agent.slug === slug) ?? null;
+}
+
+/** An error text when `name` cannot be the name of an Agent of `projectKey`; else null. */
+export function checkPersonalAgentName(
+  baseDataDir: string,
+  projectKey: string,
+  name: string,
+  fsApi: InstanceDirFs
+): string | null {
+  const slug = agentNameSlug(name);
+  if (slug === null) {
+    return "must contain a letter or digit (it names this Agent's folder)";
   }
-  const legacyUrl = fsApi.readApiUrl(legacy);
-  if (legacyUrl === null || serverSlug(legacyUrl) === slug) {
-    return legacyInstance;
+  const existing = findPersonalAgent(baseDataDir, slug, fsApi);
+  if (
+    existing !== null &&
+    existing.projectKey !== null &&
+    existing.projectKey !== projectKey
+  ) {
+    return `"${name}" is already the name of a personal Agent of ${existing.projectKey} on this computer: choose another name`;
   }
-  return keyedInstance;
+  return null;
 }
 
 export function defaultInstanceDirFs(): InstanceDirFs {
@@ -138,73 +234,80 @@ export function defaultInstanceDirFs(): InstanceDirFs {
         return [];
       }
     },
-    readApiUrl: (dir) => {
+    readAgentSettings: (dir) => {
       try {
         const config = readRunnerConfigFile(runnerConfigFile(dir));
-        return config[HeadlessRunnerEnv.ApiUrl]?.trim() || null;
+        return {
+          projectKey: normalizeProjectKey(
+            config[HeadlessRunnerEnv.ProjectKey] ?? ""
+          ),
+          runnerName: config[HeadlessRunnerEnv.RunnerName]?.trim() || null,
+        };
       } catch {
-        // observability: parse fallback — an unreadable config has no API URL
-        return null;
+        // observability: parse fallback — an unreadable config has no settings
+        return { projectKey: null, runnerName: null };
       }
     },
   };
 }
 
-function resolveWithServer(
-  options: { baseDataDir: string; projectKey: string },
-  server: string,
+function resolveByName(
+  options: { baseDataDir: string; projectKey: string | null },
+  name: string,
   fsApi: InstanceDirFs
-): PersonalInstanceResult {
-  const { baseDataDir, projectKey } = options;
-  const keyed = personalInstanceDir(baseDataDir, projectKey, server);
-  if (fsApi.exists(keyed)) {
-    return { ok: true, instance: { dataDir: keyed, projectKey, server } };
-  }
-  const legacy = personalInstanceDir(baseDataDir, projectKey, null);
-  if (
-    fsApi.exists(legacy) &&
-    serverSlug(fsApi.readApiUrl(legacy) ?? "") === server
-  ) {
+): ResolvePersonalAgentResult {
+  const slug = agentNameSlug(name);
+  if (slug === null) {
     return {
-      ok: true,
-      instance: { dataDir: legacy, projectKey, server: null },
+      ok: false,
+      error: `--name needs an agent name with a letter or digit, got "${name}"`,
     };
   }
-  const command = personalAgentOptions(projectKey, server);
-  return {
-    ok: false,
-    error: `No personal Agent of ${projectKey} for ${server} is set up on this computer: run "node runner.mjs setup ${command}" (Windows: setup-runner.cmd ${command})`,
-  };
+  const agents = listPersonalAgents(options.baseDataDir, fsApi);
+  const agent = agents.find((entry) => entry.slug === slug) ?? null;
+  if (agent === null) {
+    const known = agents.map((entry) => `${NAME_OPTION} ${entry.slug}`);
+    const choices =
+      known.length > 0 ? `; its personal Agents: ${known.join(", ")}` : "";
+    return {
+      ok: false,
+      error: `No personal Agent named "${name}" is set up on this computer: run "node runner.mjs setup ${NAME_OPTION} ${slug}" (Windows: setup-runner.cmd ${NAME_OPTION} ${slug})${choices}`,
+    };
+  }
+  const { projectKey } = options;
+  if (
+    projectKey !== null &&
+    agent.projectKey !== null &&
+    agent.projectKey !== projectKey
+  ) {
+    return {
+      ok: false,
+      error: `The personal Agent ${slug} belongs to project ${agent.projectKey}, not ${projectKey}: drop ${PROJECT_OPTION_NAME} or use ${PROJECT_OPTION_NAME} ${agent.projectKey}`,
+    };
+  }
+  return { ok: true, agent };
 }
 
-function resolveWithoutServer(
-  options: { baseDataDir: string; projectKey: string },
+function resolveByProject(
+  baseDataDir: string,
+  projectKey: string,
   fsApi: InstanceDirFs
-): PersonalInstanceResult {
-  const { baseDataDir, projectKey } = options;
-  const legacy = personalInstanceDir(baseDataDir, projectKey, null);
-  const legacyInstance = { dataDir: legacy, projectKey, server: null };
-  if (fsApi.exists(legacy)) {
-    return { ok: true, instance: legacyInstance };
+): ResolvePersonalAgentResult {
+  const candidates = agentsOfProject(
+    listPersonalAgents(baseDataDir, fsApi),
+    projectKey
+  );
+  if (candidates.length === 0) {
+    return { ok: true, agent: null };
   }
-  const prefix = `${projectKey}${SERVER_SEPARATOR}`;
-  const servers = fsApi
-    .listDir(path.join(baseDataDir, PERSONAL_DATA_DIR_NAME))
-    .filter((name) => name.startsWith(prefix))
-    .map((name) => name.slice(prefix.length));
-  if (servers.length === 0) {
-    return { ok: true, instance: legacyInstance };
+  if (candidates.length === 1) {
+    return { ok: true, agent: candidates[0] };
   }
-  if (servers.length === 1) {
-    const server = servers[0];
-    const dataDir = personalInstanceDir(baseDataDir, projectKey, server);
-    return { ok: true, instance: { dataDir, projectKey, server } };
-  }
-  const choices = servers
-    .map((server) => `${SERVER_OPTION} ${server}`)
+  const choices = candidates
+    .map((agent) => `${NAME_OPTION} ${agent.slug}`)
     .join(" or ");
   return {
     ok: false,
-    error: `Several personal Agents of ${projectKey} are set up here, one per AgentFlow server: add ${choices}`,
+    error: `Several personal Agents of ${projectKey} are set up on this computer: add ${choices}`,
   };
 }

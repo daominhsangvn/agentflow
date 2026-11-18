@@ -51,6 +51,10 @@ vi.mock("@/app/compute-targets/service", () => ({
     ok: boolean;
     error?: string;
   }) => !result.ok && result.error === "gateway_conflict",
+  isComputeTargetMachineNameInUseResult: (result: {
+    ok: boolean;
+    error?: string;
+  }) => !result.ok && result.error === "machine_name_in_use",
 }));
 
 vi.mock("@/lib/relay-event-bus", () => ({
@@ -231,6 +235,32 @@ const helloTimeoutCases: HelloTimeoutCase[] = [
     },
     expectedDisconnect: true,
     expectedNackReason: DesktopHelloNackReason.ComputeTargetRegisterFailed,
+  },
+  {
+    name: "register reports machine_name_in_use → nack MachineNameInUse + disconnect",
+    arrange: () => {
+      mockRegister.mockResolvedValue({
+        ok: false,
+        error: "machine_name_in_use",
+      });
+    },
+    expectedDisconnect: true,
+    expectedNackReason: DesktopHelloNackReason.MachineNameInUse,
+  },
+  {
+    name: "updateOwned reports machine_name_in_use → nack MachineNameInUse + disconnect",
+    arrange: async () => {
+      const { computeTargetsService } = await import(
+        "@/app/compute-targets/service"
+      );
+      vi.mocked(computeTargetsService.updateOwned).mockResolvedValue({
+        ok: false,
+        error: "machine_name_in_use",
+      } as Awaited<ReturnType<typeof computeTargetsService.updateOwned>>);
+    },
+    payloadOverrides: { computeTargetId: "target-relay-existing" },
+    expectedDisconnect: true,
+    expectedNackReason: DesktopHelloNackReason.MachineNameInUse,
   },
 ];
 

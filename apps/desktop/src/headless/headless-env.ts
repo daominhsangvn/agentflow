@@ -85,7 +85,7 @@ export const RunnerMode = {
 export type RunnerMode = (typeof RunnerMode)[keyof typeof RunnerMode];
 
 const DEFAULT_DATA_DIR_NAME = ".agentflow-runner";
-/** Personal runners keep their data in `<data dir>/personal/<project key>` (or `<KEY>@<server>`). */
+/** Personal runners keep their data in `<data dir>/personal/<agent slug>` (the project key is in that dir's runner.env). */
 export const PERSONAL_DATA_DIR_NAME = "personal";
 const PROJECT_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
@@ -103,20 +103,4 @@ export function resolveRunnerDataDir(
 export function normalizeProjectKey(value: string): string | null {
   const key = value.trim().toUpperCase();
   return PROJECT_KEY_RE.test(key) ? key : null;
-}
-
-/**
- * The data directory of the personal runner of a project: one per project
- * key (or `<KEY>@<server>` for a second server), so several personal runners on one computer never share their
- * identity, job store, loop tokens, status or config file.
- */
-export function resolvePersonalRunnerDataDir(
-  projectKey: string,
-  env: NodeJS.ProcessEnv = process.env
-): string {
-  return path.join(
-    resolveRunnerDataDir(env),
-    PERSONAL_DATA_DIR_NAME,
-    projectKey
-  );
 }

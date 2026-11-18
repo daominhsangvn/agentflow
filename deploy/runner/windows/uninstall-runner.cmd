@@ -1,8 +1,8 @@
 @echo off
 rem Removes the AgentFlow Agent's Windows service and asks whether to delete
 rem its local data. uninstall-runner.cmd --project PRO-1 for a personal Agent;
-rem uninstall-runner.cmd --project PRO-1 --server agentflow.example.com for the
-rem one of a given AgentFlow server.
+rem uninstall-runner.cmd --name an-pro-1 for the Agent of that name (enough
+rem alone; --project alone needs the key to have one Agent).
 rem The Agent stays in AgentFlow; remove it there if not needed.
 setlocal
 where node >nul 2>nul || (

@@ -125,6 +125,7 @@ vi.mock("../../app/compute-targets/service", () => ({
     updateOwned: vi.fn(),
   },
   isComputeTargetGatewayConflictResult: () => false,
+  isComputeTargetMachineNameInUseResult: () => false,
 }));
 
 vi.mock("../relay-event-bus", () => ({

@@ -3,11 +3,11 @@
  * @description Command line of the headless runner bundle (headless-main.ts):
  *
  *   node runner.mjs                                   the auto runner
- *   node runner.mjs --project <key> [--server <host>] [--role "<role>"]
- *                                                     the personal runner of a project
- *   node runner.mjs setup [--project <key> [--server <host>]]  asks the setup questions
- *   node runner.mjs uninstall [--project <key> [--server <host>]]  removes the Windows service
- *   node runner.mjs check --project <key> [--server <host>]  validates the project's AGENTFLOW.md
+ *   node runner.mjs [--project <key>] [--name <agent name>] [--role "<role>"]
+ *                                                     a personal runner (an Agent of a project)
+ *   node runner.mjs setup [--project <key>] [--name <agent name>]  asks the setup questions
+ *   node runner.mjs uninstall [--project <key>] [--name <agent name>]  removes the Windows service
+ *   node runner.mjs check [--project <key>] [--name <agent name>]  validates the project's AGENTFLOW.md
  */
 
 import {
@@ -15,10 +15,7 @@ import {
   runnerRoleSchema,
 } from "@repo/api/src/types/runner-capabilities";
 import { normalizeProjectKey } from "./headless-env.js";
-import {
-  normalizeServerOption,
-  SERVER_OPTION,
-} from "./headless-instance-dir.js";
+import { agentNameSlug, NAME_OPTION } from "./headless-instance-dir.js";
 
 export const SETUP_COMMAND = "setup";
 export const UNINSTALL_COMMAND = "uninstall";
@@ -34,7 +31,8 @@ export type RunnerArgs = {
   check: boolean;
   projectKey: string | null;
   role: string | null;
-  server: string | null;
+  /** The agent name as typed (trimmed). */
+  name: string | null;
 };
 
 export type RunnerArgsResult =
@@ -45,7 +43,7 @@ type OptionResult =
   | { ok: true; consumed: number }
   | { ok: false; error: string };
 
-/** `[setup|uninstall|check] [--project <key>] [--role <role>]`. */
+/** `[setup|uninstall|check] [--project <key>] [--name <agent name>] [--role <role>]`. */
 export function parseRunnerArgs(argv: readonly string[]): RunnerArgsResult {
   const value: RunnerArgs = {
     setup: false,
@@ -53,7 +51,7 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgsResult {
     check: false,
     projectKey: null,
     role: null,
-    server: null,
+    name: null,
   };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
@@ -83,17 +81,17 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgsResult {
 }
 
 function validateCombination(value: RunnerArgs): string | null {
-  if (value.server && !value.projectKey) {
-    return `${SERVER_OPTION} picks one of a project's personal Agents: use it with ${PROJECT_OPTION} <key>, e.g. node runner.mjs ${PROJECT_OPTION} PRO-1 ${SERVER_OPTION} agentflow.example.com`;
-  }
-  if (value.check && !value.projectKey) {
-    return `${CHECK_COMMAND} validates a personal Agent's AGENTFLOW.md: use it with ${PROJECT_OPTION} <key>, e.g. node runner.mjs ${CHECK_COMMAND} ${PROJECT_OPTION} PRO-1`;
+  if (value.check && !value.projectKey && !value.name) {
+    return `${CHECK_COMMAND} validates a personal Agent's AGENTFLOW.md: use it with ${NAME_OPTION} <agent name> or ${PROJECT_OPTION} <key>, e.g. node runner.mjs ${CHECK_COMMAND} ${NAME_OPTION} an-pro-1`;
   }
   if (
     value.role &&
-    (!value.projectKey || value.setup || value.uninstall || value.check)
+    (!(value.projectKey || value.name) ||
+      value.setup ||
+      value.uninstall ||
+      value.check)
   ) {
-    return `${ROLE_OPTION} sets the role of a running personal Agent: use it with ${PROJECT_OPTION} <key>, e.g. node runner.mjs ${PROJECT_OPTION} PRO-1 ${ROLE_OPTION} "Dev (LeaveDesk, An)"`;
+    return `${ROLE_OPTION} sets the role of a running personal Agent: use it with ${PROJECT_OPTION} <key> or ${NAME_OPTION} <agent name>, e.g. node runner.mjs ${PROJECT_OPTION} PRO-1 ${ROLE_OPTION} "Dev (LeaveDesk, An)"`;
   }
   return null;
 }
@@ -125,19 +123,19 @@ function readOption(
     value.role = role.data;
     return { ok: true, consumed: 1 };
   }
-  if (arg === SERVER_OPTION) {
-    const server = normalizeServerOption(next ?? "");
-    if (!server) {
+  if (arg === NAME_OPTION) {
+    const name = (next ?? "").trim();
+    if (agentNameSlug(name) === null) {
       return {
         ok: false,
-        error: `${SERVER_OPTION} needs an AgentFlow server, its host or API URL, e.g. ${SERVER_OPTION} agentflow.example.com or ${SERVER_OPTION} localhost:3002`,
+        error: `${NAME_OPTION} needs an agent name with a letter or digit, e.g. ${NAME_OPTION} an-pro-1`,
       };
     }
-    value.server = server;
+    value.name = name;
     return { ok: true, consumed: 1 };
   }
   return {
     ok: false,
-    error: `Unknown argument "${arg}": run without arguments (auto runner), with "${PROJECT_OPTION} <project key>" [${SERVER_OPTION} <host>] [${ROLE_OPTION} "<role>"] (personal runner), "${SETUP_COMMAND}", "${UNINSTALL_COMMAND}" or "${CHECK_COMMAND} ${PROJECT_OPTION} <key>" [${SERVER_OPTION} <host>]`,
+    error: `Unknown argument "${arg}": run without arguments (auto runner), with "${PROJECT_OPTION} <project key>" and/or "${NAME_OPTION} <agent name>" [${ROLE_OPTION} "<role>"] (personal runner), "${SETUP_COMMAND}", "${UNINSTALL_COMMAND}" or "${CHECK_COMMAND}" with ${PROJECT_OPTION} <key> or ${NAME_OPTION} <agent name>`,
   };
 }

@@ -343,24 +343,24 @@ ConnectionStrings__DefaultConnection=Server=localhost;Database=App_Agent;Trusted
 **Start with Windows.** The last setup question offers to install the Agent
 as a Windows service ([WinSW](https://github.com/winsw/winsw), shipped in
 `winsw/`) that starts before anyone signs in. There is one service per Agent:
-`agentflow-agent`, or `agentflow-agent-pro-1` for the personal Agent of PRO-1
-(`agentflow-agent-pro-1-<server>` for a second server's Agent of PRO-1).
+`agentflow-agent` for the auto Agent, or `agentflow-agent-<agent name>` for a
+personal Agent (`agentflow-agent-an-pro-1` for the Agent named `an-pro-1`; the
+name is the folder-safe form described under "Personal runner").
 It runs under your Windows account: WinSW asks for that account's password
 (not a Windows Hello PIN; Microsoft accounts use the online password) and
 offers the "log on as a service" right. Windows asks for administrator
 approval once per action. Mapped network drives are not visible to services;
 use UNC paths. Logs are in `<data dir>\service\logs`
 (`%USERPROFILE%\.agentflow-runner\service\logs`, or
-`...\personal\PRO-1\service\logs`, or
-`...\personal\PRO-1@<server>\service\logs`). Keep the unzipped folder in a permanent
+`...\personal\<agent name>\service\logs`). Keep the unzipped folder in a permanent
 place, not Downloads or temp: the service runs `runner.mjs` from it.
 Answering no to the question removes an installed service.
 
-**Upgrade.** Unzip the new release, run `setup-runner.cmd [--project KEY [--server HOST]]`
+**Upgrade.** Unzip the new release, run `setup-runner.cmd [--project KEY] [--name NAME]`
 from it and press Enter to every question; the service is re-pointed to the
 new folder and restarted.
 
-**Uninstall.** `uninstall-runner.cmd [--project KEY [--server HOST]]` (`node runner.mjs
+**Uninstall.** `uninstall-runner.cmd [--project KEY] [--name NAME]` (`node runner.mjs
 uninstall`) removes the service and asks whether to delete the Agent's local
 data (default no). The Agent stays in AgentFlow as an offline computer;
 remove it there if you no longer need it. A service left behind by a deleted
@@ -638,50 +638,81 @@ migration aid, not a replacement for the auto runner.
 | Loops | PLAN, EXECUTE, STEP, ... | process steps (STEP loops) only |
 | At once | `AGENTFLOW_RUNNER_MAX_CONCURRENT` | one, the other runs waiting their turn, or several when the project's commands make their own worktrees (`AGENTFLOW_RUNNER_PARALLEL=true`) |
 | Permission prompts | the loop's allowed tools | the loop's allowed tools and the person's `permissions.allow`, or none at all (`AGENTFLOW_RUNNER_SKIP_PERMISSIONS=true`) |
-| Per computer | any number, each with its own `AGENTFLOW_RUNNER_DATA_DIR` | any number, one per project key and AgentFlow server |
+| Per computer | any number, each with its own `AGENTFLOW_RUNNER_DATA_DIR` | any number per project key, one per agent name; a name is unique on the computer |
 | Claude Code | the version set in AgentFlow | the `claude` on PATH (no pinning; a loop fails when the provider pins another version) |
 
 **Set up.** `node runner.mjs setup` (Windows: `setup-runner.cmd`) asks for the
 mode first; Enter keeps `auto`. Personal asks for the API URL and key, the
-project key, the project folder (it must exist), whether the project's
-commands can run several tasks at once in that folder (default no), whether
-to allow every tool (default no: tools not in the commands' `allowed-tools`
-or the person's `permissions.allow` are refused, nobody can approve them), the
-runner name (default `<user name>-<project key>`), an optional role for this
-computer (replaces `runner:` of the shared AGENTFLOW.md; `none` clears it) and
-the local gateway port
+project key, the Agent's name (it names the Agent on this computer, default
+`<user name>-<project key>`), the project folder (it must exist), whether the
+project's commands can run several tasks at once in that folder (default no),
+whether to allow every tool (default no: tools not in the commands'
+`allowed-tools` or the person's `permissions.allow` are refused, nobody can
+approve them), an optional role for this computer (replaces `runner:` of the
+shared AGENTFLOW.md; `none` clears it) and the local gateway port
 (Enter: any free port). The answers go to
-`<data dir>/personal/<project key>/runner.env`, or
-`<data dir>/personal/<project key>@<server>/runner.env` when that key already
-has an Agent for another AgentFlow server; start it with
+`<data dir>/personal/<agent name>/runner.env`; the project key is saved in that
+file (`AGENTFLOW_RUNNER_PROJECT_KEY`). Start it with
 
 ```bash
-node runner.mjs --project PRO-1          # Windows: start-runner.cmd --project PRO-1
-node runner.mjs --project PRO-1 --server agentflow.example.com   # the Agent of PRO-1 for that server
-node runner.mjs --project PRO-1 --role "Dev (LeaveDesk, An)"   # role for this start
-node runner.mjs setup --project PRO-1    # asks that runner's questions again
-node runner.mjs check --project PRO-1    # validates AGENTFLOW.md and exits
+node runner.mjs --name an-pro-1          # Windows: start-runner.cmd --name an-pro-1
+node runner.mjs --project PRO-1          # the Agent of PRO-1; see below when there are several
+node runner.mjs --name an-pro-1 --role "Dev (LeaveDesk, An)"   # role for this start
+node runner.mjs setup --name an-pro-1    # asks that Agent's questions again
+node runner.mjs check --name an-pro-1    # validates AGENTFLOW.md and exits
 ```
 
-On Windows each personal Agent can be its own service, and
-`uninstall-runner.cmd --project PRO-1` removes it.
+On Windows each personal Agent can be its own service (`agentflow-agent-<agent
+name>`), and `uninstall-runner.cmd --name an-pro-1` removes it.
 
-**Two AgentFlow servers on one computer.** One personal Agent exists per
-project key and AgentFlow server. The server name (slug) is the host of the
-API URL in lower case, with `-<port>` appended for an explicit port and no
-`:` (`http://agentflow.example.com:3002` gives `agentflow.example.com-3002`).
-The first Agent of a key keeps `personal/<KEY>` and its service name; existing
-directories are not migrated. When setup finds that `personal/<KEY>` belongs to
-another server, it stores the new Agent in `personal/<KEY>@<slug>` and prints
-the start command with `--server`.
+**Several Agents of one project on one computer.** Any number of personal
+Agents can work for the same project key, one per agent name. A name is unique
+among all the personal Agents of the computer, whatever their project. The
+folder name is the slug of the Agent's name: accents dropped (`đ` becomes `d`),
+lower case, every run of characters other than letters and digits turned into
+`-`, dashes at the ends removed, at most 40 characters. `Sang Dao-PRO-1` and
+`sang-dao-pro-1` are the same Agent; a name with no letter or digit is refused.
+Folders of the earlier layout (one folder per project key) are not read and
+not migrated.
 
-`--server <host|URL>` is accepted only together with `--project`, for run,
-setup, uninstall and check. With `--server`, the Agent of that server is used:
-`personal/<KEY>@<slug>`, or `personal/<KEY>` when its API URL is that server;
-if neither exists the command fails and names the setup command to run.
-Without `--server`, `personal/<KEY>` is used; if it does not exist and exactly
-one `<KEY>@<slug>` does, that one is used; if several do, the command fails
-and lists the `--server` values to choose from.
+Setup asks the name right after the project key and says which Agents the key
+already has. An existing name of the same project re-configures that Agent (its
+answers are the defaults); an existing name that belongs to another project's
+Agent is refused and asked again; a new name adds another Agent, which keeps
+the other answers as defaults but defaults its gateway port to `random`, so two
+Agents never share a fixed port. Variables that setup does not ask for (such as
+`CLAUDE_CODE_OAUTH_TOKEN`) are not copied to the new Agent's runner.env. A
+folder of that name with no runner.env (an Agent configured only through the
+environment) is adopted by setup.
+
+**Choosing the Agent.** `--name <agent name>` alone is enough, for start,
+setup, check and uninstall. `--project <KEY>` and `--name` together must agree:
+when the Agent's runner.env has another project key the command fails naming
+both keys. `check` and `uninstall` with an unknown `--name` fail.
+
+`--project <KEY>` alone:
+
+- One Agent of that key: it is used.
+- Several Agents, start in a terminal: the single one that is not running
+  starts (it says so); when several are free it lists them and asks for a
+  number; when all are running it fails.
+- Several Agents, start without a terminal (a service, systemd, Docker): it
+  fails and lists every `--name` choice, running ones marked `(running)`, so an
+  unattended unit never starts a different Agent.
+- No Agent of that key: in a terminal setup runs; without one it fails and says
+  to run setup, or to pass `--name` when the settings come from the
+  environment.
+- `check` and `uninstall` with several Agents fail and list the `--name`
+  choices; they never ask.
+
+`start` with a `--name` that is not set up uses `personal/<agent name>`
+anyway: its settings may come from environment variables alone, and in a
+terminal setup runs with that name filled in. An Agent that has no runner.env
+belongs to no project key in this listing, so it is reachable with `--name`
+only; `--project` alone never finds it. A start with `--name` alone requires a
+personal configuration (set up with `setup --name <agent name>`, or
+`AGENTFLOW_RUNNER_MODE=personal` with the project key and folder in the
+environment).
 
 Each personal runner has its own data directory (identity, job store, loop
 tokens, status, Windows shims), so any number of them, for different
@@ -748,6 +779,12 @@ give each its own folder.
   (`personal_agent_project_not_found`). It is not added to the project
   automatically: it shows on Project -> Agents as "waiting to be added" and an
   admin adds it. It can only be added to its own project.
+- A name is also unique among the computers of the same account. When another
+  computer of the account that is online already has the Agent's name, the new
+  Agent is refused (`machine_name_in_use`) and disconnects; run setup again
+  with another name. A computer of that name that is offline is taken over by
+  the new Agent. Renaming an Agent that is already registered to a name another
+  computer of the account has is refused whether or not that computer is online.
 - When the project has Agents, a workflow only uses a personal Agent when it
   is one of them. Otherwise the run fails with `agent_not_in_project` ("Agent ... is
   not one of project ...'s Agents"). An offline personal Agent fails the
