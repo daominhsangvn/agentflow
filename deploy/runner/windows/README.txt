@@ -38,6 +38,9 @@ Start:
                       key (Settings -> API Keys), the runner name (default:
                       your Windows user name) and the workspace (default:
                       %USERPROFILE%\.agentflow\_works), then connects.
+                      When personal Agents are set up here and the
+                      automatic one is not, it starts the personal Agent, or
+                      lists those not running and asks which.
   setup-runner.cmd    Asks the questions again.
 
 The answers are saved to %USERPROFILE%\.agentflow-runner\runner.env. Add more
