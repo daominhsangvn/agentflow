@@ -25,6 +25,7 @@ import { checkPersonalAgentProject } from "@/app/compute-targets/personal-agent-
 import {
   computeTargetsService,
   isComputeTargetGatewayConflictResult,
+  isComputeTargetMachineNameInUseResult,
 } from "@/app/compute-targets/service";
 import { githubDirtyScopeService } from "@/app/integrations/github/dirty-scope-service";
 import {
@@ -350,6 +351,9 @@ async function resolveRelayHelloTarget(
     if (isComputeTargetGatewayConflictResult(updated)) {
       return { ok: "conflict" };
     }
+    if (isComputeTargetMachineNameInUseResult(updated)) {
+      return machineNameInUseNack(auth, input);
+    }
     if (updated.value) {
       return {
         ok: true,
@@ -382,11 +386,32 @@ async function resolveRelayHelloTarget(
   if (isComputeTargetGatewayConflictResult(target)) {
     return { ok: "conflict" };
   }
+  if (isComputeTargetMachineNameInUseResult(target)) {
+    return machineNameInUseNack(auth, input);
+  }
   return {
     ok: true,
     targetId: target.value.id,
     targetCreated: true,
     targetGatewayId: target.value.gatewayId ?? input.gatewayId ?? null,
+  };
+}
+
+function machineNameInUseNack(
+  auth: RelayAuthContext,
+  input: RelayHelloInput
+): ResolveRelayHelloTargetResult {
+  log.warn("relay.hello.machine_name_in_use", {
+    reason: "machine_name_in_use",
+    organizationId: auth.organizationId,
+    userId: auth.userId,
+    computeTargetId: input.computeTargetId,
+    errorClass: ErrorClass.Protocol,
+  });
+  return {
+    ok: false,
+    reason: DesktopHelloNackReason.MachineNameInUse,
+    cause: null,
   };
 }
 

@@ -2,7 +2,7 @@
  * @file headless-windows-service.ts
  * @description Runs the Agent as a Windows service through WinSW (see
  * docs/runner.md, "Option D: Windows"). One service per Agent: the automatic
- * Agent and every personal Agent (project key, plus its server for a second server). Setup and uninstall ask for the
+ * Agent and every personal Agent by its name. Setup and uninstall ask for the
  * desired state; this module makes the service match it. Every process and
  * file operation goes through injected dependencies so the logic is testable
  * off Windows. Service control needs administrator rights, so SCM actions run
@@ -41,8 +41,8 @@ export type ServiceLocation = { id: string; instanceDataDir: string };
 
 export type ServiceSpec = ServiceLocation & {
   projectKey: string | null;
-  /** The `KEY@slug` server; null or absent for the legacy dir and the automatic Agent. */
-  server?: string | null;
+  /** The personal Agent's slug (--name); null or absent for the automatic Agent. */
+  agentName?: string | null;
   nodePath: string;
   programDir: string;
   baseDataDir: string;
@@ -77,30 +77,13 @@ type ServiceFiles = {
 
 const STATE_RE = /\b(NonExistent|Started|Stopped)\b/i;
 
-export function serviceId(
-  projectKey: string | null,
-  server: string | null = null
-): string {
-  if (!projectKey) {
-    return "agentflow-agent";
-  }
-  if (server) {
-    return `agentflow-agent-${projectKey.toLowerCase()}-${server}`;
-  }
-  return `agentflow-agent-${projectKey.toLowerCase()}`;
+/** `agentflow-agent` for the automatic Agent, else one id per personal Agent slug. */
+export function serviceId(agentSlug: string | null): string {
+  return agentSlug ? `agentflow-agent-${agentSlug}` : "agentflow-agent";
 }
 
-export function serviceDisplayName(
-  projectKey: string | null,
-  server: string | null = null
-): string {
-  if (!projectKey) {
-    return "AgentFlow Agent";
-  }
-  if (server) {
-    return `AgentFlow Agent (${projectKey} @ ${server})`;
-  }
-  return `AgentFlow Agent (${projectKey})`;
+export function serviceDisplayName(agentSlug: string | null): string {
+  return agentSlug ? `AgentFlow Agent (${agentSlug})` : "AgentFlow Agent";
 }
 
 export function serviceFiles(location: ServiceLocation): ServiceFiles {
@@ -125,14 +108,14 @@ export function renderServiceXml(spec: ServiceSpec): string {
   const runnerArgs = [`"${path.win32.join(spec.programDir, "runner.mjs")}"`];
   if (spec.projectKey) {
     runnerArgs.push("--project", spec.projectKey);
-    if (spec.server) {
-      runnerArgs.push("--server", spec.server);
-    }
+  }
+  if (spec.agentName) {
+    runnerArgs.push("--name", spec.agentName);
   }
   const lines = [
     "<service>",
     `  <id>${escapeXml(spec.id)}</id>`,
-    `  <name>${escapeXml(serviceDisplayName(spec.projectKey, spec.server ?? null))}</name>`,
+    `  <name>${escapeXml(serviceDisplayName(spec.agentName ?? null))}</name>`,
     "  <description>Runs AgentFlow agent loops on this computer (docs/runner.md).</description>",
     `  <executable>${escapeXml(spec.nodePath)}</executable>`,
     `  <arguments>${escapeXml(runnerArgs.join(" "))}</arguments>`,

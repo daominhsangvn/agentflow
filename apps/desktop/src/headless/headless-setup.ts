@@ -7,11 +7,12 @@
  * to `<data dir>/runner.env`. It first asks for the mode: `auto` (the
  * default) clones the project repositories into the workspace; `personal`
  * works for one AgentFlow project in a folder of this computer and asks for
- * the project key, that folder, whether the project's commands can run
- * several loops at once, and an optional role of this computer (it replaces
- * the `runner:` of the project's AGENTFLOW.md); its answers go to the project's own data directory
- * (`<data dir>/personal/<project key>`), so several personal runners can
- * share one computer. At startup the runner reads that file; a
+ * the project key, the Agent's name, that folder, whether the project's commands
+ * can run several loops at once, and an optional role of this computer (it
+ * replaces the `runner:` of the project's AGENTFLOW.md); its answers go to the
+ * Agent's own data directory (`<data dir>/personal/<agent name>`; the project
+ * key is saved in that runner.env), so several personal runners can share one
+ * computer. At startup the runner reads that file; a
  * variable set in the environment wins over it. Any other variable written
  * there (CLAUDE_CODE_OAUTH_TOKEN, a connection string for the agents, ...)
  * reaches the loops too. A start with no API URL or key, from a terminal,
@@ -88,6 +89,8 @@ export type SetupContext = {
   current: Readonly<Record<string, string | undefined>>;
   username: string;
   homeDir: string;
+  /** Personal Agents already set up on this computer; absent when not known. */
+  personalAgents?: PersonalAgentSetup;
 };
 
 export function runnerConfigFile(dataDir: string): string {
@@ -133,16 +136,7 @@ export function needsSetup(env: NodeJS.ProcessEnv): boolean {
  * every run of other characters, whitespace included, turned into one `-`.
  */
 export function defaultRunnerName(username: string): string {
-  const name = username
-    .normalize("NFD")
-    .replace(COMBINING_MARKS_RE, "")
-    .replaceAll("đ", "d")
-    .replaceAll("Đ", "D")
-    .replace(NON_NAME_CHARACTERS_RE, "-")
-    .replace(EDGE_DASHES_RE, "")
-    .slice(0, RUNNER_NAME_MAX_LENGTH)
-    .replace(EDGE_DASHES_RE, "");
-  return name || FALLBACK_RUNNER_NAME;
+  return asciiName(username) || FALLBACK_RUNNER_NAME;
 }
 
 /** `<home>/.agentflow/_works`: where repositories are cloned by default. */
@@ -218,35 +212,33 @@ async function askPersonalRunnerSettings(
     currentValue: current[HeadlessRunnerEnv.ProjectKey],
     check: checkProjectKey,
   });
-  const projectDir = await askUntilValid(context, {
+  const runnerName = await askPersonalAgentName(context, projectKey);
+  const agentContext: SetupContext = {
+    ...context,
+    current: personalAgentCurrent(context, runnerName),
+  };
+  const agentCurrent = agentContext.current;
+  const projectDir = await askUntilValid(agentContext, {
     question: "Project folder (the agent works here, as you do by hand)",
-    currentValue: current[HeadlessRunnerEnv.ProjectDir],
+    currentValue: agentCurrent[HeadlessRunnerEnv.ProjectDir],
     check: (value) => checkProjectDir(value, context.homeDir),
   });
-  const parallel = await askUntilValid(context, {
+  const parallel = await askUntilValid(agentContext, {
     question:
       "Can the project's commands run several tasks at once in this folder (they make their own worktrees)? yes/no",
-    currentValue: current[HeadlessRunnerEnv.Parallel] === "true" ? "yes" : "no",
+    currentValue:
+      agentCurrent[HeadlessRunnerEnv.Parallel] === "true" ? "yes" : "no",
     check: checkYesNo,
   });
-  const skipPermissions = await askUntilValid(context, {
+  const skipPermissions = await askUntilValid(agentContext, {
     question:
       "Allow every tool? With no, tools not in your commands' allowed-tools or your permissions.allow are refused (nobody can approve them in the background). yes/no",
     currentValue:
-      current[HeadlessRunnerEnv.SkipPermissions] === "true" ? "yes" : "no",
+      agentCurrent[HeadlessRunnerEnv.SkipPermissions] === "true" ? "yes" : "no",
     check: checkYesNo,
   });
-  const currentName = current[HeadlessRunnerEnv.RunnerName];
-  const runnerName = await askUntilValid(context, {
-    question: "Runner name, shown in AgentFlow",
-    currentValue:
-      currentName && current[HeadlessRunnerEnv.ProjectKey] === projectKey
-        ? currentName
-        : `${defaultRunnerName(context.username)}-${projectKey}`,
-    check: checkRunnerName,
-  });
-  const role = await askRunnerRole(context);
-  const gatewayPort = await askGatewayPort(context);
+  const role = await askRunnerRole(agentContext);
+  const gatewayPort = await askGatewayPort(agentContext);
   return {
     [HeadlessRunnerEnv.Mode]: RunnerMode.Personal,
     ...connection,
@@ -258,6 +250,58 @@ async function askPersonalRunnerSettings(
     [HeadlessRunnerEnv.SkipPermissions]: skipPermissions,
     [HeadlessRunnerEnv.GatewayPort]: gatewayPort,
   };
+}
+
+/**
+ * The Agent's name, asked right after the project key: it names the Agent's
+ * folder and must not belong to another project's Agent on this computer.
+ */
+async function askPersonalAgentName(
+  context: SetupContext,
+  projectKey: string
+): Promise<string> {
+  const { current, personalAgents } = context;
+  const existing = personalAgents?.list(projectKey) ?? [];
+  if (existing.length > 0) {
+    context.say(
+      `  ${projectKey} has personal Agents on this computer: ${existing.join(", ")}. Enter the name of one to re-configure it, or a new name to add another Agent.`
+    );
+  }
+  const currentName = current[HeadlessRunnerEnv.RunnerName];
+  return await askUntilValid(context, {
+    question: "Runner name, shown in AgentFlow (it names this Agent here)",
+    currentValue:
+      currentName && current[HeadlessRunnerEnv.ProjectKey] === projectKey
+        ? currentName
+        : `${defaultRunnerName(context.username)}-${projectKey}`,
+    check: (value) => {
+      const name = checkRunnerName(value);
+      if (!name.ok) {
+        return name;
+      }
+      const refused = personalAgents?.checkName(projectKey, name.value) ?? null;
+      return refused === null ? name : { ok: false, error: refused };
+    },
+  });
+}
+
+/**
+ * What the Agent's remaining questions default to: its own settings when it
+ * exists, else (a new Agent) the current ones without a fixed port.
+ */
+function personalAgentCurrent(
+  context: SetupContext,
+  name: string
+): Readonly<Record<string, string | undefined>> {
+  const { current, personalAgents } = context;
+  if (!personalAgents) {
+    return current;
+  }
+  const loaded = personalAgents.load(name);
+  if (loaded) {
+    return { ...current, ...loaded };
+  }
+  return { ...current, [HeadlessRunnerEnv.GatewayPort]: undefined };
 }
 
 /**
@@ -501,6 +545,29 @@ export async function askYesNo(
     check: checkYesNo,
   });
   return answer === "true";
+}
+
+/** The personal Agents of this computer, as the setup questions see them. */
+export type PersonalAgentSetup = {
+  /** Slugs of the Agents of a project key. */
+  list(projectKey: string): string[];
+  /** An error when `name` cannot name an Agent of the key; null when it can. */
+  checkName(projectKey: string, name: string): string | null;
+  /** Settings of the Agent dir of that name, null for a new name. */
+  load(name: string): Record<string, string | undefined> | null;
+};
+
+/** A name with accents dropped and other character runs turned into one `-`; "" when nothing is left. */
+export function asciiName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(COMBINING_MARKS_RE, "")
+    .replaceAll("đ", "d")
+    .replaceAll("Đ", "D")
+    .replace(NON_NAME_CHARACTERS_RE, "-")
+    .replace(EDGE_DASHES_RE, "")
+    .slice(0, RUNNER_NAME_MAX_LENGTH)
+    .replace(EDGE_DASHES_RE, "");
 }
 
 /** The last Windows setup question; `installed` makes Enter keep the service. */

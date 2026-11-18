@@ -46,32 +46,42 @@ Answer `personal` to the first question, then:
 |---|---|
 | API URL and API key | The key's owner becomes the owner of this Agent |
 | Project key | The AgentFlow project's key, for example `PRO-1` |
+| Name | Default `<user name>-<project key>`. It names this Agent on this computer and must be unique here, whatever the project. An existing name of the same project re-configures that Agent (its answers become the defaults); a new name adds another Agent; the name of another project's Agent is refused and asked again. Setup lists the key's existing Agents before it asks |
 | Project folder | Must exist; tasks run in it |
 | Several tasks at once | Default no. Yes only when the project's commands keep their own work apart (a worktree or branch per ticket) |
 | Allow every tool | Default no. Nobody is at the terminal to approve a prompt, so any tool not allowed in the commands' `allowed-tools` or the person's `permissions.allow` is refused. Yes lets the agent do anything the account can |
-| Name | Default `<user name>-<project key>` |
 | Role (optional) | This computer's role, for example `Dev (LeaveDesk, An)`. It replaces the `runner:` of the shared `AGENTFLOW.md`. Enter keeps the current role, `none` clears it |
-| Local gateway port | Enter picks a free port |
+| Local gateway port | Enter picks a free port; a new Agent never inherits another Agent's fixed port |
 
-The answers are saved in `~/.agentflow-runner/personal/<project key>/runner.env` (Windows: `%USERPROFILE%\.agentflow-runner\personal\<project key>\runner.env`). `node runner.mjs setup --project PRO-1` asks that Agent's questions again. All settings: [Agent CLI and environment](/docs/reference/agent-cli).
+The answers are saved in `~/.agentflow-runner/personal/<agent name>/runner.env` (Windows: `%USERPROFILE%\.agentflow-runner\personal\<agent name>\runner.env`), which also holds the project key. The folder name is the name in lower case with accents dropped and every run of other characters turned into `-` (at most 40 characters), so `Sang Dao-PRO-1` is the folder `sang-dao-pro-1`. A name with no letter or digit is refused. `node runner.mjs setup --name an-pro-1` asks that Agent's questions again. All settings: [Agent CLI and environment](/docs/reference/agent-cli).
 
 ## Start
 
 ```bash
-node runner.mjs --project PRO-1          # Windows: start-runner.cmd --project PRO-1
+node runner.mjs --name an-pro-1          # Windows: start-runner.cmd --name an-pro-1
+node runner.mjs --project PRO-1          # the Agent of PRO-1, when it has only one
 ```
+
+`--name <agent name>` alone is enough. With `--project` too, the Agent must belong to that project, or the command fails naming both keys. With `--project` alone:
+
+- One Agent of the key: it starts.
+- Several, in a terminal: the one that is not running starts; when several are free it asks you to pick by number; when all are running it fails.
+- Several, without a terminal (a service, systemd, Docker): it fails and lists every `--name` choice, so an unattended unit never starts a different Agent.
+- None, in a terminal: setup runs. Without a terminal it fails and tells you to run setup, or to pass `--name` when the settings come from environment variables.
+
+An Agent configured only through environment variables (no `runner.env`) is reachable with `--name` only. A `--name` that was never set up uses `personal/<agent name>`, and in a terminal runs setup with that name filled in.
 
 To set the role for one start, add `--role`; it wins over the saved role:
 
 ```bash
-node runner.mjs --project PRO-1 --role "Dev (LeaveDesk, An)"
+node runner.mjs --name an-pro-1 --role "Dev (LeaveDesk, An)"
 ```
 
 The role belongs to the computer, not to `AGENTFLOW.md`, which is committed and shared by every computer. Without a role the Agent keeps the file's `runner:`.
 
-The Agent first checks the folder's `AGENTFLOW.md`. When the file does not parse, it lists the problems and refuses to start (exit code `2`). To validate the file without starting the Agent, run `node runner.mjs check --project PRO-1` (Windows: `start-runner.cmd check --project PRO-1`). A service, systemd or Docker restart policy keeps restarting the Agent until the file is fixed.
+The Agent first checks the folder's `AGENTFLOW.md`. When the file does not parse, it lists the problems and refuses to start (exit code `2`). To validate the file without starting the Agent, run `node runner.mjs check --name an-pro-1` (Windows: `start-runner.cmd check --name an-pro-1`). `check` accepts `--project` alone only when the key has one Agent here; with several it lists the `--name` choices. A service, systemd or Docker restart policy keeps restarting the Agent until the file is fixed.
 
-It uploads the folder's `AGENTFLOW.md` (and its role) and waits for tasks. The data directory keeps the Agent's identity, so the next start is the same Agent in AgentFlow. A second process for the same project refuses to start (`runner.lock`).
+It uploads the folder's `AGENTFLOW.md` (and its role) and waits for tasks. The data directory keeps the Agent's identity, so the next start is the same Agent in AgentFlow. A second process for the same Agent refuses to start (`runner.lock`). A project can have several Agents on one computer, each with its own name and data directory.
 
 ## After it starts
 
@@ -98,7 +108,7 @@ A personal Agent runs only while its process runs. Start it at login so it survi
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string><string>-lc</string>
-    <string>exec node ~/agentflow-runner/agentflow-runner/runner.mjs --project PRO-1</string>
+    <string>exec node ~/agentflow-runner/agentflow-runner/runner.mjs --name an-pro-1</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -118,7 +128,7 @@ The login shell (`zsh -lc`) gives the Agent the same `PATH` as the terminal, so 
 
 ```ini
 [Service]
-ExecStart=/bin/bash -lc 'exec node %h/agentflow-runner/agentflow-runner/runner.mjs --project PRO-1'
+ExecStart=/bin/bash -lc 'exec node %h/agentflow-runner/agentflow-runner/runner.mjs --name an-pro-1'
 Restart=always
 
 [Install]
@@ -130,21 +140,21 @@ systemctl --user enable --now agentflow-runner-pro-1
 journalctl --user -u agentflow-runner-pro-1 -f
 ```
 
-**Windows.** The last question of `setup-runner.cmd --project PRO-1` offers to start the Agent with Windows as a Windows service (WinSW), named `agentflow-agent-pro-1`, that starts before anyone signs in. It runs under your Windows account: WinSW asks for that account's password (not a Windows Hello PIN; Microsoft accounts use the online password) and the "log on as a service" right. Mapped network drives are not visible to services, so use UNC paths. Logs are in `%USERPROFILE%\.agentflow-runner\personal\PRO-1\service\logs`. Keep the unzipped folder in a permanent place, not Downloads or temp.
+**Windows.** The last question of `setup-runner.cmd --name an-pro-1` offers to start the Agent with Windows as a Windows service (WinSW), named `agentflow-agent-<agent name>` (here `agentflow-agent-an-pro-1`), that starts before anyone signs in. It runs under your Windows account: WinSW asks for that account's password (not a Windows Hello PIN; Microsoft accounts use the online password) and the "log on as a service" right. Mapped network drives are not visible to services, so use UNC paths. Logs are in `%USERPROFILE%\.agentflow-runner\personal\<agent name>\service\logs`. Keep the unzipped folder in a permanent place, not Downloads or temp.
 
 ## Stop and upgrade
 
 - Stop it with Ctrl+C, `launchctl unload <plist>`, `systemctl --user stop <unit>` or by ending the task. Stopping abandons the task it runs; the server times it out. Stop it when it is idle.
 - To upgrade, stop it, replace the bundle folder with the new release and start it again. The data directory in `~/.agentflow-runner` is not in the bundle folder, so the Agent keeps its identity and settings.
-- On Windows, stop the service in `services.msc`, or remove it with `uninstall-runner.cmd --project PRO-1`. That command also asks whether to delete the Agent's local data (default no); the Agent stays in AgentFlow as offline. A service left behind by a deleted folder is removed with `sc.exe delete agentflow-agent-pro-1`.
-- On Windows, to upgrade, unzip the new release, run `setup-runner.cmd --project PRO-1` from it and press Enter to every question: the service is re-pointed and restarted. Answering no to the service question removes it.
+- On Windows, stop the service in `services.msc`, or remove it with `uninstall-runner.cmd --name an-pro-1`. That command also asks whether to delete the Agent's local data (default no); the Agent stays in AgentFlow as offline. A service left behind by a deleted folder is removed with `sc.exe delete agentflow-agent-an-pro-1`.
+- On Windows, to upgrade, unzip the new release, run `setup-runner.cmd --name an-pro-1` from it and press Enter to every question: the service is re-pointed and restarted. Answering no to the service question removes it.
 - Upgrading Claude Code is the person's job: run `claude install <version>` when AgentFlow pins a new version.
 
 ## Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
-| Exits with code `2` and lists problems | `AGENTFLOW.md` is not valid. Fix the listed fields (`commands.0.mode: ...`), then start again; `node runner.mjs check --project PRO-1` validates it without starting |
+| Exits with code `2` and lists problems | `AGENTFLOW.md` is not valid. Fix the listed fields (`commands.0.mode: ...`), then start again; `node runner.mjs check --name an-pro-1` validates it without starting |
 | Exits with code `3` | A required tool is missing or not on the login shell's `PATH`. The message names it |
 | Tasks wait with `runner_busy` | One task at a time is the default; the next one starts when the current one ends (tried every minute) |
 | Every task fails with `claude install <version>` | The pinned Claude Code version differs from `claude --version`. Install it, or set the Agent to `latest` |

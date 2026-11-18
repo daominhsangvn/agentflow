@@ -51,6 +51,10 @@ vi.mock("../../app/compute-targets/service", () => ({
     ok: boolean;
     error?: string;
   }) => !result.ok && result.error === "gateway_conflict",
+  isComputeTargetMachineNameInUseResult: (result: {
+    ok: boolean;
+    error?: string;
+  }) => !result.ok && result.error === "machine_name_in_use",
 }));
 
 vi.mock("../relay-event-bus", () => ({
@@ -530,6 +534,56 @@ describe("handleSocketHello — personal Agent project check", () => {
       "desktop.gateway.hello.personal_project_not_found",
       expect.anything()
     );
+    expect(mockRegister).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleSocketHello — machine name in use", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installSuccessfulHelloDefaults();
+  });
+
+  it("nacks machine_name_in_use and disconnects when register reports it", async () => {
+    mockRegister.mockResolvedValue({ ok: false, error: "machine_name_in_use" });
+    const socket = makeSocket();
+    await handleSocketHello(
+      socket as never,
+      makeAuthContext() as never,
+      makeHelloPayload() as never,
+      { helloStartedAt: Date.now() }
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      "desktop.hello.nack",
+      expect.objectContaining({
+        reason: DesktopHelloNackReason.MachineNameInUse,
+      })
+    );
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it("nacks machine_name_in_use and disconnects when updateOwned reports it", async () => {
+    const { computeTargetsService } = await import(
+      "../../app/compute-targets/service"
+    );
+    vi.mocked(computeTargetsService.updateOwned).mockResolvedValue({
+      ok: false,
+      error: "machine_name_in_use",
+    } as Awaited<ReturnType<typeof computeTargetsService.updateOwned>>);
+    const socket = makeSocket();
+    await handleSocketHello(
+      socket as never,
+      makeAuthContext() as never,
+      makeHelloPayload({ computeTargetId: "target-1" }) as never,
+      { helloStartedAt: Date.now() }
+    );
+    expect(socket.emit).toHaveBeenCalledWith(
+      "desktop.hello.nack",
+      expect.objectContaining({
+        reason: DesktopHelloNackReason.MachineNameInUse,
+      })
+    );
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
     expect(mockRegister).not.toHaveBeenCalled();
   });
 });

@@ -30,31 +30,36 @@ function Read-EnvFile($file) {
   return $values
 }
 
-# The short, file-name safe name of an AgentFlow server (host, lower case,
-# -port when explicit, no ":"). Same rule as serverSlug in headless-instance-dir.ts.
-function Get-ServerSlug($value) {
+# The folder-safe slug of an agent name: accents dropped, lower case, every run
+# of other characters turned into "-", edge dashes trimmed, at most 40
+# characters; $null when empty. Same rule as agentNameSlug in headless-instance-dir.ts.
+function Get-AgentSlug($value) {
   if (-not $value) { return $null }
-  $text = $value.Trim()
-  if ($text -notmatch '://') { $text = "http://$text" }
-  try { $uri = [Uri]$text } catch { return $null }
-  if (-not $uri.Host) { return $null }
-  $hostName = $uri.Host.ToLower().Replace("[", "").Replace("]", "").Replace(":", "-")
-  $slug = $hostName
-  if (-not $uri.IsDefaultPort) { $slug = "$hostName-$($uri.Port)" }
-  if ($slug -notmatch '^[a-z0-9][a-z0-9.-]*$') { return $null }
+  $text = $value.Normalize([Text.NormalizationForm]::FormD)
+  $text = [regex]::Replace($text, '\p{M}', '')
+  $text = $text.Replace([string][char]0x111, 'd').Replace([string][char]0x110, 'D')
+  $slug = ([regex]::Replace($text.ToLower(), '[^a-z0-9]+', '-')).Trim('-')
+  if ($slug.Length -gt 40) { $slug = $slug.Substring(0, 40).Trim('-') }
+  if (-not $slug) { return $null }
   return $slug
 }
 
 $project = $null
-$serverArg = $null
+$nameArg = $null
 for ($i = 0; $i -lt $args.Count; $i++) {
   if ($args[$i] -eq "--project" -and $i + 1 -lt $args.Count) { $project = $args[$i + 1].ToUpper() }
-  if ($args[$i] -eq "--server" -and $i + 1 -lt $args.Count) { $serverArg = $args[$i + 1] }
+  if ($args[$i] -eq "--name" -and $i + 1 -lt $args.Count) { $nameArg = $args[$i + 1].Trim() }
 }
-$server = Get-ServerSlug $serverArg
+$nameSlug = Get-AgentSlug $nameArg
+$personalMode = $project -or $nameArg
 
 $title = "AgentFlow Agent doctor"
-if ($project) { $title = "$title (personal Agent of $project" + $(if ($server) { " on $server" } else { "" }) + ")" }
+if ($personalMode) {
+  $parts = @()
+  if ($nameSlug) { $parts += "personal Agent $nameSlug" } else { $parts += "personal Agent" }
+  if ($project) { $parts += "of $project" }
+  $title = "$title (" + ($parts -join " ") + ")"
+}
 Write-Host $title
 Write-Host ""
 
@@ -181,40 +186,40 @@ else { Warn "gh" "not found: loops cannot open GitHub pull requests (winget inst
 $dataDir = if ($env:AGENTFLOW_RUNNER_DATA_DIR) { $env:AGENTFLOW_RUNNER_DATA_DIR } else { Join-Path $env:USERPROFILE ".agentflow-runner" }
 $envFile = Join-Path $dataDir "runner.env"
 $instanceDir = $dataDir
-$instanceServer = $null
-if ($project) {
+$instanceSlug = $null
+if ($personalMode) {
   $personal = Join-Path $dataDir "personal"
-  $legacyDir = Join-Path $personal $project
-  $instanceDir = $legacyDir
-  $envFile = Join-Path $legacyDir "runner.env"
-  if ($serverArg -and -not $server) {
-    Fail "instance" "cannot read '$serverArg' as a server (use a host, host:port or the API URL)"
-  } elseif ($server) {
-    $keyedDir = Join-Path $personal "$project@$server"
-    if (Test-Path $keyedDir) {
-      $instanceDir = $keyedDir
-      $instanceServer = $server
-      $envFile = Join-Path $keyedDir "runner.env"
-    } else {
-      $legacyConfig = Read-EnvFile (Join-Path $legacyDir "runner.env")
-      $legacySlug = Get-ServerSlug $legacyConfig["AGENTFLOW_API_URL"]
-      if (-not (Test-Path $legacyDir) -or $legacySlug -ne $server) {
-        $instanceDir = $keyedDir
-        $envFile = Join-Path $keyedDir "runner.env"
-        $instanceServer = $server
-        Info "runner.env" "no personal Agent of $project for $server set up yet (setup-runner.cmd --project $project --server $server)"
+  if ($nameArg -and -not $nameSlug) {
+    Fail "instance" "--name '$nameArg' needs an agent name with a letter or digit"
+  } elseif ($nameSlug) {
+    $instanceSlug = $nameSlug
+    $instanceDir = Join-Path $personal $nameSlug
+    $envFile = Join-Path $instanceDir "runner.env"
+    if (Test-Path $envFile) {
+      $agentKey = (Read-EnvFile $envFile)["AGENTFLOW_RUNNER_PROJECT_KEY"]
+      if ($project -and $agentKey -and $agentKey.ToUpper() -ne $project) {
+        Fail "instance" "the personal Agent $nameSlug belongs to project $($agentKey.ToUpper()), not $project"
       }
+    } else {
+      Info "instance" "personal Agent $nameSlug is not set up yet (setup-runner.cmd --name $nameSlug)"
     }
-  } elseif (-not (Test-Path $legacyDir)) {
-    $keyedDirs = @()
-    if (Test-Path $personal) { $keyedDirs = @(Get-ChildItem -Path $personal -Directory -Filter "$project@*") }
-    if ($keyedDirs.Count -eq 1) {
-      $instanceDir = $keyedDirs[0].FullName
-      $instanceServer = $keyedDirs[0].Name.Substring($project.Length + 1)
+  } else {
+    $candidates = @()
+    if (Test-Path $personal) {
+      $candidates = @(Get-ChildItem -Path $personal -Directory | Where-Object {
+        (Get-AgentSlug $_.Name) -ceq $_.Name -and
+        "$((Read-EnvFile (Join-Path $_.FullName "runner.env"))["AGENTFLOW_RUNNER_PROJECT_KEY"])".ToUpper() -eq $project
+      })
+    }
+    if ($candidates.Count -eq 1) {
+      $instanceSlug = $candidates[0].Name
+      $instanceDir = $candidates[0].FullName
       $envFile = Join-Path $instanceDir "runner.env"
-    } elseif ($keyedDirs.Count -gt 1) {
-      $choices = (@($keyedDirs | ForEach-Object { "--server " + $_.Name.Substring($project.Length + 1) })) -join " or "
-      Fail "instance" "several personal Agents of $project are set up here, one per AgentFlow server: add $choices"
+    } elseif ($candidates.Count -gt 1) {
+      $choices = (@($candidates | ForEach-Object { "--name " + $_.Name })) -join " or "
+      Fail "instance" "several personal Agents of $project are set up here: add $choices"
+    } else {
+      Info "instance" "no personal Agent of $project set up yet (setup-runner.cmd --project $project)"
     }
   }
 }
@@ -241,7 +246,7 @@ else {
     if ($health -eq "200") { Pass "API" "$apiUrl answers" } else { Fail "API" "$apiUrl/health answered '$health' (network, VPN, hosts file?)" }
   }
   if ($config["HTTPS_PROXY"]) { Info "proxy" "HTTPS_PROXY=$($config["HTTPS_PROXY"]) NO_PROXY=$($config["NO_PROXY"])" }
-  if ($project) {
+  if ($personalMode) {
     $projectDir = $config["AGENTFLOW_RUNNER_PROJECT_DIR"]
     if ($projectDir -and (Test-Path $projectDir)) { Pass "project folder" $projectDir }
     else { Fail "project folder" "AGENTFLOW_RUNNER_PROJECT_DIR '$projectDir' does not exist" }
@@ -249,9 +254,8 @@ else {
 }
 
 $serviceId = "agentflow-agent"
-if ($project) {
-  $serviceId = "agentflow-agent-$($project.ToLower())"
-  if ($instanceServer) { $serviceId = "$serviceId-$instanceServer" }
+if ($instanceSlug) {
+  $serviceId = "agentflow-agent-$instanceSlug"
   # Prefer the id of an installed service definition in the instance dir.
   $serviceXml = Get-ChildItem -Path (Join-Path $instanceDir "service") -Filter "*.xml" -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($serviceXml) { $serviceId = [IO.Path]::GetFileNameWithoutExtension($serviceXml.Name) }

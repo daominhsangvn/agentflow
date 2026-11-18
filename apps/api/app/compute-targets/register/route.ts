@@ -14,6 +14,7 @@ import { checkPersonalAgentProject } from "../personal-agent-project";
 import {
   computeTargetsService,
   isComputeTargetGatewayConflictResult,
+  isComputeTargetMachineNameInUseResult,
 } from "../service";
 import { registerComputeTargetValidator } from "../validators";
 
@@ -52,6 +53,11 @@ export const POST = withAnyAuth<
     if (isComputeTargetGatewayConflictResult(target)) {
       return conflictResponse(
         "Desktop gateway identity is already bound to another target"
+      );
+    }
+    if (isComputeTargetMachineNameInUseResult(target)) {
+      return conflictResponse(
+        "Another online computer of yours already uses this machine name"
       );
     }
 

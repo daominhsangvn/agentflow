@@ -12,11 +12,12 @@ In environment variable names, `RUNNER` means Agent: the names keep the old word
 | Command | Starts |
 |---|---|
 | `node runner.mjs` | The automatic Agent (one per computer) |
-| `node runner.mjs --project <key>` | The personal Agent of an AgentFlow project (for example `--project PRO-1`) |
-| `node runner.mjs --project <key> --role "<role>"` | The personal Agent with this computer's role for this start (not saved) |
-| `node runner.mjs setup [--project <key>]` | Asks the setup questions and saves them to `<data dir>/runner.env` |
-| `node runner.mjs check --project <key>` | Validates the personal Agent's `AGENTFLOW.md` and exits (0 valid or missing, 2 invalid or no project folder configured) |
-| `node runner.mjs uninstall [--project <key>]` | Windows: removes the Agent's service; asks whether to delete its local data |
+| `node runner.mjs --name <agent name>` | The personal Agent of that name (for example `--name an-pro-1`). `--name` alone is enough |
+| `node runner.mjs --project <key> [--name <agent name>]` | The personal Agent of an AgentFlow project (for example `--project PRO-1`). With `--name` too, the Agent must belong to that project. Without it, one Agent of the key starts; with several, see [Start](/docs/guides/setup/personal-agent#start) |
+| `node runner.mjs --project <key> --role "<role>"` | The personal Agent with this computer's role for this start (not saved); `--name` works in place of `--project` |
+| `node runner.mjs setup [--project <key>] [--name <agent name>]` | Asks the setup questions and saves them to `<data dir>/runner.env`, or `<data dir>/personal/<agent name>/runner.env` for a personal Agent |
+| `node runner.mjs check [--project <key>] [--name <agent name>]` | Validates the personal Agent's `AGENTFLOW.md` and exits (0 valid or missing, 2 invalid or no project folder configured). Needs `--project` or `--name`; `--project` alone fails when the key has several Agents |
+| `node runner.mjs uninstall [--project <key>] [--name <agent name>]` | Windows: removes the Agent's service; asks whether to delete its local data. `--project` alone fails when the key has several Agents |
 
 Any other argument is rejected. Settings come from the environment and from `<data dir>/runner.env` (one `NAME=value` per line; a variable set in the environment wins). A start from a terminal with no API URL or key asks the setup questions first. Empty variables count as unset.
 
@@ -37,7 +38,7 @@ Exit codes: `2` for an invalid configuration (the message names the variable), `
 | `AGENTFLOW_RUNNER_PARALLEL` | `false` | Personal: `true` lets several runs share the folder (the commands make their own worktrees); `false` runs them one at a time |
 | `AGENTFLOW_RUNNER_SKIP_PERMISSIONS` | `false` | Personal: `true` lets Claude Code use any tool without a permission prompt (`--permission-mode bypassPermissions`). Otherwise it uses the run's allowed tools plus the person's own `permissions.allow` |
 | `AGENTFLOW_RUNNER_WORKSPACE` | `/workspace` | Automatic: where repositories are cloned and runs work in worktrees |
-| `AGENTFLOW_RUNNER_DATA_DIR` | `~/.agentflow-runner` | Identity, job store, sealed tokens and status file. Keep it private. A personal Agent uses `<data dir>/personal/<PROJECT KEY>` |
+| `AGENTFLOW_RUNNER_DATA_DIR` | `~/.agentflow-runner` | Identity, job store, sealed tokens and status file. Keep it private. A personal Agent uses `<data dir>/personal/<agent name>`, named after its Agent name (lower case, letters, digits and `-`); its project key is in that directory's `runner.env` |
 | `AGENTFLOW_RUNNER_MAX_CONCURRENT` | `2` | Commands executed at the same time (1 to 16) |
 | `AGENTFLOW_RUNNER_GATEWAY_PORT` | any free port | Local gateway port, loopback only (1024 to 65535). A configured port that is taken stops the Agent |
 | `AGENTFLOW_RUNNER_REWRITE_CALLBACK_URL` | `true` | Send callbacks to `AGENTFLOW_API_URL` instead of the address the API put in the command, which is often reachable only from the API host |
@@ -126,7 +127,7 @@ node apps/desktop/dist-headless/runner.mjs
 
 Runs the Agent directly on Windows, with the machine's own toolchains and network. It can do anything the Windows account can, so use a dedicated non-administrator account, and prefer Docker or a VM when the project builds on Linux. Install Node.js 22+, Git for Windows, `jq`, Python 3 with PyYAML and Claude Code (native installer), then unzip `agentflow-runner-<version>-windows.zip` (from the releases, or `pnpm -C apps/desktop package:headless --windows`), run `doctor.bat` (`doctor.bat --project PRO-1` for a personal Agent) and fix its `FAIL` lines, then run `start-runner.cmd`. The first start asks for the API URL, API key, name and workspace, and saves them to `%USERPROFILE%\.agentflow-runner\runner.env`; `setup-runner.cmd` asks again. `start-runner.cmd --project PRO-1` starts a personal Agent.
 
-The last setup question offers to start the Agent with Windows as a Windows service (WinSW, `agentflow-agent` or `agentflow-agent-pro-1`) that starts before sign-in. It runs under your Windows account: WinSW asks for its password (not a Windows Hello PIN) and the "log on as a service" right. Mapped network drives are not visible to services; use UNC paths. Logs are in `<data dir>\service\logs`. Keep the unzipped folder in a permanent place. To upgrade, unzip the new release, run `setup-runner.cmd [--project KEY]` from it and press Enter to every question. `uninstall-runner.cmd [--project KEY]` removes the service and asks whether to delete the local data (default no); answering no to the service question also removes it. A service left behind by a deleted folder is removed with `sc.exe delete <id>`.
+The last setup question offers to start the Agent with Windows as a Windows service (WinSW, `agentflow-agent` for the automatic Agent, `agentflow-agent-<agent name>` for a personal one) that starts before sign-in. It runs under your Windows account: WinSW asks for its password (not a Windows Hello PIN) and the "log on as a service" right. Mapped network drives are not visible to services; use UNC paths. Logs are in `<data dir>\service\logs` (a personal Agent: `<data dir>\personal\<agent name>\service\logs`). Keep the unzipped folder in a permanent place. To upgrade, unzip the new release, run `setup-runner.cmd [--project KEY] [--name NAME]` from it and press Enter to every question. `uninstall-runner.cmd [--project KEY] [--name NAME]` removes the service and asks whether to delete the local data (default no); answering no to the service question also removes it. A service left behind by a deleted folder is removed with `sc.exe delete <id>`.
 
 On Windows, scripts run in Git for Windows' `bash.exe` (never WSL's), stopping a run ends its whole process tree, and the Claude Code version set in AgentFlow is not installed: the `claude` on `PATH` runs.
 

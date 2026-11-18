@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import type { AgentSettings } from "../src/headless/headless-instance-dir.js";
 import { isInstanceLockHeld } from "../src/headless/headless-instance-lock.js";
 import {
   runUninstall,
@@ -14,8 +15,22 @@ import {
 } from "../src/headless/headless-windows-service.js";
 
 const BASE = path.resolve("/data/agent");
+const PERSONAL_ROOT = path.join(BASE, "personal");
+const NAME_A_RE = /--name a( |$)/;
+const NAME_B_RE = /--name b( |$)/;
 
-function fakeDeps(overrides: Partial<UninstallDeps> = {}) {
+const agentOf = (projectKey: string): AgentSettings => ({
+  projectKey,
+  runnerName: null,
+});
+const DEFAULT_AGENTS: Record<string, AgentSettings> = {
+  "an-pro-1": agentOf("PRO-1"),
+};
+
+function fakeDeps(
+  overrides: Partial<UninstallDeps> = {},
+  agents: Record<string, AgentSettings> = DEFAULT_AGENTS
+) {
   const calls = {
     removed: [] as string[],
     service: 0,
@@ -30,8 +45,9 @@ function fakeDeps(overrides: Partial<UninstallDeps> = {}) {
     },
     isWindows: true,
     homeDir: path.resolve("/home/me"),
-    exists: () => false,
-    readApiUrl: () => null,
+    exists: (dir) => path.dirname(dir) === PERSONAL_ROOT,
+    readAgentSettings: (dir) =>
+      agents[path.basename(dir)] ?? { projectKey: null, runnerName: null },
     installedServiceId: () => null,
     removeService: (location) => {
       calls.service++;
@@ -39,8 +55,12 @@ function fakeDeps(overrides: Partial<UninstallDeps> = {}) {
       return Promise.resolve(ServiceOutcome.Removed);
     },
     isLockHeld: () => false,
-    listDir: (dir) =>
-      dir === BASE ? ["runner.env", "identity", "personal"] : ["PRO-1"],
+    listDir: (dir) => {
+      if (dir === BASE) {
+        return ["runner.env", "identity", "personal"];
+      }
+      return dir === PERSONAL_ROOT ? Object.keys(agents) : [];
+    },
     removeDir: (target) => calls.removed.push(target),
     ...overrides,
   };
@@ -69,7 +89,9 @@ describe("runUninstall", () => {
       path.join(BASE, "runner.env"),
       path.join(BASE, "identity"),
     ]);
-    assert.ok(lines.some((l) => l.includes("PRO-1")));
+    assert.ok(
+      lines.some((l) => l.includes("uninstall-runner.cmd --name an-pro-1"))
+    );
   });
 
   it("deletes only the personal directory for a project", async () => {
@@ -78,7 +100,7 @@ describe("runUninstall", () => {
       await runUninstall({ baseDataDir: BASE, projectKey: "PRO-1" }, deps),
       0
     );
-    assert.deepEqual(calls.removed, [path.join(BASE, "personal", "PRO-1")]);
+    assert.deepEqual(calls.removed, [path.join(PERSONAL_ROOT, "an-pro-1")]);
   });
 
   it("refuses while the lock is held", async () => {
@@ -122,53 +144,93 @@ describe("runUninstall", () => {
   });
 });
 
-describe("runUninstall with servers", () => {
-  it("removes the keyed dir and its service", async () => {
-    const keyed = path.join(BASE, "personal", "PRO-1@host-3002");
-    const { deps, calls } = fakeDeps({ exists: (d) => d === keyed });
+describe("runUninstall by name or key", () => {
+  const two = {
+    a: agentOf("PRO-1"),
+    b: agentOf("PRO-1"),
+    other: agentOf("PRO-2"),
+  };
+
+  it("--name alone removes that Agent's dir and its service", async () => {
+    const { deps, calls } = fakeDeps({}, two);
     assert.equal(
       await runUninstall(
-        { baseDataDir: BASE, projectKey: "PRO-1", server: "host-3002" },
+        { baseDataDir: BASE, projectKey: null, agentName: "B" },
         deps
       ),
       0
     );
-    assert.deepEqual(calls.removed, [keyed]);
-    assert.equal(calls.locations[0]?.id, "agentflow-agent-pro-1-host-3002");
+    assert.deepEqual(calls.removed, [path.join(PERSONAL_ROOT, "b")]);
+    assert.equal(calls.locations[0]?.id, "agentflow-agent-b");
   });
 
   it("uses the installed service id", async () => {
     const { deps, calls } = fakeDeps({ installedServiceId: () => "custom-id" });
-    await runUninstall({ baseDataDir: BASE, projectKey: "PRO-1" }, deps);
+    await runUninstall(
+      { baseDataDir: BASE, projectKey: null, agentName: "an-pro-1" },
+      deps
+    );
     assert.equal(calls.locations[0]?.id, "custom-id");
   });
 
-  it("refuses an ambiguous project", async () => {
+  it("--project with one Agent works", async () => {
+    const { deps, calls } = fakeDeps({}, two);
+    assert.equal(
+      await runUninstall({ baseDataDir: BASE, projectKey: "PRO-2" }, deps),
+      0
+    );
+    assert.deepEqual(calls.removed, [path.join(PERSONAL_ROOT, "other")]);
+    assert.equal(calls.locations[0]?.id, "agentflow-agent-other");
+  });
+
+  it("--project with several Agents lists the --name choices and removes nothing", async () => {
     const lines: string[] = [];
-    const { deps, calls } = fakeDeps({
-      say: (l) => lines.push(l),
-      listDir: () => ["PRO-1@a", "PRO-1@b"],
-    });
+    const { deps, calls } = fakeDeps({ say: (l) => lines.push(l) }, two);
     assert.equal(
       await runUninstall({ baseDataDir: BASE, projectKey: "PRO-1" }, deps),
       1
     );
     assert.equal(calls.service, 0);
     assert.deepEqual(calls.removed, []);
-    assert.ok(lines.some((l) => l.includes("--server a")));
+    assert.ok(lines.some((l) => NAME_A_RE.test(l) && NAME_B_RE.test(l)));
   });
 
-  it("lists remaining Agents with their server option", async () => {
+  it("--project with --name of another key's Agent is a mismatch", async () => {
     const lines: string[] = [];
-    const { deps } = fakeDeps({
-      say: (l) => lines.push(l),
-      listDir: (dir) =>
-        dir === BASE ? ["personal"] : ["PRO-1", "PRO-1@host-3002"],
-    });
-    await runUninstall({ baseDataDir: BASE, projectKey: null }, deps);
-    assert.ok(
-      lines.some((l) => l.includes("--project PRO-1 --server host-3002"))
+    const { deps, calls } = fakeDeps({ say: (l) => lines.push(l) }, two);
+    assert.equal(
+      await runUninstall(
+        { baseDataDir: BASE, projectKey: "PRO-1", agentName: "other" },
+        deps
+      ),
+      1
     );
+    assert.equal(calls.service, 0);
+    assert.deepEqual(calls.removed, []);
+    assert.ok(lines.some((l) => l.includes("belongs to project PRO-2")));
+  });
+
+  it("--project with no Agent of the key says so", async () => {
+    const lines: string[] = [];
+    const { deps, calls } = fakeDeps({ say: (l) => lines.push(l) });
+    assert.equal(
+      await runUninstall({ baseDataDir: BASE, projectKey: "PRO-9" }, deps),
+      1
+    );
+    assert.equal(calls.service, 0);
+    assert.ok(lines.some((l) => l.includes("No personal Agent of PRO-9")));
+  });
+
+  it("an unknown --name is an error", async () => {
+    const { deps, calls } = fakeDeps();
+    assert.equal(
+      await runUninstall(
+        { baseDataDir: BASE, projectKey: null, agentName: "ghost" },
+        deps
+      ),
+      1
+    );
+    assert.equal(calls.service, 0);
   });
 });
 

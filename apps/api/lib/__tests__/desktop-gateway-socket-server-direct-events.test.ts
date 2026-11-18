@@ -77,6 +77,10 @@ vi.mock("../../app/compute-targets/service", () => ({
   },
   isComputeTargetGatewayConflictResult: (result: { ok: boolean }) =>
     result.ok === false,
+  isComputeTargetMachineNameInUseResult: (result: {
+    ok: boolean;
+    error?: string;
+  }) => !result.ok && result.error === "machine_name_in_use",
 }));
 
 vi.mock("../relay-event-bus", () => ({

@@ -19,7 +19,8 @@ Open a new terminal afterwards so PATH includes the new tools.
 Check the machine (run it again after a change):
 
   doctor.bat                  before setting up the automatic Agent
-  doctor.bat --project PRO-1  before (or after) setting up a personal Agent
+  doctor.bat --name an-pro-1  before (or after) setting up a personal Agent
+                              (or --project PRO-1)
 
 It checks Node.js 22+, Git for Windows and its bash, that `claude` is the
 native Claude Code (an npm install is a script wrapper that breaks the
@@ -53,21 +54,20 @@ Ctrl+C.
 
 Start with Windows: the last setup question offers to install the Agent as a
 Windows service (WinSW, in the winsw folder) that starts before anyone signs
-in. One service per Agent: agentflow-agent, or agentflow-agent-pro-1 for a
-personal one; a second Agent of the same key for another server is
-agentflow-agent-pro-1-<server>. It runs under your Windows account: WinSW asks for that
+in. One service per Agent: agentflow-agent, or agentflow-agent-<agent name> for a
+personal one (agentflow-agent-an-pro-1 for the Agent named an-pro-1). It runs under your Windows account: WinSW asks for that
 account's password (not a Windows Hello PIN; Microsoft accounts use the online
 password) and offers the "log on as a service" right; answer y. Mapped
 network drives are not visible to services, use UNC paths. Logs:
 %USERPROFILE%\.agentflow-runner\service\logs (personal:
-...\personal\PRO-1\service\logs, or ...\personal\PRO-1@<server>\service\logs). Keep this folder in a permanent place, not
+...\personal\<agent name>\service\logs). Keep this folder in a permanent place, not
 Downloads or temp: the service runs runner.mjs from here. Answering no to the
 question removes an installed service.
 
-Upgrade: unzip the new release, run setup-runner.cmd [--project KEY [--server HOST]] from it
+Upgrade: unzip the new release, run setup-runner.cmd [--project KEY] [--name NAME] from it
 and press Enter to every question. The service is re-pointed and restarted.
 
-Uninstall: uninstall-runner.cmd [--project KEY [--server HOST]] removes the service and asks
+Uninstall: uninstall-runner.cmd [--project KEY] [--name NAME] removes the service and asks
 whether to delete the Agent's local data (default no). The Agent stays in
 AgentFlow as an offline computer. A service left behind by a deleted folder
 is removed with: sc.exe delete agentflow-agent
@@ -76,19 +76,29 @@ Personal runner (one project, in your own project folder, with this
 computer's git, gh and Claude Code setup):
 
   setup-runner.cmd    Answer "personal" to the first question, then give the
-                      AgentFlow project key (e.g. PRO-1), the project folder,
+                      AgentFlow project key (e.g. PRO-1), the Agent's name
+                      (default <user name>-<project key>), the project folder,
                       and whether your commands can run several tasks at once.
-  start-runner.cmd --project PRO-1
-                      Starts the personal runner of PRO-1. Run one per project;
-                      they can run next to each other and next to the auto
-                      runner. uninstall-runner.cmd --project PRO-1 removes it. Settings: %USERPROFILE%\.agentflow-runner\personal\PRO-1\runner.env
+  start-runner.cmd --name an-pro-1
+                      Starts the personal Agent named an-pro-1. --name alone is
+                      enough. Agents run next to each other and next to the
+                      auto runner. uninstall-runner.cmd --name an-pro-1 removes
+                      it. Settings: %USERPROFILE%\.agentflow-runner\personal\an-pro-1\runner.env
 
-Two AgentFlow servers on one computer: the first Agent of PRO-1 keeps
-personal\PRO-1; a second one for another server lives in
-personal\PRO-1@<server> (host, lower case, -port when explicit) with the
-service agentflow-agent-pro-1-<server>. Setup picks the folder from the API
-URL you enter. Start, uninstall and doctor take --server <host>, e.g.
-start-runner.cmd --project PRO-1 --server agentflow.example.com. Without
---server the only Agent of the key is used; with several, add --server.
+Several Agents per project on one computer: each Agent has its own folder
+personal\<agent name> (the name in lower case, accents dropped, other
+characters turned into "-", at most 40 characters), and the project key is
+stored in its runner.env. A name is unique on the computer, whatever the
+project. Setup asks the name after the project key: an existing name of the
+same project re-configures that Agent, a new name adds another one, and the
+name of another project's Agent is refused. A new Agent's gateway port
+defaults to "random".
+
+--project PRO-1 alone: one Agent of the key is used. With several, start in a
+terminal picks the one that is not running or asks which (a number); start
+without a terminal (a service) fails and lists the --name choices; check and
+uninstall fail and list them. With --project and --name together the Agent
+must belong to that project. An Agent configured only through environment
+variables has no runner.env: use --name for it.
 
 See docs/runner.md, "Personal runner".

@@ -108,6 +108,8 @@ export const HELLO_NACK_MESSAGES: Record<DesktopHelloNackReason, string> = {
     "Cloud could not load this machine's pending commands (pending_commands_lookup_failed). Reconnecting — if this keeps happening, check AgentFlow status.",
   [DesktopHelloNackReason.PersonalAgentProjectNotFound]:
     "AgentFlow refused this personal Agent: its project key (AGENTFLOW_RUNNER_PROJECT_KEY) is not a project of the API key's organization (personal_agent_project_not_found). Run setup again with the right project key, then restart the Agent.",
+  [DesktopHelloNackReason.MachineNameInUse]:
+    "AgentFlow refused this machine: another of your computers already uses its name (machine_name_in_use; at first registration only a computer that is online counts, a rename is refused for an offline one too). Give this one another name (headless runner: run setup again, AGENTFLOW_RUNNER_NAME), then restart it.",
   [DesktopHelloNackReason.InternalError]:
     "Cloud hit an internal error while accepting this machine (internal_error). Reconnecting — if this keeps happening, check AgentFlow status.",
 };

@@ -52,6 +52,7 @@ vi.mock("@/lib/compute-target-signing-eligibility", () => ({
 import {
   computeTargetsService,
   isComputeTargetGatewayConflictResult,
+  isComputeTargetMachineNameInUseResult,
 } from "./service";
 
 const now = new Date("2026-04-28T17:00:00.000Z");
@@ -590,6 +591,71 @@ describe("computeTargetsService gateway reconciliation", () => {
     );
   });
 
+  it("refuses a same-name target that is online with another gateway", async () => {
+    const update = vi.fn();
+    const upsert = vi.fn();
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(
+        buildTarget({
+          id: "machine-target",
+          gatewayId: "gateway-other",
+          isOnline: true,
+          lastSeenAt: new Date(),
+        })
+      );
+    installDb({ computeTarget: { findFirst, update, upsert } });
+
+    const result = await computeTargetsService.register("org-1", "user-1", {
+      machineName: "machine-1",
+      platform: "darwin",
+      gatewayId: "gateway-1",
+      capabilities: {},
+      supportedOperations: ["symphony_plan_loop"],
+    });
+
+    expect(isComputeTargetMachineNameInUseResult(result)).toBe(true);
+    expect(update).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["offline", { isOnline: false, lastSeenAt: new Date() }],
+    ["stale", { isOnline: true, lastSeenAt: new Date(0) }],
+  ])("re-binds a same-name target with another gateway when it is %s", async (_label, state) => {
+    const update = vi
+      .fn()
+      .mockResolvedValue(
+        buildTarget({ id: "machine-target", gatewayId: "gateway-1" })
+      );
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(
+        buildTarget({
+          id: "machine-target",
+          gatewayId: "gateway-other",
+          ...state,
+        })
+      );
+    installDb({ computeTarget: { findFirst, update } });
+
+    await computeTargetsService.register("org-1", "user-1", {
+      machineName: "machine-1",
+      platform: "darwin",
+      gatewayId: "gateway-1",
+      capabilities: {},
+      supportedOperations: ["symphony_plan_loop"],
+    });
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "machine-target" } })
+    );
+  });
+
   it("attaches a new gateway to an existing owned machine-name target", async () => {
     const update = vi.fn().mockResolvedValue(
       buildTarget({
@@ -758,12 +824,15 @@ describe("computeTargetsService gateway reconciliation", () => {
     expect(isComputeTargetGatewayConflictResult(result)).toBe(true);
   });
 
-  it("re-throws a machine-name unique-constraint violation without remapping", async () => {
+  it.each([
+    ["column array", ["userId", "machineName"]],
+    ["constraint name", "compute_targets_user_id_machine_name_key"],
+  ])("maps a machine-name unique-constraint violation (%s) to machine_name_in_use", async (_label, target) => {
     const machineNameP2002 = Object.assign(
       new Error("Unique constraint failed"),
       {
         code: "P2002",
-        meta: { target: ["userId", "machineName"] },
+        meta: { target },
       }
     );
     installDb({
@@ -773,15 +842,15 @@ describe("computeTargetsService gateway reconciliation", () => {
       },
     });
 
-    await expect(
-      computeTargetsService.updateOwned(
-        "target-1",
-        "org-1",
-        "user-1",
-        { machineName: "taken-name" },
-        null
-      )
-    ).rejects.toThrow("Unique constraint failed");
+    const result = await computeTargetsService.updateOwned(
+      "target-1",
+      "org-1",
+      "user-1",
+      { machineName: "taken-name" },
+      null
+    );
+
+    expect(isComputeTargetMachineNameInUseResult(result)).toBe(true);
   });
 
   it("maps a gateway DB unique-constraint violation during register to a gateway conflict result", async () => {

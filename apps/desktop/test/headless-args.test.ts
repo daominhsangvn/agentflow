@@ -13,7 +13,7 @@ test("no arguments is the auto runner", () => {
       check: false,
       projectKey: null,
       role: null,
-      server: null,
+      name: null,
     },
   });
 });
@@ -58,7 +58,7 @@ test("an unknown argument is an error", () => {
   assert.equal(parseRunnerArgs(["--nope"]).ok, false);
 });
 
-test("check needs --project and only works as the first argument", () => {
+test("check needs --project or --name and only works as the first argument", () => {
   const ok = parseRunnerArgs(["check", "--project", "pro-1"]);
   assert.equal(ok.ok && ok.value.check, true);
   assert.equal(ok.ok && ok.value.projectKey, "PRO-1");
@@ -70,34 +70,47 @@ test("check needs --project and only works as the first argument", () => {
   assert.equal(parseRunnerArgs(["--project", "PRO-1", "check"]).ok, false);
 });
 
-test("--server is reduced to the server slug", () => {
-  const result = parseRunnerArgs([
-    "--project",
-    "pro-1",
-    "--server",
-    "http://LocalHost:3002",
-  ]);
-  assert.equal(result.ok && result.value.server, "localhost-3002");
+test("--name is kept as typed and trimmed", () => {
+  const result = parseRunnerArgs(["--name", "  Sang Dao-PRO-1 "]);
+  assert.equal(result.ok && result.value.name, "Sang Dao-PRO-1");
 });
 
-test("--server works with run, setup, uninstall and check", () => {
-  for (const command of ["setup", "uninstall", "check"]) {
-    const result = parseRunnerArgs([
-      command,
+test("--name works with run, setup, uninstall and check, alone or with --project", () => {
+  for (const command of [null, "setup", "uninstall", "check"]) {
+    const prefix = command ? [command] : [];
+    const alone = parseRunnerArgs([...prefix, "--name", "an-pro-1"]);
+    assert.equal(alone.ok && alone.value.name, "an-pro-1");
+    const both = parseRunnerArgs([
+      ...prefix,
       "--project",
       "PRO-1",
-      "--server",
-      "host",
+      "--name",
+      "an-pro-1",
     ]);
-    assert.equal(result.ok && result.value.server, "host");
+    assert.equal(both.ok && both.value.name, "an-pro-1");
+    assert.equal(both.ok && both.value.projectKey, "PRO-1");
   }
 });
 
-test("--server needs --project and a valid value", () => {
-  assert.equal(parseRunnerArgs(["--server", "x"]).ok, false);
-  assert.equal(parseRunnerArgs(["--project", "PRO-1", "--server"]).ok, false);
+test("--name needs a valid value", () => {
+  assert.equal(parseRunnerArgs(["--name"]).ok, false);
+  assert.equal(parseRunnerArgs(["--name", "  "]).ok, false);
+  assert.equal(parseRunnerArgs(["--name", "運用"]).ok, false);
+});
+
+test("check --name works without --project", () => {
+  const result = parseRunnerArgs(["check", "--name", "x"]);
+  assert.equal(result.ok && result.value.check, true);
+});
+
+test("--role with --name alone is valid", () => {
+  const result = parseRunnerArgs(["--name", "x", "--role", ROLE]);
+  assert.equal(result.ok && result.value.role, ROLE);
+});
+
+test("--server is an unknown argument", () => {
   assert.equal(
-    parseRunnerArgs(["--project", "PRO-1", "--server", "a b"]).ok,
+    parseRunnerArgs(["--project", "PRO-1", "--server", "h"]).ok,
     false
   );
 });

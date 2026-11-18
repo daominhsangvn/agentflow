@@ -16,6 +16,7 @@ import {
 import {
   computeTargetsService,
   isComputeTargetGatewayConflictResult,
+  isComputeTargetMachineNameInUseResult,
 } from "../service";
 import { updateComputeTargetValidator } from "../validators";
 
@@ -50,6 +51,11 @@ export const PUT = withAnyAuth<ComputeTarget, "/compute-targets/[id]">(
       if (isComputeTargetGatewayConflictResult(target)) {
         return conflictResponse(
           "That Desktop gateway is already registered to another compute target"
+        );
+      }
+      if (isComputeTargetMachineNameInUseResult(target)) {
+        return conflictResponse(
+          "A compute target with that machine name already exists"
         );
       }
 
