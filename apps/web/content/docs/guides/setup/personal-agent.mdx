@@ -60,6 +60,7 @@ The answers are saved in `~/.agentflow-runner/personal/<agent name>/runner.env` 
 ```bash
 node runner.mjs --name an-pro-1          # Windows: start-runner.cmd --name an-pro-1
 node runner.mjs --project PRO-1          # the Agent of PRO-1, when it has only one
+node runner.mjs                          # picks among the Agents set up on this computer
 ```
 
 `--name <agent name>` alone is enough. With `--project` too, the Agent must belong to that project, or the command fails naming both keys. With `--project` alone:
@@ -68,6 +69,12 @@ node runner.mjs --project PRO-1          # the Agent of PRO-1, when it has only 
 - Several, in a terminal: the one that is not running starts; when several are free it asks you to pick by number; when all are running it fails.
 - Several, without a terminal (a service, systemd, Docker): it fails and lists every `--name` choice, so an unattended unit never starts a different Agent.
 - None, in a terminal: setup runs. Without a terminal it fails and tells you to run setup, or to pass `--name` when the settings come from environment variables.
+
+Without any option, the start looks at what is set up on this computer:
+
+- No personal Agent: the automatic Agent starts (in a terminal, its setup runs when it is not configured).
+- Personal Agents and no configured automatic Agent (no API URL and key in `~/.agentflow-runner/runner.env` or the environment): the same rules as `--project` alone, over the personal Agents of every project. One starts; several ask in a terminal and fail with the `--name` choices without one.
+- Personal Agents and a configured automatic Agent: in a terminal it lists those that are not running, the automatic Agent included, and asks you to pick (a single one starts without asking). Without a terminal the automatic Agent starts.
 
 An Agent configured only through environment variables (no `runner.env`) is reachable with `--name` only. A `--name` that was never set up uses `personal/<agent name>`, and in a terminal runs setup with that name filled in.
 

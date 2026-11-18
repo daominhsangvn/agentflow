@@ -11,7 +11,7 @@ In environment variable names, `RUNNER` means Agent: the names keep the old word
 
 | Command | Starts |
 |---|---|
-| `node runner.mjs` | The automatic Agent (one per computer) |
+| `node runner.mjs` | The automatic Agent (one per computer). When personal Agents are set up on the computer, it starts or asks for one of them instead, see [Start](/docs/guides/setup/personal-agent#start) |
 | `node runner.mjs --name <agent name>` | The personal Agent of that name (for example `--name an-pro-1`). `--name` alone is enough |
 | `node runner.mjs --project <key> [--name <agent name>]` | The personal Agent of an AgentFlow project (for example `--project PRO-1`). With `--name` too, the Agent must belong to that project. Without it, one Agent of the key starts; with several, see [Start](/docs/guides/setup/personal-agent#start) |
 | `node runner.mjs --project <key> --role "<role>"` | The personal Agent with this computer's role for this start (not saved); `--name` works in place of `--project` |

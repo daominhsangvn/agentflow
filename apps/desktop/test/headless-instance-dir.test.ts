@@ -272,6 +272,18 @@ describe("chooseAgentToStart", () => {
     );
     assert.deepEqual(result, { ok: "ask", candidates: [b, c] });
   });
+
+  it("without a project key chooses among Agents of any project", () => {
+    const other = agent("d", "PRO-2");
+    const asked = chooseAgentToStart(null, [a, other], none, true);
+    assert.deepEqual(asked, { ok: "ask", candidates: [a, other] });
+    const listed = chooseAgentToStart(null, [a, other], none, false);
+    assert.ok(listed.ok === false);
+    assert.equal(
+      listed.error,
+      "Several personal Agents are set up on this computer: start one with --name a or --name d"
+    );
+  });
 });
 
 describe("parseAgentChoice", () => {

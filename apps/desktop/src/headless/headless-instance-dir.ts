@@ -146,12 +146,13 @@ export function resolvePersonalAgent(
 }
 
 /**
- * Which of a key's Agents starts. One Agent is used as is. With several, a
+ * Which of a key's Agents (null key: of all this computer's personal
+ * Agents) starts. One Agent is used as is. With several, a
  * terminal picks the single one not running or asks; without a terminal the
  * choice must be explicit (--name), so a unit never starts another Agent.
  */
 export function chooseAgentToStart(
-  projectKey: string,
+  projectKey: string | null,
   agents: PersonalAgent[],
   isRunning: (dataDir: string) => boolean,
   interactive: boolean
@@ -159,6 +160,7 @@ export function chooseAgentToStart(
   if (agents.length === 1) {
     return { ok: true, agent: agents[0], picked: false };
   }
+  const scope = projectKey ? ` of ${projectKey}` : "";
   if (!interactive) {
     const choices = agents
       .map((agent) => {
@@ -168,7 +170,7 @@ export function chooseAgentToStart(
       .join(" or ");
     return {
       ok: false,
-      error: `Several personal Agents of ${projectKey} are set up on this computer: start one with ${choices}`,
+      error: `Several personal Agents${scope} are set up on this computer: start one with ${choices}`,
     };
   }
   const free = agents.filter((agent) => !isRunning(agent.dataDir));
@@ -176,7 +178,7 @@ export function chooseAgentToStart(
     const names = agents.map((agent) => agent.slug).join(", ");
     return {
       ok: false,
-      error: `Every personal Agent of ${projectKey} on this computer is already running: ${names}`,
+      error: `Every personal Agent${scope} on this computer is already running: ${names}`,
     };
   }
   if (free.length === 1) {

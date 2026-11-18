@@ -15,7 +15,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { LoopHarness } from "@agentflow-ai/loops-api/desktop-request";
 import { gatewayLog } from "../main/logging/gateway-logger.js";
@@ -49,21 +48,16 @@ import {
   agentNameSlug,
   agentsOfProject,
   checkPersonalAgentName,
-  chooseAgentToStart,
   defaultInstanceDirFs,
   findPersonalAgent,
   listPersonalAgents,
   type PersonalAgent,
-  parseAgentChoice,
   personalAgentDir,
   personalAgentOptions,
   resolvePersonalAgent,
   setupNameDefault,
 } from "./headless-instance-dir.js";
-import {
-  acquireInstanceLock,
-  isInstanceLockHeld,
-} from "./headless-instance-lock.js";
+import { acquireInstanceLock } from "./headless-instance-lock.js";
 import {
   defaultPreflightDeps,
   fatalPreflightProblems,
@@ -71,9 +65,9 @@ import {
   runHeadlessPreflight,
   toCapabilities,
 } from "./headless-preflight.js";
+import { openPrompt } from "./headless-prompt.js";
 import { type HeadlessRunner, startHeadlessRunner } from "./headless-runner.js";
 import {
-  type Ask,
   applyRunnerConfig,
   askRunnerMode,
   askRunnerSettings,
@@ -88,6 +82,7 @@ import {
   type SetupContext,
   writeRunnerConfigFile,
 } from "./headless-setup.js";
+import { resolveStartInstance } from "./headless-start-instance.js";
 import { defaultUninstallDeps, runUninstall } from "./headless-uninstall.js";
 import {
   applyServiceChoice,
@@ -111,7 +106,6 @@ const LOG_TAG = "headless-runner";
 const EXIT_CONFIG_ERROR = 2;
 const EXIT_PREFLIGHT_ERROR = 3;
 const EXIT_RUNTIME_ERROR = 1;
-const EXIT_INTERRUPTED = 130;
 async function main(): Promise<void> {
   const args = parseRunnerArgs(process.argv.slice(2));
   if (!args.ok) {
@@ -480,42 +474,6 @@ async function runInteractiveSetup(options: {
   }
 }
 
-/** A readline prompt on this terminal. */
-function openPrompt(): {
-  ask: Ask;
-  say: (line: string) => void;
-  close(): void;
-} {
-  const prompt = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  // Without a listener, Ctrl+C only pauses the prompt.
-  prompt.on("SIGINT", () => {
-    prompt.close();
-    process.exit(EXIT_INTERRUPTED);
-  });
-  // Read through the iterator, not prompt.question(): it keeps lines that
-  // arrive before their question (answers piped in) and ends on end of input.
-  const lines = prompt[Symbol.asyncIterator]();
-  return {
-    ask: async (question: string, shownDefault?: string) => {
-      process.stdout.write(
-        shownDefault ? `${question} [${shownDefault}]: ` : `${question}: `
-      );
-      const line = await lines.next();
-      if (line.done) {
-        throw new Error("Setup input ended before every question was answered");
-      }
-      return line.value.trim();
-    },
-    say: (line: string) => {
-      process.stdout.write(`${line}\n`);
-    },
-    close: () => prompt.close(),
-  };
-}
-
 /**
  * Windows only: asks whether this Agent starts with Windows and installs,
  * updates or removes its service. True when the service now runs it.
@@ -636,108 +594,6 @@ function runCheckCommand(projectKey: string | null, name: string | null): void {
   });
 }
 
-type StartInstance =
-  | { ok: true; dataDir: string | null; agentSlug: string | null }
-  | { ok: false; error: string };
-
-/**
- * The data directory (null: none yet, a terminal runs setup) and Agent slug
- * (null: the auto runner) a start uses.
- */
-async function resolveStartInstance(
-  projectKey: string | null,
-  name: string | null
-): Promise<StartInstance> {
-  const baseDataDir = resolveRunnerDataDir();
-  if (name !== null) {
-    return resolveNamedStart(baseDataDir, projectKey, name);
-  }
-  if (projectKey === null) {
-    return { ok: true, dataDir: baseDataDir, agentSlug: null };
-  }
-  return await resolveKeyedStart(baseDataDir, projectKey);
-}
-
-/** `--name`: that Agent's directory, even when it is not set up yet. */
-function resolveNamedStart(
-  baseDataDir: string,
-  projectKey: string | null,
-  name: string
-): StartInstance {
-  const slug = agentNameSlug(name);
-  if (slug === null) {
-    return {
-      ok: false,
-      error: `--name needs an agent name with a letter or digit, got "${name}"`,
-    };
-  }
-  const fsApi = defaultInstanceDirFs();
-  if (findPersonalAgent(baseDataDir, slug, fsApi) === null) {
-    return {
-      ok: true,
-      dataDir: personalAgentDir(baseDataDir, slug),
-      agentSlug: slug,
-    };
-  }
-  const resolved = resolvePersonalAgent(
-    { baseDataDir, projectKey, name },
-    fsApi
-  );
-  if (!resolved.ok) {
-    return resolved;
-  }
-  return {
-    ok: true,
-    dataDir: resolved.agent?.dataDir ?? null,
-    agentSlug: slug,
-  };
-}
-
-/** `--project` alone: the key's one Agent, or a choice among several. */
-async function resolveKeyedStart(
-  baseDataDir: string,
-  projectKey: string
-): Promise<StartInstance> {
-  const interactive = Boolean(process.stdin.isTTY);
-  const agents = agentsOfProject(
-    listPersonalAgents(baseDataDir, defaultInstanceDirFs()),
-    projectKey
-  );
-  if (agents.length === 0) {
-    if (interactive) {
-      return { ok: true, dataDir: null, agentSlug: null };
-    }
-    return {
-      ok: false,
-      error: `No personal Agent of ${projectKey} is set up on this computer: run "node runner.mjs ${SETUP_COMMAND} --project ${projectKey}", or start with --name <agent name> when its settings come from the environment`,
-    };
-  }
-  const chosen = chooseAgentToStart(
-    projectKey,
-    agents,
-    (dir) => isInstanceLockHeld(dir),
-    interactive
-  );
-  if (chosen.ok === false) {
-    return chosen;
-  }
-  if (chosen.ok === "ask") {
-    const agent = await askAgentToStart(projectKey, chosen.candidates);
-    return { ok: true, dataDir: agent.dataDir, agentSlug: agent.slug };
-  }
-  if (chosen.picked) {
-    gatewayLog.info(
-      LOG_TAG,
-      `Starting ${chosen.agent.slug}, the only personal Agent of ${projectKey} here that is not running (choose it next time with --name ${chosen.agent.slug}).`
-    );
-  }
-  return {
-    ok: true,
-    dataDir: chosen.agent.dataDir,
-    agentSlug: chosen.agent.slug,
-  };
-}
-
 /** The directory whose config the setup questions start from; null: none. */
 function setupPrefillDir(
   projectKey: string | null,
@@ -847,32 +703,6 @@ function announcePersonalAgent(
   say(
     `Start this personal runner with: start-runner ${options} (node runner.mjs ${options})`
   );
-}
-
-/** Asks which of several free Agents of a key starts; closes its prompt. */
-async function askAgentToStart(
-  projectKey: string,
-  candidates: PersonalAgent[]
-): Promise<PersonalAgent> {
-  const { ask, say, close } = openPrompt();
-  try {
-    say(
-      `${projectKey} has ${candidates.length} personal Agents on this computer that are not running:`
-    );
-    candidates.forEach((agent, index) => {
-      say(`  ${index + 1}) ${agent.slug} (${agent.runnerName ?? agent.slug})`);
-    });
-    for (;;) {
-      const answer = await ask(`Which one starts? 1-${candidates.length}`);
-      const agent = parseAgentChoice(answer, candidates);
-      if (agent) {
-        return agent;
-      }
-      say(`  answer a number from 1 to ${candidates.length}`);
-    }
-  } finally {
-    close();
-  }
 }
 
 /** Notes in the log that this process is the Windows service. */

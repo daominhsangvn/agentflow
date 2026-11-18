@@ -581,3 +581,13 @@ export function askStartWithWindows(
     installed
   );
 }
+
+/** True when `dataDir`'s runner.env or the environment configures a runner. */
+export function isRunnerConfigured(
+  dataDir: string,
+  env: NodeJS.ProcessEnv
+): boolean {
+  const merged = { ...env };
+  applyRunnerConfig(merged, readRunnerConfigFile(runnerConfigFile(dataDir)));
+  return !needsSetup(merged);
+}

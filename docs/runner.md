@@ -705,6 +705,19 @@ both keys. `check` and `uninstall` with an unknown `--name` fail.
 - `check` and `uninstall` with several Agents fail and list the `--name`
   choices; they never ask.
 
+No option at all:
+
+- No personal Agent on this computer: the automatic Agent starts (in a
+  terminal its setup runs when it is not configured).
+- Personal Agents and no configured automatic Agent (no API URL and key in the
+  base runner.env or the environment): the rules of `--project <KEY>` alone,
+  over the personal Agents of every project. So a start right after a personal
+  setup starts that Agent instead of asking the automatic Agent's questions.
+- Personal Agents and a configured automatic Agent: a terminal lists those
+  that are not running, the automatic Agent included, and asks for a number (a
+  single one starts without asking; none is an error). Without a terminal the
+  automatic Agent starts, so an existing service or container is unchanged.
+
 `start` with a `--name` that is not set up uses `personal/<agent name>`
 anyway: its settings may come from environment variables alone, and in a
 terminal setup runs with that name filled in. An Agent that has no runner.env
