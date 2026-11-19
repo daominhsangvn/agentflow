@@ -6,6 +6,7 @@ import {
   claudeCodeVersionSchema,
   modelProviderEnvSchema,
 } from "@repo/api/src/types/compute-target-model-provider";
+import type { IntegrationSessionGrant } from "@repo/api/src/types/integration-tools";
 import {
   ORCHESTRATOR_MCP_SERVER_NAME,
   ORCHESTRATOR_TURN_ANSWER_MAX,
@@ -19,6 +20,7 @@ import {
   orchestratorTurnRequestSchema,
 } from "@repo/api/src/types/orchestrator";
 import { z } from "zod";
+import { gatewayLog } from "../../main/logging/gateway-logger.js";
 import type { OperationDispatcher } from "../operation-dispatcher.js";
 import type { ClaudeCodeShellEnvProvider } from "../otel/claude-code-env.js";
 import type { ProcessManager } from "../process-manager.js";
@@ -66,6 +68,7 @@ export const ORCHESTRATOR_DISALLOWED_TOOLS = [
   "Task",
 ].join(",");
 
+const LOG_TAG = "orchestrator-turn";
 const TURNS_DIR = "turns";
 const MCP_CONFIG_FILE = "mcp-config.json";
 const OUTPUT_FILE = "claude-output.jsonl";
@@ -301,7 +304,8 @@ async function runTurn(
   if (binary.error) {
     return failure(binary.error, true, null);
   }
-  if (!deps.openOrchestratorSession) {
+  const openSession = deps.openOrchestratorSession;
+  if (!openSession) {
     return failure(
       "This computer has no AgentFlow API key, so the orchestrator cannot get its tools.",
       false,
@@ -310,7 +314,7 @@ async function runTurn(
   }
   let grant: Awaited<ReturnType<OpenOrchestratorSession>>;
   try {
-    grant = await deps.openOrchestratorSession(request.turnId);
+    grant = await openSession(request.turnId);
   } catch (error) {
     return failure(
       `The orchestrator's tools could not be opened: ${errorText(error)}`,
@@ -325,9 +329,7 @@ async function runTurn(
     "utf8"
   );
   const shellEnv = await deps.getClaudeShellEnv(request.claudeEnv);
-  // The token lives only in the agent's environment, never in a file.
-  const env = { ...shellEnv, ...integrationToolEnv(grant, null) };
-  const spawn = (sessionId: string | null) =>
+  const spawn = (sessionId: string | null, current: IntegrationSessionGrant) =>
     spawnAgent({
       deps,
       command: binary.resolved.path,
@@ -335,21 +337,22 @@ async function runTurn(
       args: orchestratorTurnArgs(mcpConfigFile, sessionId),
       outputFile: path.join(turnFolder, OUTPUT_FILE),
       prompt: request.prompt,
-      env,
+      // The token lives only in the agent's environment, never in a file.
+      env: { ...shellEnv, ...integrationToolEnv(current, null) },
       timeoutMs: request.timeoutMs,
       onCancel: (stop) => {
         onCancel(stop);
         runningTurns.set(request.turnId, stop);
       },
     });
-  let outcome = await spawn(request.sessionId);
-  if (
-    request.sessionId &&
-    outcome.missingSession &&
-    !stoppedTurns.has(request.turnId)
-  ) {
-    outcome = await spawn(null);
-  }
+  let outcome = await spawnResumingSession({
+    turnId: request.turnId,
+    sessionId: request.sessionId,
+    grant,
+    spawn,
+    reopenFresh: () => openSession(request.turnId, { freshSession: true }),
+    stopped: () => stoppedTurns.has(request.turnId),
+  });
   runningTurns.delete(request.turnId);
   if (stoppedTurns.delete(request.turnId)) {
     outcome = {
@@ -486,4 +489,59 @@ function writeLine(response: ServerResponse, payload: object): void {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Resumes the conversation's session. When this computer no longer has it, the turn starts a fresh one,
+ * after exchanging the turn again with `freshSession` so AgentFlow forgets what the old session read
+ * (runners_list) before the new one can call a tool. The exchange is tried twice. When both attempts
+ * fail, the fresh session uses the first token, which may already be revoked if AgentFlow applied the
+ * swap but the reply was lost; its tool calls then fail for that turn.
+ */
+export async function spawnResumingSession<
+  T extends { missingSession: boolean },
+>(input: {
+  turnId?: string;
+  sessionId: string | null;
+  grant: IntegrationSessionGrant;
+  spawn: (
+    sessionId: string | null,
+    grant: IntegrationSessionGrant
+  ) => Promise<T>;
+  reopenFresh: () => Promise<IntegrationSessionGrant>;
+  stopped: () => boolean;
+}): Promise<T> {
+  const first = await input.spawn(input.sessionId, input.grant);
+  if (input.sessionId && first.missingSession && !input.stopped()) {
+    return input.spawn(null, await freshGrant(input));
+  }
+  return first;
+}
+
+async function freshGrant(input: {
+  turnId?: string;
+  sessionId: string | null;
+  grant: IntegrationSessionGrant;
+  reopenFresh: () => Promise<IntegrationSessionGrant>;
+}): Promise<IntegrationSessionGrant> {
+  try {
+    return await input.reopenFresh();
+  } catch {
+    // observability: the retry below logs when it fails too
+  }
+  try {
+    return await input.reopenFresh();
+  } catch (error) {
+    gatewayLog.warn(
+      LOG_TAG,
+      "fresh session exchange failed twice; keeping the first token",
+      {
+        reason: "fresh_session_exchange_failed",
+        turnId: input.turnId,
+        sessionId: input.sessionId,
+        error,
+      }
+    );
+    return input.grant;
+  }
 }

@@ -12,6 +12,7 @@ import {
   orchestratorTurnArgs,
   readTurnResult,
   resolveOrchestratorFolder,
+  spawnResumingSession,
   stopRunningTurn,
 } from "../src/server/operations/orchestrator-turn.js";
 
@@ -112,4 +113,101 @@ test("stopping a turn is an operation a headless runner runs", () => {
       ORCHESTRATOR_TURN_CANCEL_OPERATION_ID
     )
   );
+});
+
+function resumeHarness(options: {
+  sessionId: string | null;
+  missing: boolean[];
+  stopped?: boolean;
+  reopenFails?: boolean;
+  reopenFailsOnce?: boolean;
+}) {
+  const calls: [string | null, string][] = [];
+  let reopened = 0;
+  const grantOf = (token: string) => ({
+    token,
+    expiresAt: "2026-10-13T09:00:00.000Z",
+    mcpUrl: "http://localhost:3010/mcp",
+    filesUrl: "http://localhost:3002/integration-tools/files",
+  });
+  const run = () =>
+    spawnResumingSession({
+      sessionId: options.sessionId,
+      grant: grantOf("ost_a"),
+      spawn: (sessionId, grant) => {
+        calls.push([sessionId, grant.token]);
+        return Promise.resolve({
+          missingSession: options.missing.shift() ?? false,
+        });
+      },
+      reopenFresh: () => {
+        reopened += 1;
+        if (options.reopenFailsOnce && reopened === 1) {
+          return Promise.reject(new Error("blip"));
+        }
+        return options.reopenFails
+          ? Promise.reject(new Error("down"))
+          : Promise.resolve(grantOf("ost_b"));
+      },
+      stopped: () => options.stopped ?? false,
+    });
+  return { calls, run, reopened: () => reopened };
+}
+
+test("a session this computer no longer has starts fresh after a fresh-session exchange", async () => {
+  const h = resumeHarness({ sessionId: "s-1", missing: [true, false] });
+  await h.run();
+  assert.deepEqual(h.calls, [
+    ["s-1", "ost_a"],
+    [null, "ost_b"],
+  ]);
+  assert.equal(h.reopened(), 1);
+});
+
+test("a resumed session is not exchanged again", async () => {
+  const h = resumeHarness({ sessionId: "s-1", missing: [false] });
+  await h.run();
+  assert.deepEqual(h.calls, [["s-1", "ost_a"]]);
+  assert.equal(h.reopened(), 0);
+});
+
+test("a first turn starts once", async () => {
+  const h = resumeHarness({ sessionId: null, missing: [true] });
+  await h.run();
+  assert.deepEqual(h.calls, [[null, "ost_a"]]);
+  assert.equal(h.reopened(), 0);
+});
+
+test("a stopped turn is not restarted", async () => {
+  const h = resumeHarness({ sessionId: "s-1", missing: [true], stopped: true });
+  await h.run();
+  assert.deepEqual(h.calls, [["s-1", "ost_a"]]);
+  assert.equal(h.reopened(), 0);
+});
+
+test("a failed exchange is retried once and the fresh session gets the new token", async () => {
+  const h = resumeHarness({
+    sessionId: "s-1",
+    missing: [true, false],
+    reopenFailsOnce: true,
+  });
+  await h.run();
+  assert.deepEqual(h.calls, [
+    ["s-1", "ost_a"],
+    [null, "ost_b"],
+  ]);
+  assert.equal(h.reopened(), 2);
+});
+
+test("the fresh session keeps the first token when the exchange fails", async () => {
+  const h = resumeHarness({
+    sessionId: "s-1",
+    missing: [true, false],
+    reopenFails: true,
+  });
+  await h.run();
+  assert.deepEqual(h.calls, [
+    ["s-1", "ost_a"],
+    [null, "ost_a"],
+  ]);
 });
