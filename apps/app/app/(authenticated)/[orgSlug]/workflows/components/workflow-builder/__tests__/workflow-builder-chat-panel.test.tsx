@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   setMessages: vi.fn(),
   messages: [] as unknown[],
+  status: "ready" as string,
   loadStoredMessages: vi.fn(),
   saveStoredMessages: vi.fn(),
 }));
@@ -27,7 +28,7 @@ vi.mock("@ai-sdk/react", () => ({
       sendMessage: mocks.sendMessage,
       setMessages: mocks.setMessages,
       addToolOutput: mocks.addToolOutput,
-      status: "ready",
+      status: mocks.status,
       stop: vi.fn(),
       error: undefined,
     };
@@ -126,7 +127,22 @@ describe("WorkflowBuilderChatPanel", () => {
     vi.clearAllMocks();
     mocks.chatOptions = null;
     mocks.messages = [];
+    mocks.status = "ready";
     mocks.loadStoredMessages.mockResolvedValue([]);
+  });
+
+  it.each([
+    "submitted",
+    "streaming",
+  ])("shows the thinking line while the status is %s", async (status) => {
+    mocks.status = status;
+    await renderPanel();
+    expect(screen.getByTestId("workflow-builder-thinking")).toBeInTheDocument();
+  });
+
+  it("hides the thinking line when ready", async () => {
+    await renderPanel();
+    expect(screen.queryByTestId("workflow-builder-thinking")).toBeNull();
   });
 
   it("restores the stored history into the chat", async () => {
