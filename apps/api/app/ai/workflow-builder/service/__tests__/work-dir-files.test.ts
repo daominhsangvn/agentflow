@@ -16,11 +16,17 @@ function guide(overrides: Partial<KnowledgeGuide>): KnowledgeGuide {
   };
 }
 
-function build(guides: KnowledgeGuide[], catalog: unknown = {}, yaml = "") {
+function build(
+  guides: KnowledgeGuide[],
+  catalog: unknown = {},
+  yaml = "",
+  runnerFiles: { path: string; content: string }[] = []
+) {
   return buildWorkflowBuilderWorkDirFiles({
     guides,
     catalog,
     editorYaml: yaml,
+    runnerFiles,
   });
 }
 
@@ -69,5 +75,21 @@ describe("buildWorkflowBuilderWorkDirFiles", () => {
       "No guides are available."
     );
     expect(files.some((entry) => entry.path.startsWith("guides/"))).toBe(false);
+  });
+
+  it("includes runner files and lists them in the README", () => {
+    const files = build([], {}, "", [
+      { path: "runners/box.md", content: "# body" },
+    ]);
+    expect(content(files, "runners/box.md")).toBe("# body");
+    const readme = content(files, WORK_DIR_FILES.Readme);
+    expect(readme).toContain("| Runner file |");
+    expect(readme).toContain("runners/box.md");
+  });
+
+  it("says so when there are no runner files", () => {
+    expect(content(build([]), WORK_DIR_FILES.Readme)).toContain(
+      "No runner files."
+    );
   });
 });

@@ -30,7 +30,7 @@ Exit codes: `2` for an invalid configuration (the message names the variable), `
 | `AGENTFLOW_API_URL` | required | Origin of the AgentFlow API. Must be https, except `localhost` or hosts in `AGENTFLOW_ALLOW_HTTP_HOSTS` |
 | `AGENTFLOW_API_KEY` | required | An API key (`sk_live_...`) with the `write` scope. The Agent acts as its owner |
 | `AGENTFLOW_WEB_APP_URL` | the API URL | Web app origin; used for links |
-| `AGENTFLOW_RUNNER_NAME` | the hostname | The Agent's name in AgentFlow (1-120 characters). Set it: a container's hostname changes on every `docker run` |
+| `AGENTFLOW_RUNNER_NAME` | hostname (auto); required in personal mode | The Agent's name in AgentFlow (1-120 characters). Set it: a container's hostname changes on every `docker run`. A personal Agent without it does not start, even with `--name`; setup always writes it |
 | `AGENTFLOW_RUNNER_MODE` | `auto` | `auto` or `personal` |
 | `AGENTFLOW_RUNNER_PROJECT_KEY` | none | Personal: the AgentFlow project key, such as `PRO-1` (required in personal mode) |
 | `AGENTFLOW_RUNNER_PROJECT_DIR` | none | Personal: the project folder runs happen in; it must exist (required in personal mode). Replaces the workspace |

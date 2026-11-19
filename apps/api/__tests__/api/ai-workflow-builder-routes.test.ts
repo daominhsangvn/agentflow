@@ -89,7 +89,9 @@ vi.mock("@/lib/platform-agent/claude-code", async (importOriginal) => {
   };
 });
 vi.mock("@/app/ai/workflow-builder/service/catalog-tool", () => ({
-  loadWorkflowBuilderCatalog: vi.fn(() => Promise.resolve({ projects: [] })),
+  loadWorkflowBuilderCatalog: vi.fn(() =>
+    Promise.resolve({ catalog: { projects: [] }, runnerFiles: [] })
+  ),
 }));
 
 // --- Imports (after mocks) ---

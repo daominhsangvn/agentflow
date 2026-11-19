@@ -851,6 +851,54 @@ describe("buildRunSnapshot", () => {
     expect(mocks.listRunLoops).not.toHaveBeenCalled();
   });
 
+  describe("plan line from the run's process", () => {
+    const processOf = (steps: unknown[]) => ({
+      version: 2,
+      definition: { toolkit: null, steps },
+    });
+    const planStep = { type: "agentflow.plan", id: "plan", name: "Plan" };
+    const executeStep = {
+      type: "agentflow.execute",
+      id: "execute",
+      name: "Execute",
+    };
+
+    async function summaryFor(row: object) {
+      mocks.findUnique.mockResolvedValue({ ...row, prUrl: null });
+      mocks.getLatest.mockResolvedValue({ content: "# Plan\n\nStep 1" });
+      mocks.findLatestRunLoop.mockResolvedValue(null);
+      const snapshot = await buildRunSnapshot(
+        "run-1",
+        WorkflowRunEvent.Succeeded
+      );
+      return snapshot?.summaryMarkdown ?? "";
+    }
+
+    it("links the plan when the process has no implement step", async () => {
+      const row = { ...runRow(), process: processOf([planStep]) };
+      expect(await summaryFor(row)).toContain("Implementation plan:");
+    });
+
+    it("links the run when the process executes", async () => {
+      const row = {
+        ...runRow(),
+        process: processOf([planStep, executeStep]),
+      };
+      expect(await summaryFor(row)).toContain("Details:");
+    });
+
+    it("follows agent.mode on the built-in flow", async () => {
+      const row = {
+        ...runRow(),
+        agentConfig: {
+          mode: WorkflowAgentMode.Plan,
+          computeTargetId: "4f9d6c1e-2b7a-4c3d-8e5f-1a2b3c4d5e6f",
+        },
+      };
+      expect(await summaryFor(row)).toContain("Implementation plan:");
+    });
+  });
+
   it("returns null for a missing run", async () => {
     mocks.findUnique.mockResolvedValue(null);
     await expect(

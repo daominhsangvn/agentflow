@@ -1,3 +1,4 @@
+import { AgentKind } from "@repo/api/src/types/agent-fleet";
 import {
   type ComputeTarget,
   HarnessType,
@@ -90,6 +91,7 @@ describe("toComputeTargetOption", () => {
       label: "Build Mac",
       description: "Shared with the organization by Ada",
       isOnline: true,
+      kind: AgentKind.Automatic,
     });
     expect(
       toComputeTargetOption(
@@ -100,7 +102,18 @@ describe("toComputeTargetOption", () => {
       label: "Build Mac",
       description: "Ada",
       isOnline: false,
+      kind: AgentKind.Automatic,
     });
+  });
+
+  it("marks a target with a personal runner as personal", () => {
+    expect(
+      toComputeTargetOption(
+        makeTarget({
+          capabilities: { personalRunner: { projectKey: "PRO-1" } },
+        })
+      ).kind
+    ).toBe(AgentKind.Personal);
   });
 });
 

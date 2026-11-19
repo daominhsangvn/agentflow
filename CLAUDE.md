@@ -118,6 +118,7 @@ AgentFlow: human-governed, AI-centric software delivery platform. AI produces ar
 - **[convention]**: Service operations get a `withSpan` span named `<domain>.<operation>` with `AfAttribute` ids only; caught or returned failures call `setSpanOutcome(AfOutcome.Error, reason)` so the journey shows why.
 - **[mistake]**: New document types — check existing support in: useDocumentUIState type union, isNavigableDocument, getDocumentRoute switch, DOCUMENT_SECTIONS. Mark existing as verification, not implementation.
 - **[convention]**: Check `plan.json` architectureDecisions before implementing entity types or schema changes.
+- **[pattern]**: Runner/workflow fit rules (personal runner ⇒ agent steps only, no finish: push, declared /commands) live in packages/api/src/types/workflow-runner-fit.ts and run in both the browser YAML validation (which also validates workflow builder proposals) and validateWorkflowInput; add new runtime refusals there so the editor catches them before a run.
 - **[mistake]**: Check investigation-log.md for already-imported components before writing import tasks. Mark as verification when already present.
 
 ### TypeScript & Imports

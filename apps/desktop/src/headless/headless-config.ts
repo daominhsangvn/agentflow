@@ -216,7 +216,7 @@ export function checkApiKeySetting(value: string): SettingCheck {
       };
 }
 
-/** Personal mode needs a project key and an existing project folder. */
+/** Personal mode needs a runner name, a project key and an existing project folder. */
 function readPersonalSettings(
   values: EnvValues
 ):
@@ -230,6 +230,9 @@ function readPersonalSettings(
   const errors: string[] = [];
   if (!projectKey) {
     errors.push(`${HeadlessRunnerEnv.ProjectKey}: required in personal mode`);
+  }
+  if (!values[HeadlessRunnerEnv.RunnerName]) {
+    errors.push(`${HeadlessRunnerEnv.RunnerName}: required in personal mode`);
   }
   if (!projectDir) {
     errors.push(`${HeadlessRunnerEnv.ProjectDir}: required in personal mode`);

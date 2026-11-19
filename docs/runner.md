@@ -417,7 +417,7 @@ setup questions first.
 |---|---|---|
 | `AGENTFLOW_API_URL` | required | Origin of the AgentFlow API: websocket, loop credentials and loop callbacks. |
 | `AGENTFLOW_API_KEY` | required | `sk_live_` key with the `write` scope. |
-| `AGENTFLOW_RUNNER_NAME` | hostname | Compute target name. Set it: a container's hostname changes on every `docker run`. |
+| `AGENTFLOW_RUNNER_NAME` | hostname (auto); required in personal mode | Compute target name. Set it: a container's hostname changes on every `docker run`. A personal runner without it does not start ("AGENTFLOW_RUNNER_NAME: required in personal mode"), even with `--name`; setup always writes it. |
 | `AGENTFLOW_WEB_APP_URL` | API URL | Web app origin (links only). |
 | `AGENTFLOW_MCP_URL` | the API's | MCP endpoint instruction agents use for integration tools (docs/workflows.md "Integration tools"). The API names it (its own `AGENTFLOW_MCP_URL`, default `http://localhost:3010/mcp`); set it when the runner reaches the MCP server under another address, e.g. `http://host.docker.internal:3010/mcp` from a container. |
 | `AGENTFLOW_RUNNER_WORKSPACE` | `/workspace` | Repositories are cloned here and loops work in worktrees next to them. Project repositories are cloned by URL with per-loop credentials from the API (docs/workflows.md "How loops use them"); the runner needs no git or `gh` login. |
@@ -724,8 +724,8 @@ terminal setup runs with that name filled in. An Agent that has no runner.env
 belongs to no project key in this listing, so it is reachable with `--name`
 only; `--project` alone never finds it. A start with `--name` alone requires a
 personal configuration (set up with `setup --name <agent name>`, or
-`AGENTFLOW_RUNNER_MODE=personal` with the project key and folder in the
-environment).
+`AGENTFLOW_RUNNER_MODE=personal` with `AGENTFLOW_RUNNER_NAME`, the project key
+and folder in the environment).
 
 Each personal runner has its own data directory (identity, job store, loop
 tokens, status, Windows shims), so any number of them, for different
@@ -740,7 +740,8 @@ give each its own folder.
 - The loop must carry the runner's project key (AgentFlow sends the
   project's slug with every loop); another project's loop, a loop that is
   not a STEP and a `finish: push` step are refused with that reason, which
-  fails the loop.
+  fails the loop. The workflow editor and save refuse these before a run
+  (docs/workflows.md "Editor and save checks for runner fit").
 - **One at a time** (the default): AgentFlow does not start a step on the
   runner while another loop holds it. The step waits (`runner_busy`, tried
   again every minute) and the runs take the runner in turn

@@ -16,6 +16,15 @@ import {
   type WorkflowTrigger,
   type WorkflowTriggerInput,
 } from "@repo/api/src/types/workflow";
+import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
+import {
+  type RunnerFitProblem,
+  RunnerFitProblemCode,
+  type RunnerFitRunner,
+  RunnerFitSeverity,
+  runnerFitInTriggerProject,
+  workflowRunnerFitProblems,
+} from "@repo/api/src/types/workflow-runner-fit";
 import {
   parseRunnerCondition,
   type WorkflowRunnerRule,
@@ -160,6 +169,7 @@ export function parseWorkflowYaml(
     }
   }
   checkProcess(context, value);
+  checkIgnoredAgentKeys(context, value);
   const input = parsed.success
     ? resolveWorkflow(context, parsed.data, saved)
     : null;
@@ -286,6 +296,17 @@ function resolveWorkflow(
     savedActions
   );
   const process = parseProcess(workflow.agent.process);
+  if (project && runner && runners && process !== undefined) {
+    checkRunnerFit(
+      context,
+      workflow,
+      runner,
+      runners,
+      process,
+      triggers,
+      project.id
+    );
+  }
   if (
     !(project && runner && runners) ||
     triggers.some((trigger) => trigger === null) ||
@@ -356,28 +377,36 @@ function resolveRunnerRules(
   return resolved.every((rule) => rule !== null) ? resolved : null;
 }
 
-/** `project:` at the root, else the older `agent.project` (with a warning). */
+/**
+ * `project:` at the root. The older `agent.project` alone is an error:
+ * runners and capabilities resolve from the root key.
+ */
 function resolveWorkflowProject(
   context: ResolveContext,
   workflow: WorkflowYaml
 ): WorkflowYamlProject | null {
-  const reference = workflow.project ?? workflow.agent.project;
+  const reference = workflow.project;
   if (!reference) {
+    if (workflow.agent.project) {
+      report(
+        context,
+        ["agent", "project"],
+        "Write project: at the top of the workflow: it is required to resolve runners and capabilities (agent.project is the older place)"
+      );
+    }
     return null;
   }
-  const path = workflow.project ? ["project"] : ["agent", "project"];
-  if (!workflow.project) {
-    report(
-      context,
-      path,
-      "agent.project is the older place: write project: at the top of the workflow",
-      YamlProblemSeverity.Warning
-    );
-  }
-  return resolveByIdOrName(context, path, context.catalog.projects, reference, {
-    noun: "project",
-    nameOf: (entry) => entry.name,
-  });
+  return resolveByIdOrName(
+    context,
+    ["project"],
+    context.catalog.projects,
+    reference,
+    {
+      noun: "project",
+      nameOf: (entry) => entry.name,
+      hint: PROJECT_REQUIRED_HINT,
+    }
+  );
 }
 
 function resolveTrigger(
@@ -555,6 +584,8 @@ type NamedLookup<T> = {
   nameOf: (entry: T) => string;
   /** Names that are valid besides the entries', listed in messages. */
   extraNames?: readonly string[];
+  /** Appended to the "several" and "no match" messages. */
+  hint?: string;
 };
 
 /**
@@ -577,7 +608,7 @@ function resolveByIdOrName<T extends { id: string }>(
     report(
       context,
       path,
-      `Several ${lookup.noun}s are named "${reference}": use the id (${matches.map((entry) => entry.id).join(", ")})`
+      `Several ${lookup.noun}s are named "${reference}": use the id (${matches.map((entry) => entry.id).join(", ")})${hintSuffix(lookup)}`
     );
     return null;
   }
@@ -586,8 +617,8 @@ function resolveByIdOrName<T extends { id: string }>(
     context,
     path,
     names.length > 0
-      ? `No ${lookup.noun} "${reference}". Available: ${names.join(", ")}`
-      : `No ${lookup.noun} "${reference}", and there is none yet`
+      ? `No ${lookup.noun} "${reference}". Available: ${names.join(", ")}${hintSuffix(lookup)}`
+      : `No ${lookup.noun} "${reference}", and there is none yet${hintSuffix(lookup)}`
   );
   return null;
 }
@@ -831,4 +862,208 @@ function warnLongInstructions(
     `instructions is ${length} characters, over ${WORKFLOW_INSTRUCTIONS_WARN_LENGTH}: they are sent with every orchestrator turn (and every imported item) and repeat in a resumed session, which costs tokens and attention. It still saves, up to ${WORKFLOW_INSTRUCTIONS_MAX}.`,
     YamlProblemSeverity.Warning
   );
+}
+
+const PROJECT_REQUIRED_HINT =
+  "project: is required to resolve runners and capabilities";
+
+function hintSuffix(lookup: { hint?: string }): string {
+  return lookup.hint ? `. ${lookup.hint}` : "";
+}
+
+const IGNORED_WITH_PROCESS_KEYS = ["mode", "stopOnOpenQuestions"] as const;
+
+/** `mode` and `stopOnOpenQuestions` do nothing next to `agent.process`. */
+function checkIgnoredAgentKeys(
+  context: ResolveContext,
+  value: Record<string, unknown>
+) {
+  const { agent } = value;
+  if (
+    !isRecord(agent) ||
+    agent.process === undefined ||
+    agent.process === null ||
+    agent.mode === WorkflowAgentMode.Orchestrated
+  ) {
+    return;
+  }
+  for (const key of IGNORED_WITH_PROCESS_KEYS) {
+    if (Object.hasOwn(agent, key)) {
+      reportKey(
+        context,
+        ["agent"],
+        key,
+        `${key} is ignored when agent.process is set: the process's steps decide what runs. Remove it.`,
+        YamlProblemSeverity.Warning
+      );
+    }
+  }
+}
+
+/**
+ * What a runner refuses at run time (a personal runner and PLAN/EXECUTE
+ * loops or push, an undeclared command), reported where it is written.
+ */
+function checkRunnerFit(
+  context: ResolveContext,
+  workflow: WorkflowYaml,
+  runner: { id: string },
+  rules: readonly { computeTargetId: string }[],
+  process: ProjectProcess | null,
+  triggers: readonly (WorkflowTriggerInput | null)[],
+  rootProjectId: string
+) {
+  const fitRunners = runnersForFit(context, runner, rules);
+  const fit = context.catalog.runnerFit;
+  const ids =
+    process === null ? fitProjectIds(rootProjectId, triggers) : [rootProjectId];
+  for (const id of ids) {
+    if (process === null && !(fit && Object.hasOwn(fit.processes, id))) {
+      continue;
+    }
+    const problems = workflowRunnerFitProblems({
+      mode: workflow.agent.mode,
+      ownProcess: process,
+      projectProcess: process === null ? (fit?.processes[id] ?? null) : null,
+      runners: fitRunners,
+    });
+    reportProjectFit(context, id, problems);
+  }
+}
+
+function runnersForFit(
+  context: ResolveContext,
+  runner: { id: string },
+  rules: readonly { computeTargetId: string }[]
+): RunnerFitRunner[] {
+  const fit =
+    context.catalog.runnerFit?.projectId === context.projectId
+      ? context.catalog.runnerFit
+      : undefined;
+  return [runner.id, ...rules.map((rule) => rule.computeTargetId)].map((id) => {
+    const option = context.catalog.runners.find((entry) => entry.id === id);
+    return {
+      label: option?.label ?? id,
+      kind: option?.kind ?? null,
+      commands: fit?.commands[id] ?? null,
+    };
+  });
+}
+
+/** The projects a run can use: the root project and each trigger's project. */
+function fitProjectIds(
+  rootProjectId: string,
+  triggers: readonly (WorkflowTriggerInput | null)[]
+): string[] {
+  const ids = [rootProjectId];
+  for (const trigger of triggers) {
+    if (trigger?.projectId && !ids.includes(trigger.projectId)) {
+      ids.push(trigger.projectId);
+    }
+  }
+  return ids;
+}
+
+function reportProjectFit(
+  context: ResolveContext,
+  projectId: string,
+  problems: readonly RunnerFitProblem[]
+) {
+  const name =
+    context.catalog.projects.find((entry) => entry.id === projectId)?.name ??
+    projectId;
+  const isRoot = projectId === context.projectId;
+  for (const { message, ...rest } of problems) {
+    const text = isRoot ? message : runnerFitInTriggerProject(name, message);
+    reportRunnerFit(context, { ...rest, message: text });
+  }
+}
+
+function reportRunnerFit(context: ResolveContext, problem: RunnerFitProblem) {
+  const severity =
+    problem.severity === RunnerFitSeverity.Error
+      ? YamlProblemSeverity.Error
+      : YamlProblemSeverity.Warning;
+  if (problem.stepIndex !== null && problem.inOwnProcess) {
+    reportKey(
+      context,
+      ["agent", "process", "steps", problem.stepIndex],
+      runnerFitStepKey(problem.code),
+      problem.message,
+      severity
+    );
+    return;
+  }
+  const path =
+    problem.runnerIndex === 0
+      ? ["agent", "runner"]
+      : ["agent", "runners", problem.runnerIndex - 1, "runner"];
+  report(context, path, problem.message, severity);
+}
+
+function runnerFitStepKey(code: RunnerFitProblemCode): string {
+  if (code === RunnerFitProblemCode.UndeclaredCommand) {
+    return "instruction";
+  }
+  return code === RunnerFitProblemCode.PersonalPush ? "finish" : "type";
+}
+
+/**
+ * The project the YAML's root `project:` names (id or name), for loading what
+ * runner fit needs; never the older `agent.project`. Null when it names none
+ * or several.
+ */
+export function workflowYamlProjectId(
+  text: string,
+  catalog: Pick<WorkflowYamlCatalog, "projects">
+): string | null {
+  const value = parseYamlValue(text);
+  return projectIdOf(isRecord(value) ? value.project : undefined, catalog);
+}
+
+/**
+ * The projects the YAML's triggers name with `project:` (id or name), for
+ * loading what runner fit needs. Distinct ids in order; never throws.
+ */
+export function workflowYamlTriggerProjectIds(
+  text: string,
+  catalog: Pick<WorkflowYamlCatalog, "projects">
+): string[] {
+  const value = parseYamlValue(text);
+  const triggers = isRecord(value) ? value[WorkflowYamlList.Triggers] : null;
+  const ids = new Set<string>();
+  for (const trigger of Array.isArray(triggers) ? triggers : []) {
+    const id = projectIdOf(
+      isRecord(trigger) ? trigger.project : undefined,
+      catalog
+    );
+    if (id) {
+      ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+function parseYamlValue(text: string): unknown {
+  try {
+    return toPlainValue(parseDocument(text));
+  } catch {
+    // observability: unparsable text only means no project is named
+    return null;
+  }
+}
+
+function projectIdOf(
+  reference: unknown,
+  catalog: Pick<WorkflowYamlCatalog, "projects">
+): string | null {
+  if (typeof reference !== "string" || reference.trim() === "") {
+    return null;
+  }
+  const matches = matchByIdOrName(
+    catalog.projects,
+    reference.trim(),
+    (project) => project.name
+  );
+  return matches.length === 1 ? (matches[0]?.id ?? null) : null;
 }

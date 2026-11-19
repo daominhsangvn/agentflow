@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  ProjectProcess,
   ProjectProcessState,
   ProjectProcessVersions,
   UpdateProjectProcessInput,
@@ -8,7 +9,14 @@ import type {
 // Cross-slice: same server-message toasts as the integrations mutations.
 import { mutationErrorOptions } from "@repo/app/integrations/lib/mutation-error";
 import { useApiClient } from "@repo/app/shared/api/use-api-client";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type UseQueryResult,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useCallback } from "react";
 import { projectKeys } from "./project-keys";
 
 /**
@@ -27,14 +35,17 @@ export const projectProcessKeys = {
     [...projectKeys.detail(projectId), "process", "versions"] as const,
 };
 
-export function useProjectProcess(projectId: string | null | undefined) {
+export function useProjectProcess(
+  projectId: string | null | undefined,
+  options?: { enabled?: boolean }
+) {
   const apiClient = useApiClient();
 
   return useQuery({
     queryKey: projectProcessKeys.detail(projectId ?? ""),
     queryFn: () =>
       apiClient.get<ProjectProcessState>(processPath(projectId ?? "")),
-    enabled: !!projectId,
+    enabled: !!projectId && (options?.enabled ?? true),
   });
 }
 
@@ -66,6 +77,42 @@ export function useSaveProjectProcess(projectId: string) {
       });
     },
     ...mutationErrorOptions(SAVE_PROJECT_PROCESS_ERROR_TITLE),
+  });
+}
+
+/**
+ * The current process of each project id. Only ids whose process loaded are
+ * present (`null` = the project has none); loading, failed and disabled
+ * queries are left out, which reads as "unknown".
+ */
+export function useProjectProcesses(
+  projectIds: readonly string[],
+  options?: { enabled?: boolean }
+): Readonly<Record<string, ProjectProcess | null>> {
+  const apiClient = useApiClient();
+  const enabled = options?.enabled ?? true;
+  const idsKey = projectIds.join("\n");
+  const combine = useCallback(
+    (results: UseQueryResult<ProjectProcessState>[]) => {
+      const ids = idsKey === "" ? [] : idsKey.split("\n");
+      const processes: Record<string, ProjectProcess | null> = {};
+      for (const [index, result] of results.entries()) {
+        if (result.isSuccess) {
+          processes[ids[index]] = result.data.current?.definition ?? null;
+        }
+      }
+      return processes;
+    },
+    [idsKey]
+  );
+
+  return useQueries({
+    queries: projectIds.map((id) => ({
+      queryKey: projectProcessKeys.detail(id),
+      queryFn: () => apiClient.get<ProjectProcessState>(processPath(id)),
+      enabled: enabled && id !== "",
+    })),
+    combine,
   });
 }
 

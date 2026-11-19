@@ -63,6 +63,7 @@ function chat(
     catalog: { projects: [] },
     messages: MESSAGES,
     editorYaml: EDITOR_YAML,
+    runnerFiles: [],
     write: (chunk) => chunks.push(chunk),
     baseEnv: { ...process.env },
     generateId: () => `id-${++counter}`,

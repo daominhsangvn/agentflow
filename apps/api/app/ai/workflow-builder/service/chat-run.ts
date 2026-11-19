@@ -8,6 +8,7 @@ import {
   type AgentRunOutcome,
   ClaudeCodeTool,
 } from "@/lib/platform-agent/stream-json";
+import type { AgentWorkDirFile } from "@/lib/platform-agent/work-dir";
 import type { KnowledgeGuide } from "./knowledge";
 import {
   renderConversationPrompt,
@@ -46,6 +47,7 @@ export async function runWorkflowBuilderChat(input: {
   catalog: unknown;
   messages: UIMessage[];
   editorYaml: string;
+  runnerFiles: AgentWorkDirFile[];
   write: UiChunkSink;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
@@ -67,6 +69,7 @@ export async function runWorkflowBuilderChat(input: {
         guides: input.guides,
         catalog: input.catalog,
         editorYaml: input.editorYaml,
+        runnerFiles: input.runnerFiles,
       }),
       systemPrompt: WORKFLOW_BUILDER_SYSTEM_PROMPT,
       prompt: renderConversationPrompt({

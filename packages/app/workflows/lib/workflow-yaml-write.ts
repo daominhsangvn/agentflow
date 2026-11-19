@@ -51,6 +51,9 @@ export function workflowToYaml(
   );
   const actions = sortActions(workflow.actions).map(actionYamlValue);
   const { agent } = workflow;
+  // The ignored keys are left out when the workflow has its own process.
+  const keepsModeKeys =
+    !agent.process || agent.mode === WorkflowAgentMode.Orchestrated;
   return stringifyWorkflow(
     compact({
       name: workflow.name,
@@ -76,8 +79,10 @@ export function workflowToYaml(
                 condition: rule.condition,
               }))
             : undefined,
-        mode: agent.mode,
-        stopOnOpenQuestions: agent.stopOnOpenQuestions,
+        mode: keepsModeKeys ? agent.mode : undefined,
+        stopOnOpenQuestions: keepsModeKeys
+          ? agent.stopOnOpenQuestions
+          : undefined,
         repository: agent.repository ?? undefined,
         prd: prdYamlValue(agent.prd),
         titleTemplate: agent.titleTemplate,

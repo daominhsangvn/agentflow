@@ -17,6 +17,8 @@ const REJECTED_KEY = "not-a-key";
 const REJECTED_KEY_RE = /not-a-key/;
 const PROJECT_KEY_REQUIRED_RE = /PROJECT_KEY: required/;
 const NOT_A_DIRECTORY_RE = /is not a directory/;
+const RUNNER_NAME_REQUIRED_RE =
+  /AGENTFLOW_RUNNER_NAME: required in personal mode/;
 
 function baseEnv(): NodeJS.ProcessEnv {
   return {
@@ -147,6 +149,7 @@ test("personal mode works in the project folder, one loop at a time by default",
     const result = loadHeadlessConfig({
       ...baseEnv(),
       [HeadlessRunnerEnv.Mode]: "Personal",
+      [HeadlessRunnerEnv.RunnerName]: "an-pro-1",
       [HeadlessRunnerEnv.ProjectKey]: " pro-1 ",
       [HeadlessRunnerEnv.ProjectDir]: projectDir,
       [HeadlessRunnerEnv.Workspace]: "/ignored",
@@ -178,9 +181,35 @@ test("personal mode needs a project key and an existing project folder", () => {
   if (result.ok) {
     return;
   }
-  assert.equal(result.errors.length, 2);
+  assert.equal(result.errors.length, 3);
   assert.match(result.errors.join("\n"), PROJECT_KEY_REQUIRED_RE);
   assert.match(result.errors.join("\n"), NOT_A_DIRECTORY_RE);
+  assert.match(result.errors.join("\n"), RUNNER_NAME_REQUIRED_RE);
+});
+
+test("personal mode needs a runner name", () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "personal-name-"));
+  try {
+    const result = loadHeadlessConfig({
+      ...baseEnv(),
+      [HeadlessRunnerEnv.Mode]: "personal",
+      [HeadlessRunnerEnv.ProjectKey]: "PRO-1",
+      [HeadlessRunnerEnv.ProjectDir]: projectDir,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.deepEqual(result.errors, [
+        `${HeadlessRunnerEnv.RunnerName}: required in personal mode`,
+      ]);
+    }
+  } finally {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test("auto mode without a runner name uses the hostname", () => {
+  const result = loadHeadlessConfig(baseEnv());
+  assert.equal(result.ok && result.config.runnerName, os.hostname());
 });
 
 test("auto mode has no personal settings", () => {
@@ -194,6 +223,7 @@ test("personal mode reads this computer's role", () => {
     const env = {
       ...baseEnv(),
       [HeadlessRunnerEnv.Mode]: "personal",
+      [HeadlessRunnerEnv.RunnerName]: "an-pro-1",
       [HeadlessRunnerEnv.ProjectKey]: "PRO-1",
       [HeadlessRunnerEnv.ProjectDir]: projectDir,
     };
