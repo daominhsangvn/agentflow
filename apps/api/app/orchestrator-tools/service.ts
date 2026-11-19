@@ -30,6 +30,7 @@ import { jsonValueSchema } from "@/lib/json-schema";
 import { renderCase } from "@/lib/orchestrator/case-render";
 import type { StoredDecisionDraft } from "@/lib/orchestrator/decision-draft";
 import { decide, requestDecision } from "@/lib/orchestrator/decisions";
+import { recordRunnersRead } from "@/lib/orchestrator/runners-read";
 import {
   TURN_SUPERSEDED_ERROR,
   turnSuperseded,
@@ -305,6 +306,13 @@ const HANDLERS: Record<string, Handler> = {
       context.organizationId,
       context.projectId
     );
+    await recordRunnersRead({
+      organizationId: context.organizationId,
+      projectId: context.projectId,
+      conversationId: context.conversationId,
+      turnId: context.turnId,
+      files,
+    });
     // The commands' optional fields are dropped by the JSON round trip.
     const output = files.map((file) => ({
       runner: file.runnerName,

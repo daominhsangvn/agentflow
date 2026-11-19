@@ -234,6 +234,8 @@ export const ORCHESTRATOR_TOOLS_CALL_ROUTE = "/orchestrator-tools/call";
 
 export const orchestratorSessionRequestSchema = z.object({
   turnId: z.uuid(),
+  /** The runner replaced a session it no longer has: forget what the old one read (runners_list). */
+  freshSession: z.boolean().optional(),
 });
 
 export const OrchestratorToolName = {

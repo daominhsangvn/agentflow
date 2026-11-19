@@ -77,6 +77,18 @@ const BASE = {
 };
 
 describe("buildTurnPrompt", () => {
+  it("tells the turn to read runners_list before its first task_run", () => {
+    const prompt = buildTurnPrompt(BASE);
+    expect(prompt).toContain(`call ${OrchestratorToolName.RunnersList}`);
+    expect(prompt).toContain(
+      `before your first ${OrchestratorToolName.TaskRun}`
+    );
+    const rule = prompt
+      .split("\n")
+      .find((line) => line.includes("The project work is done by runners"));
+    expect(rule?.startsWith("- ")).toBe(true);
+  });
+
   it("keeps rules longer than 8000 characters uncut", () => {
     const rules = "r".repeat(9000);
     expect(buildTurnPrompt({ ...BASE, rules })).toContain(rules);

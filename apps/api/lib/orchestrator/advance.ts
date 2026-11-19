@@ -11,7 +11,7 @@ import {
   orchestratorTurnResultSchema,
 } from "@repo/api/src/types/orchestrator";
 import { resolveOrchestratorGrants } from "@repo/api/src/types/orchestrator-grants";
-import { type Prisma, withDb } from "@repo/database";
+import { Prisma, withDb } from "@repo/database";
 import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
 import {
@@ -30,6 +30,7 @@ import {
 } from "@/lib/loops/loop-desktop";
 import { renderCase } from "./case-render";
 import { readChannel } from "./channel";
+import { runnersReadWrittenBy } from "./runners-read";
 import { newerMessageWaiting, supersedeRequested } from "./supersede";
 import { advanceTasks } from "./tasks";
 import { loadTeamsAskChannels } from "./teams-ask-channels";
@@ -435,6 +436,19 @@ async function finishTurn(
       return;
     }
     logTurnFinished(turn, outcome.status, outcome.error);
+    const before = await tx.orchestratorConversation.findUnique({
+      where: { id: turn.conversationId },
+      select: { sessionId: true, runnersRead: true },
+    });
+    const replaced = sessionReplaced(before, outcome.sessionId, turn.id);
+    if (replaced) {
+      log.info("orchestrator.runners_read.cleared", {
+        organizationId: turn.organizationId,
+        conversationId: turn.conversationId,
+        turnId: turn.id,
+        cause: "session_replaced",
+      });
+    }
     await tx.orchestratorConversation.update({
       where: { id: turn.conversationId },
       data: {
@@ -443,6 +457,7 @@ async function finishTurn(
             ? OrchestratorConversationStatus.Closed
             : OrchestratorConversationStatus.Waiting,
         ...(outcome.sessionId ? { sessionId: outcome.sessionId } : {}),
+        ...(replaced ? { runnersRead: Prisma.DbNull } : {}),
       },
     });
   });
@@ -603,6 +618,7 @@ async function startTurnIfDue(
     return;
   }
   const timeoutMs = settings.turnTimeoutMinutes * 60_000;
+  const freshSession = conversation._count.turns > 0 && !conversation.sessionId;
   const turn = await withDb.tx(async (tx) => {
     const created = await tx.orchestratorTurn.create({
       data: {
@@ -625,10 +641,19 @@ async function startTurnIfDue(
         status: OrchestratorConversationStatus.Turn,
         nextWakeAt: null,
         askedHuman: null,
+        ...(freshSession ? { runnersRead: Prisma.DbNull } : {}),
       },
     });
     return created;
   });
+  if (freshSession) {
+    log.info("orchestrator.runners_read.cleared", {
+      organizationId: conversation.organizationId,
+      conversationId,
+      turnId: turn.id,
+      cause: "fresh_session",
+    });
+  }
   log.info("orchestrator.turn.started", {
     organizationId: conversation.organizationId,
     projectId: conversation.projectId,
@@ -756,4 +781,22 @@ async function refuseForeignOrchestratorAgent(input: {
     );
   }
   return true;
+}
+
+/**
+ * True when the runner replaced a missing session and this turn did not record runners_list in it
+ * (a record already cleared mid-turn by the runner's fresh-session exchange is left alone).
+ */
+function sessionReplaced(
+  before: { sessionId: string | null; runnersRead: unknown } | null,
+  sessionId: string | null,
+  turnId: string
+): boolean {
+  if (!(sessionId && before?.sessionId && before.runnersRead !== null)) {
+    return false;
+  }
+  return (
+    before.sessionId !== sessionId &&
+    !runnersReadWrittenBy(before.runnersRead, turnId)
+  );
 }

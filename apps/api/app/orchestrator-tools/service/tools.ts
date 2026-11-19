@@ -66,7 +66,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.RunnersList,
     title: "List the runners",
     description:
-      "Each runner of the project with its id and role, and its AGENTFLOW.md: the commands it declares (mode read or write, what each produces and needs), its skills and whether it is online.",
+      "Each runner of the project with its id and role, and its AGENTFLOW.md: the commands it declares (mode read or write, what each produces and needs), its skills and whether it is online. Read it before your first task_run: each file says how to call its commands (args, replying, follow-ups and resume, what the runner does not take).",
     inputSchema: NO_ARGUMENTS,
     annotations: READS,
   },
@@ -159,7 +159,7 @@ export const TOOLS: IntegrationToolDescriptor[] = [
     name: OrchestratorToolName.TaskRun,
     title: "Run a command on a runner",
     description:
-      "Starts one of a runner's declared commands as a task (runners_list). The runner works on the case in its own workspace; the task's answer, questions and files come back when it ends (wait_for). A task resumes an earlier task's session on the same runner with resumeTaskId (fork: in a copy, leaving that session as it was), e.g. to answer the questions it asked or to ask about its plan. It is refused when the runner does not declare the command, when write mode is asked for a read command, or when a file the command needs (its needs, produced by another command's attach) is neither in files nor attached to the ticket.",
+      "Starts one of a runner's declared commands as a task (runners_list). The runner works on the case in its own workspace; the task's answer, questions and files come back when it ends (wait_for). A task resumes an earlier task's session on the same runner with resumeTaskId (fork: in a copy, leaving that session as it was), e.g. to answer the questions it asked or to ask about its plan. It is refused when the runner does not declare the command, when write mode is asked for a read command, or when a file the command needs (its needs, produced by another command's attach) is neither in files nor attached to the ticket. It is also refused until this conversation called runners_list, and when the runner's AGENTFLOW.md changed since: call runners_list again.",
     inputSchema: {
       type: "object",
       properties: {
