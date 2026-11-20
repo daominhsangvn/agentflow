@@ -1,5 +1,6 @@
 import path from "node:path";
 import { splitAttachGlob } from "@agentflow-ai/loops-api/loop-step";
+import { OrchestratorToolName } from "@repo/api/src/types/orchestrator";
 import { Result } from "@repo/api/src/types/result";
 import {
   type ComputeTargetCapabilities,
@@ -11,10 +12,12 @@ import { log } from "@repo/observability/log";
 import { createProviderContext } from "@/lib/integrations/connection-service";
 import { loadProjectConnectionRuntime } from "@/lib/integrations/project-connections";
 import { readChannel } from "./channel";
+import type { RunnersRead } from "./runners-read";
 
 /**
  * What a task may start with (docs/orchestrator.md "Tasks and waits", F10):
- * the command must be declared by the runner's AGENTFLOW.md, a read command
+ * the conversation must have read the runner's current AGENTFLOW.md through
+ * runners_list, the command must be declared by the runner's AGENTFLOW.md, a read command
  * does not run in write mode, and the files the command `needs` must exist,
  * either passed in or already attached to the ticket.
  */
@@ -54,6 +57,29 @@ export function checkTaskCommand(
     );
   }
   return Result.ok({ declared, mode: mode ?? declared.mode });
+}
+
+export function checkRunnersRead(
+  runner: ComputeTargetCapabilities,
+  read: RunnersRead | null
+): Result<void, string> {
+  if (read === null) {
+    return Result.err(
+      `Call ${OrchestratorToolName.RunnersList} first: each runner's AGENTFLOW.md (front matter and body) says how to call its commands (args, replying, follow-ups and resume, what it does not take). Follow it, then run the task.`
+    );
+  }
+  const hash = read[runner.computeTargetId];
+  if (hash === undefined) {
+    return Result.err(
+      `${runner.runnerName} was not in your last ${OrchestratorToolName.RunnersList}: call it again and read its AGENTFLOW.md before running its commands.`
+    );
+  }
+  if (hash !== runner.contentHash) {
+    return Result.err(
+      `${runner.runnerName}'s AGENTFLOW.md changed since your last ${OrchestratorToolName.RunnersList}: call it again and follow the new file before running its commands.`
+    );
+  }
+  return Result.ok(undefined);
 }
 
 export function missingNeeds(

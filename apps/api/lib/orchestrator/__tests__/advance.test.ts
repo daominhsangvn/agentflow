@@ -45,7 +45,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@repo/database", () => {
   const withDb = (fn: (db: unknown) => unknown) => fn(mocks.fake?.db);
   withDb.tx = (fn: (db: unknown) => unknown) => fn(mocks.fake?.db);
-  return { withDb };
+  return { Prisma: { DbNull: null }, withDb };
 });
 vi.mock("@/app/projects/project-runner-selection", () => ({
   loadProjectRunnerIds: () => Promise.resolve(mocks.runnerIds),
@@ -748,5 +748,81 @@ describe("concurrency", () => {
       error: "Stopped by Ann Admin.",
     });
     expect(fake.messages[0]?.turnId).toBe(turn?.id);
+  });
+});
+
+describe("runners_list record across session resets", () => {
+  const RECORD = { turnId: "turn-old", hashes: { "ct-1": "h1" } };
+
+  it("clears the record when a fresh session starts for an existing conversation", async () => {
+    await advanceConversation(conversationId, NOW);
+    finish({
+      type: "result",
+      ok: false,
+      error: "Claude crashed",
+      retryable: true,
+      sessionId: null,
+    });
+    await advanceConversation(conversationId, LATER);
+    Object.assign(fake.conversations[0] ?? {}, { runnersRead: RECORD });
+    mocks.dispatch.mockResolvedValue("cmd-2");
+
+    await advanceConversation(
+      conversationId,
+      new Date(LATER.getTime() + 2 * 60_000)
+    );
+
+    expect(mocks.dispatch).toHaveBeenLastCalledWith({
+      computeTargetId: RUNNER_ID,
+      request: expect.objectContaining({ sessionId: null }),
+    });
+    expect(fake.conversations[0]?.runnersRead).toBeNull();
+  });
+
+  it("keeps the record when the next turn resumes the session", async () => {
+    await advanceConversation(conversationId, NOW);
+    await addMessage("501", "and part-timers?");
+    Object.assign(fake.conversations[0] ?? {}, { runnersRead: RECORD });
+    finish(OK_RESULT);
+    mocks.dispatch.mockResolvedValue("cmd-2");
+
+    await advanceConversation(conversationId, LATER);
+
+    expect(mocks.dispatch).toHaveBeenLastCalledWith({
+      computeTargetId: RUNNER_ID,
+      request: expect.objectContaining({ sessionId: "session-1" }),
+    });
+    expect(fake.conversations[0]?.runnersRead).toEqual(RECORD);
+  });
+
+  it("clears the record when the runner replaced a missing session", async () => {
+    Object.assign(fake.conversations[0] ?? {}, {
+      sessionId: "session-1",
+      runnersRead: RECORD,
+    });
+    await advanceConversation(conversationId, NOW);
+    finish({ ...OK_RESULT, sessionId: "session-2" });
+
+    await advanceConversation(conversationId, LATER);
+
+    expect(fake.conversations[0]?.sessionId).toBe("session-2");
+    expect(fake.conversations[0]?.runnersRead).toBeNull();
+  });
+
+  it("keeps a record the turn wrote in its replacement session", async () => {
+    Object.assign(fake.conversations[0] ?? {}, { sessionId: "session-1" });
+    await advanceConversation(conversationId, NOW);
+    Object.assign(fake.conversations[0] ?? {}, {
+      runnersRead: { ...RECORD, turnId: fake.turns[0]?.id },
+    });
+    finish({ ...OK_RESULT, sessionId: "session-2" });
+
+    await advanceConversation(conversationId, LATER);
+
+    expect(fake.conversations[0]?.sessionId).toBe("session-2");
+    expect(fake.conversations[0]?.runnersRead).toEqual({
+      ...RECORD,
+      turnId: fake.turns[0]?.id,
+    });
   });
 });

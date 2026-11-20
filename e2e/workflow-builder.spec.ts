@@ -113,6 +113,63 @@ test("workflow builder assistant proposes YAML and Apply only changes the editor
   expect(saves).toEqual([]);
 });
 
+test("workflow builder chat shows bubbles, markdown and a thinking line", {
+  tag: E2ETag.Smoke,
+}, async ({ apiToken: token, page }) => {
+  test.setTimeout(120_000);
+  const { orgRole, orgSlug } = requireOrgClaims(token);
+  expect(isOrgAdminRole(orgRole), ADMIN_REQUIRED_MESSAGE).toBe(true);
+  const sentText = "Build a workflow";
+
+  let releaseChat: () => void = () => undefined;
+  const chatGate = new Promise<void>((resolve) => {
+    releaseChat = resolve;
+  });
+  await page.route(STATUS_URL, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, data: { enabled: true } }),
+    })
+  );
+  await page.route(CHAT_URL, async (route) => {
+    await chatGate;
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream",
+        "x-vercel-ai-ui-message-stream": "v1",
+        "cache-control": "no-cache",
+      },
+      body: toSse(textStream("**Ready** to build:\n\n- first\n- second")),
+    });
+  });
+
+  await page.goto(`/${orgSlug}/workflows/new`);
+  await page
+    .getByRole("button", { name: BUILD_WITH_AI_RE })
+    .click({ timeout: UI_TIMEOUT_MS });
+  await page.getByLabel("Message to the assistant").fill(sentText);
+  await page.getByRole("button", { name: SEND_RE }).click();
+
+  const thinking = page.getByTestId("workflow-builder-thinking");
+  await expect(thinking).toBeVisible({ timeout: UI_TIMEOUT_MS });
+  releaseChat();
+
+  const assistantBubble = page
+    .getByTestId("workflow-builder-message")
+    .and(page.locator('[data-role="assistant"]'));
+  await expect(assistantBubble.locator("strong")).toHaveText("Ready", {
+    timeout: UI_TIMEOUT_MS,
+  });
+  await expect(assistantBubble.locator("li")).toHaveCount(2);
+  await expect(thinking).toHaveCount(0);
+  await expect(
+    page
+      .getByTestId("workflow-builder-message")
+      .and(page.locator('[data-role="user"]'))
+  ).toContainText(sentText);
+});
+
 type StreamChunk = Record<string, unknown> | "[DONE]";
 
 function proposalStream(yaml: string): StreamChunk[] {

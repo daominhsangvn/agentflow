@@ -1,4 +1,5 @@
 import type { JsonObject } from "@repo/api/src/types/common";
+import type { ComputeTarget } from "@repo/api/src/types/compute-target";
 import {
   IntegrationOperationTarget,
   IntegrationProviderKey,
@@ -64,6 +65,7 @@ import {
   projectAgentsError,
   workflowAgentRefs,
 } from "./workflow-project-agents";
+import { checkRunnerFit, type FitTarget } from "./workflow-runner-fit-check";
 
 /**
  * Validation of a saved workflow (docs/workflows.md "API"): projects and
@@ -177,26 +179,33 @@ export async function validateWorkflowInput(
   if (scope.error) {
     return Result.err(scope.error);
   }
-  const targetError = await checkComputeTarget({
+  const defaultTarget = await checkComputeTarget({
     organizationId,
     computeTargetId: input.agent.computeTargetId,
     runAsUserId,
     callerId: context.callerId,
   });
-  if (targetError) {
-    return Result.err(targetError);
+  if ("error" in defaultTarget) {
+    return Result.err(defaultTarget.error);
   }
+  const targets: FitTarget[] = [
+    { label: "The workflow's Agent", target: defaultTarget.target },
+  ];
   // Each runner rule's runner follows the same access rule as the default.
   for (const [index, rule] of (input.agent.runners ?? []).entries()) {
-    const ruleError = await checkComputeTarget({
+    const ruleTarget = await checkComputeTarget({
       organizationId,
       computeTargetId: rule.computeTargetId,
       runAsUserId,
       callerId: context.callerId,
     });
-    if (ruleError) {
-      return Result.err(`Runner rule ${index + 1}: ${ruleError}`);
+    if ("error" in ruleTarget) {
+      return Result.err(`Runner rule ${index + 1}: ${ruleTarget.error}`);
     }
+    targets.push({
+      label: `Runner rule ${index + 1}'s Agent`,
+      target: ruleTarget.target,
+    });
   }
   const agentsError = await checkProjectAgents(
     organizationId,
@@ -209,6 +218,13 @@ export async function validateWorkflowInput(
   const orchestratedError = checkOrchestrated(input);
   if (orchestratedError) {
     return Result.err(orchestratedError);
+  }
+  const fitError = await checkRunnerFit(organizationId, input, targets, {
+    projectIds,
+    projects: scope.projects,
+  });
+  if (fitError) {
+    return Result.err(fitError);
   }
   const toolkitError = await checkToolkits(
     organizationId,
@@ -387,17 +403,20 @@ async function checkComputeTarget(input: {
   computeTargetId: string;
   runAsUserId: string;
   callerId: string;
-}): Promise<string | null> {
+}): Promise<{ error: string } | { target: ComputeTarget }> {
   const { organizationId, computeTargetId, runAsUserId } = input;
   if (runAsUserId !== input.callerId) {
-    const target = await computeTargetsService.findAccessibleById(
+    const shared = await computeTargetsService.findAccessibleById(
       computeTargetId,
       organizationId,
       runAsUserId
     );
-    return target?.isSharedWithOrg
-      ? null
-      : "The compute target must be shared with the organization when the workflow runs as another member. Share the target, or run the workflow as yourself.";
+    return shared?.isSharedWithOrg
+      ? { target: shared }
+      : {
+          error:
+            "The compute target must be shared with the organization when the workflow runs as another member. Share the target, or run the workflow as yourself.",
+        };
   }
   const target =
     (await computeTargetsService.findOwnedById(
@@ -411,8 +430,11 @@ async function checkComputeTarget(input: {
       runAsUserId
     ));
   return target
-    ? null
-    : "The compute target was not found, or it is neither owned by nor shared with the run-as user.";
+    ? { target }
+    : {
+        error:
+          "The compute target was not found, or it is neither owned by nor shared with the run-as user.",
+      };
 }
 
 /** The workflow's own process: its toolkit must be a repository of every trigger project. */

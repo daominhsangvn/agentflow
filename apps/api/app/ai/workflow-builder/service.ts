@@ -35,6 +35,7 @@ import {
   type PlatformAgentSettings,
 } from "@/lib/platform-agent/settings";
 import { AgentRunOutcome } from "@/lib/platform-agent/stream-json";
+import type { AgentWorkDirFile } from "@/lib/platform-agent/work-dir";
 import { scheduleLogFlush } from "@/lib/route-utils";
 import {
   loadWorkflowBuilderCatalog,
@@ -198,7 +199,9 @@ async function streamChat(
 
   try {
     const knowledge = await knowledgeLoader.load();
-    const catalog = await loadWorkflowBuilderCatalog(caller);
+    const loaded = await loadWorkflowBuilderCatalog(caller, {
+      editorYaml: input.editorYaml,
+    });
     const stream = createUIMessageStream({
       originalMessages: validated.data,
       onError: () => STREAM_ERROR_MESSAGE,
@@ -210,9 +213,10 @@ async function streamChat(
           command: claudeCode.command,
           settings: settings.settings,
           guides: knowledge.ok ? knowledge.guides : [],
-          catalog,
+          catalog: "error" in loaded ? loaded : loaded.catalog,
           messages: validated.data,
           editorYaml: input.editorYaml,
+          runnerFiles: "error" in loaded ? [] : loaded.runnerFiles,
           abortSignal: input.abortSignal,
         }),
     });
@@ -293,6 +297,7 @@ type CliRunInput = {
   catalog: unknown;
   messages: UIMessage[];
   editorYaml: string;
+  runnerFiles: AgentWorkDirFile[];
   abortSignal?: AbortSignal;
 };
 
@@ -313,6 +318,7 @@ function runInSpan(input: CliRunInput): Promise<void> {
           catalog: input.catalog,
           messages: input.messages,
           editorYaml: input.editorYaml,
+          runnerFiles: input.runnerFiles,
           write: (chunk) => input.writer.write(chunk),
           abortSignal: input.abortSignal,
         });

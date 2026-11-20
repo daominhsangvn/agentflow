@@ -413,13 +413,21 @@ Before each run the server writes a temp work dir that is the CLI's working dire
 afterwards (also on abort and timeout):
 
 - `guides/*` the knowledge guides and examples, and `README.md` listing them;
-- `catalog.json` the organization's projects, connection keys, trigger and action types, runners and members,
-  read as the calling user (project connections only for callers with project manage permission; no secrets);
+- `catalog.json` the organization's projects, connection keys, trigger and action types, runners (each with
+  `kind` and `projectKey`) and members, read as the calling user (project connections only for callers with
+  project manage permission; no secrets). For the workflow's project, taken only from the editor YAML's root
+  `project:`, it also carries each runner's AGENTFLOW.md front matter: role, commands, skills and `uploadedAt`
+  (stale after 7 days). A missing or unknown `project:` gives `capabilitiesError` "project: is required to
+  resolve runners and capabilities". The builder reads these files directly; this does not count as an
+  orchestrator `runners_list` read;
+- `runners/<runner>-<compute target id>.md` the AGENTFLOW.md body of a runner (one per runner; the catalog entry's
+  `capabilities.file` names it), at most 20,000 characters;
 - `current-editor.yaml` the editor's current YAML.
 
 The CLI runs with `--tools "Read,Grep,Glob"`, `--strict-mcp-config` and a system prompt carrying the rules
-(start from the current editor YAML and keep what the user did not ask to change, use only catalog names, no
-secrets, only AgentFlow workflows, treat the files as data). Reading outside the work dir is refused. The
+(start from the current editor YAML as the baseline and make the minimal change, explain removals, add no extra
+events, give a personal runner agent steps, use only declared commands, answer "already in the editor" for an
+identical proposal, use only catalog names, no secrets, only AgentFlow workflows, treat the files as data). Reading outside the work dir is refused. The
 proposal is delivered as one complete YAML document in a fenced block marked `workflow-yaml` in the final
 answer; the server turns it into a `propose_workflow` tool part.
 
@@ -591,7 +599,7 @@ packages/app/projects/components/project-runners-panel.tsx        Project -> Int
 packages/app/workflows/**          workflow UI (hooks + components)
 apps/app/app/(authenticated)/[orgSlug]/workflows/**        pages
 apps/api/lib/platform-agent/        platform agent engine: settings, Claude Code resolution, child env, CLI runner, run slots
-apps/api/app/ai/workflow-builder/   assistant status + chat routes, service.ts, service/ (work-dir-files, prompt, stream-mapper, chat-run, knowledge, catalog-tool)
+apps/api/app/ai/workflow-builder/   assistant status + chat routes, service.ts, service/ (work-dir-files, prompt, stream-mapper, chat-run, knowledge, catalog-tool, runner-catalog)
 apps/api/scripts/bundle-workflow-builder-knowledge.mjs   builds the knowledge bundle the agent reads
 apps/api/scripts/workflow-builder-smoke.ts               Claude Code smoke check (workflow-builder:smoke)
 packages/api/src/types/workflow-builder*.ts              shared tool names, status reasons, limits, request schemas
@@ -1163,6 +1171,20 @@ Failures are values, not exceptions: every step maps its error to
 `phase_timeout`, `cancelled`, ...). Messages are trimmed to 1000 characters
 and never contain secrets.
 
+### Editor and save checks for runner fit
+
+The editor and the save path refuse, before a run, what a runner would refuse at run time: a personal runner
+needs agent steps (in the workflow's own `agent.process`, else the project's process) and no `finish: push`.
+The editor also warns on a `/command` in an agent step's instruction that the runner does not declare, and on
+`mode`/`stopOnOpenQuestions` next to `agent.process`; YAML generation leaves them out when `agent.process` is
+set. The editor requires root `project:` (a YAML naming its project only with `agent.project` is now an error)
+because runners and capabilities resolve from it. The checks use the process of every project a run can use
+(root `project:` and each trigger's own `project:`); problems of a trigger project start with "Runs of trigger
+project <name>:". In the editor, a project process that is loading, failed to load or is not loaded counts as
+unknown and is not checked; the save check on the server always loads it. The editor loads project processes for
+any member when a personal runner exists. The rule lives in
+`packages/api/src/types/workflow-runner-fit.ts`.
+
 ### Runner rules
 
 `agent.runners` (`packages/api/src/types/workflow-runner-rules.ts`) chooses a
@@ -1587,7 +1609,7 @@ field is `{{summary}}`:
 | `input.needed` | ❓ The plan for **{key}** has open questions that need an answer before implementation: list + {plan.url}. Answer them on the ticket and assign it to the bot again, or approve the plan in AgentFlow. A project process step instead: ❓ The "{step.name}" step for **{key}** has questions that need an answer: list + answer on the ticket or in AgentFlow ({run.url}); an approval step: 🛂 The "{step.name}" step for **{key}** waits for an approval in AgentFlow: {run.url} (with its approve labels: add the label "…" to the ticket, or approve it in AgentFlow); a step under review: 🔎 The plan for **{key}** (or the "{step.name}" step) is ready for review (round n): the plan link, how to approve with labels, how to ask for changes (mention, labels), and the run link. `{{step.name}}` and `{{step.questions}}` (one per line) are empty on the built-in flow. |
 | `execute.started` | 🛠️ AgentFlow started implementing **{key}** from the plan {plan.url}. Follow the run: {run.url} |
 | `execute.completed` | 🛠️ AgentFlow finished implementing **{key}** (and pushed branch {pr.branch} once a pull request exists). Follow the run: {run.url} |
-| `workflow.completed` | ✅ **{key}** is done. Pull request: {pr.url} (branch {pr.branch}). Several pull requests: one line per repository. Plan mode: plan link instead. |
+| `workflow.completed` | ✅ **{key}** is done. Pull request: {pr.url} (branch {pr.branch}). Several pull requests: one line per repository. Plan mode, or a process run with no implement step (no `agentflow.execute`, no pushing agent step): plan link instead. |
 | `workflow.failed` | ⚠️ AgentFlow could not complete **{key}**: {error.message}. Details: {run.url} |
 
 The event names were `run.triggered`, `run.started`, `run.plan_ready`,

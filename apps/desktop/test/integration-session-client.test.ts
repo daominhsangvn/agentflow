@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { createIntegrationSessionOpener } from "../src/server/operations/integration-session-client.js";
+import {
+  createIntegrationSessionOpener,
+  orchestratorSessionOpenerFor,
+} from "../src/server/operations/integration-session-client.js";
 
 /**
  * The runner exchanges an instruction's action run for the agent's
@@ -85,6 +88,52 @@ describe("createIntegrationSessionOpener", () => {
     await assert.rejects(
       opener(fetchImpl, { apiKey: null })(ACTION_RUN_ID),
       NOT_CONNECTED_RE
+    );
+  });
+});
+
+describe("orchestratorSessionOpenerFor", () => {
+  const TURN_ID = "7d1c2f4e-7a51-4c3e-9d2a-1f6b8e9c0b22";
+  const ORCHESTRATOR_GRANT = {
+    ...GRANT,
+    token: "ost_abcdefghijklmnopqrstuvwxyz",
+  };
+
+  function open(requests: { url: string; init: RequestInit | undefined }[]) {
+    const fetchImpl = ((url: URL, init?: RequestInit) => {
+      requests.push({ url: String(url), init });
+      return Promise.resolve(
+        Response.json({ success: true, data: ORCHESTRATOR_GRANT })
+      );
+    }) as typeof fetch;
+    const openSession = orchestratorSessionOpenerFor({
+      getApiOrigin: () => "http://api.test/",
+      getApiKey: () => "sk_live_runner",
+      getComputeTargetId: () => "ct-runner",
+      fetchImpl,
+    });
+    if (!openSession) {
+      throw new Error("opener not created");
+    }
+    return openSession;
+  }
+
+  test("asks for the turn's session", async () => {
+    const requests: { url: string; init: RequestInit | undefined }[] = [];
+    await open(requests)(TURN_ID);
+    assert.equal(
+      requests[0]?.url,
+      "http://api.test/desktop/orchestrator-sessions?computeTargetId=ct-runner"
+    );
+    assert.equal(requests[0]?.init?.body, JSON.stringify({ turnId: TURN_ID }));
+  });
+
+  test("says when the runner replaced the session", async () => {
+    const requests: { url: string; init: RequestInit | undefined }[] = [];
+    await open(requests)(TURN_ID, { freshSession: true });
+    assert.equal(
+      requests[0]?.init?.body,
+      JSON.stringify({ turnId: TURN_ID, freshSession: true })
     );
   });
 });

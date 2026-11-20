@@ -1,6 +1,7 @@
 import { connectionGrantsSchema } from "@repo/api/src/types/connection-grants";
 import type { IntegrationProviderSummary } from "@repo/api/src/types/integration";
 import type { ProjectConnection } from "@repo/api/src/types/project-connection";
+import type { ProjectProcess } from "@repo/api/src/types/project-process";
 import {
   WORKFLOW_ACTIONS_MAX,
   WORKFLOW_DEFAULT_TITLE_TEMPLATE,
@@ -42,6 +43,22 @@ export type WorkflowYamlCatalog = {
   projects: readonly WorkflowYamlProject[];
   users: readonly WorkflowYamlUser[];
   runners: readonly WorkflowComputeTargetOption[];
+  /** What the runner-fit checks need beyond the names; absent = unknown. */
+  runnerFit?: WorkflowYamlRunnerFit;
+};
+
+/** What runner-fit checks need beyond the names. */
+export type WorkflowYamlRunnerFit = {
+  /** The root project; `commands` are its runners' declared commands. */
+  projectId: string;
+  /**
+   * Current process by project id (root and each trigger's project); null =
+   * none. A missing id = unknown (loading, failed or not loaded): the
+   * project-process part of the runner-fit rule is skipped for it.
+   */
+  processes: Readonly<Record<string, ProjectProcess | null>>;
+  /** Declared commands by compute target id; a missing id = unknown. */
+  commands: Readonly<Record<string, readonly string[]>>;
 };
 
 export type WorkflowYamlProject = { id: string; name: string };
@@ -390,7 +407,8 @@ export const workflowYamlSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["project"],
-        message: "Name the project the workflow's runs belong to (project:)",
+        message:
+          "Name the project the workflow's runs belong to (project:): it is required to resolve runners and capabilities",
       });
     }
     const count =

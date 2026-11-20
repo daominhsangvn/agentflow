@@ -6,6 +6,8 @@ import type { ToolCallDecision } from "@repo/api/src/types/integration-tools";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import {
   type StartWorkflowRunInput,
+  WORKFLOW_RUN_FINAL_STATUSES,
+  WORKFLOW_RUN_NEEDS_YOU_STATUSES,
   type WorkflowActionRun,
   WorkflowActionRunStatus,
   WorkflowActionStage,
@@ -15,13 +17,16 @@ import {
   type WorkflowRunPullRequest,
   WorkflowRunRetryMode,
   type WorkflowRunSourceDocumentRef,
-  type WorkflowRunStatus,
+  WorkflowRunStatus,
   type WorkflowRunSummary,
   type WorkflowRunsResponse,
+  type WorkflowRunsSummary,
   workflowInstructionRunDetailSchema,
   workflowRunEventSchema,
 } from "@repo/api/src/types/workflow";
 import { type Prisma, withDb } from "@repo/database";
+import { AfAttribute } from "@repo/observability/af-attributes";
+import { withSpan } from "@repo/observability/span";
 import { v7 as uuidv7 } from "uuid";
 import { z } from "zod";
 import { integrationToolCallService } from "@/app/integration-tools/integration-tool-call-service";
@@ -79,7 +84,11 @@ export type RunListOptions = {
   status?: WorkflowRunStatus;
   cursor?: string | null;
   limit?: number;
+  startDate?: string;
+  endDate?: string;
 };
+
+export type RunSummaryOptions = Omit<RunListOptions, "cursor" | "limit">;
 
 export const RUN_LIST_DEFAULT_LIMIT = 25;
 export const RUN_LIST_MAX_LIMIT = 100;
@@ -104,10 +113,7 @@ export const workflowRunService = {
     const rows = await withDb((db) =>
       db.workflowRun.findMany({
         where: {
-          organizationId,
-          ...(options.projectId ? { projectId: options.projectId } : {}),
-          ...(options.workflowId ? { workflowId: options.workflowId } : {}),
-          ...(options.status ? { status: options.status } : {}),
+          ...orgRunWhere(organizationId, options),
           ...(cursor ? cursorFilter(cursor) : {}),
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -121,6 +127,36 @@ export const workflowRunService = {
       runs: page.map(toRunSummary),
       nextCursor: rows.length > limit && last ? encodeCursor(last) : null,
     });
+  },
+
+  /** Run counts per bucket for the same filters as `list`, from one grouped query. */
+  summary(
+    organizationId: string,
+    options: RunSummaryOptions = {}
+  ): Promise<Result<WorkflowRunsSummary, RunServiceError>> {
+    return withSpan(
+      "workflow_runs.summary",
+      { [AfAttribute.OrgId]: organizationId },
+      async () => {
+        if (options.workflowId) {
+          const exists = await workflowExists(
+            organizationId,
+            options.workflowId
+          );
+          if (!exists) {
+            return notFound<WorkflowRunsSummary>("Workflow not found");
+          }
+        }
+        const rows = await withDb((db) =>
+          db.workflowRun.groupBy({
+            by: ["status"],
+            where: orgRunWhere(organizationId, options),
+            _count: { _all: true },
+          })
+        );
+        return Result.ok(foldRunSummary(rows));
+      }
+    );
   },
 
   async get(
@@ -803,4 +839,54 @@ function toRunPullRequests(
       branch: run.branchName,
     },
   ];
+}
+
+function orgRunWhere(
+  organizationId: string,
+  options: RunSummaryOptions
+): Prisma.WorkflowRunWhereInput {
+  const createdAt: Prisma.DateTimeFilter = {};
+  if (options.startDate) {
+    createdAt.gte = new Date(options.startDate);
+  }
+  if (options.endDate) {
+    createdAt.lte = new Date(options.endDate);
+  }
+  return {
+    organizationId,
+    ...(options.projectId ? { projectId: options.projectId } : {}),
+    ...(options.workflowId ? { workflowId: options.workflowId } : {}),
+    ...(options.status ? { status: options.status } : {}),
+    ...(options.startDate || options.endDate ? { createdAt } : {}),
+  };
+}
+
+function foldRunSummary(
+  rows: readonly { status: string; _count: { _all: number } }[]
+): WorkflowRunsSummary {
+  const summary: WorkflowRunsSummary = {
+    total: 0,
+    active: 0,
+    needsYou: 0,
+    succeeded: 0,
+    failed: 0,
+    cancelled: 0,
+  };
+  for (const row of rows) {
+    const count = row._count._all;
+    const status = row.status as WorkflowRunStatus;
+    summary.total += count;
+    if (status === WorkflowRunStatus.Succeeded) {
+      summary.succeeded += count;
+    } else if (status === WorkflowRunStatus.Failed) {
+      summary.failed += count;
+    } else if (status === WorkflowRunStatus.Cancelled) {
+      summary.cancelled += count;
+    } else if (WORKFLOW_RUN_NEEDS_YOU_STATUSES.includes(status)) {
+      summary.needsYou += count;
+    } else if (!WORKFLOW_RUN_FINAL_STATUSES.includes(status)) {
+      summary.active += count;
+    }
+  }
+  return summary;
 }

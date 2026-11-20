@@ -30,6 +30,11 @@ import {
   workflowBuilderStorageKey,
 } from "@/lib/workflow-builder/chat-storage";
 import { useWorkflowBuilderTransport } from "@/lib/workflow-builder/use-workflow-builder-transport";
+import {
+  WorkflowBuilderBubbleRole,
+  WorkflowBuilderTextBubble,
+  WorkflowBuilderThinking,
+} from "./workflow-builder-message";
 import { WorkflowBuilderProposalCard } from "./workflow-builder-proposal-card";
 
 /** After this many invalid proposals in a row the client stops answering the agent on its own. */
@@ -170,6 +175,12 @@ function WorkflowBuilderChat({
   });
 
   const isBusy = status === "streaming" || status === "submitted";
+  const endRef = useRef<HTMLDivElement>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll to the end when messages or busy state change
+  useEffect(() => {
+    endRef.current?.scrollIntoView?.({ block: "end" });
+  }, [messages, isBusy]);
 
   function send(text: string) {
     invalidStreakRef.current = 0;
@@ -234,19 +245,18 @@ function WorkflowBuilderChat({
           </div>
         ) : null}
         {messages.map((message) => (
-          <div
-            className={message.role === "user" ? "text-right" : "text-left"}
-            key={message.id}
-          >
+          <div className="space-y-2" key={message.id}>
             {message.parts.map((part, index) => {
               if (part.type === "text") {
+                if (part.text.trim() === "") {
+                  return null;
+                }
                 return (
-                  <p
-                    className="whitespace-pre-wrap text-sm"
+                  <WorkflowBuilderTextBubble
                     key={textPartKey(message.id, index)}
-                  >
-                    {part.text}
-                  </p>
+                    role={bubbleRole(message.role)}
+                    text={part.text}
+                  />
                 );
               }
               if (!isToolUIPart(part)) {
@@ -269,7 +279,7 @@ function WorkflowBuilderChat({
               }
               return (
                 <p
-                  className="text-muted-foreground text-xs"
+                  className="text-left text-muted-foreground text-xs"
                   key={part.toolCallId}
                 >
                   {TOOL_LABELS[part.type] ?? "Working"}
@@ -278,6 +288,8 @@ function WorkflowBuilderChat({
             })}
           </div>
         ))}
+        {isBusy ? <WorkflowBuilderThinking /> : null}
+        <div ref={endRef} />
       </div>
       {autoSendLimitHit ? (
         <Alert>
@@ -329,6 +341,13 @@ function WorkflowBuilderChat({
       </div>
     </div>
   );
+}
+
+function bubbleRole(role: UIMessage["role"]): WorkflowBuilderBubbleRole {
+  if (role === "user") {
+    return WorkflowBuilderBubbleRole.User;
+  }
+  return WorkflowBuilderBubbleRole.Assistant;
 }
 
 type ProposalToolPart = {

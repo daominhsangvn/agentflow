@@ -56,6 +56,7 @@ import { personalRunnerBusy } from "@/lib/workflows/engine/personal-runner-queue
 import { isLoopSettled } from "@/lib/workflows/engine/run-loops";
 import { renderCase } from "./case-render";
 import { mailTaskQuestions } from "./needs-person-mail";
+import { loadRunnersRead } from "./runners-read";
 import { recordAskedQuestions } from "./task-asked";
 import { taskCancelledMessage } from "./task-cancel";
 import {
@@ -63,7 +64,11 @@ import {
   type TaskFileRef,
   taskFilesFromStep,
 } from "./task-files";
-import { checkTaskCommand, checkTaskNeeds } from "./task-guards";
+import {
+  checkRunnersRead,
+  checkTaskCommand,
+  checkTaskNeeds,
+} from "./task-guards";
 import { initialResultFor } from "./task-initial-result";
 import {
   logTaskFailed,
@@ -92,7 +97,8 @@ import { matchTaskRunners, pickCaseTaskRunner } from "./task-runner-match";
  * A task that task_cancel closed stays cancelled: it is never resumed, and no
  * later write here overwrites that status. A case's tasks of one role stay on one Agent (its
  * workspace holds the case's uncommitted work): `pickCaseTaskRunner` derives it from the case's
- * started tasks.
+ * started tasks. A task starts only after the conversation's runners_list read the runner's
+ * current AGENTFLOW.md.
  */
 
 const LOG_PREFIX = "[orchestrator/tasks]";
@@ -176,6 +182,13 @@ async function runStartTask(input: StartTaskInput): Promise<
     return Result.err(matched.error);
   }
   const runner = matched.value;
+  const read = checkRunnersRead(
+    runner,
+    await loadRunnersRead(input.organizationId, input.conversationId)
+  );
+  if (!read.ok) {
+    return Result.err(read.error);
+  }
   const checked = checkTaskCommand(runner, input.command, input.mode);
   if (!checked.ok) {
     return Result.err(checked.error);

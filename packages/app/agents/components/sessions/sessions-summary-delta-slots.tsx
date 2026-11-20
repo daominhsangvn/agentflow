@@ -86,7 +86,8 @@ export type SessionsDeltaKey =
   | "meteredCost"
   | "prsShipped"
   | "sessions"
-  | "tokens";
+  | "tokens"
+  | "totalCost";
 
 /**
  * ISS-5315: one card's delta props, or the movement-free slot when that card has
@@ -216,7 +217,10 @@ export function deliveryComparableDeltas(
  * green through exactly the mis-pairing it was written to catch.
  */
 export function costDeltaKey(
-  presentation: Readonly<{ honest: boolean }>
+  presentation: Readonly<{ honest: boolean; total?: boolean }>
 ): SessionsDeltaKey {
+  if (presentation.total) {
+    return "totalCost";
+  }
   return presentation.honest ? "meteredCost" : "apiCost";
 }

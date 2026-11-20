@@ -20,12 +20,22 @@ const mocks = vi.hoisted(() => ({
     refetch: vi.fn(),
   },
   useOrgCases: vi.fn(),
+  summary: {
+    data: undefined as unknown,
+    isLoading: false,
+    isError: false,
+  },
+  useSummary: vi.fn(),
 }));
 
 vi.mock("../../hooks/use-orchestrator-cases", () => ({
   useOrgOrchestratorCases: (query: unknown) => {
     mocks.useOrgCases(query);
     return mocks.cases;
+  },
+  useOrgOrchestratorCasesSummary: (query: unknown) => {
+    mocks.useSummary(query);
+    return mocks.summary;
   },
   isCaseActive: (c: { turnRunning: boolean; activeTaskCount: number }) =>
     c.turnRunning || c.activeTaskCount > 0,
@@ -141,6 +151,51 @@ describe("OrgCaseList", () => {
     mocks.cases.error = null;
     mocks.cases.refetch.mockReset();
     mocks.useOrgCases.mockReset();
+    mocks.useSummary.mockReset();
+    mocks.summary.data = { total: 7, open: 4, needsPerson: 2, closed: 3 };
+    mocks.summary.isLoading = false;
+    mocks.summary.isError = false;
+  });
+
+  it("shows the stats from the summary and sends the same filters to both requests", async () => {
+    mocks.cases.data = [item()];
+    render(<OrgCaseList />);
+
+    expect(screen.getByText("Cases")).toBeTruthy();
+    expect(screen.getByText("Needs a person")).toBeTruthy();
+    expect(screen.getByText("7")).toBeTruthy();
+    expect(screen.getByText("4")).toBeTruthy();
+
+    await userEvent.selectOptions(
+      screen.getAllByRole("combobox")[2] as HTMLElement,
+      OrchestratorCaseStatus.Closed
+    );
+
+    const expected = {
+      projectId: undefined,
+      workflowId: undefined,
+      status: OrchestratorCaseStatus.Closed,
+    };
+    expect(mocks.useOrgCases).toHaveBeenLastCalledWith(expected);
+    expect(mocks.useSummary).toHaveBeenLastCalledWith(expected);
+  });
+
+  it("dashes the stats on a summary error while the table still renders", () => {
+    mocks.summary.isError = true;
+    mocks.summary.data = undefined;
+    mocks.cases.data = [item()];
+    render(<OrgCaseList />);
+
+    expect(screen.queryByText("7")).toBeNull();
+    expect(screen.getByRole("link", { name: "PROJ-7 login bug" })).toBeTruthy();
+  });
+
+  it("has no date control", () => {
+    mocks.cases.data = [item()];
+    render(<OrgCaseList layout="page" />);
+
+    expect(screen.queryByText("Last 30 days")).toBeNull();
+    expect(screen.getAllByRole("combobox")).toHaveLength(3);
   });
 
   it("renders project, workflow, waiting label and agents", () => {

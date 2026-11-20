@@ -175,7 +175,8 @@ describe("parseWorkflowYaml", () => {
     ]);
     expect(problemsOf(mobile)[0]).toEqual({
       line: 2,
-      message: 'No project "Mobile". Available: Web',
+      message:
+        'No project "Mobile". Available: Web. project: is required to resolve runners and capabilities',
       severity: YamlProblemSeverity.Error,
     });
     expect(parseWorkflowYaml(slack, CATALOG).input).toBeNull();
@@ -574,7 +575,7 @@ postActions:
   it("validates the workflow's own process like a project's", () => {
     const valid = `${VALID_YAML.replace(
       "  mode: plan\n",
-      "  mode: plan\n  process:\n    steps:\n      - type: agent\n        id: answer\n        name: Answer\n        instruction: Reply\n"
+      "  process:\n    steps:\n      - type: agent\n        id: answer\n        name: Answer\n        instruction: Reply\n"
     )}`;
     const invalid = valid.replace(
       "        id: answer\n",
@@ -587,7 +588,7 @@ postActions:
     const problems = problemsOf(invalid);
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatchObject({
-      line: 15,
+      line: 14,
       severity: YamlProblemSeverity.Error,
     });
   });
@@ -906,7 +907,7 @@ describe("newWorkflowYaml", () => {
     );
 
     expect(messages).toEqual([
-      "Name the project the workflow's runs belong to (project:)",
+      "Name the project the workflow's runs belong to (project:): it is required to resolve runners and capabilities",
     ]);
   });
 });

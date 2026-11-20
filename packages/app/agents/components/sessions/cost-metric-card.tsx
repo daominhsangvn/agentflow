@@ -533,3 +533,35 @@ function formatPositiveCurrency(
 export const DASHBOARD_COST_METRIC_CARD_INFO = {
   what: "Estimated agent cost in the selected range, including subscription-covered usage.",
 } as const;
+
+/**
+ * Label of the Sessions Cost card on the subscription-inclusive basis: the
+ * estimated cost at API prices of every matched session, whoever paid for it.
+ */
+export const SESSIONS_TOTAL_COST_METRIC_CARD_LABEL = "Est. cost";
+
+export const SESSIONS_TOTAL_COST_METRIC_CARD_INFO = {
+  what: "Estimated cost of the matched sessions at API prices, including usage covered by a subscription.",
+  how: "Sum of per-session estimated cost in the selected range. The caption shows how much of it a subscription covered.",
+} as const;
+
+/**
+ * Caption of the subscription-inclusive Cost card: how much of the headline a
+ * subscription covered. Same drop rules as {@link formatCostMetricDetail}.
+ */
+export function formatTotalCostMetricDetail(
+  subscriptionEstimatedCost: number | null | undefined
+): string | undefined {
+  if (
+    subscriptionEstimatedCost == null ||
+    !Number.isFinite(subscriptionEstimatedCost) ||
+    subscriptionEstimatedCost <= 0
+  ) {
+    return undefined;
+  }
+  const formattedValue = formatCurrencyWhole(subscriptionEstimatedCost);
+  if (NO_FIGURE_CURRENCY_STRINGS.has(formattedValue)) {
+    return undefined;
+  }
+  return `incl. ${formattedValue} subscription-covered`;
+}

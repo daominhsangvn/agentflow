@@ -147,8 +147,11 @@ and sends it to the orchestrator's runner as the desktop command
 (`apps/desktop/src/server/operations/orchestrator-turn.ts`) runs Claude Code
 in `<workspace>/.agentflow-ai/orchestrator/<workflow id>` with
 `--resume <session>` when the conversation has one (a session this computer
-does not have starts over: CASE.md carries what matters), only the
-orchestrator's tools allowed (`mcp__agentflow_orchestrator`) and files,
+does not have starts over, after the fresh-session exchange described below:
+CASE.md carries what matters; the exchange is tried twice, and if both fail the
+fresh session keeps the first token, which may already be revoked when the API
+applied the swap but the reply was lost, so its tool calls fail that turn), only
+the orchestrator's tools allowed (`mcp__agentflow_orchestrator`) and files,
 shell and web denied. The result line carries the note, the session id and
 the usage.
 
@@ -207,13 +210,17 @@ CASE.md (`case-render.ts`) lists Tasks and Decisions before Conversations.
 exchanges the turn for an `ost_…` token (`POST /desktop/orchestrator-sessions`,
 the computer the turn was sent to, its owner's API key); apps/mcp serves the
 tools for that token from `GET /orchestrator-tools/session` and
-`POST /orchestrator-tools/call`. The token works while the turn runs.
+`POST /orchestrator-tools/call`. The token works while the turn runs. When the
+runner replaces a session it no longer has, it exchanges the turn again with
+`freshSession: true` before the new session starts; the API then also clears
+the conversation's runners_list record (`runners_read`). An older runner does
+not send it, and the record is cleared when the turn finishes.
 
 | Tool | Does |
 |---|---|
 | `case_get` | CASE.md: notes, conversations with their latest messages, tasks, decisions |
 | `case_update_notes` | Replaces the case's notes |
-| `runners_list` | Each runner's AGENTFLOW.md (commands, skills, online) |
+| `runners_list` | Each runner's AGENTFLOW.md (commands, skills, online); records each file's contentHash for the conversation (task_run guard) |
 | `source_item_get` | The conversation's item through its project connection, incl. `blockedBy` / `blocks` relations |
 | `reply` | `where`: `thread` (default for a message from the ticket) or `case_page` (default for a message sent from AgentFlow; shown on the case page only, no grant, no files). `thread` needs `source: comment`, and `attachments` needs `attach`. Posts in the conversation's thread through the provider's `replyOnItem` (Jira: a comment in the thread of the comment answered, on the issue when the site refuses threads; Teams: a reply in the thread mentioning who asked last). Kept as a `reply` message and an anchor |
 | `task_run` | Starts a runner's command as a task (below); optional `replyTo`: the message ref the task answers |
@@ -416,6 +423,7 @@ The loop:
 **Guards.** `task_run` (through `startTask`) refuses a task before it is
 created when:
 
+- **read**: the conversation has not called runners_list in its current Claude session, the runner was not in its last runners_list, or the runner's AGENTFLOW.md contentHash changed since (stored per conversation in orchestrator_conversations.runners_read, written by every runners_list, cleared when a fresh session starts for the conversation or the runner replaces a missing session: at the fresh-session exchange, or when the turn finishes for older runners). A queued task is not checked again when it launches: the orchestrator is not in a turn then, and refusing would drop work it already decided.
 - **declared**: the command is not in the runner's AGENTFLOW.md (a file that
   does not parse refuses every command). A queued task is checked again when
   it launches and fails if its command is no longer declared.

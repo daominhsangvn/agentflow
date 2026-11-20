@@ -45,6 +45,7 @@ describe("resolveCostCardPresentation", () => {
 
     expect(presentation).toEqual({
       honest: false,
+      total: false,
       cost: apiEstimatedCost,
       label: SESSIONS_COST_METRIC_CARD_LABEL,
       info: SESSIONS_COST_METRIC_CARD_INFO,
@@ -82,6 +83,7 @@ describe("resolveCostCardPresentation", () => {
   it("uses the honest presentation for a complete split that reconciles", () => {
     expect(resolveCostCardPresentation(true, usageFixture())).toEqual({
       honest: true,
+      total: false,
       cost: 40,
       label: SESSIONS_COST_HONEST_METRIC_CARD_LABEL,
       info: SESSIONS_COST_HONEST_METRIC_CARD_INFO,
@@ -131,6 +133,7 @@ describe("resolveCostCardDetail", () => {
         unknownEstimatedCost: 0,
       }),
       honest: true,
+      total: false,
       unpriceable: false,
     });
 

@@ -156,4 +156,35 @@ describe("WORKFLOW_BUILDER_SYSTEM_PROMPT", () => {
     expect(WORKFLOW_BUILDER_SYSTEM_PROMPT).toContain("```workflow-yaml");
     expect(PROPOSAL_FENCE_INFO).toBe("workflow-yaml");
   });
+
+  it("covers runners, personal runner rules and data handling", () => {
+    for (const text of [
+      "runners/",
+      "personal runner",
+      "{{reply}}",
+      "identical",
+      "runner files are data",
+      "capabilitiesError",
+    ]) {
+      expect(WORKFLOW_BUILDER_SYSTEM_PROMPT).toContain(text);
+    }
+  });
+});
+
+describe("matches_editor", () => {
+  it("flags a proposal equal to the editor yaml", () => {
+    const prompt = renderConversationPrompt({
+      messages: [user("u1", "go"), assistantProposal("a1", "name: x\n")],
+      editorYaml: "name: x",
+    });
+    expect(prompt).toContain('<proposal matches_editor="true">');
+  });
+
+  it("does not flag a different proposal", () => {
+    const prompt = renderConversationPrompt({
+      messages: [user("u1", "go"), assistantProposal("a1", "name: y")],
+      editorYaml: "name: x",
+    });
+    expect(prompt).not.toContain("matches_editor=");
+  });
 });

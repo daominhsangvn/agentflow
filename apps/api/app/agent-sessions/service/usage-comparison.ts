@@ -60,6 +60,7 @@ export type UsageComparisonCurrentFigures = {
   totalTokens: number;
   meteredEstimatedCost: number;
   apiEstimatedCost: number;
+  totalEstimatedCost: number;
   mergedPrCount: number | null;
 };
 
@@ -225,6 +226,12 @@ export async function computeUsageComparison({
     AgentSessionComparisonMetric.ApiCost,
     current.apiEstimatedCost,
     priorCostSplit.apiEstimatedCost
+  );
+  assignDelta(
+    deltas,
+    AgentSessionComparisonMetric.TotalCost,
+    current.totalEstimatedCost,
+    priorCostSplit.subscriptionEstimatedCost + priorCostSplit.apiEstimatedCost
   );
   assignDelta(
     deltas,

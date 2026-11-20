@@ -45,6 +45,8 @@ export const taskMocks = {
   needsPrd: false,
   stored: new Map<string, Uint8Array>(),
   runnerCapabilities: { loopStepForkSession: true } as Record<string, unknown>,
+  runnersRead: null as Record<string, string> | null,
+  baHash: "hash-ba",
 };
 
 export function databaseModule() {
@@ -81,6 +83,16 @@ export function databaseModule() {
     },
   });
   const db = {
+    orchestratorConversation: {
+      findFirst: () =>
+        Promise.resolve({
+          runnersRead: taskMocks.runnersRead
+            ? { turnId: IDS.turn, hashes: taskMocks.runnersRead }
+            : null,
+          projectConnectionId: null,
+          channel: null,
+        }),
+    },
     orchestratorTask: {
       create: (args: { data: Row }) => {
         const row = {
@@ -151,6 +163,7 @@ export function capabilitiesModule() {
           {
             computeTargetId: IDS.ba,
             runnerName: "runner-1",
+            contentHash: taskMocks.baHash,
             isOnline: taskMocks.online,
             source: RunnerCapabilitiesSource.Toolkit,
             capabilities: {
@@ -176,6 +189,7 @@ export function capabilitiesModule() {
           {
             computeTargetId: IDS.dev,
             runnerName: "an-PRO-1",
+            contentHash: "hash-dev",
             isOnline: taskMocks.online,
             source: RunnerCapabilitiesSource.Personal,
             capabilities: {
@@ -306,6 +320,8 @@ export function resetTaskMocks() {
   taskMocks.needsPrd = false;
   taskMocks.stored = new Map();
   taskMocks.runnerCapabilities = { loopStepForkSession: true };
+  taskMocks.baHash = "hash-ba";
+  taskMocks.runnersRead = { [IDS.ba]: "hash-ba", [IDS.dev]: "hash-dev" };
   taskMocks.createDocument.mockResolvedValue({ id: "doc-1" });
   taskMocks.createLoop.mockResolvedValue({
     loopId: "loop-1",

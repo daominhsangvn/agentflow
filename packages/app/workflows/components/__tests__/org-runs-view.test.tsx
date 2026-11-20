@@ -1,5 +1,6 @@
 import { WorkflowRunStatus } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
+import { KPI_NO_VALUE } from "@repo/app/shared/lib/format-utils";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -8,6 +9,12 @@ import { OrgRunsView } from "../org-runs-view";
 
 const mocks = vi.hoisted(() => ({
   history: vi.fn(),
+  summary: vi.fn(),
+  summaryResult: {
+    data: undefined as unknown,
+    isError: false,
+    isLoading: false,
+  },
 }));
 
 vi.mock("../workflow-runs-table", () => ({
@@ -22,6 +29,10 @@ vi.mock("@repo/app/projects/hooks/use-projects", () => ({
 }));
 
 vi.mock("../../hooks/use-workflows", () => ({
+  useOrgWorkflowRunsSummary: (filters: unknown) => {
+    mocks.summary(filters);
+    return mocks.summaryResult;
+  },
   useWorkflows: () => ({
     data: [
       {
@@ -69,6 +80,17 @@ vi.mock("@repo/design-system/components/ui/select", () => ({
 describe("OrgRunsView", () => {
   beforeEach(() => {
     mocks.history.mockReset();
+    mocks.summary.mockReset();
+    mocks.summaryResult.data = {
+      total: 10,
+      active: 2,
+      needsYou: 1,
+      succeeded: 5,
+      failed: 2,
+      cancelled: 0,
+    };
+    mocks.summaryResult.isError = false;
+    mocks.summaryResult.isLoading = false;
   });
 
   it("passes the project and status filters to the run history", async () => {
@@ -83,22 +105,28 @@ describe("OrgRunsView", () => {
       WorkflowRunStatus.Failed
     );
 
-    expect(mocks.history).toHaveBeenLastCalledWith({
-      projectId: "p1",
-      workflowId: undefined,
-      status: WorkflowRunStatus.Failed,
-    });
+    expect(mocks.history).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        projectId: "p1",
+        workflowId: undefined,
+        status: WorkflowRunStatus.Failed,
+      })
+    );
+    expect(mocks.summary).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        projectId: "p1",
+        status: WorkflowRunStatus.Failed,
+      })
+    );
   });
 
   it("hides the project filter and scopes the runs when projectId is passed", () => {
     render(<OrgRunsView projectId="p1" />);
 
     expect(screen.getAllByRole("combobox")).toHaveLength(2);
-    expect(mocks.history).toHaveBeenLastCalledWith({
-      projectId: "p1",
-      workflowId: undefined,
-      status: undefined,
-    });
+    expect(mocks.history).toHaveBeenLastCalledWith(
+      expect.objectContaining({ projectId: "p1", workflowId: undefined })
+    );
   });
 
   it("offers only process-mode workflows", () => {
@@ -108,5 +136,37 @@ describe("OrgRunsView", () => {
     expect(
       screen.queryByRole("option", { name: "Orchestrated flow" })
     ).toBeNull();
+  });
+
+  it("shows the stats from the summary", () => {
+    render(<OrgRunsView layout="page" />);
+
+    expect(screen.getByText("10")).toBeTruthy();
+    expect(screen.getAllByText("Needs you").length).toBeTruthy();
+    expect(screen.getAllByText("Succeeded").length).toBeGreaterThan(0);
+  });
+
+  it("dashes only the cards when the summary fails, and keeps the table", () => {
+    mocks.summaryResult.data = undefined;
+    mocks.summaryResult.isError = true;
+    render(<OrgRunsView layout="page" />);
+
+    expect(screen.queryByText("10")).toBeNull();
+    expect(screen.getAllByText(KPI_NO_VALUE).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("history")).toBeTruthy();
+  });
+
+  it("sends the same date window to the list and the summary", async () => {
+    render(<OrgRunsView />);
+    await userEvent.click(screen.getByRole("radio", { name: "Last 7 days" }));
+
+    for (const mock of [mocks.history, mocks.summary]) {
+      const filters = mock.mock.lastCall?.[0] as {
+        startDate?: string;
+        endDate?: string;
+      };
+      expect(filters.startDate).toBeTruthy();
+      expect(filters.endDate).toBeTruthy();
+    }
   });
 });

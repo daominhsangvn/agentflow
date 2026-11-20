@@ -26,7 +26,12 @@ vi.mock("@/lib/integrations/connection-service", () => ({
   createProviderContext: () => ({}),
 }));
 
-import { checkTaskCommand, checkTaskNeeds, missingNeeds } from "../task-guards";
+import {
+  checkRunnersRead,
+  checkTaskCommand,
+  checkTaskNeeds,
+  missingNeeds,
+} from "../task-guards";
 
 function file(
   commands: NonNullable<ComputeTargetCapabilities["capabilities"]>["commands"]
@@ -187,5 +192,26 @@ describe("checkTaskNeeds", () => {
     });
     expect(result.ok).toBe(true);
     expect(mocks.fetchItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkRunnersRead", () => {
+  it("refuses when the conversation read nothing", () => {
+    const result = checkRunnersRead(runner, null);
+    expect(!result.ok && result.error).toContain("runners_list");
+  });
+
+  it("refuses a runner missing from the last read", () => {
+    const result = checkRunnersRead(runner, { "ct-2": "h" });
+    expect(!result.ok && result.error).toContain("was not in your last");
+  });
+
+  it("refuses when the file changed", () => {
+    const result = checkRunnersRead(runner, { "ct-1": "old" });
+    expect(!result.ok && result.error).toContain("changed");
+  });
+
+  it("accepts the same hash", () => {
+    expect(checkRunnersRead(runner, { "ct-1": "h" }).ok).toBe(true);
   });
 });

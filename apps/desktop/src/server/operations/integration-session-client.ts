@@ -180,21 +180,26 @@ export function integrationMcpConfig(mcpUrl: string): object {
 /**
  * The project orchestrator's runner exchanges a turn it was asked to run for
  * the turn's tool session (docs/orchestrator.md), like an instruction's.
+ * With `freshSession` (a replaced session) AgentFlow also forgets what the
+ * old session read.
  */
 export type OpenOrchestratorSession = (
-  turnId: string
+  turnId: string,
+  options?: { freshSession?: boolean }
 ) => Promise<IntegrationSessionGrant>;
 
 export function orchestratorSessionOpenerFor(options: {
   getApiOrigin?: () => string;
   getApiKey?: () => string | null;
   getComputeTargetId?: () => string | null;
+  fetchImpl?: typeof fetch;
 }): OpenOrchestratorSession | undefined {
   const { getApiOrigin, getApiKey, getComputeTargetId } = options;
+  const fetchImpl = options.fetchImpl ?? fetch;
   if (!(getApiOrigin && getApiKey && getComputeTargetId)) {
     return undefined;
   }
-  return async (turnId) => {
+  return async (turnId, openOptions) => {
     const apiKey = getApiKey();
     const computeTargetId = getComputeTargetId();
     if (!(apiKey && computeTargetId)) {
@@ -203,13 +208,15 @@ export function orchestratorSessionOpenerFor(options: {
     const origin = getApiOrigin().replace(TRAILING_SLASHES_RE, "");
     const url = new URL(`${origin}${ORCHESTRATOR_SESSION_ROUTE}`);
     url.searchParams.set("computeTargetId", computeTargetId);
-    const response = await fetch(url, {
+    const response = await fetchImpl(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ turnId }),
+      body: JSON.stringify(
+        openOptions?.freshSession ? { turnId, freshSession: true } : { turnId }
+      ),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     return withMcpUrlOverride(

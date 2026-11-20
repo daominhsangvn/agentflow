@@ -1,3 +1,4 @@
+import { AgentKind } from "@repo/api/src/types/agent-fleet";
 import { IntegrationFieldKind } from "@repo/api/src/types/integration";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +8,15 @@ const mocks = vi.hoisted(() => ({
   listTargets: vi.fn(),
   findMembers: vi.fn(),
   providers: vi.fn(),
+  listForProject: vi.fn(),
+  loadRunnerIds: vi.fn(),
+}));
+
+vi.mock("@/app/compute-targets/capabilities-service", () => ({
+  computeTargetCapabilitiesService: { listForProject: mocks.listForProject },
+}));
+vi.mock("@/app/projects/project-runner-selection", () => ({
+  loadProjectRunnerIds: mocks.loadRunnerIds,
 }));
 
 vi.mock("@/app/projects/service", () => ({
@@ -33,6 +43,10 @@ import {
   type WorkflowBuilderCaller,
 } from "../catalog-tool";
 
+const WITH_PROJECT = "project: Alpha";
+const NO_EDITOR = { editorYaml: "" };
+const MISSING = "project: is required to resolve runners and capabilities";
+
 const caller: WorkflowBuilderCaller = {
   organizationId: "org-1",
   userId: "user-1",
@@ -55,6 +69,8 @@ beforeEach(() => {
   mocks.listTargets.mockResolvedValue([
     { id: "t1", machineName: "box", isOnline: true, isSharedWithOrg: false },
   ]);
+  mocks.listForProject.mockResolvedValue([]);
+  mocks.loadRunnerIds.mockResolvedValue([]);
   mocks.findMembers.mockResolvedValue([
     { id: "u1", firstName: "Ann", lastName: "Lee", email: "ann@example.com" },
   ]);
@@ -79,7 +95,8 @@ beforeEach(() => {
 
 describe("loadWorkflowBuilderCatalog", () => {
   it("drops secret fields and omits connection settings", async () => {
-    const catalog = await loadWorkflowBuilderCatalog(caller);
+    const loaded = await loadWorkflowBuilderCatalog(caller, NO_EDITOR);
+    const catalog = "catalog" in loaded ? loaded.catalog : loaded;
     expect(catalog).toMatchObject({
       projects: [{ id: "p1", name: "Alpha" }],
       runners: [
@@ -95,11 +112,11 @@ describe("loadWorkflowBuilderCatalog", () => {
   });
 
   it("withholds project connections without project manage permission", async () => {
-    const catalog = await loadWorkflowBuilderCatalog({
-      ...caller,
-      canManageProjects: false,
-    });
-    expect(catalog).toMatchObject({
+    const loaded = await loadWorkflowBuilderCatalog(
+      { ...caller, canManageProjects: false },
+      NO_EDITOR
+    );
+    expect("catalog" in loaded && loaded.catalog).toMatchObject({
       projectConnections: null,
       projectConnectionsNote: "requires project manage permission",
     });
@@ -113,15 +130,107 @@ describe("loadWorkflowBuilderCatalog", () => {
         name: `P${i}`,
       }))
     );
-    const catalog = await loadWorkflowBuilderCatalog(caller);
-    expect("projects" in catalog && catalog.projects).toHaveLength(
+    const loaded = await loadWorkflowBuilderCatalog(caller, NO_EDITOR);
+    expect("catalog" in loaded && loaded.catalog.projects).toHaveLength(
       CATALOG_MAX_PROJECTS
     );
   });
 
   it("returns catalog_unavailable when a read throws", async () => {
     mocks.listTargets.mockRejectedValue(new Error("db down"));
-    const catalog = await loadWorkflowBuilderCatalog(caller);
+    const catalog = await loadWorkflowBuilderCatalog(caller, NO_EDITOR);
     expect(catalog).toEqual({ error: CatalogToolError.Unavailable });
+  });
+
+  it("adds capabilities of the project named by the editor YAML", async () => {
+    mocks.listForProject.mockResolvedValue([
+      {
+        computeTargetId: "t1",
+        runnerName: "box",
+        source: "toolkit",
+        content: "---\nrunner: ba\n---\nBody text",
+        capabilities: {
+          runner: "ba",
+          commands: [{ name: "/ask" }],
+          skills: [{ name: "s1" }],
+        },
+        problems: [],
+        uploadedAt: new Date().toISOString(),
+      },
+      {
+        computeTargetId: "other",
+        runnerName: "hidden",
+        source: "toolkit",
+        content: "x",
+        capabilities: null,
+        problems: [],
+        uploadedAt: new Date().toISOString(),
+      },
+    ]);
+    const loaded = await loadWorkflowBuilderCatalog(caller, {
+      editorYaml: WITH_PROJECT,
+    });
+    if (!("catalog" in loaded)) {
+      throw new Error("expected catalog");
+    }
+    expect(loaded.catalog.capabilitiesProject?.id).toBe("p1");
+    expect(loaded.catalog.runners[0]).toMatchObject({
+      capabilities: { file: "runners/box-t1.md", stale: false },
+    });
+    expect(loaded.catalog.runners[0]?.capabilities?.commands[0]?.name).toBe(
+      "/ask"
+    );
+    expect(loaded.runnerFiles).toHaveLength(1);
+    expect(loaded.runnerFiles[0]?.content).toContain("Body text");
+    expect(loaded.runnerFiles[0]?.content).not.toContain("runner: ba");
+  });
+
+  it.each([
+    ["no project", "agent:\n  runner: t1\n"],
+    ["only agent.project", "agent:\n  project: Alpha\n"],
+    ["unknown project", "project: Nope\n"],
+  ])("gives capabilitiesError for %s", async (_name, editorYaml) => {
+    const loaded = await loadWorkflowBuilderCatalog(caller, { editorYaml });
+    if (!("catalog" in loaded)) {
+      throw new Error("expected catalog");
+    }
+    expect(loaded.catalog.capabilitiesProject).toBeNull();
+    expect(JSON.stringify(loaded.catalog)).toContain(MISSING);
+    expect(mocks.listForProject).not.toHaveBeenCalled();
+    expect(loaded.runnerFiles).toEqual([]);
+  });
+
+  it("marks personal runners and stale files", async () => {
+    mocks.listTargets.mockResolvedValue([
+      {
+        id: "t1",
+        machineName: "box",
+        isOnline: true,
+        isSharedWithOrg: false,
+        capabilities: { personalRunner: { projectKey: "PRO-1" } },
+      },
+    ]);
+    mocks.listForProject.mockResolvedValue([
+      {
+        computeTargetId: "t1",
+        runnerName: "box",
+        source: "toolkit",
+        content: "x",
+        capabilities: null,
+        problems: [],
+        uploadedAt: "2020-01-01T00:00:00.000Z",
+      },
+    ]);
+    const loaded = await loadWorkflowBuilderCatalog(caller, {
+      editorYaml: WITH_PROJECT,
+    });
+    if (!("catalog" in loaded)) {
+      throw new Error("expected catalog");
+    }
+    expect(loaded.catalog.runners[0]).toMatchObject({
+      kind: AgentKind.Personal,
+      projectKey: "PRO-1",
+      capabilities: { stale: true },
+    });
   });
 });

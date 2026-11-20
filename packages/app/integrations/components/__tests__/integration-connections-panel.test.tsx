@@ -13,6 +13,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEPLOYMENT_CLOUD,
@@ -25,7 +26,10 @@ import {
   teamsConnection,
 } from "../../__tests__/integration-fixtures";
 import { REQUIRED_FIELD_MESSAGE } from "../../lib/integration-field-values";
-import { IntegrationConnectionsPanel } from "../integration-connections-panel";
+import {
+  IntegrationConnectionsPanel,
+  type IntegrationConnectionsPanelProps,
+} from "../integration-connections-panel";
 
 const JIRA_RE = /^Jira/;
 const LOCAL_GIT_RE = /^Local Git/;
@@ -145,7 +149,7 @@ beforeEach(() => {
 describe("IntegrationConnectionsPanel states", () => {
   it("shows a loading skeleton", () => {
     mocks.connections.isLoading = true;
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
     expect(
       screen.getByRole("status", { name: "Loading connections" })
     ).toBeInTheDocument();
@@ -154,7 +158,7 @@ describe("IntegrationConnectionsPanel states", () => {
   it("shows an inline error with retry", async () => {
     const user = userEvent.setup();
     mocks.connections.error = new Error("boom");
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     expect(screen.getByText("Couldn't load connections")).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
@@ -162,10 +166,21 @@ describe("IntegrationConnectionsPanel states", () => {
     expect(mocks.connections.refetch).toHaveBeenCalled();
   });
 
-  it("offers admins an Add connection action in the empty state", () => {
-    render(
-      <IntegrationConnectionsPanel id="integration-connections" isAdmin />
+  it("puts Add connection in the header slot and opens the create dialog", async () => {
+    const user = userEvent.setup();
+    setConnections([jiraConnection]);
+    render(<TestPanel isAdmin />);
+
+    await user.click(
+      within(screen.getByTestId("page-header")).getByRole("button", {
+        name: "Add connection",
+      })
     );
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("offers admins an Add connection action in the empty state", () => {
+    render(<TestPanel id="integration-connections" isAdmin />);
     expect(screen.getByText("No connections yet")).toBeInTheDocument();
     expect(
       screen.getAllByRole("button", { name: "Add connection" }).length
@@ -174,7 +189,7 @@ describe("IntegrationConnectionsPanel states", () => {
   });
 
   it("gives members a read-only empty state", () => {
-    render(<IntegrationConnectionsPanel isAdmin={false} />);
+    render(<TestPanel isAdmin={false} />);
     expect(screen.getByText("No connections yet")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Add connection" })
@@ -198,16 +213,17 @@ describe("IntegrationConnectionsPanel list", () => {
         account: null,
       }),
     ]);
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
-    const list = screen.getByRole("list", { name: "Integration connections" });
-    const [first, second] = within(list).getAllByRole("listitem");
+    const list = screen.getByRole("table", { name: "Integration connections" });
+    const [, first, second] = within(list).getAllByRole("row");
     expect(within(first).getByText("Acme Jira")).toBeInTheDocument();
     expect(within(first).getByText("Error")).toBeInTheDocument();
     expect(
-      within(first).getByText(
-        "Jira · Webhook · as AgentFlow Bot · used by 2 workflow items or projects"
-      )
+      within(first).getByText("Jira · Webhook · as AgentFlow Bot")
+    ).toBeInTheDocument();
+    expect(
+      within(first).getByText("2 workflow items or projects")
     ).toBeInTheDocument();
     expect(
       within(first).getByText("Last error: 401 from Jira")
@@ -222,10 +238,10 @@ describe("IntegrationConnectionsPanel list", () => {
     const user = userEvent.setup();
     mocks.providers = [...PROVIDERS, serverLocalGitProvider];
     setConnections([jiraConnection, serverLocalGitConnection]);
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
-    const list = screen.getByRole("list", { name: "Integration connections" });
-    const [, localGit] = within(list).getAllByRole("listitem");
+    const list = screen.getByRole("table", { name: "Integration connections" });
+    const [, , localGit] = within(list).getAllByRole("row");
     expect(within(localGit).getByText("Default")).toBeInTheDocument();
     expect(
       within(localGit).getByText("Local Git · Actions only · as agentflow")
@@ -262,7 +278,7 @@ describe("IntegrationConnectionsPanel list", () => {
 
   it("hides admin actions from members but keeps the deliveries view", () => {
     setConnections([jiraConnection, teamsConnection]);
-    render(<IntegrationConnectionsPanel isAdmin={false} />);
+    render(<TestPanel isAdmin={false} />);
 
     expect(
       screen.queryByRole("button", { name: "Test" })
@@ -291,7 +307,7 @@ describe("IntegrationConnectionsPanel list", () => {
           error: null,
         })
     );
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     await user.click(screen.getByRole("button", { name: "Test" }));
 
@@ -311,7 +327,7 @@ describe("IntegrationConnectionsPanel list", () => {
       (_id: string, options: MutationOptions<unknown>) =>
         options.onSuccess?.({ ok: false, account: null, error: "Bad token" })
     );
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     await user.click(screen.getByRole("button", { name: "Test" }));
     expect(screen.getByText("Bad token")).toBeInTheDocument();
@@ -321,7 +337,7 @@ describe("IntegrationConnectionsPanel list", () => {
     const user = userEvent.setup();
     setConnections([jiraConnection]);
     mocks.deleteMutateAsync.mockResolvedValue({ deleted: true });
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     await user.click(screen.getByRole("button", { name: "Delete Acme Jira" }));
     const dialog = await screen.findByRole("dialog");
@@ -334,7 +350,7 @@ describe("IntegrationConnectionsPanel list", () => {
   it("opens the inbound setup with the URL, the secret behind a reveal, and instructions", async () => {
     const user = userEvent.setup();
     setConnections([jiraConnection]);
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     await user.click(screen.getByRole("button", { name: "Inbound setup" }));
     const dialog = await screen.findByRole("dialog");
@@ -354,7 +370,7 @@ describe("IntegrationConnectionsPanel list", () => {
 describe("IntegrationConnectionsPanel create and edit", () => {
   it("creates a connection from the provider's settings written as YAML", async () => {
     const user = userEvent.setup();
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     await user.click(
       screen.getAllByRole("button", { name: "Add connection" })[0]
@@ -391,7 +407,7 @@ describe("IntegrationConnectionsPanel create and edit", () => {
 
   it("blocks the save and shows required errors client-side", async () => {
     const user = userEvent.setup();
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     await user.click(
       screen.getAllByRole("button", { name: "Add connection" })[0]
@@ -417,7 +433,7 @@ describe("IntegrationConnectionsPanel create and edit", () => {
 
   it("checks the inbound mode against the provider and the poll interval range", async () => {
     const user = userEvent.setup();
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     await user.click(
       screen.getAllByRole("button", { name: "Add connection" })[0]
@@ -461,7 +477,7 @@ describe("IntegrationConnectionsPanel create and edit", () => {
     setConnections([
       makeConnection({ status: IntegrationConnectionStatus.Error }),
     ]);
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     await user.click(screen.getByRole("button", { name: "Edit Acme Jira" }));
     const dialog = await screen.findByRole("dialog");
@@ -479,7 +495,7 @@ describe("IntegrationConnectionsPanel create and edit", () => {
   it("edits a connection without resending the stored secret", async () => {
     const user = userEvent.setup();
     setConnections([jiraConnection]);
-    render(<IntegrationConnectionsPanel isAdmin />);
+    render(<TestPanel isAdmin />);
 
     await user.click(screen.getByRole("button", { name: "Edit Acme Jira" }));
     const dialog = await screen.findByRole("dialog");
@@ -516,3 +532,17 @@ describe("IntegrationConnectionsPanel create and edit", () => {
     );
   });
 });
+
+/** The panel with a header slot like the Connections page's, holding the Add action. */
+function TestPanel(
+  props: Omit<IntegrationConnectionsPanelProps, "renderHeader">
+) {
+  return (
+    <IntegrationConnectionsPanel
+      {...props}
+      renderHeader={(action: ReactNode | null) => (
+        <header data-testid="page-header">{action}</header>
+      )}
+    />
+  );
+}

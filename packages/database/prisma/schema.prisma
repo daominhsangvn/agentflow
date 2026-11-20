@@ -727,6 +727,11 @@ model OrchestratorConversation {
   nextWakeAt          DateTime? @map("next_wake_at")
   // What the orchestrator asked people and waits for (wait_human asked); cleared when the next turn starts.
   askedHuman          String?   @map("asked_human") @db.Text
+  // { turnId, hashes }: the contentHash of each runner's AGENTFLOW.md (by computeTargetId) as
+  // the last runners_list of this Claude session returned it; null until it calls runners_list,
+  // and cleared when the session is reset. task_run is refused until then, and when the
+  // runner's file changed since.
+  runnersRead         Json?     @map("runners_read")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 

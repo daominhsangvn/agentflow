@@ -2,6 +2,7 @@ import {
   type OrchestratorCaseDetail,
   type OrchestratorCaseListItem,
   type OrchestratorCaseListQuery,
+  type OrchestratorCaseListSummary,
   type OrchestratorCaseLoops,
   OrchestratorCaseStatus,
   type OrchestratorCaseSummary,
@@ -12,6 +13,8 @@ import {
 } from "@repo/api/src/types/orchestrator";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import { withDb } from "@repo/database";
+import { AfAttribute } from "@repo/observability/af-attributes";
+import { withSpan } from "@repo/observability/span";
 import {
   toCaseDetail,
   toCaseSummary,
@@ -27,11 +30,13 @@ import {
   deriveCaseWaitingFor,
   loadCaseWaitState,
   loadOrgCaseRows,
+  orgCaseBaseWhere,
   toCaseListItem,
 } from "@/app/orchestrator/cases/service/org-case-list";
 import { readCaseTaskFile } from "@/app/orchestrator/cases/service/task-file";
 import { dispatchOrchestratorTurnCancel } from "@/lib/loops/loop-desktop";
 import { listCaseDocuments } from "@/lib/orchestrator/case-documents";
+import { caseNeedsPersonWhere } from "@/lib/orchestrator/case-needs-person";
 import { readTurnTimeoutMs } from "@/lib/orchestrator/turn-usage";
 import { displayUserName } from "@/lib/user-display-name";
 
@@ -114,6 +119,38 @@ export const orchestratorCaseService = {
     ]);
     return rows.map((row) =>
       toCaseSummary(row, running.has(row.id), stats.get(row.id) ?? EMPTY_STATS)
+    );
+  },
+
+  /** Case counts for the same filters as `listForOrg`, not capped at 100. */
+  summaryForOrg(
+    organizationId: string,
+    query: OrchestratorCaseListQuery
+  ): Promise<OrchestratorCaseListSummary> {
+    return withSpan(
+      "orchestrator_cases.summary",
+      { [AfAttribute.OrgId]: organizationId },
+      async () => {
+        const base = orgCaseBaseWhere(organizationId, query);
+        const withStatus = (status: OrchestratorCaseStatus) => ({
+          AND: [base, { status }],
+        });
+        const [total, open, needsPerson, closed] = await withDb((db) =>
+          Promise.all([
+            db.orchestratorCase.count({ where: base }),
+            db.orchestratorCase.count({
+              where: withStatus(OrchestratorCaseStatus.Open),
+            }),
+            db.orchestratorCase.count({
+              where: { AND: [base, caseNeedsPersonWhere()] },
+            }),
+            db.orchestratorCase.count({
+              where: withStatus(OrchestratorCaseStatus.Closed),
+            }),
+          ])
+        );
+        return { total, open, needsPerson, closed };
+      }
     );
   },
 

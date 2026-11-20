@@ -14,15 +14,16 @@ import {
 } from "@repo/design-system/components/ui/alert";
 import { Badge } from "@repo/design-system/components/ui/badge";
 import { Button } from "@repo/design-system/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@repo/design-system/components/ui/card";
 import { EmptyState } from "@repo/design-system/components/ui/empty-state";
 import { Skeleton } from "@repo/design-system/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@repo/design-system/components/ui/table";
 import {
   CheckCircleIcon,
   InboxIcon,
@@ -33,7 +34,7 @@ import {
   TrashIcon,
   XCircleIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
   useDeleteIntegrationConnection,
   useIntegrationConnections,
@@ -54,8 +55,14 @@ import { QueryErrorMessage } from "./query-error-message";
 export type IntegrationConnectionsPanelProps = {
   /** Admins add, edit, test and delete connections; members get a read-only list. */
   isAdmin: boolean;
-  /** Anchor id for deep links (`?tab=integrations#<id>`). */
+  /** Anchor id for deep links (`#<id>`), set on the connections table. */
   id?: string;
+  /**
+   * Renders the page header. Receives the "Add connection" button (null when
+   * the viewer cannot add), so the dialog state stays inside the panel while
+   * the shell owns the header chrome.
+   */
+  renderHeader: (addAction: ReactNode | null) => ReactNode;
 };
 
 type DialogState =
@@ -75,6 +82,7 @@ type DialogState =
 export function IntegrationConnectionsPanel({
   isAdmin,
   id,
+  renderHeader,
 }: Readonly<IntegrationConnectionsPanelProps>) {
   const providers = useIntegrationProviders();
   const connections = useIntegrationConnections();
@@ -97,35 +105,29 @@ export function IntegrationConnectionsPanel({
       .map((provider) => provider.key)
   );
   const canAdd = isAdmin && (connectableProviders?.length ?? 0) > 0;
+  const addAction = canAdd ? (
+    <Button
+      onClick={() => setDialog({ kind: "create" })}
+      size="sm"
+      type="button"
+    >
+      <PlusIcon className="size-4" />
+      Add connection
+    </Button>
+  ) : null;
 
   return (
-    <Card id={id} tabIndex={id ? -1 : undefined}>
-      <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
-        <div className="space-y-1.5">
-          <CardTitle className="flex items-center gap-2">
-            <PlugIcon className="size-5" />
-            Connections
-          </CardTitle>
-          <CardDescription>
-            Accounts in Jira, Azure DevOps, Microsoft Teams and other systems
-            that workflows use to receive events and to run the pre and post
-            actions you configure.
-            {isAdmin ? null : " Only organization admins can change them."}
-          </CardDescription>
-        </div>
-        {canAdd ? (
-          <Button
-            onClick={() => setDialog({ kind: "create" })}
-            size="sm"
-            type="button"
-          >
-            <PlusIcon className="size-4" />
-            Add connection
-          </Button>
-        ) : null}
-      </CardHeader>
-      <CardContent>
+    <>
+      {renderHeader(addAction)}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4 md:p-6">
+        <p className="max-w-2xl text-muted-foreground text-sm">
+          Accounts in Jira, Azure DevOps, Microsoft Teams and other systems that
+          workflows use to receive events and to run the pre and post actions
+          you configure.
+          {isAdmin ? null : " Only organization admins can change them."}
+        </p>
         <ConnectionsBody
+          anchorId={id}
           connections={connections.data?.filter(
             // A workflow's own HTTP endpoint is managed in its editor.
             (connection) =>
@@ -146,7 +148,7 @@ export function IntegrationConnectionsPanel({
           }}
           providers={listedProviders}
         />
-      </CardContent>
+      </div>
 
       {dialog?.kind === "create" || dialog?.kind === "edit" ? (
         <IntegrationConnectionDialog
@@ -191,11 +193,12 @@ export function IntegrationConnectionsPanel({
         title="Delete connection?"
         variant="destructive"
       />
-    </Card>
+    </>
   );
 }
 
 type ConnectionsBodyProps = {
+  anchorId: string | undefined;
   connections: IntegrationConnection[] | undefined;
   providers: IntegrationProviderSummary[] | undefined;
   isLoading: boolean;
@@ -209,6 +212,7 @@ type ConnectionsBodyProps = {
 };
 
 function ConnectionsBody({
+  anchorId,
   connections,
   providers,
   isLoading,
@@ -239,44 +243,63 @@ function ConnectionsBody({
   }
   if (!connections || connections.length === 0) {
     return (
-      <EmptyState
-        action={
-          onAdd ? (
-            <Button onClick={onAdd} size="sm" type="button">
-              <PlusIcon className="size-4" />
-              Add connection
-            </Button>
-          ) : undefined
-        }
-        description={
-          isAdmin
-            ? "Connect Jira, Azure DevOps, Microsoft Teams or a generic HTTPS endpoint to start building workflows."
-            : "An organization admin can connect Jira, Azure DevOps, Microsoft Teams or a generic HTTPS endpoint."
-        }
-        icon={PlugIcon}
-        size="compact"
-        title="No connections yet"
-      />
+      <div id={anchorId} tabIndex={anchorId ? -1 : undefined}>
+        <EmptyState
+          action={
+            onAdd ? (
+              <Button onClick={onAdd} size="sm" type="button">
+                <PlusIcon className="size-4" />
+                Add connection
+              </Button>
+            ) : undefined
+          }
+          description={
+            isAdmin
+              ? "Connect Jira, Azure DevOps, Microsoft Teams or a generic HTTPS endpoint to start building workflows."
+              : "An organization admin can connect Jira, Azure DevOps, Microsoft Teams or a generic HTTPS endpoint."
+          }
+          icon={PlugIcon}
+          size="compact"
+          title="No connections yet"
+        />
+      </div>
     );
   }
 
   return (
-    <ul
-      aria-label="Integration connections"
-      className="divide-y rounded-md border"
+    <div
+      className="overflow-x-auto rounded-md border"
+      id={anchorId}
+      tabIndex={anchorId ? -1 : undefined}
     >
-      {connections.map((connection) => (
-        <ConnectionRow
-          connection={connection}
-          isAdmin={isAdmin}
-          key={connection.id}
-          onDelete={() => onDelete(connection)}
-          onEdit={() => onEdit(connection)}
-          onOpenInbound={() => onOpenInbound(connection)}
-          providerName={getProviderDisplayName(providers, connection.provider)}
-        />
-      ))}
-    </ul>
+      <Table aria-label="Integration connections">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Connection</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Used by</TableHead>
+            <TableHead>Last delivery</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {connections.map((connection) => (
+            <ConnectionRow
+              connection={connection}
+              isAdmin={isAdmin}
+              key={connection.id}
+              onDelete={() => onDelete(connection)}
+              onEdit={() => onEdit(connection)}
+              onOpenInbound={() => onOpenInbound(connection)}
+              providerName={getProviderDisplayName(
+                providers,
+                connection.provider
+              )}
+            />
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 
@@ -300,119 +323,150 @@ function ConnectionRow({
   const testConnection = useTestIntegrationConnection();
   const [testResult, setTestResult] =
     useState<IntegrationConnectionTestResult | null>(null);
-  const hasInbound = connection.deliveryMode !== IntegrationDeliveryMode.None;
 
   return (
-    <li className="space-y-2 p-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <TableRow>
+      <TableCell className="max-w-[24rem] align-top">
         <div className="flex min-w-0 items-start gap-3">
           <ProviderIcon
-            className="mt-0.5 size-5"
+            className="mt-0.5 size-5 shrink-0"
             provider={connection.provider}
           />
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="truncate font-medium">{connection.name}</span>
-              <Badge variant={CONNECTION_STATUS_TONES[connection.status]}>
-                {CONNECTION_STATUS_LABELS[connection.status]}
-              </Badge>
               {connection.providedByServer ? (
                 <Badge variant="info">Default</Badge>
               ) : null}
             </div>
-            <ConnectionMeta
-              connection={connection}
-              providerName={providerName}
-            />
+            <p className="text-muted-foreground text-xs">
+              {describeConnectionMeta(connection, providerName)}
+            </p>
             {connection.lastError ? (
               <p className="break-words text-destructive text-xs">
                 Last error: {connection.lastError}
               </p>
             ) : null}
+            {testResult ? <TestResultAlert result={testResult} /> : null}
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {hasInbound ? (
-            <Button
-              onClick={onOpenInbound}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <InboxIcon className="size-3.5" />
-              {isAdmin &&
-              connection.deliveryMode === IntegrationDeliveryMode.Webhook
-                ? "Inbound setup"
-                : "Deliveries"}
-            </Button>
-          ) : null}
-          {isAdmin ? (
-            <>
-              <Button
-                disabled={testConnection.isPending}
-                onClick={() =>
-                  testConnection.mutate(connection.id, {
-                    onSuccess: setTestResult,
-                  })
-                }
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                {testConnection.isPending ? (
-                  <Loader2Icon className="size-3.5 animate-spin" />
-                ) : null}
-                Test
-              </Button>
-              {connection.providedByServer ? null : (
-                <>
-                  <Button
-                    aria-label={`Edit ${connection.name}`}
-                    onClick={onEdit}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <PencilIcon className="size-4" />
-                  </Button>
-                  <Button
-                    aria-label={`Delete ${connection.name}`}
-                    onClick={onDelete}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <TrashIcon className="size-4 text-muted-foreground" />
-                  </Button>
-                </>
-              )}
-            </>
-          ) : null}
-        </div>
-      </div>
-      {testResult ? <TestResultAlert result={testResult} /> : null}
-    </li>
+      </TableCell>
+      <TableCell className="align-top">
+        <Badge variant={CONNECTION_STATUS_TONES[connection.status]}>
+          {CONNECTION_STATUS_LABELS[connection.status]}
+        </Badge>
+      </TableCell>
+      <TableCell className="align-top text-muted-foreground">
+        {connection.usageCount > 0 ? describeUsage(connection.usageCount) : "-"}
+      </TableCell>
+      <TableCell className="max-w-[16rem] align-top text-muted-foreground">
+        {describeActivity(connection)}
+      </TableCell>
+      <TableCell className="align-top">
+        <ConnectionActions
+          connection={connection}
+          isAdmin={isAdmin}
+          isTesting={testConnection.isPending}
+          onDelete={onDelete}
+          onEdit={onEdit}
+          onOpenInbound={onOpenInbound}
+          onTest={() =>
+            testConnection.mutate(connection.id, { onSuccess: setTestResult })
+          }
+        />
+      </TableCell>
+    </TableRow>
   );
 }
 
-function ConnectionMeta({
+type ConnectionActionsProps = {
+  connection: IntegrationConnection;
+  isAdmin: boolean;
+  isTesting: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+  onOpenInbound: () => void;
+  onTest: () => void;
+};
+
+function ConnectionActions({
   connection,
-  providerName,
-}: Readonly<{ connection: IntegrationConnection; providerName: string }>) {
+  isAdmin,
+  isTesting,
+  onEdit,
+  onDelete,
+  onOpenInbound,
+  onTest,
+}: Readonly<ConnectionActionsProps>) {
+  const hasInbound = connection.deliveryMode !== IntegrationDeliveryMode.None;
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {hasInbound ? (
+        <Button
+          onClick={onOpenInbound}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <InboxIcon className="size-3.5" />
+          {isAdmin &&
+          connection.deliveryMode === IntegrationDeliveryMode.Webhook
+            ? "Inbound setup"
+            : "Deliveries"}
+        </Button>
+      ) : null}
+      {isAdmin ? (
+        <>
+          <Button
+            disabled={isTesting}
+            onClick={onTest}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {isTesting ? (
+              <Loader2Icon className="size-3.5 animate-spin" />
+            ) : null}
+            Test
+          </Button>
+          {connection.providedByServer ? null : (
+            <>
+              <Button
+                aria-label={`Edit ${connection.name}`}
+                onClick={onEdit}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <PencilIcon className="size-4" />
+              </Button>
+              <Button
+                aria-label={`Delete ${connection.name}`}
+                onClick={onDelete}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <TrashIcon className="size-4 text-muted-foreground" />
+              </Button>
+            </>
+          )}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function describeConnectionMeta(
+  connection: IntegrationConnection,
+  providerName: string
+): string {
   const parts = [providerName, describeDeliveryMode(connection)];
   if (connection.account?.displayName) {
     parts.push(`as ${connection.account.displayName}`);
   }
-  if (connection.usageCount > 0) {
-    parts.push(describeUsage(connection.usageCount));
-  }
-
-  return (
-    <div className="space-y-0.5 text-muted-foreground text-xs">
-      <p>{parts.join(" · ")}</p>
-      <p>{describeActivity(connection)}</p>
-    </div>
-  );
+  return parts.join(" · ");
 }
 
 function describeActivity(connection: IntegrationConnection): string {
@@ -420,7 +474,7 @@ function describeActivity(connection: IntegrationConnection): string {
     return "Provided by the server for every organization; configured in the API's environment.";
   }
   return connection.lastDeliveryAt
-    ? `Last delivery ${formatRelativeTime(connection.lastDeliveryAt)}`
+    ? formatRelativeTime(connection.lastDeliveryAt)
     : "No deliveries yet";
 }
 
@@ -462,6 +516,6 @@ function describeDeliveryMode(connection: IntegrationConnection): string {
 /** Workflow triggers, actions, project repositories and project connections. */
 function describeUsage(usageCount: number): string {
   return usageCount === 1
-    ? "used by 1 workflow item or project"
-    : `used by ${usageCount} workflow items or projects`;
+    ? "1 workflow item or project"
+    : `${usageCount} workflow items or projects`;
 }

@@ -165,10 +165,6 @@ vi.mock("../google-integration-card", () => ({
   GoogleIntegrationCard: () => <div data-testid="google-integration-card" />,
 }));
 
-vi.mock("../integration-connections-section", () => ({
-  IntegrationConnectionsSection: () => null,
-}));
-
 vi.mock("../local-compute-targets-card", () => ({
   LocalComputeTargetsCard: () => null,
 }));

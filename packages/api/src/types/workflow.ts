@@ -1041,3 +1041,19 @@ export type WorkflowCaseCounts = {
   /** Open cases that need a person (caseNeedsPersonWhere). */
   needsPerson: number;
 };
+
+/** Run counts for the org-wide runs page; every run lands in exactly one bucket. */
+export type WorkflowRunsSummary = {
+  total: number;
+  active: number;
+  needsYou: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+};
+
+/** Statuses where the run waits for a person. */
+export const WORKFLOW_RUN_NEEDS_YOU_STATUSES: readonly WorkflowRunStatus[] = [
+  WorkflowRunStatus.NeedsInput,
+  WorkflowRunStatus.NeedsApproval,
+];

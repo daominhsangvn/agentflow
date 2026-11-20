@@ -4,6 +4,7 @@ import {
   type OrgUsageStats,
 } from "@repo/api/src/types/org-stats";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AttentionWidget } from "../home-attention-widget";
@@ -28,6 +29,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../hooks/use-org-stats", () => ({
   useOrgUsageStats: () => mocks.usage,
   useOrgAttentionStats: () => mocks.attention,
+}));
+
+// Recharts needs layout jsdom lacks: render the datum count instead.
+vi.mock("@repo/design-system/components/ui/category-bar-chart", () => ({
+  CategoryBarChart: ({ data }: { data: unknown[] }) => (
+    <div data-testid="bar-chart">{data.length}</div>
+  ),
 }));
 
 vi.mock("@repo/navigation/use-org-path", () => ({
@@ -73,7 +81,9 @@ describe("UsageWidget", () => {
 
   it("renders - for null cost and $0.00 for zero cost", () => {
     render(<UsageWidget />);
-    const costs = screen.getAllByText("Cost");
+    const costs = screen
+      .getAllByText("Cost")
+      .filter((element) => element.tagName === "SPAN");
     expect(costs).toHaveLength(2);
     const sevenDays = costs[0].previousElementSibling;
     const thirtyDays = costs[1].previousElementSibling;
@@ -81,19 +91,38 @@ describe("UsageWidget", () => {
     expect(thirtyDays?.textContent).toBe("$0.00");
   });
 
-  it("links top cases to the case page and top agents to the agent page", () => {
+  it("links top cases, then switches to agents and workflows", async () => {
     render(<UsageWidget />);
     expect(screen.getByRole("link", { name: "Case one" })).toHaveAttribute(
       "href",
       "/acme/orchestrator/cases/c1"
     );
+
+    await userEvent.click(screen.getByRole("radio", { name: "Agents" }));
     expect(screen.getByRole("link", { name: "runner-1" })).toHaveAttribute(
       "href",
       "/acme/agents/a1"
     );
+
+    await userEvent.click(screen.getByRole("radio", { name: "Workflows" }));
     expect(
       within(screen.getByTestId("top-Workflows")).getByText("None yet")
     ).toBeInTheDocument();
+  });
+
+  it("omits unpriced rows from the chart but keeps them in the table", () => {
+    const tokens = { inputTokens: 1, outputTokens: 1 };
+    mocks.usage = ok(
+      usageStats({
+        topCases: [
+          { id: "c1", name: "Priced", costUsd: 2, ...tokens },
+          { id: "c2", name: "Unpriced", costUsd: null, ...tokens },
+        ],
+      })
+    );
+    render(<UsageWidget />);
+    expect(screen.getByTestId("bar-chart").textContent).toBe("1");
+    expect(screen.getByRole("link", { name: "Unpriced" })).toBeInTheDocument();
   });
 });
 

@@ -1,3 +1,5 @@
+import type { AgentKind } from "@repo/api/src/types/agent-fleet";
+
 /**
  * A desktop compute target the workflow's loops can run on, as offered by the
  * editor. Compute targets are read by a web-shell hook (they need the
@@ -10,6 +12,8 @@ export type WorkflowComputeTargetOption = {
   /** Secondary text, e.g. the owner or "Shared with the organization". */
   description?: string;
   isOnline: boolean;
+  /** Personal or automatic runner; unknown when absent. */
+  kind?: AgentKind;
 };
 
 /** The compute target choices the shell hands to the workflow editor. */

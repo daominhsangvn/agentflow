@@ -2,6 +2,7 @@
 
 import {
   type OrchestratorCaseListItem,
+  type OrchestratorCaseListSummary,
   OrchestratorCaseStatus,
 } from "@repo/api/src/types/orchestrator";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
@@ -9,22 +10,23 @@ import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
 import { ProviderIcon } from "@repo/app/integrations/components/provider-icon";
 // Cross-slice: same retryable error block as the repositories list.
 import { QueryErrorMessage } from "@repo/app/integrations/components/query-error-message";
-// Cross-slice: the project filter lists the org's projects.
-import { useProjects } from "@repo/app/projects/hooks/use-projects";
+import type { FilterSelectOption } from "@repo/app/shared/components/filter-select";
 import {
-  FilterSelect,
-  type FilterSelectOption,
-} from "@repo/app/shared/components/filter-select";
+  SummaryCardRow,
+  summaryCardClass,
+} from "@repo/app/shared/components/summary-card-row";
 import { formatRelativeTime } from "@repo/app/shared/lib/date-utils";
 import { formatActiveTime } from "@repo/app/shared/lib/format-active-time";
 import {
   formatCostPrecise,
   formatTokenCount,
+  KPI_NO_VALUE,
 } from "@repo/app/shared/lib/format-utils";
-// Cross-slice: the workflow filter lists the org's orchestrated workflows.
-import { useWorkflows } from "@repo/app/workflows/hooks/use-workflows";
+// Cross-slice: the same project, workflow and status filters as the runs list.
+import { WorkListFilters } from "@repo/app/workflows/components/work-list-filters";
 import { Badge } from "@repo/design-system/components/ui/badge";
 import { EmptyState } from "@repo/design-system/components/ui/empty-state";
+import { MetricCard } from "@repo/design-system/components/ui/primitives/metric-card";
 import { Skeleton } from "@repo/design-system/components/ui/skeleton";
 import {
   Table,
@@ -41,6 +43,7 @@ import { useState } from "react";
 import {
   isCaseActive,
   useOrgOrchestratorCases,
+  useOrgOrchestratorCasesSummary,
 } from "../hooks/use-orchestrator-cases";
 import { caseSourceProvider } from "../lib/case-source";
 import { CASE_WAITING_FOR_LABELS } from "../lib/case-waiting-labels";
@@ -57,95 +60,105 @@ export type OrgCaseListProps = {
   /** Scope the list to one project (hides the project filter). */
   projectId?: string;
   hideProjectFilter?: boolean;
+  /** `page` is the full Sessions-style page; `embedded` stacks inside another panel. */
+  layout?: "page" | "embedded";
 };
 
-/** Every orchestrator case of the org (or of one project), with filters. */
+/** Every orchestrator case of the org (or of one project), with filters and stats. */
 export function OrgCaseList({
   projectId,
   hideProjectFilter = false,
+  layout = "embedded",
 }: Readonly<OrgCaseListProps>) {
   const [selectedProject, setSelectedProject] = useState<string | undefined>();
   const [workflowId, setWorkflowId] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
   const effectiveProject = projectId ?? selectedProject;
-  const cases = useOrgOrchestratorCases({
+  const query = {
     projectId: effectiveProject,
     workflowId,
     status: toCaseStatus(status),
+  };
+  const cases = useOrgOrchestratorCases(query);
+  const summary = useOrgOrchestratorCasesSummary(query, {
+    poll: cases.data?.some((item) => isCaseActive(item)) ?? false,
   });
+
+  const toolbar = (
+    <WorkListFilters
+      hideProjectFilter={hideProjectFilter || projectId !== undefined}
+      includeWorkflow={isOrchestratedWorkflow}
+      onProjectChange={setSelectedProject}
+      onStatusChange={setStatus}
+      onWorkflowChange={setWorkflowId}
+      projectId={effectiveProject}
+      status={status}
+      statusOptions={STATUS_OPTIONS}
+      workflowId={workflowId}
+    />
+  );
+
+  if (layout === "page") {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col" data-testid="org-case-list">
+        <div className="border-b px-4 py-3">{toolbar}</div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          <div className="px-4 pt-3 pb-4">
+            <CaseStatsRow summary={summary} />
+          </div>
+          <div className="px-4 pb-4">
+            <CaseTable cases={cases} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4" data-testid="org-case-list">
-      <CaseFilters
-        hideProjectFilter={hideProjectFilter || projectId !== undefined}
-        onProjectChange={setSelectedProject}
-        onStatusChange={setStatus}
-        onWorkflowChange={setWorkflowId}
-        projectId={effectiveProject}
-        status={status}
-        workflowId={workflowId}
-      />
+      {toolbar}
+      <CaseStatsRow summary={summary} />
       <CaseTable cases={cases} />
     </div>
   );
 }
 
-function CaseFilters({
-  hideProjectFilter,
-  projectId,
-  workflowId,
-  status,
-  onProjectChange,
-  onWorkflowChange,
-  onStatusChange,
-}: Readonly<{
-  hideProjectFilter: boolean;
-  projectId: string | undefined;
-  workflowId: string | undefined;
-  status: string | undefined;
-  onProjectChange: (value: string | undefined) => void;
-  onWorkflowChange: (value: string | undefined) => void;
-  onStatusChange: (value: string | undefined) => void;
-}>) {
-  const projects = useProjects();
-  const workflows = useWorkflows();
-  const projectOptions: FilterSelectOption[] = (projects.data ?? []).map(
-    (project) => ({ value: project.id, label: project.name })
-  );
-  const workflowOptions: FilterSelectOption[] = (workflows.data ?? [])
-    .filter(
-      (workflow) =>
-        workflow.agent.mode === WorkflowAgentMode.Orchestrated &&
-        (projectId === undefined || workflow.project?.id === projectId)
-    )
-    .map((workflow) => ({ value: workflow.id, label: workflow.name }));
+function CaseStatsRow({
+  summary,
+}: Readonly<{ summary: ReturnType<typeof useOrgOrchestratorCasesSummary> }>) {
+  const cardClass = summaryCardClass(true);
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {hideProjectFilter ? null : (
-        <FilterSelect
-          label="Projects"
-          onChange={onProjectChange}
-          options={projectOptions}
-          value={projectId}
+    <SummaryCardRow busy={summary.isLoading} wrapBelow>
+      {CASE_STAT_CARDS.map((card) => (
+        <MetricCard
+          className={cardClass}
+          key={card.key}
+          label={card.label}
+          loading={summary.isLoading}
+          value={summary.isError ? null : (summary.data?.[card.key] ?? null)}
+          valueUnavailableLabel={KPI_NO_VALUE}
         />
-      )}
-      <FilterSelect
-        label="Workflows"
-        onChange={onWorkflowChange}
-        options={workflowOptions}
-        value={workflowId}
-      />
-      <FilterSelect
-        allLabel="All statuses"
-        label="Status"
-        onChange={onStatusChange}
-        options={STATUS_OPTIONS}
-        value={status}
-      />
-    </div>
+      ))}
+    </SummaryCardRow>
   );
 }
+
+function isOrchestratedWorkflow(workflow: {
+  agent: { mode: WorkflowAgentMode };
+}): boolean {
+  return workflow.agent.mode === WorkflowAgentMode.Orchestrated;
+}
+
+const CASE_STAT_CARDS: readonly {
+  key: keyof OrchestratorCaseListSummary;
+  label: string;
+}[] = [
+  { key: "total", label: "Cases" },
+  { key: "open", label: "Open" },
+  { key: "needsPerson", label: "Needs a person" },
+  { key: "closed", label: "Closed" },
+];
 
 function CaseTable({
   cases,

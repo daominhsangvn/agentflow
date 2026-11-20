@@ -8,6 +8,10 @@ export type WorkflowRunListFilters = {
   projectId?: string;
   /** Org-wide list only: runs of one workflow (the per-workflow hook carries it in its path). */
   workflowId?: string;
+  /** Org-wide list only: runs created at or after this ISO timestamp. */
+  startDate?: string;
+  /** Org-wide list only: runs created at or before this ISO timestamp. */
+  endDate?: string;
 };
 
 /**
@@ -29,6 +33,8 @@ export const workflowKeys = {
     [...workflowKeys.runs(), "workflow", workflowId, filters] as const,
   orgRuns: (filters: WorkflowRunListFilters = {}) =>
     [...workflowKeys.runs(), "org", filters] as const,
+  orgRunsSummary: (filters: WorkflowRunListFilters = {}) =>
+    [...workflowKeys.runs(), "org-summary", filters] as const,
   runDetails: () => [...workflowKeys.runs(), "detail"] as const,
   runDetail: (runId: string) => [...workflowKeys.runDetails(), runId] as const,
   events: (workflowId: string) =>

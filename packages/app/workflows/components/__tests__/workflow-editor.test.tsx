@@ -94,6 +94,15 @@ vi.mock("@repo/app/projects/hooks/use-project-runners", () => ({
   useProjectRunners: () => ({ data: undefined }),
 }));
 
+vi.mock("@repo/app/projects/hooks/use-project-process", () => ({
+  useProjectProcess: () => ({ data: undefined }),
+  useProjectProcesses: () => ({}),
+}));
+
+vi.mock("@repo/app/projects/hooks/use-project-runner-capabilities", () => ({
+  useProjectRunnerCapabilities: () => ({ data: undefined }),
+}));
+
 vi.mock("@repo/app/projects/hooks/use-project-repositories", () => ({
   useProjectRepositories: (
     _projectId: string,
@@ -262,7 +271,7 @@ describe("WorkflowEditor (YAML)", () => {
     expect(mocks.createMutate).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(FIX_PROBLEMS_RE);
     expect(screen.getByTestId("workflow-yaml-problems")).toHaveTextContent(
-      'No project "Mobile". Available: Web'
+      'No project "Mobile". Available: Web. project: is required to resolve runners and capabilities'
     );
   });
 

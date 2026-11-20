@@ -1,5 +1,6 @@
 "use client";
 
+import { AgentKind } from "@repo/api/src/types/agent-fleet";
 import type { IntegrationConnection } from "@repo/api/src/types/integration";
 import type { Workflow } from "@repo/api/src/types/workflow";
 import type { ProposeWorkflowOutput } from "@repo/api/src/types/workflow-builder-schemas";
@@ -14,8 +15,10 @@ import {
 } from "@repo/app/integrations/hooks/use-integrations";
 // Cross-slice: the YAML names the org's projects, members and repositories.
 import { useOrgProjectConnections } from "@repo/app/projects/hooks/use-project-connections";
+import { useProjectProcesses } from "@repo/app/projects/hooks/use-project-process";
 import { useProjectRepositories } from "@repo/app/projects/hooks/use-project-repositories";
 // Cross-slice: the editor suggests only the project's Agents.
+import { useProjectRunnerCapabilities } from "@repo/app/projects/hooks/use-project-runner-capabilities";
 import { useProjectRunners } from "@repo/app/projects/hooks/use-project-runners";
 import { useProjects } from "@repo/app/projects/hooks/use-projects";
 import { getUserDisplayName } from "@repo/app/shared/lib/user-utils";
@@ -51,7 +54,11 @@ import {
   WORKFLOW_SOURCE_SYSTEMS_NOTICE,
   WorkflowMutationErrorTitle,
 } from "../lib/workflow-labels";
-import { parseWorkflowYaml } from "../lib/workflow-yaml";
+import {
+  parseWorkflowYaml,
+  workflowYamlProjectId,
+  workflowYamlTriggerProjectIds,
+} from "../lib/workflow-yaml";
 import { validateWorkflowProposal } from "../lib/workflow-yaml-proposal";
 import type { WorkflowYamlCatalog } from "../lib/workflow-yaml-schema";
 import { newWorkflowYaml, workflowToYaml } from "../lib/workflow-yaml-write";
@@ -206,13 +213,62 @@ function WorkflowYamlForm({
   );
   const [text, setText] = useState(savedText);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  // Runner-fit checks resolve from the root `project:` only.
+  const fitProjectId = useMemo(
+    () => workflowYamlProjectId(text, catalog) ?? "",
+    [text, catalog]
+  );
+  const hasPersonalRunner = catalog.runners.some(
+    (runner) => runner.kind === AgentKind.Personal
+  );
+  const triggerProjectIds = useMemo(
+    () => workflowYamlTriggerProjectIds(text, catalog),
+    [text, catalog]
+  );
+  const fitProcessIds = useMemo(
+    () =>
+      [...new Set([fitProjectId, ...triggerProjectIds])].filter(
+        (id) => id !== ""
+      ),
+    [fitProjectId, triggerProjectIds]
+  );
+  const fitProcesses = useProjectProcesses(fitProcessIds, {
+    enabled: hasPersonalRunner,
+  });
+  const fitCapabilities = useProjectRunnerCapabilities(fitProjectId, {
+    enabled: isAdmin && (hasPersonalRunner || SLASH_INSTRUCTION_RE.test(text)),
+  });
+  const fitCatalog = useMemo<WorkflowYamlCatalog>(
+    () => ({
+      ...catalog,
+      runnerFit: fitProjectId
+        ? {
+            projectId: fitProjectId,
+            processes: fitProcesses,
+            commands: Object.fromEntries(
+              (fitCapabilities.data ?? []).flatMap((entry) =>
+                entry.capabilities
+                  ? [
+                      [
+                        entry.computeTargetId,
+                        entry.capabilities.commands.map((c) => c.name),
+                      ],
+                    ]
+                  : []
+              )
+            ),
+          }
+        : undefined,
+    }),
+    [catalog, fitProjectId, fitProcesses, fitCapabilities.data]
+  );
   const result = useMemo(
-    () => parseWorkflowYaml(text, catalog, workflow),
-    [text, catalog, workflow]
+    () => parseWorkflowYaml(text, fitCatalog, workflow),
+    [text, fitCatalog, workflow]
   );
   const validate = useCallback(
-    (yaml: string) => validateWorkflowProposal(yaml, catalog, workflow),
-    [catalog, workflow]
+    (yaml: string) => validateWorkflowProposal(yaml, fitCatalog, workflow),
+    [fitCatalog, workflow]
   );
   const projectId = result.input?.projectId ?? workflow?.project?.id ?? "";
   // Repositories are only suggested for `repository:` keys (agent.repository,
@@ -482,6 +538,7 @@ function getSubmitLabel(isEdit: boolean, isPending: boolean): string {
 }
 
 const REPOSITORY_KEY_RE = /^\s*repository:/m;
+const SLASH_INSTRUCTION_RE = /^\s*instruction:\s*["']?\//m;
 
 /** What the optional assistant sees of the editor: its text, a way to replace it, the YAML check and the editor to render. */
 export type WorkflowEditorAssistantContext = {

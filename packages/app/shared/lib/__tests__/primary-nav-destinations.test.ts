@@ -7,6 +7,7 @@ import {
   MOBILE_NAV_PHONE_DESTINATION_PATHS,
   PRIMARY_NAV_DESTINATIONS,
   PrimaryNavGroup,
+  RUNS_NAV_PATH,
   resolveMobileNavDestinations,
   SESSIONS_NAV_PATH,
   WORKFLOWS_NAV_PATH,
@@ -19,6 +20,7 @@ describe("PRIMARY_NAV_DESTINATIONS", () => {
     expect(paths).toEqual([
       HOME_NAV_PATH,
       CASES_NAV_PATH,
+      RUNS_NAV_PATH,
       SESSIONS_NAV_PATH,
       WORKFLOWS_NAV_PATH,
       AGENTS_NAV_PATH,
@@ -26,6 +28,7 @@ describe("PRIMARY_NAV_DESTINATIONS", () => {
     ]);
     expect(PRIMARY_NAV_DESTINATIONS.map((d) => d.group)).toEqual([
       PrimaryNavGroup.Home,
+      PrimaryNavGroup.Work,
       PrimaryNavGroup.Work,
       PrimaryNavGroup.Work,
       PrimaryNavGroup.Setup,

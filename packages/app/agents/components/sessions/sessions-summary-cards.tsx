@@ -17,6 +17,7 @@ import {
   SESSIONS_SUMMARY_HONEST_LOADING_FEATURE_FLAG_KEY,
 } from "@repo/app/shared/lib/feature-flags";
 import {
+  formatCurrencyTileValue,
   formatLocPerDollar,
   formatNumber,
   formatTokenCount,
@@ -29,6 +30,7 @@ import type { SessionSummaryDeltas } from "../../lib/session-summary-deltas";
 import {
   resolveCostCardPresentation,
   resolveCostTileSlots,
+  SessionsCostBasis,
 } from "./cost-card-presentation";
 import { CostMetricCard } from "./cost-metric-card";
 import {
@@ -37,6 +39,7 @@ import {
 } from "./sessions-delivery-metric-card";
 import { SessionsSignInIndicator } from "./sessions-sign-in-indicator";
 import {
+  AVG_COST_PER_SESSION_METRIC_CARD_LABEL,
   PRS_SHIPPED_METRIC_CARD_LABEL,
   SESSIONS_METRIC_CARD_LABEL,
   TOTAL_TOKENS_METRIC_CARD_LABEL,
@@ -185,6 +188,8 @@ export function SessionsSummaryCards({
   signInPromptSuppressed = false,
   costUnknownActive = false,
   deltas,
+  costBasis = SessionsCostBasis.Api,
+  showDeliveryCards = true,
 }: {
   /** Layout for the card container (desktop passes its dashboard grid). */
   className?: string;
@@ -343,6 +348,16 @@ export function SessionsSummaryCards({
    * layout is held stable across.
    */
   deltas?: SessionSummaryDeltas;
+  /**
+   * Which figure the Cost card headlines. Defaults to the API-billed bucket;
+   * `SessionsCostBasis.Total` headlines the subscription-inclusive estimate.
+   */
+  costBasis?: SessionsCostBasis;
+  /**
+   * Render the delivery pair (`PRs Shipped`, `LOC / $`). Defaults to `true`;
+   * `false` swaps them for one `Avg cost / session` card.
+   */
+  showDeliveryCards?: boolean;
 }) {
   // ISS-4773: read here too (same `…Optional` reasoning as above) because the
   // LOC / $ card's info copy asserts its divisor matches the Cost card's
@@ -373,9 +388,11 @@ export function SessionsSummaryCards({
       <SessionsSummaryCardsLoading
         cardClassName={resolvedCardClassName}
         className={className}
+        costBasis={costBasis}
         loadingDetail={LOADING_DETAIL}
         locPerDollarLabel={LOC_PER_DOLLAR_MERGED_LABEL}
         reservesDeltaSlot={deltas !== undefined}
+        showDeliveryCards={showDeliveryCards}
         wrapBelow={wrapBelow}
       />
     );
@@ -443,6 +460,7 @@ export function SessionsSummaryCards({
       <AlwaysAvailableCards
         alwaysAvailableLoading={alwaysAvailableLoading}
         cardClassName={resolvedCardClassName}
+        costBasis={costBasis}
         costUnknownActive={costUnknownActive}
         couldNotImportLabel={couldNotImportLabel}
         deltas={deltas}
@@ -450,33 +468,36 @@ export function SessionsSummaryCards({
         isError={isError}
         isLocalError={isLocalError}
         localUsage={localUsage}
+        showAvgCost={!showDeliveryCards}
         transientRecovering={transientRecovering}
         usage={usage}
       />
-      <DeliveryMetricCard
-        availableDetail="merged in range"
-        cardClassName={resolvedCardClassName}
-        deltaPlaceholder={resolveDeliveryDeltaPlaceholder(deliveryDeltas)}
-        deltaProps={deltaSlotProps(
-          deliveryDeltas,
-          "prsShipped",
-          deliveryDeltaTreatment
-        )}
-        deltaTreatment={deliveryDeltaTreatment}
-        formatValue={formatNumber}
-        info={{
-          what: "Pull requests merged from the matched sessions.",
-          how: "Count of merged PRs linked to sessions in range.",
-        }}
-        isError={isError}
-        label={PRS_SHIPPED_METRIC_CARD_LABEL}
-        onSignIn={onSignIn}
-        perCardIndicatorSuppressed={perCardIndicatorSuppressed}
-        signedOut={deliverySignedOut}
-        signInError={signInError}
-        value={usage?.mergedPrCount}
-      />
-      {/* FEA-4126: Median PR Size is intentionally NOT rendered here — it was
+      {showDeliveryCards && (
+        <>
+          <DeliveryMetricCard
+            availableDetail="merged in range"
+            cardClassName={resolvedCardClassName}
+            deltaPlaceholder={resolveDeliveryDeltaPlaceholder(deliveryDeltas)}
+            deltaProps={deltaSlotProps(
+              deliveryDeltas,
+              "prsShipped",
+              deliveryDeltaTreatment
+            )}
+            deltaTreatment={deliveryDeltaTreatment}
+            formatValue={formatNumber}
+            info={{
+              what: "Pull requests merged from the matched sessions.",
+              how: "Count of merged PRs linked to sessions in range.",
+            }}
+            isError={isError}
+            label={PRS_SHIPPED_METRIC_CARD_LABEL}
+            onSignIn={onSignIn}
+            perCardIndicatorSuppressed={perCardIndicatorSuppressed}
+            signedOut={deliverySignedOut}
+            signInError={signInError}
+            value={usage?.mergedPrCount}
+          />
+          {/* FEA-4126: Median PR Size is intentionally NOT rendered here — it was
           removed from the Sessions bar (FEA-3937 layout, undoing FEA-3574's
           re-add) and lives only on the Branches bar, which reads its OWN
           `BranchAnalytics.medianPrSize` (not this field). The
@@ -485,67 +506,69 @@ export function SessionsSummaryCards({
           still send it) — do not repurpose it as a signal that the card belongs
           here. Do not reintroduce the card; a regression guard in the tests fails
           if this label returns to the Sessions bar. */}
-      <DeliveryMetricCard
-        // ISS-4866 (review cid 3701359138): the label already carries "(Merged)",
-        // so repeating "merged" in the caption directly under the value spent a
-        // third of a 124px card re-saying one word. The caption names the
-        // population it is measured over instead — the same "… in range" shape
-        // PRs Shipped uses one card to the left. NOT "per merged PR": this figure
-        // is merged gross lines ÷ cost across the matched
-        // SESSIONS, so a per-PR caption would misname its own denominator.
-        availableDetail="across sessions in range"
-        cardClassName={resolvedCardClassName}
-        // FEA-4202: never compared — the prior window's spend is read too late in
-        // the request to reach the delivery pass (ISS-6398 windowed the current
-        // divisor; see `session-summary-deltas.ts`). It takes the ISS-4995 "not
-        // computed" reason rather than the range-shaped default; otherwise the
-        // tooltip would point at the range control, which cannot help here.
-        deltaPlaceholder={resolveDeliveryDeltaPlaceholder(
-          deliveryDeltas,
-          KPI_NOT_COMPUTED_REASON
-        )}
-        deltaTreatment={deliveryDeltaTreatment}
-        formatValue={formatLocPerDollar}
-        // ISS-4773 (stage review x2 + wongk): the "same figure the Cost card
-        // shows" clause is only true while that card sums `apiEstimatedCost`.
-        // With honesty ON the Cost headline drops to `meteredEstimatedCost`
-        // while this card keeps dividing by the broader non-subscription bucket
-        // (`delivery-metrics.ts` feeds `mergedLocPerDollar` off it) — two cards
-        // in one strip on different bases, one of them announcing they match, so
-        // a reader multiplying LOC/$ by the headline cannot recover merged lines.
-        //
-        // The flag-ON copy NAMES ITS OWN DIVISOR instead of pointing at a
-        // neighbour. Deliberately it does not mention the Cost card at all: the
-        // honest presentation ALSO requires a producer that actually sent the
-        // split, so on a version-skewed payload that card still reads
-        // "cost" and copy naming an "API-billed Cost" card
-        // would describe a tile that is not on screen. Naming only this card's
-        // own denominator is true in both cases, which is why the gate can be
-        // the flag alone and not the resolved presentation.
-        info={{
-          what: "Lines of code merged per dollar, output efficiency. Higher is better.",
-          how: costHonestyEnabled
-            ? "Merged gross lines divided by cost across matched sessions — confirmed API-billed spend plus usage whose billing could not be determined."
-            : "Merged gross lines divided by cost across matched sessions, the same figure the Cost card shows.",
-        }}
-        isError={isError}
-        // ISS-4866: the merged-scope label, built FROM the shared unit constant so
-        // the unit itself cannot drift away from the column that shares it. It
-        // names the population this card actually computes (merged PRs only), so
-        // the bare unit stops reading as "the efficiency of everything on this
-        // row" beside the whole-cohort tiles.
-        label={LOC_PER_DOLLAR_MERGED_LABEL}
-        onSignIn={onSignIn}
-        perCardIndicatorSuppressed={perCardIndicatorSuppressed}
-        signedOut={deliverySignedOut}
-        signInError={signInError}
-        // ISS-4667: read through the shared skew resolver so a producer still on
-        // the KLOC-unit field is scaled into LOC/$ rather than rendering ~0.00.
-        value={resolveLocPerDollar(
-          usage?.mergedLocPerDollar,
-          usage?.mergedKlocPerDollar
-        )}
-      />
+          <DeliveryMetricCard
+            // ISS-4866 (review cid 3701359138): the label already carries "(Merged)",
+            // so repeating "merged" in the caption directly under the value spent a
+            // third of a 124px card re-saying one word. The caption names the
+            // population it is measured over instead — the same "… in range" shape
+            // PRs Shipped uses one card to the left. NOT "per merged PR": this figure
+            // is merged gross lines ÷ cost across the matched
+            // SESSIONS, so a per-PR caption would misname its own denominator.
+            availableDetail="across sessions in range"
+            cardClassName={resolvedCardClassName}
+            // FEA-4202: never compared — the prior window's spend is read too late in
+            // the request to reach the delivery pass (ISS-6398 windowed the current
+            // divisor; see `session-summary-deltas.ts`). It takes the ISS-4995 "not
+            // computed" reason rather than the range-shaped default; otherwise the
+            // tooltip would point at the range control, which cannot help here.
+            deltaPlaceholder={resolveDeliveryDeltaPlaceholder(
+              deliveryDeltas,
+              KPI_NOT_COMPUTED_REASON
+            )}
+            deltaTreatment={deliveryDeltaTreatment}
+            formatValue={formatLocPerDollar}
+            // ISS-4773 (stage review x2 + wongk): the "same figure the Cost card
+            // shows" clause is only true while that card sums `apiEstimatedCost`.
+            // With honesty ON the Cost headline drops to `meteredEstimatedCost`
+            // while this card keeps dividing by the broader non-subscription bucket
+            // (`delivery-metrics.ts` feeds `mergedLocPerDollar` off it) — two cards
+            // in one strip on different bases, one of them announcing they match, so
+            // a reader multiplying LOC/$ by the headline cannot recover merged lines.
+            //
+            // The flag-ON copy NAMES ITS OWN DIVISOR instead of pointing at a
+            // neighbour. Deliberately it does not mention the Cost card at all: the
+            // honest presentation ALSO requires a producer that actually sent the
+            // split, so on a version-skewed payload that card still reads
+            // "cost" and copy naming an "API-billed Cost" card
+            // would describe a tile that is not on screen. Naming only this card's
+            // own denominator is true in both cases, which is why the gate can be
+            // the flag alone and not the resolved presentation.
+            info={{
+              what: "Lines of code merged per dollar, output efficiency. Higher is better.",
+              how: costHonestyEnabled
+                ? "Merged gross lines divided by cost across matched sessions — confirmed API-billed spend plus usage whose billing could not be determined."
+                : "Merged gross lines divided by cost across matched sessions, the same figure the Cost card shows.",
+            }}
+            isError={isError}
+            // ISS-4866: the merged-scope label, built FROM the shared unit constant so
+            // the unit itself cannot drift away from the column that shares it. It
+            // names the population this card actually computes (merged PRs only), so
+            // the bare unit stops reading as "the efficiency of everything on this
+            // row" beside the whole-cohort tiles.
+            label={LOC_PER_DOLLAR_MERGED_LABEL}
+            onSignIn={onSignIn}
+            perCardIndicatorSuppressed={perCardIndicatorSuppressed}
+            signedOut={deliverySignedOut}
+            signInError={signInError}
+            // ISS-4667: read through the shared skew resolver so a producer still on
+            // the KLOC-unit field is scaled into LOC/$ rather than rendering ~0.00.
+            value={resolveLocPerDollar(
+              usage?.mergedLocPerDollar,
+              usage?.mergedKlocPerDollar
+            )}
+          />
+        </>
+      )}
     </SummaryCardRow>
   );
 
@@ -598,7 +621,13 @@ function AlwaysAvailableCards({
   cardClassName,
   costUnknownActive,
   deltas,
+  costBasis,
+  showAvgCost,
 }: {
+  /** Render the `Avg cost / session` card after Cost. */
+  showAvgCost: boolean;
+  /** Which figure the Cost card headlines (see `SessionsCostBasis`). */
+  costBasis: SessionsCostBasis;
   usage: AgentSessionUsageSummary | undefined;
   localUsage: AgentSessionUsageSummary | undefined;
   isError: boolean;
@@ -649,7 +678,8 @@ function AlwaysAvailableCards({
   const alwaysAvailableUsage = onLocalFallbackPath ? localUsage : usage;
   const costPresentation = resolveCostCardPresentation(
     costHonestyEnabled,
-    alwaysAvailableUsage
+    alwaysAvailableUsage,
+    costBasis
   );
   const alwaysAvailableError = onLocalFallbackPath ? isLocalError : isError;
   // FEA-4128 review (design-critic): while the local FALLBACK source hydrates
@@ -875,6 +905,20 @@ function AlwaysAvailableCards({
         label={costPresentation.label}
         loading={cardsLoading}
       />
+      {showAvgCost && (
+        <AvgCostPerSessionCard
+          cardClassName={cardClassName}
+          cost={costSlots.dashed ? null : costSlots.cost}
+          detail={resolveAlwaysAvailableDetail(
+            cardsLoading,
+            loadingDetail,
+            showingLocalFallback,
+            "cost ÷ sessions"
+          )}
+          loading={cardsLoading}
+          totalSessions={alwaysAvailableUsage?.totalSessions ?? 0}
+        />
+      )}
     </>
   );
 }
@@ -1025,4 +1069,39 @@ function resolveAlwaysAvailableCardsLoading({
     return true;
   }
   return alwaysAvailableLoading && isCloudReadFailed(isError, usage);
+}
+
+/**
+ * `Avg cost / session`: the Cost tile's own figure divided by the matched
+ * session count, so the two always reconcile. Dashed whenever the Cost tile is
+ * (`cost === null`) or there are no sessions — unavailable is never `$0`.
+ */
+function AvgCostPerSessionCard({
+  cardClassName,
+  cost,
+  detail,
+  loading,
+  totalSessions,
+}: {
+  cardClassName: string;
+  cost: number | null | undefined;
+  detail: string;
+  loading: boolean;
+  totalSessions: number;
+}) {
+  const hasValue = cost != null && totalSessions > 0;
+  return (
+    <MetricCard
+      className={cardClassName}
+      detail={detail}
+      info={{
+        what: "Average estimated cost of one matched session.",
+        how: "The Est. cost figure divided by the number of sessions in range.",
+      }}
+      label={AVG_COST_PER_SESSION_METRIC_CARD_LABEL}
+      loading={loading}
+      value={hasValue ? formatCurrencyTileValue(cost / totalSessions) : null}
+      valueUnavailableLabel={KPI_NO_VALUE}
+    />
+  );
 }

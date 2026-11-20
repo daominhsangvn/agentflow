@@ -95,7 +95,7 @@ Set in the environment or in `<data dir>/runner.env` (`NAME=value` per line; the
 |---|---|---|
 | `AGENTFLOW_API_URL` | required | Origin of the AgentFlow API. |
 | `AGENTFLOW_API_KEY` | required | `sk_live_` key with the `write` scope. |
-| `AGENTFLOW_RUNNER_NAME` | hostname | The Agent's name, as YAML writes it (`runner: runner-1`). Set it: a container's hostname changes on every run. |
+| `AGENTFLOW_RUNNER_NAME` | hostname (auto); required in personal mode | The Agent's name, as YAML writes it (`runner: runner-1`). Set it: a container's hostname changes on every run. A personal Agent without it does not start, even with `--name`. |
 | `AGENTFLOW_RUNNER_MODE` | `auto` | `personal` for a personal Agent. |
 | `AGENTFLOW_RUNNER_PROJECT_KEY` | none | Personal: the project key (slug) whose steps it runs. |
 | `AGENTFLOW_RUNNER_PROJECT_DIR` | none | Personal: the project folder loops run in. |

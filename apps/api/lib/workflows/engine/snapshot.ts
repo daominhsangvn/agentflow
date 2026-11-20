@@ -1,6 +1,9 @@
 import { DocumentType } from "@repo/api/src/types/document";
 import { LoopCommand } from "@repo/api/src/types/loop";
 import {
+  agentStepFinish,
+  type ProcessStep,
+  ProcessStepFinish,
   ProcessStepRole,
   ProcessStepType,
   reviewGoOnLabels,
@@ -181,7 +184,7 @@ export async function buildRunSnapshot(
       pullRequest,
       pullRequests,
       errorMessage: error?.message ?? null,
-      planOnly: mode === WorkflowAgentMode.Plan,
+      planOnly: isPlanOnlyRun(run.process, mode),
       step,
     }),
     startedAt: run.createdAt.toISOString(),
@@ -633,4 +636,26 @@ function reviewSummary(
 
 function quoteLabels(labels: readonly string[]): string {
   return labels.map((label) => `"${label}"`).join(" or ");
+}
+
+/** A process run that plans and never implements; the built-in flow follows agent.mode. */
+function isPlanOnlyRun(
+  process: unknown,
+  mode: WorkflowAgentMode | undefined
+): boolean {
+  const parsed = runProcessSnapshotSchema.safeParse(process);
+  if (!parsed.success) {
+    return mode === WorkflowAgentMode.Plan;
+  }
+  return !parsed.data.definition.steps.some(stepImplements);
+}
+
+function stepImplements(step: ProcessStep): boolean {
+  if (step.type === ProcessStepType.AgentFlowExecute) {
+    return true;
+  }
+  return (
+    step.type === ProcessStepType.Agent &&
+    agentStepFinish(step) === ProcessStepFinish.Push
+  );
 }

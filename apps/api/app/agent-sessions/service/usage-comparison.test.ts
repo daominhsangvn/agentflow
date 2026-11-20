@@ -62,6 +62,7 @@ const CURRENT_FIGURES = {
   totalTokens: 300,
   meteredEstimatedCost: 90,
   apiEstimatedCost: 50,
+  totalEstimatedCost: 80,
   mergedPrCount: 6 as number | null,
 };
 
@@ -232,10 +233,29 @@ describe("computeUsageComparison (ISS-5809)", () => {
       tokens: 50, // 300 vs 200
       meteredCost: -10, // 90 vs 100
       apiCost: 25, // 50 vs 40
+      totalCost: 100, // 80 vs 40 (prior subscription 0)
       prsShipped: 20, // 6 vs 5
     });
     expect(comparison.priorStartDate).toBe(priorWindow.startDate);
     expect(comparison.priorEndDate).toBe(priorWindow.endDate);
+  });
+
+  it("computes totalCost from subscription plus api for both periods", async () => {
+    priorCostSplit = { ...priorCostSplit, subscriptionEstimatedCost: 20 };
+
+    const comparison = await computeUsageComparison({
+      input: usageInput({ startDate: CURRENT_START, endDate: CURRENT_END }),
+      priorWindow,
+      current: {
+        ...CURRENT_FIGURES,
+        apiEstimatedCost: 0,
+        totalEstimatedCost: 90,
+      },
+      priorMergedPrCount: 5,
+    });
+
+    // 90 vs (20 + 40) = 60
+    expect(comparison.deltas.totalCost).toBe(50);
   });
 
   it("resolves the PRIOR window's own cohort, carrying every other facet", async () => {

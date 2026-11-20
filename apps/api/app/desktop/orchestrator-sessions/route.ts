@@ -42,6 +42,7 @@ export const POST = withAnyAuth<
       clerkUserId,
       computeTargetId,
       turnId: body.turnId,
+      freshSession: body.freshSession === true,
     });
     if (result.ok) {
       return successResponse(result.value);

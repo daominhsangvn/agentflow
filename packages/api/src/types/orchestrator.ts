@@ -234,6 +234,8 @@ export const ORCHESTRATOR_TOOLS_CALL_ROUTE = "/orchestrator-tools/call";
 
 export const orchestratorSessionRequestSchema = z.object({
   turnId: z.uuid(),
+  /** The runner replaced a session it no longer has: forget what the old one read (runners_list). */
+  freshSession: z.boolean().optional(),
 });
 
 export const OrchestratorToolName = {
@@ -621,6 +623,14 @@ export const orchestratorCaseListQuerySchema = z
 export type OrchestratorCaseListQuery = z.infer<
   typeof orchestratorCaseListQuerySchema
 >;
+
+/** Case counts for the org-wide case list filters (not capped like the list). */
+export type OrchestratorCaseListSummary = {
+  total: number;
+  open: number;
+  needsPerson: number;
+  closed: number;
+};
 
 /** A message written on the case page in AgentFlow, or a reply shown there. */
 export const OrchestratorMessageVia = {

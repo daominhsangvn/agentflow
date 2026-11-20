@@ -24,3 +24,4 @@
 export const SESSIONS_METRIC_CARD_LABEL = "Sessions";
 export const TOTAL_TOKENS_METRIC_CARD_LABEL = "Total Tokens";
 export const PRS_SHIPPED_METRIC_CARD_LABEL = "PRs Shipped";
+export const AVG_COST_PER_SESSION_METRIC_CARD_LABEL = "Avg cost / session";

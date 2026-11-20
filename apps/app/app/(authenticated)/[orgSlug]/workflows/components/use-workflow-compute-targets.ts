@@ -1,6 +1,8 @@
 "use client";
 
+import { AgentKind } from "@repo/api/src/types/agent-fleet";
 import type { ComputeTarget } from "@repo/api/src/types/compute-target";
+import { readPersonalAgentProjectKey } from "@repo/api/src/types/project-runners";
 import type {
   WorkflowComputeTargetChoices,
   WorkflowComputeTargetOption,
@@ -31,6 +33,9 @@ export function toComputeTargetOption(
     label: target.machineName,
     description: describeComputeTarget(target),
     isOnline: target.isOnline,
+    kind: readPersonalAgentProjectKey(target.capabilities)
+      ? AgentKind.Personal
+      : AgentKind.Automatic,
   };
 }
 
