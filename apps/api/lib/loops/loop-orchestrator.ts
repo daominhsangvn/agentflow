@@ -45,6 +45,7 @@ import { dispatchLoopCompletedNotification } from "@/lib/loop-notifications";
 import { dispatchLoopCompletedSlackNotification } from "@/lib/loop-slack-notifications";
 import { isRunReplanLoop } from "@/lib/workflows/engine/run-loops";
 import { MissingAnthropicApiKeyError } from "./anthropic-api-key-error";
+import { carriedWorkspaceSlug } from "./carried-session-metadata";
 import type {
   DesktopUserIntentSignature,
   LaunchContext,
@@ -415,7 +416,9 @@ async function resolveLoopLaunchContext(
         select: { slug: true, project: { select: { slug: true } } },
       })
     );
-    documentSlug = artifact?.slug ?? undefined;
+    // The slug names the runner workspace and the scratch branch. A carried
+    // run names the earlier run's folder so `--resume` runs from the same cwd.
+    documentSlug = carriedWorkspaceSlug(loop) ?? artifact?.slug ?? undefined;
     contextPack.projectKey = artifact?.project?.slug ?? undefined;
   }
 

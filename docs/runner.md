@@ -619,6 +619,37 @@ A project process step (docs/workflows.md "Project process") runs as a
   `uploadedArtifacts.step`; a `finish: push` step is committed and pushed by
   the EXECUTE finalization. Boot recovery reads the same files.
 
+**Continuing an earlier run's session** (`agent.sameItem: queue_resume`,
+docs/workflows.md "Item queue"):
+
+- The loop is launched with `--resume <session id of the earlier run's loop>`
+  (`parentLoopId`), with `step.reportResumeMiss: true`. Claude Code keeps its
+  sessions in `~/.claude/projects/<working directory>` and removes old ones (by
+  default after 30 days), so the session must be found from the same working
+  directory.
+- When such a loop fails, never produced an assistant message and its error
+  output says the session is missing, it fails with `RESUME_SESSION_NOT_FOUND`
+  (`operations/loop-step-resume-miss.ts`, matching `no conversation found`,
+  `session not found` or `failed to load session`, case-insensitive; only for a
+  STEP loop that set `reportResumeMiss`, so other loops keep their error codes).
+  The API then tries `--resume --fork-session` once, then a fresh session.
+- Capabilities: a runner reports `loopStepResumeMiss` (this check) and
+  `loopStepForkSession` (the fork) in its capabilities (the headless runner and
+  the Electron app do). A runner without `loopStepResumeMiss` (an older
+  version) is never given a carried session: the run starts fresh with the
+  reason `runner_cannot_report_resume_miss`. One without `loopStepForkSession`
+  skips the fork and goes straight to a fresh session.
+- `carriedWorkspace` (loop metadata): the earlier run's folder slug. On an auto
+  runner the API sends it as the loop's `artifactSlug`, so the loop works in
+  `loops/<slug>` of the earlier run where the session is. It also names the
+  session's subject and the scratch branch. The work directory is reset for the
+  attempt loop (the earlier run's `answer.md` is gone), and later loops of the
+  run reuse the same folder. Auto-runner `loops/<slug>` folders are not cleaned
+  up by this feature.
+- A personal runner resumes because Claude runs in the project folder for every
+  loop, while each run keeps its own work directory (both modes); it needs no
+  `carriedWorkspace`.
+
 The tools a toolkit's scripts call (`bash`, `git`, `jq`, project
 toolchains, ...) must be installed on the runner like any other loop tool.
 
@@ -786,6 +817,11 @@ give each its own folder.
   `commentId` when the command already commented it on the ticket (see
   "Writing commands for a personal runner").
 - The folder is never removed or reset; worktree clean-up skips it.
+- With `agent.sameItem: queue_resume` a later run of the same item resumes the
+  earlier run's Claude session: Claude runs in the project folder, so it finds
+  the session there, while each run keeps its own work directory. With one
+  loop at a time, the next run waits for the runner as well as for the queue
+  ("Continuing an earlier run's session" above).
 - A workflow chooses a person's runner per item with runner rules
   (docs/workflows.md "Runner rules"), e.g. the assignee's.
 - A personal Agent registers with the organization only. Its project key must

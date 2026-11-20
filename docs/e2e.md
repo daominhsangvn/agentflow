@@ -55,10 +55,18 @@ exists. `e2e/invitations.spec.ts` also needs Mailpit at http://localhost:8025.
 
 | Tag | Specs | Needs |
 |---|---|---|
-| `@smoke` | `auth.setup`, `agent-onboarding-card`, `auth`, `bitbucket-connection`, `connection-yaml-editor`, `document-without-collaboration`, `local-git`, `model-provider`, `navigation`, `project-connections`, `project-process`, `project-repositories`, `projects`, `session-token`, `teams`, `workflow-run-process`, `workflow-yaml-editor`, `workflows` | Postgres plus the app and API dev servers. |
+| `@smoke` | `auth.setup`, `agent-onboarding-card`, `auth`, `bitbucket-connection`, `connection-yaml-editor`, `document-without-collaboration`, `local-git`, `model-provider`, `navigation`, `orchestrator-agents`, `orchestrator-cases`, `orchestrator-full-flow`, `project-connections`, `project-process`, `project-repositories`, `projects`, `session-token`, `teams`, `workflow-run-process`, `workflow-yaml-editor`, `workflows` | Postgres plus the app and API dev servers. |
 | `@external` | `feature-evaluation`, `plan-evaluation`, `pre-loop-system-check` | Liveblocks for document pages, and for loop completion a desktop compute target plus `AGENTFLOW_RUNNER_JWT_SECRET` shared with the API. Skipped unless `E2E_INCLUDE_EXTERNAL=1`. |
 
 `settings.spec.ts` has no tag: `pnpm test:e2e` runs it, the smoke run does not.
+`workflow-item-queue.spec.ts` has no tag either (it takes minutes). It runs a
+process-mode workflow with `agent.sameItem: queue_resume` against a fake Jira
+site and two fake Agents and covers the item queue and session carry-over:
+queued mentions, redelivery, another item in parallel, two mentions at once, a
+failed run, the resume to fork to fresh fallback and an offline Agent. It
+needs Postgres, migrations applied, the app and API dev servers (the API through
+`server.ts`, for the engine tick), a Local Git repository and an org admin user,
+like `orchestrator-full-flow.spec.ts`.
 Tags come from `E2ETag` in `e2e/helpers/tags.ts`. `e2e/global.setup.ts` probes
 the app and API first and stops with start instructions when either is down.
 
@@ -84,6 +92,94 @@ throwaway HTTP server the test starts on `127.0.0.1`: a pre action
 5. opens `/{org}/workflows` and expects the workflow to be listed.
 
 Everything it creates is deleted in `finally`.
+
+## Orchestrator and item queue specs
+
+`orchestrator-full-flow.spec.ts` (a case from a fake Jira event through fake
+Agents), `orchestrator-cases.spec.ts` and `orchestrator-agents.spec.ts` (the
+case list and the Agents tab), and `workflow-item-queue.spec.ts` (the item queue
+and session carry-over of `agent.sameItem`, docs/workflows.md "Item queue") run
+with `pnpm exec playwright test <spec>`. They use the real API, its tick and
+Postgres, with a fake Jira site and fake Agents (`e2e/helpers/fake-jira.ts`,
+`fake-agent.ts`) instead of Jira, computers and Claude.
+
+Needs, beyond "Run locally":
+
+- All migrations applied (`pnpm prisma migrate deploy`): the queue and the case
+  flow read tables and columns added by recent migrations, and fail with a
+  Prisma error when one is missing.
+- The two flow specs, `orchestrator-full-flow` and `workflow-item-queue`
+  (`helpers/orchestrator-flow-env.ts`), need the org's Local Git connection
+  with a repository: set `LOCAL_GIT_TOKEN` on the API (and restart it), so
+  every organization gets the connection. Without it they stop with "The org
+  has no Local Git connection (LOCAL_GIT_TOKEN on the API)".
+- The e2e user is an org admin. `E2E_KEEP_DATA=1` keeps what a flow spec created.
+
+`workflow-item-queue.spec.ts` has four tests (no tag). The first queues a second
+mention on the same item and starts it after the first run's reply, in order
+(result `queued`, shown as `queuedBehind` on the run detail, always pointing at the run that holds the item), delivers the same event twice (`duplicate`),
+and resumes the earlier run's session (`parentLoopId`, the short prompt,
+`inputs/new-messages.md`), a third run resuming the second's. The second runs a
+mention on another item at once. The third sends two mentions at the same moment
+and checks they never run together. The fourth fails the first run without
+blocking the second, then runs the `RESUME_SESSION_NOT_FOUND` -> fork -> fresh
+chain and starts fresh when the runner is offline. A fake Agent reports session ids and capabilities
+(`loopStepResumeMiss`, `loopStepForkSession`) but runs no Claude.
+
+What no automated spec reaches: a real Claude session, the working directory
+lookup, Teams and `mentionRequester`. Those are the manual scenarios below.
+
+### Manual scenarios for the item queue (Teams emulator)
+
+Setup: the stack as above; the emulator and a Teams connection as in the next
+section; a workflow from the project's request process with
+`agent.sameItem: queue_resume`, `runner` = a real personal runner on this
+machine (`/ask` available in its project folder, else add
+`.claude/commands/ask.md`), and a second, shared auto runner in the project.
+Send messages with `node scripts/dev/teams-send.mjs ... --inbound <url>`.
+
+- **M1, queue and resume (personal runner, one at a time).** Mention the bot in
+  a new thread (note `rootId`); while run 1 works, post a plain reply
+  (`--reply-to <rootId> --text "context message"`, no mention) and then a
+  mention as another user; then a mention in a new thread. Expect: run 2
+  `received` with "Waiting for an earlier run of this item (Running)";
+  `workflow_events.result` `created`, then `queued` for the second mention (the
+  plain reply gets none that starts a run); `/control/messages` shows reply 1
+  (`<at>An</at>`) strictly before reply 2 (`<at>Binh</at>`); the new thread runs
+  at once; run 2's page says it continued the item's previous agent session;
+  run 2's loop has `parentLoopId` = run 1's loop and the same Claude session id;
+  `inputs/new-messages.md` of run 2 holds "context message" and the second
+  mention only; each run page lists its own session row and run 2's tokens
+  are not run 1's plus its own.
+- **M2, auto runner.** As M1 with `runner` = the auto runner. Expect: run 2's loop
+  runs in `loops/<run 1 slug>`; `.agentflow-ai/work/answer.md` of run 1 is gone
+  before run 2's agent starts; with a step that asks (`questions: ask`), the
+  answers-resume loop runs in the same folder and resumes.
+- **M3, session missing.** Before the second mention, delete the session
+  `.jsonl` under `~/.claude/projects/<working directory>` on the runner.
+  Expect: run 2's first loop fails `RESUME_SESSION_NOT_FOUND`, a fork loop fails
+  the same way, then a fresh loop runs; the run page says the runner no longer
+  had the session; reply 2 is posted.
+- **M4, runner offline.** Stop the runner after reply 1, mention again. Expect: the
+  run goes to the other runner, fresh, with the full thread in `issue.md` and the
+  reason "the runner of the earlier session is not available".
+- **M5, personal runner in parallel.** `AGENTFLOW_RUNNER_PARALLEL=true`, two
+  threads with two mentions each, sent quickly. Expect: the threads overlap, and
+  within a thread the runs are strictly sequential with resume.
+
+Two things only a real runner confirms, and the code assumes:
+
+1. **The text the pinned Claude Code prints for a missing session.** The runner
+   matches `no conversation found`, `session not found` / `session id not found`
+   and `failed to load session` (`RESUME_SESSION_MISSING_RE` in
+   `apps/desktop/src/server/operations/loop-step-resume-miss.ts`). M3 shows
+   whether the pinned version's message matches; when it does not, the loop
+   fails with its ordinary code and the run does not fall back.
+2. **Whether a resumed invocation reports per-invocation or cumulative
+   tokens.** Usage is recorded per loop on the assumption that a resumed
+   invocation's result covers that invocation only. M1 checks it: if run 2's
+   tokens equal run 1's plus its own, the numbers are cumulative and run 2 is
+   overcounted.
 
 ## Microsoft Teams emulator (manual e2e)
 

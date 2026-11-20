@@ -25,6 +25,10 @@ import {
   WORKFLOW_RUNNER_RULES_MAX,
   workflowRunnerRuleSchema,
 } from "./workflow-runner-rules.ts";
+import {
+  type WorkflowRunSessionCarry,
+  WorkflowSameItem,
+} from "./workflow-same-item.ts";
 
 /**
  * Event-driven workflows: one or more triggers (Jira issue assigned to the
@@ -182,6 +186,11 @@ export const WorkflowRunErrorCode = {
    * for it (retried, never fails the run by itself).
    */
   RunnerBusy: "runner_busy",
+  /**
+   * Another run of the same item, or the previous run's reply, is not
+   * finished: the run waits (retried, never fails the run by itself).
+   */
+  ItemQueued: "item_queued",
   SigningRequired: "signing_required",
   NoRepository: "no_repository",
   RepositoryNotAllowed: "repository_not_allowed",
@@ -480,6 +489,11 @@ export const workflowAgentConfigSchema = z.object({
   mode: workflowAgentModeSchema.default(WorkflowAgentMode.PlanAndExecute),
   /** Plan+execute only: stop in needs_input when the plan has open questions. */
   stopOnOpenQuestions: z.boolean().default(true),
+  /**
+   * Process modes: what an event on an item with an active run does; absent:
+   * ignore.
+   */
+  sameItem: z.enum(WorkflowSameItem).optional(),
   /**
    * Desktop compute target the loops run on. Must be owned by the run-as user
    * or shared with the org. With runner rules: the runner when none matches.
@@ -861,6 +875,16 @@ export type WorkflowRunDetail = WorkflowRunSummary & {
   toolCalls: WorkflowRunToolCall[];
   /** The failed step a workflow administrator can run again; null otherwise. */
   retryStep: WorkflowRunRetryStep | null;
+  /**
+   * A queued run (agent.sameItem): the run of the item it waits for and that
+   * run's status; null otherwise.
+   */
+  queuedBehind: { runId: string; status: WorkflowRunStatus } | null;
+  /**
+   * agent.sameItem queue_resume: how the first agent step started; null when
+   * not considered.
+   */
+  sessionCarry: WorkflowRunSessionCarry | null;
 };
 
 /** A process step of a failed run that POST /workflow-runs/{id}/retry runs again. */

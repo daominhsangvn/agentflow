@@ -394,6 +394,39 @@ describe("fetchTeamsThread", () => {
     );
   });
 
+  it("exposes the thread as structured messages, bot posts marked", async () => {
+    replies.push({
+      id: "1700000000007",
+      createdDateTime: "2026-10-04T12:00:00Z",
+      body: { contentType: "html", content: "<p>Done.</p>" },
+      from: { application: { id: BOT_APP_ID } },
+    } as unknown as (typeof replies)[number]);
+    try {
+      const { http } = graphHttp();
+      const item = await fetchTeamsThread(
+        makeTeamsContext({ http, bot: true }),
+        itemRef
+      );
+
+      expect(item.thread?.map((message) => message.id)).toEqual([
+        ROOT_ID,
+        "1700000000005",
+        REPLY_ID,
+        "1700000000007",
+      ]);
+      expect(item.thread?.[0]?.parentId).toBeNull();
+      expect(item.thread?.[1]?.parentId).toBe(ROOT_ID);
+      expect(item.thread?.map((message) => message.fromBot)).toEqual([
+        false,
+        false,
+        false,
+        true,
+      ]);
+    } finally {
+      replies.pop();
+    }
+  });
+
   it("reports a missing Graph permission and retries throttling", async () => {
     await expect(
       fetchTeamsThread(

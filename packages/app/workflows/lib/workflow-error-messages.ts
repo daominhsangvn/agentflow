@@ -30,6 +30,8 @@ export const WORKFLOW_RUN_ERROR_MESSAGES: Record<WorkflowRunErrorCode, string> =
       "The workflow's Agent is not one of the project's Agents",
     [WorkflowRunErrorCode.RunnerBusy]:
       "The personal runner is running another task; the step starts when it is free",
+    [WorkflowRunErrorCode.ItemQueued]:
+      "Another run of the same item (or its reply) is not finished; this run starts when it is",
     [WorkflowRunErrorCode.SigningRequired]:
       "The compute target requires a browser signature, which unattended runs cannot provide",
     [WorkflowRunErrorCode.NoRepository]:

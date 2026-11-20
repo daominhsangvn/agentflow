@@ -27,6 +27,10 @@ export const LoopErrorCode = {
   BinaryNotFound: "BINARY_NOT_FOUND",
   ScriptNotFound: "SCRIPT_NOT_FOUND",
   SpawnFailed: "SPAWN_FAILED",
+  // A STEP loop that asked for it (`step.reportResumeMiss`) was launched with
+  // `--resume` and Claude Code did not find the session in this folder; the
+  // agent never started.
+  ResumeSessionNotFound: "RESUME_SESSION_NOT_FOUND",
 
   // Lifecycle codes (set by harness/gateway at run completion)
   TimedOut: "TIMED_OUT",

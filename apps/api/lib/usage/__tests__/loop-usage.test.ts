@@ -226,6 +226,44 @@ describe("loadLoopUsage", () => {
     expect(result.get("l1")?.inputTokens).toBe(100);
   });
 
+  it("keeps each loop's own numbers when two loops share a Claude session id", async () => {
+    // Headless runner: session rows are keyed by the loop id, so a carried
+    // Claude session id (Loop.sessionId "claude-abc") does not merge them.
+    mocks.loopFindMany.mockResolvedValue([
+      loop({ id: "run1-loop" }),
+      loop({ id: "run2-loop" }),
+    ]);
+    mocks.sessionFindMany.mockResolvedValue([
+      session({
+        artifactId: "run1-loop",
+        sourceLoopId: "run1-loop",
+        inputTokens: BigInt(100),
+        outputTokens: BigInt(40),
+        estimatedCost: "0.5",
+      }),
+      session({
+        artifactId: "run2-loop",
+        sourceLoopId: "run2-loop",
+        inputTokens: BigInt(30),
+        outputTokens: BigInt(10),
+        estimatedCost: "0.25",
+      }),
+    ]);
+
+    const result = await loadLoopUsage("org", ["run1-loop", "run2-loop"], NOW);
+
+    const first = result.get("run1-loop");
+    const second = result.get("run2-loop");
+    expect(first?.inputTokens).toBe(100);
+    expect(first?.outputTokens).toBe(40);
+    expect(first?.costUsd).toBeCloseTo(0.5);
+    expect(second?.inputTokens).toBe(30);
+    expect(second?.outputTokens).toBe(10);
+    expect(second?.costUsd).toBeCloseTo(0.25);
+    expect((first?.inputTokens ?? 0) + (second?.inputTokens ?? 0)).toBe(130);
+    expect((first?.costUsd ?? 0) + (second?.costUsd ?? 0)).toBeCloseTo(0.75);
+  });
+
   it("drops the artifact arm without session artifacts", async () => {
     mocks.loopFindMany.mockResolvedValue([loop()]);
 

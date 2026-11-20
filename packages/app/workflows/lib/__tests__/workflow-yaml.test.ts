@@ -11,6 +11,7 @@ import {
 } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
 import { WORKFLOW_EMAIL_ACTION_TYPE } from "@repo/api/src/types/workflow-email";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 import { YamlProblemSeverity } from "@repo/app/shared/lib/yaml-problems";
 import { describe, expect, it } from "vitest";
 import {
@@ -602,6 +603,61 @@ postActions:
     expect(parseWorkflowYaml(text, CATALOG).input?.triggers).toEqual([
       { connectionKey: null, type: WEBHOOK_REQUEST, config: {}, enabled: true },
     ]);
+  });
+});
+
+describe("agent.sameItem", () => {
+  it("parses sameItem and omits it when absent", () => {
+    const set = parseWorkflowYaml(
+      withAgentLines(`  sameItem: ${WorkflowSameItem.QueueResume}\n`),
+      CATALOG
+    );
+    const absent = parseWorkflowYaml(VALID_YAML, CATALOG);
+
+    expect(set.problems).toEqual([]);
+    expect(set.input?.agent.sameItem).toBe(WorkflowSameItem.QueueResume);
+    expect(absent.input?.agent).not.toHaveProperty("sameItem");
+  });
+
+  it("refuses an unknown value", () => {
+    const messages = problemsOf(withAgentLines("  sameItem: later\n")).map(
+      (problem) => problem.message
+    );
+
+    expect(messages.some((message) => message.includes("sameItem is"))).toBe(
+      true
+    );
+  });
+
+  it("refuses queue for an orchestrated workflow", () => {
+    const text = VALID_YAML.replace(
+      "  mode: plan\n",
+      `  mode: ${WorkflowAgentMode.Orchestrated}\n  sameItem: ${WorkflowSameItem.Queue}\n`
+    );
+
+    const messages = problemsOf(text).map((problem) => problem.message);
+
+    expect(
+      messages.some((message) => message.includes("sameItem: an orchestrated"))
+    ).toBe(true);
+  });
+
+  it("round-trips queue and writes nothing for ignore", () => {
+    const workflow = makeWorkflow();
+    const queued = makeWorkflow({
+      agent: { ...workflow.agent, sameItem: WorkflowSameItem.Queue },
+    });
+    const ignored = makeWorkflow({
+      agent: { ...workflow.agent, sameItem: WorkflowSameItem.Ignore },
+    });
+
+    const text = workflowToYaml(queued, CATALOG);
+
+    expect(text).toContain("  sameItem: queue\n");
+    expect(parseWorkflowYaml(text, CATALOG, queued).input?.agent.sameItem).toBe(
+      WorkflowSameItem.Queue
+    );
+    expect(workflowToYaml(ignored, CATALOG)).not.toContain("sameItem");
   });
 });
 

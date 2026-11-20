@@ -43,7 +43,17 @@ export type LoopBody = {
   agentFlowAuthToken: string;
   prompt: string | null;
   parentLoopId: string | null;
-  step?: { stepId: string; forkSession?: boolean; readOnly?: boolean };
+  step?: {
+    stepId: string;
+    forkSession?: boolean;
+    readOnly?: boolean;
+    /** Files the runner writes to the loop's inputs folder. */
+    inputs?: { name: string; content: string }[];
+    /** The runner reports RESUME_SESSION_NOT_FOUND instead of starting fresh. */
+    reportResumeMiss?: boolean;
+    /** A new session: the run does not resume an earlier one. */
+    fresh?: boolean;
+  };
 };
 
 /**
@@ -62,6 +72,12 @@ export type TaskOutcome = {
   questions?: { id: string; question: string; commentId?: string }[];
   reply?: string;
   attachments?: TaskAttachment[];
+  /** The agent session the loop recorded (sent with the completed or error event). */
+  sessionId?: string;
+  /** Workspace path of the reply file; default ORCHESTRATOR_TASK_REPLY_FILE. */
+  replyPath?: string;
+  /** The loop fails with this code: an error event instead of the upload and completed. */
+  fail?: { code: string; message: string };
 };
 
 export type TaskScript = (loop: LoopBody) => Promise<TaskOutcome>;
@@ -90,7 +106,11 @@ export class FakeAgent {
   }
 
   /** Registers an automatic Agent owned by the token's user. */
-  static async register(token: string, name: string): Promise<FakeAgent> {
+  static async register(
+    token: string,
+    name: string,
+    extraCapabilities?: Record<string, unknown>
+  ): Promise<FakeAgent> {
     const response = await fetch(
       `${getApiBaseUrl()}/compute-targets/register`,
       {
@@ -100,7 +120,11 @@ export class FakeAgent {
           machineName: name,
           platform: "e2e",
           // Like the headless runner: it can fork a STEP loop's session.
-          capabilities: { source: "fake-agent-e2e", loopStepForkSession: true },
+          capabilities: {
+            source: "fake-agent-e2e",
+            loopStepForkSession: true,
+            ...extraCapabilities,
+          },
           supportedOperations: ["loop.run"],
         }),
       }
@@ -331,13 +355,17 @@ export class FakeAgent {
     const runner = { Authorization: `Bearer ${loop.agentFlowAuthToken}` };
     await this.loopEvent(loop, runner, { type: "started" });
     const outcome = await script(loop);
+    if (outcome.fail) {
+      await this.failTask(loop, runner, outcome);
+      return;
+    }
     const step = {
       stepId: loop.step?.stepId ?? "step",
       questions: outcome.questions ?? [],
       files: outcome.reply
         ? [
             {
-              path: ORCHESTRATOR_TASK_REPLY_FILE,
+              path: outcome.replyPath ?? ORCHESTRATOR_TASK_REPLY_FILE,
               content: outcome.reply,
               truncated: false,
             },
@@ -363,12 +391,39 @@ export class FakeAgent {
     }
     await this.loopEvent(loop, runner, {
       type: "completed",
-      result: { exitCode: 0, durationSeconds: 1 },
+      result: {
+        exitCode: 0,
+        durationSeconds: 1,
+        ...(outcome.sessionId ? { sessionId: outcome.sessionId } : {}),
+      },
       tokensUsed: { input: 10, output: 5 },
     });
     await this.postResult(LOOP_COMMAND_OPERATION_ID, {
       ok: true,
       loopId: loop.loopId,
+    });
+  }
+
+  /** Like the runner on a failed loop: an error event, then the failed result. */
+  private async failTask(
+    loop: LoopBody,
+    runner: Record<string, string>,
+    outcome: TaskOutcome
+  ): Promise<void> {
+    const failure = outcome.fail;
+    if (!failure) {
+      return;
+    }
+    await this.loopEvent(loop, runner, {
+      type: "error",
+      code: failure.code,
+      message: failure.message,
+      ...(outcome.sessionId ? { sessionId: outcome.sessionId } : {}),
+    });
+    await this.postResult(LOOP_COMMAND_OPERATION_ID, {
+      ok: false,
+      loopId: loop.loopId,
+      error: failure.message,
     });
   }
 

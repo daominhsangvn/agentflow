@@ -5,6 +5,7 @@ import type { IntegrationDeliverySource } from "./integration.ts";
 /** What ingest did with an inbound event for one workflow (docs/workflows.md "Ingest"). */
 export const WorkflowEventResult = {
   Created: "created",
+  Queued: "queued",
   Resumed: "resumed",
   Duplicate: "duplicate",
   Active: "active",

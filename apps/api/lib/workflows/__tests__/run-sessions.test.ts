@@ -95,6 +95,40 @@ describe("listRunSessions", () => {
     expect(session?.status).toBe(DISPLAYED_SESSION_STATUS.WAITING);
   });
 
+  it("lists only the row of each run's own loops when runs share a Claude session id", async () => {
+    const rows = {
+      run1: sessionRow({
+        artifactId: IDS.activeSession,
+        sourceLoopId: IDS.planLoop,
+        status: "inactive",
+        startedAt: new Date("2026-10-01T10:00:00.000Z"),
+      }),
+      run2: sessionRow({
+        artifactId: IDS.endedSession,
+        sourceLoopId: IDS.stepLoop,
+        status: "inactive",
+        startedAt: new Date("2026-10-02T10:00:00.000Z"),
+      }),
+    };
+    // The query filters by sourceLoopId; emulate it over both rows.
+    mocks.db.sessionDetail.findMany.mockImplementation(
+      (args: { where: { sourceLoopId: { in: string[] } } }) =>
+        Promise.resolve(
+          Object.values(rows).filter((row) =>
+            args.where.sourceLoopId.in.includes(row.sourceLoopId)
+          )
+        )
+    );
+
+    const run1 = await listRunSessions(IDS.org, [LOOPS[0]]);
+    const run2 = await listRunSessions(IDS.org, [LOOPS[1]]);
+
+    expect(run1.map((s) => s.id)).toEqual([IDS.activeSession]);
+    expect(run1[0]?.loopId).toBe(IDS.planLoop);
+    expect(run2.map((s) => s.id)).toEqual([IDS.endedSession]);
+    expect(run2[0]?.loopId).toBe(IDS.stepLoop);
+  });
+
   it("does not query without loops", async () => {
     expect(await listRunSessions(IDS.org, [])).toEqual([]);
     expect(mocks.db.sessionDetail.findMany).not.toHaveBeenCalled();

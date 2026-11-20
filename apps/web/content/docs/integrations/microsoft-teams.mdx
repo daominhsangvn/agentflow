@@ -51,6 +51,20 @@ Tools: [`teams_ask`, `teams_ask_reply`, `teams_ask_confirm`](/docs/reference/orc
 
 A reply in a thread that does not mention the bot (`microsoft_teams.thread_reply`) is not a trigger. Only an Orchestrator Agent that already talks in that thread receives it.
 
+### Several mentions in one thread
+
+By default a mention in a thread that already has an active run does nothing, and a run that waits for input takes the mention as its answer. A workflow can set `agent.sameItem` (see [Workflow YAML](/docs/guides/setup/workflow-yaml)) to change that:
+
+- `queue`: each mention starts its own run. The runs of one thread run one after another, and a run starts only after the previous run's reply is posted (it waits at most 15 minutes for that). Other threads run in parallel. Each reply mentions the person who wrote its own mention.
+- `queue_resume`: as `queue`, and the run continues the agent session of the thread's previous run on the same runner, told only what was written in the thread since. If that runner is offline, too old to report a missing session, or no longer has the session, the run starts a new session with the whole thread. A new session is also told which message is this run's request, so it does not answer later messages in the thread.
+
+```yaml
+agent:
+  sameItem: queue_resume
+```
+
+Not available for orchestrated workflows. A failed run of a thread cannot be retried while another run of that thread is open, and with `queue_resume` not after a later run exists; mention the bot again instead.
+
 ## Actions
 
 | Operation | What it does |

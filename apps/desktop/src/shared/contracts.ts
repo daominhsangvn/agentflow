@@ -139,6 +139,12 @@ export type ComputeTargetCapabilities = {
    */
   loopStepForkSession?: boolean;
   /**
+   * A STEP loop with `step.reportResumeMiss` that was launched with `--resume`
+   * and whose session Claude Code does not find fails with
+   * RESUME_SESSION_NOT_FOUND. Older runners report their usual codes.
+   */
+  loopStepResumeMiss?: boolean;
+  /**
    * The runner reads AGENTFLOW.md from a project's toolkit repository on
    * `capabilities_refresh`. Older runners lack it and the API refuses the refresh.
    */

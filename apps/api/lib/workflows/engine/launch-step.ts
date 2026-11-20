@@ -2,6 +2,7 @@ import {
   type LoopStepConfig,
   LoopStepFinish,
 } from "@agentflow-ai/loops-api/loop-step";
+import type { JsonObject } from "@repo/api/src/types/common";
 import {
   LoopCommand,
   LoopStatus,
@@ -14,6 +15,10 @@ import {
   type WorkflowRunError,
   WorkflowRunErrorCode,
 } from "@repo/api/src/types/workflow";
+import {
+  WorkflowSameItem,
+  WorkflowSessionCarryAttempt,
+} from "@repo/api/src/types/workflow-same-item";
 import { withDb } from "@repo/database";
 import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { setSpanOutcome, withSpan } from "@repo/observability/span";
@@ -26,14 +31,26 @@ import {
   listProjectRepositoryCheckouts,
   toLoopRepositorySelection,
 } from "@/app/projects/project-repository-checkouts";
+import {
+  CARRIED_SESSION_METADATA_KEY,
+  CARRIED_WORKSPACE_METADATA_KEY,
+  type CarriedSessionMetadata,
+  type CarriedWorkspaceMetadata,
+  readCarriedSessionMetadata,
+  readCarriedWorkspaceMetadata,
+} from "@/lib/loops/carried-session-metadata";
 import { resolveLaunchHarness } from "@/lib/loops/launch-harness";
-import { LOOP_STEP_METADATA_KEY } from "@/lib/loops/loop-commands/step-handler";
+import {
+  LOOP_STEP_METADATA_KEY,
+  readLoopStepConfig,
+} from "@/lib/loops/loop-commands/step-handler";
 import { dispatchAndClassify } from "@/lib/loops/loop-dispatch-utils";
 import {
   forkUnsupportedMessage,
   runnerForksSession,
 } from "@/lib/runner-fork-session";
 import { runError } from "./errors";
+import { readSameItem } from "./item-queue";
 import {
   cancelBlockedLoop,
   checkCommandSigning,
@@ -42,7 +59,7 @@ import {
   resolveProjectComputeTarget,
 } from "./launch";
 import { personalRunnerBusy } from "./personal-runner-queue";
-import { recordRunLoop } from "./run-loops";
+import { listRunLoops, recordRunLoop } from "./run-loops";
 import { recordRunRepositories } from "./run-repository";
 
 /**
@@ -81,6 +98,14 @@ export type LaunchStepLoopInput = {
   computeTargetId: string | null;
   /** The loop whose agent session this one continues (answers to its questions). */
   resumeLoopId?: string;
+  /** An attempt loop of a carried session (agent.sameItem queue_resume): recorded in the loop metadata. */
+  carried?: CarriedSessionMetadata;
+  /**
+   * The run's carried folder (an auto runner runs every loop of a carried run
+   * in the earlier run's folder). Undefined: derive it from the run's attempt
+   * loops; null: none.
+   */
+  workspace?: CarriedWorkspaceMetadata | null;
 };
 
 export function launchStepLoop(
@@ -164,6 +189,9 @@ async function launchStepLoopLocked(
     { clerkUserId: input.runAsUser.clerkId, userId: input.runAsUser.id }
   );
 
+  const carry = await resolveCarry(input);
+  const step = withCarriedInputs(input.step, carry.inputs);
+
   let response: Awaited<ReturnType<typeof loopsService.create>>;
   try {
     response = await loopsService.create(
@@ -179,10 +207,7 @@ async function launchStepLoopLocked(
         repo: repositories.value?.primary,
         additionalRepos: repositories.value?.additional,
         contextRefs: sourceContextRefs(input),
-        metadata: {
-          workflowRunId: input.runId,
-          [LOOP_STEP_METADATA_KEY]: input.step,
-        },
+        metadata: stepLoopMetadata(input, step, carry.workspace),
       }
     );
   } catch (error) {
@@ -364,4 +389,92 @@ async function requirePersonalTarget(
     WorkflowRunErrorCode.NoRepository,
     "The project has no repositories. Add the project's repositories from an integration connection to run its process on an automatic Agent."
   );
+}
+
+type Carry = {
+  workspace: CarriedWorkspaceMetadata | null;
+  /** The messages files of the carried attempt loop; the runner clears inputs/ at every step loop. */
+  inputs: LoopStepConfig["inputs"];
+};
+
+const NO_CARRY: Carry = { workspace: null, inputs: undefined };
+
+/**
+ * The carried folder and input files of a loop launched without its own
+ * (answers, repair, auto-retry, Restart, later steps): the run's latest
+ * attempt loop decides. Resume or fork keep its folder and inputs, a fresh
+ * attempt has none. No query unless the workflow continues sessions across
+ * runs.
+ */
+async function runCarry(input: LaunchStepLoopInput): Promise<Carry> {
+  if (readSameItem(input.agent) !== WorkflowSameItem.QueueResume) {
+    return NO_CARRY;
+  }
+  const loops = await listRunLoops(input.runId);
+  const ids = loops
+    .filter((loop) => loop.command === LoopCommand.Step)
+    .map((loop) => loop.loopId);
+  if (ids.length === 0) {
+    return NO_CARRY;
+  }
+  const rows = await withDb((db) =>
+    db.loop.findMany({
+      where: { id: { in: ids }, organizationId: input.organizationId },
+      select: { id: true, metadata: true, createdAt: true },
+    })
+  );
+  const attempts = rows
+    .map((row) => ({
+      createdAt: row.createdAt,
+      carried: readCarriedSessionMetadata(row.metadata),
+      workspace: readCarriedWorkspaceMetadata(row.metadata),
+      inputs: readLoopStepConfig({
+        command: LoopCommand.Step,
+        metadata: row.metadata,
+      })?.inputs,
+    }))
+    .filter((row) => row.carried !== null)
+    .sort(
+      (left, right) => right.createdAt.getTime() - left.createdAt.getTime()
+    );
+  const latest = attempts[0];
+  if (
+    !latest ||
+    latest.carried?.attempt === WorkflowSessionCarryAttempt.Fresh
+  ) {
+    return NO_CARRY;
+  }
+  return { workspace: latest.workspace, inputs: latest.inputs };
+}
+
+async function resolveCarry(input: LaunchStepLoopInput): Promise<Carry> {
+  if (input.workspace !== undefined) {
+    return { workspace: input.workspace, inputs: undefined };
+  }
+  return await runCarry(input);
+}
+
+/** The step with the carried input files, unless it brings its own. */
+function withCarriedInputs(
+  step: LoopStepConfig,
+  inputs: LoopStepConfig["inputs"]
+): LoopStepConfig {
+  if ((step.inputs?.length ?? 0) > 0 || !inputs || inputs.length === 0) {
+    return step;
+  }
+  return { ...step, inputs };
+}
+
+/** The loop metadata: the run, the step, and the carried session and folder when there are any. */
+function stepLoopMetadata(
+  input: LaunchStepLoopInput,
+  step: LoopStepConfig,
+  workspace: CarriedWorkspaceMetadata | null
+): JsonObject {
+  return {
+    workflowRunId: input.runId,
+    [LOOP_STEP_METADATA_KEY]: step,
+    ...(input.carried ? { [CARRIED_SESSION_METADATA_KEY]: input.carried } : {}),
+    ...(workspace ? { [CARRIED_WORKSPACE_METADATA_KEY]: workspace } : {}),
+  };
 }

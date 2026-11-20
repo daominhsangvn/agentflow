@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   forkUnsupportedMessage,
   runnerForksSession,
+  runnerReportsResumeMiss,
 } from "./runner-fork-session";
 
 describe("runnerForksSession", () => {
@@ -28,5 +29,20 @@ describe("forkUnsupportedMessage", () => {
     expect(forkUnsupportedMessage({ ...base, machineName: null })).toContain(
       "The runner runs"
     );
+  });
+});
+
+describe("runnerReportsResumeMiss", () => {
+  it("accepts loopStepResumeMiss true", () => {
+    expect(runnerReportsResumeMiss({ loopStepResumeMiss: true })).toBe(true);
+  });
+
+  it.each([
+    {},
+    null,
+    { loopStepResumeMiss: "true" },
+    { loopStepForkSession: true },
+  ])("rejects %j", (value) => {
+    expect(runnerReportsResumeMiss(value)).toBe(false);
   });
 });

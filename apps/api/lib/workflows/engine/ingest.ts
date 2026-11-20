@@ -10,6 +10,7 @@ import {
 } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
 import { WorkflowEventResult } from "@repo/api/src/types/workflow-event";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 import { Prisma, withDb } from "@repo/database";
 import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { log } from "@repo/observability/log";
@@ -30,8 +31,10 @@ import { waitUntil } from "@/lib/wait-until";
 import { enqueueRunEvents, hasEnabledPreActions } from "./actions";
 import { advanceRun } from "./advance";
 import { findRepliedRuns, type RepliedRun } from "./answer-replies";
+import { createRun, decideQueuedLocked, QueuedOutcome } from "./ingest-run";
+import { readSameItem } from "./item-queue";
 import { routeReviewSignals } from "./review-signals";
-import { buildRunSource, toJsonObject } from "./run-data";
+import { buildRunSource } from "./run-data";
 import {
   type EventFacts,
   filteredEventDrafts,
@@ -59,7 +62,9 @@ import {
  *    an occurrence already seen (a run's dedupKey or one of the occurrence
  *    keys that resumed it) does nothing, an active run for the same item is
  *    resumed when it waits for input (otherwise left alone), else a new run
- *    is created.
+ *    is created. With agent.sameItem an event on an item with an active run
+ *    creates a queued run instead (item-queue.ts); a needs_input run still
+ *    takes the event as its answer first.
  * 4. Created and resumed runs are advanced in the background. Ingest only
  *    reads from the source system: every write there is a pre or post action.
  * 5. Each workflow's outcome per event is recorded in `workflow_events`
@@ -83,6 +88,8 @@ export const IngestDecision = {
   Duplicate: "duplicate",
   /** Another run for the same item is still active. */
   Active: "active",
+  /** agent.sameItem: a run was created behind another active run of the item (item-queue.ts). */
+  Queued: "queued",
   /** A run waiting on the item took the event as a review or approval signal. */
   Signaled: "signaled",
 } as const;
@@ -564,6 +571,27 @@ async function decideRunLocked(
   if (existing) {
     return { decision: IngestDecision.Duplicate, runId: existing.id };
   }
+  if (readSameItem(trigger.workflow.agentConfig) !== WorkflowSameItem.Ignore) {
+    const queued = await decideQueuedLocked({
+      organizationId: input.connection.record.organizationId,
+      connectionId: input.connection.record.id,
+      event,
+      trigger,
+      keys,
+      resume: (run, now) =>
+        resumeRun({
+          run: {
+            ...run,
+            organizationId: input.connection.record.organizationId,
+          },
+          workflowId: trigger.workflowId,
+          event,
+          dedupKey: keys.dedupKey,
+          now,
+        }),
+    });
+    return { decision: QUEUED_DECISIONS[queued.outcome], runId: queued.runId };
+  }
   const active = await withDb((db) =>
     db.workflowRun.findFirst({
       where: {
@@ -594,40 +622,17 @@ async function decideRunLocked(
       runId: active.id,
     };
   }
-  const run = await withDb((db) =>
-    db.workflowRun.create({
-      data: {
-        organizationId: input.connection.record.organizationId,
-        workflowId: trigger.workflowId,
-        projectId: trigger.projectId,
-        projectConnectionId: trigger.projectConnectionId,
-        triggerId: trigger.id,
-        connectionId: input.connection.record.id,
-        deliveryId: keys.deliveryRowId,
-        runAsUserId: trigger.workflow.runAsUserId,
-        dedupKey: keys.dedupKey,
-        sourceKey: keys.sourceKey,
-        status: WorkflowRunStatus.Received,
-        source: buildRunSource(event),
-        agentConfig: toJsonObject(trigger.workflow.agentConfig),
-        phaseStartedAt: now,
-      },
-      select: { id: true },
-    })
+  const runId = await createRun(
+    {
+      organizationId: input.connection.record.organizationId,
+      connectionId: input.connection.record.id,
+      event,
+      trigger,
+      keys,
+    },
+    now
   );
-  await withDb((db) =>
-    db.workflow.updateMany({
-      where: { id: trigger.workflowId },
-      data: { lastRunAt: now },
-    })
-  );
-  log.info("workflow.run.received", {
-    workflowRunId: run.id,
-    organizationId: input.connection.record.organizationId,
-    projectId: trigger.projectId,
-    sourceKind: event.triggerType,
-  });
-  return { decision: IngestDecision.Created, runId: run.id };
+  return { decision: IngestDecision.Created, runId };
 }
 
 /**
@@ -756,14 +761,15 @@ function summarizeDecisions(
   { decisions, unrouted, orchestrated, ignoredReasons }: DecidedRuns
 ): DecisionSummary {
   const created = countDecisions(decisions, IngestDecision.Created);
+  const queued = countDecisions(decisions, IngestDecision.Queued);
   const resumed =
     countDecisions(decisions, IngestDecision.Resumed) +
     countDecisions(decisions, IngestDecision.Signaled);
-  if (created + resumed + orchestrated > 0) {
+  if (created + queued + resumed + orchestrated > 0) {
     return {
       outcome: IntegrationDeliveryOutcome.Accepted,
-      detail: acceptedDetail(created, resumed, orchestrated),
-      runCount: created + resumed,
+      detail: acceptedDetail(created, resumed, orchestrated, queued),
+      runCount: created + queued + resumed,
     };
   }
   return {
@@ -776,7 +782,8 @@ function summarizeDecisions(
 function acceptedDetail(
   created: number,
   resumed: number,
-  orchestrated: number
+  orchestrated: number,
+  queued = 0
 ): string {
   const parts: string[] = [];
   if (orchestrated > 0) {
@@ -786,6 +793,9 @@ function acceptedDetail(
   }
   if (created > 0) {
     parts.push(`${created} run${created === 1 ? "" : "s"} started`);
+  }
+  if (queued > 0) {
+    parts.push(`${queued} run${queued === 1 ? "" : "s"} queued`);
   }
   if (resumed > 0) {
     parts.push(`${resumed} run${resumed === 1 ? "" : "s"} resumed`);
@@ -827,6 +837,7 @@ function countDecisions(
 function startsWork(decision: IngestDecision): boolean {
   return (
     decision === IngestDecision.Created ||
+    decision === IngestDecision.Queued ||
     decision === IngestDecision.Resumed ||
     decision === IngestDecision.Signaled
   );
@@ -978,10 +989,17 @@ function isOrchestratedTrigger(trigger: TriggerRow): boolean {
     .success;
 }
 
+const QUEUED_DECISIONS: Record<QueuedOutcome, IngestDecision> = {
+  [QueuedOutcome.Created]: IngestDecision.Created,
+  [QueuedOutcome.Queued]: IngestDecision.Queued,
+  [QueuedOutcome.Resumed]: IngestDecision.Resumed,
+};
+
 const DECISION_RESULTS: Record<IngestDecision, WorkflowEventResult> = {
   [IngestDecision.Created]: WorkflowEventResult.Created,
   [IngestDecision.Resumed]: WorkflowEventResult.Resumed,
   [IngestDecision.Duplicate]: WorkflowEventResult.Duplicate,
   [IngestDecision.Active]: WorkflowEventResult.Active,
+  [IngestDecision.Queued]: WorkflowEventResult.Queued,
   [IngestDecision.Signaled]: WorkflowEventResult.Signaled,
 };

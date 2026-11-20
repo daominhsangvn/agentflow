@@ -33,6 +33,8 @@ export type StoredRunSource = {
   extras: JsonObject;
   /** ISO timestamp of the occurrence. */
   occurredAt: string;
+  /** The comment or message that caused the occurrence (InboundEvent.message). */
+  message: { id: string | null; text: string } | null;
   /** W3C traceparent of the span that ingested the event; links later run spans to it. */
   traceparent?: string;
 };
@@ -101,6 +103,10 @@ const storedRunSourceSchema = z.object({
   attributes: z.record(z.string(), attributeValueSchema).default({}),
   extras: jsonObjectSchema.default({}),
   occurredAt: z.string(),
+  message: z
+    .object({ id: nullableString, text: z.string() })
+    .nullable()
+    .default(null),
   traceparent: z.string().max(64).optional(),
 });
 
@@ -135,6 +141,12 @@ export function buildRunSource(event: InboundEvent): JsonObject {
     // webhook's callbackUrl); actions read it as sourceExtras.
     extras: toJsonObject(event.extras ?? {}),
     occurredAt: event.occurredAt.toISOString(),
+    message: event.message
+      ? {
+          id: event.message.id,
+          text: event.message.text.slice(0, RUN_SOURCE_MESSAGE_MAX),
+        }
+      : null,
   };
   const traceparent = getActiveTraceparent();
   if (traceparent) {
@@ -192,3 +204,6 @@ export function toJsonObject(value: unknown): JsonObject {
   const parsed = jsonObjectSchema.safeParse(roundTripped);
   return parsed.success ? parsed.data : {};
 }
+
+/** Characters of the triggering message kept on the run. */
+const RUN_SOURCE_MESSAGE_MAX = 8000;

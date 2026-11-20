@@ -6,11 +6,7 @@ import {
   LOOP_STEP_WORK_DIR,
   LoopStepFile,
 } from "@agentflow-ai/loops-api/loop-step";
-import {
-  IntegrationToolCallStatus,
-  IntegrationToolName,
-} from "@repo/api/src/types/integration-tools";
-import { LoopCommand } from "@repo/api/src/types/loop";
+import { LoopCommand, LoopErrorCode } from "@repo/api/src/types/loop";
 import {
   type AgentProcessStep,
   type ProcessAnswer,
@@ -18,22 +14,30 @@ import {
   type RunStepState,
 } from "@repo/api/src/types/project-process";
 import {
-  WorkflowActionRunStatus,
   type WorkflowAgentConfig,
   WorkflowRunErrorCode,
   WorkflowRunEvent,
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
-import { withDb } from "@repo/database";
-import { JiraActionType } from "@/lib/integrations/providers/jira/constants";
+import {
+  WorkflowSessionCarryAttempt,
+  WorkflowSessionCarryReason,
+} from "@repo/api/src/types/workflow-same-item";
+import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
+import { log } from "@repo/observability/log";
+import { setSpanOutcome, withSpan } from "@repo/observability/span";
+import { computeTargetsService } from "@/app/compute-targets/service";
 import type { SourceItem, SourceItemComment } from "@/lib/integrations/types";
+import { runnerForksSession } from "@/lib/runner-fork-session";
 import {
   type AgentStepSettlement,
+  launchCarriedFresh,
   STEP_ISSUE_FILE,
   STEP_PLAN_FILE,
   stepStartedEvents,
   toLoopStepConfig,
 } from "./agent-step";
+import { readCarriedLoop } from "./carried-session";
 import { runError } from "./errors";
 import { launchStepLoop } from "./launch-step";
 import { stepLaunchFailure } from "./personal-runner-queue";
@@ -378,47 +382,6 @@ export function planRepairPrompt(): string {
 }
 
 /**
- * The ids of the comments the run posted on its source item: through the
- * comment tool (instruction actions and agent steps) and through Jira comment
- * actions.
- */
-export async function readRunCommentIds(
-  run: Pick<EngineRun, "id" | "organizationId">
-): Promise<ReadonlySet<string>> {
-  const [calls, actionRuns] = await Promise.all([
-    withDb((db) =>
-      db.integrationToolCall.findMany({
-        where: {
-          runId: run.id,
-          organizationId: run.organizationId,
-          tool: IntegrationToolName.SourceItemComment,
-          status: IntegrationToolCallStatus.Succeeded,
-          externalRef: { not: null },
-        },
-        select: { externalRef: true },
-      })
-    ),
-    withDb((db) =>
-      db.workflowActionRun.findMany({
-        where: {
-          runId: run.id,
-          organizationId: run.organizationId,
-          actionType: JiraActionType.AddComment,
-          status: WorkflowActionRunStatus.Succeeded,
-          externalRef: { not: null },
-        },
-        select: { externalRef: true },
-      })
-    ),
-  ]);
-  return new Set(
-    [...calls, ...actionRuns].flatMap((row) =>
-      row.externalRef ? [row.externalRef] : []
-    )
-  );
-}
-
-/**
  * Comments after the question that answer it: replies in the thread of one
  * of the run's own comments when there are any, else the top-level comments
  * (a reply in another thread answers someone else).
@@ -563,4 +526,184 @@ export async function autoRetryStep(
     events: [],
     data: { stepState: toJsonObject(state) },
   });
+}
+
+/** Launch errors on a forked attempt that go on to a fresh session. */
+const FORK_FALLBACK_LAUNCH_ERRORS: ReadonlySet<string> = new Set<string>([
+  WorkflowRunErrorCode.ComputeTargetUnavailable,
+  WorkflowRunErrorCode.AgentNotInProject,
+  WorkflowRunErrorCode.SigningRequired,
+  WorkflowRunErrorCode.DispatchFailed,
+  WorkflowRunErrorCode.PlanStateUnavailable,
+]);
+
+/**
+ * The next attempt after a carried session failed (agent.sameItem
+ * queue_resume): the runner no longer had the session, so a copy of it
+ * (`--fork-session`) is tried once when the runner forks, then a fresh session
+ * with the full thread. A loop that never started (LAUNCH_FAILED) goes
+ * straight to the fresh session. The fork is launched with the settings and
+ * prompt of the failed attempt, which already hold the messages file.
+ */
+export function continueCarriedStep(
+  run: EngineRun,
+  context: CarriedStepContext,
+  settled: Extract<AgentStepSettlement, { kind: "carryFallback" }>
+): Promise<StepOutcome> {
+  return withSpan(
+    "workflow.carried_step_fallback",
+    {
+      [AfAttribute.WorkflowRunId]: run.id,
+      [AfAttribute.OrgId]: run.organizationId,
+      [AfAttribute.LoopId]: settled.loop.loopId,
+    },
+    async (span) => {
+      const outcome = await continueCarriedStepInSpan(run, context, settled);
+      if (outcome.kind === "transition" && outcome.data?.error) {
+        setSpanOutcome(AfOutcome.Error, outcome.data.error.code, span);
+      }
+      return outcome;
+    }
+  );
+}
+
+type CarriedStepContext = {
+  agent: WorkflowAgentConfig;
+  projectId: string;
+  runAsUser: { id: string; clerkId: string };
+};
+
+async function continueCarriedStepInSpan(
+  run: EngineRun,
+  context: CarriedStepContext,
+  settled: Extract<AgentStepSettlement, { kind: "carryFallback" }>
+): Promise<StepOutcome> {
+  const { step, loop } = settled;
+  const snapshot = readRunProcessSnapshot(run.process);
+  if (!(snapshot && run.featureDocumentId)) {
+    return failRun(
+      runError(
+        WorkflowRunErrorCode.AgentConfigInvalid,
+        `The "${step.name}" step could not be read, so its session cannot be continued.`
+      )
+    );
+  }
+  // A retry after a crash between the launch and the status write: the
+  // step's latest loop is then the next attempt, not the failed one.
+  const latest = await findLatestRunLoop(
+    run.id,
+    LoopCommand.Step,
+    undefined,
+    step.id
+  );
+  if (latest && latest.loopId !== loop.loopId) {
+    return transition(WorkflowRunStatus.Running, [], { stepState: null });
+  }
+  const failed = await readCarriedLoop(loop.loopId, run.organizationId);
+  const missed = loop.error?.code === LoopErrorCode.ResumeSessionNotFound;
+  const fresh = {
+    run,
+    ...context,
+    step,
+    toolkit: snapshot.definition.toolkit,
+    documents: {
+      featureDocumentId: run.featureDocumentId,
+      planDocumentId: run.planDocumentId,
+    },
+  };
+  const forks =
+    missed &&
+    failed?.parentLoopId != null &&
+    failed.step !== null &&
+    settled.carried.attempt === WorkflowSessionCarryAttempt.Resume &&
+    (await runnerForksLoop(loop, run.organizationId));
+  const reason = fallbackReason(settled, missed);
+  log.info("workflow.run.session_carry_fallback", {
+    workflowRunId: run.id,
+    loopId: loop.loopId,
+    reason,
+    next: forks
+      ? WorkflowSessionCarryAttempt.Fork
+      : WorkflowSessionCarryAttempt.Fresh,
+  });
+  if (forks && failed?.parentLoopId && failed.step) {
+    const forked = await launchStepLoop({
+      runId: run.id,
+      organizationId: run.organizationId,
+      projectId: context.projectId,
+      runAsUser: context.runAsUser,
+      documentId: run.planDocumentId ?? run.featureDocumentId,
+      sourceDocumentId: run.featureDocumentId,
+      agent: context.agent,
+      step: { ...failed.step, forkSession: true },
+      prompt: failed.prompt ?? "",
+      computeTargetId: loop.computeTargetId,
+      resumeLoopId: failed.parentLoopId,
+      carried: {
+        fromRunId: settled.carried.fromRunId,
+        attempt: WorkflowSessionCarryAttempt.Fork,
+        depth: settled.carried.depth,
+        reason,
+      },
+      workspace: failed.workspace,
+    });
+    return forkOutcome(forked, async () =>
+      launchCarriedFresh(fresh, {
+        fromRunId: settled.carried.fromRunId,
+        reason: WorkflowSessionCarryReason.CarriedLaunchFailed,
+      })
+    );
+  }
+  const launched = await launchCarriedFresh(fresh, {
+    fromRunId: settled.carried.fromRunId,
+    reason,
+  });
+  return launched.ok
+    ? transition(WorkflowRunStatus.Running, [], { stepState: null })
+    : stepLaunchFailure(launched.error);
+}
+
+/** The runner of the failed loop forks sessions (organization-scoped). */
+async function runnerForksLoop(
+  loop: RunLoopState,
+  organizationId: string
+): Promise<boolean> {
+  if (!loop.computeTargetId) {
+    return false;
+  }
+  const target = await computeTargetsService.findById(loop.computeTargetId);
+  return (
+    target?.organizationId === organizationId &&
+    runnerForksSession(target.capabilities)
+  );
+}
+
+/** Why the attempt after `settled` is not a plain resume. */
+function fallbackReason(
+  settled: Extract<AgentStepSettlement, { kind: "carryFallback" }>,
+  missed: boolean
+): WorkflowSessionCarryReason {
+  if (!missed) {
+    return WorkflowSessionCarryReason.CarriedLaunchFailed;
+  }
+  return settled.carried.attempt === WorkflowSessionCarryAttempt.Fork
+    ? WorkflowSessionCarryReason.ForkSessionNotFound
+    : WorkflowSessionCarryReason.ResumeSessionNotFound;
+}
+
+/** A fork launch's outcome: a busy runner waits, a runner that cannot take it goes to fresh, anything else fails. */
+async function forkOutcome(
+  forked: Awaited<ReturnType<typeof launchStepLoop>>,
+  fresh: () => ReturnType<typeof launchStepLoop>
+): Promise<StepOutcome> {
+  if (forked.ok) {
+    return transition(WorkflowRunStatus.Running, [], { stepState: null });
+  }
+  if (!FORK_FALLBACK_LAUNCH_ERRORS.has(forked.error.code)) {
+    return stepLaunchFailure(forked.error);
+  }
+  const launched = await fresh();
+  return launched.ok
+    ? transition(WorkflowRunStatus.Running, [], { stepState: null })
+    : stepLaunchFailure(launched.error);
 }

@@ -16,3 +16,11 @@ export function forkUnsupportedMessage(input: {
 }): string {
   return `${input.machineName ?? "The runner"} runs a runner version that cannot fork a session: it would continue ${input.session} itself. ${input.advice}`;
 }
+
+/** A runner that reports a missing resume session (`loopStepResumeMiss`). */
+const resumeMissSchema = z.object({ loopStepResumeMiss: z.literal(true) });
+
+/** True when the compute target's runner reports `RESUME_SESSION_NOT_FOUND`. */
+export function runnerReportsResumeMiss(capabilities: unknown): boolean {
+  return resumeMissSchema.safeParse(capabilities).success;
+}

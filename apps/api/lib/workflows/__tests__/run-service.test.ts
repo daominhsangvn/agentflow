@@ -8,6 +8,7 @@ import {
   IntegrationToolCallStatus,
   ToolCallDecision,
 } from "@repo/api/src/types/integration-tools";
+import { LoopCommand } from "@repo/api/src/types/loop";
 import { ProcessDocumentType } from "@repo/api/src/types/project-process";
 import { Result, Status } from "@repo/api/src/types/result";
 import {
@@ -16,6 +17,11 @@ import {
   WorkflowRunEvent,
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
+import {
+  WorkflowSameItem,
+  WorkflowSessionCarryAttempt,
+  WorkflowSessionCarryReason,
+} from "@repo/api/src/types/workflow-same-item";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildEvent } from "@/lib/workflows/__tests__/support/ingest-db.test-fake";
 import { CancelRunFailure } from "@/lib/workflows/engine/advance";
@@ -34,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   db: {
     workflowRun: { findMany: vi.fn(), findFirst: vi.fn() },
     sessionDetail: { findMany: vi.fn() },
+    loop: { findMany: vi.fn() },
     workflow: { findFirst: vi.fn() },
     workflowTrigger: { findFirst: vi.fn() },
     workflowActionRun: {
@@ -436,6 +443,119 @@ describe("workflowRunService.get", () => {
       "post-1-late",
       "pre-2",
     ]);
+  });
+
+  it("shows the run a queued run waits for", async () => {
+    mocks.db.workflowRun.findFirst.mockResolvedValue(
+      runRow({
+        status: WorkflowRunStatus.Received,
+        agentConfig: { sameItem: WorkflowSameItem.Queue },
+      })
+    );
+    mocks.db.workflowRun.findMany.mockResolvedValue([
+      {
+        id: "run-earlier",
+        status: WorkflowRunStatus.NeedsInput,
+        createdAt: new Date("2026-10-01T09:00:00.000Z"),
+      },
+    ]);
+
+    const detail = await workflowRunService.get(IDS.org, IDS.run);
+
+    expect(detail?.queuedBehind).toEqual({
+      runId: "run-earlier",
+      status: WorkflowRunStatus.NeedsInput,
+    });
+  });
+
+  it("has no queuedBehind without the setting or once the run started", async () => {
+    mocks.db.workflowRun.findFirst.mockResolvedValue(
+      runRow({ status: WorkflowRunStatus.Received, agentConfig: {} })
+    );
+    expect((await workflowRunService.get(IDS.org, IDS.run))?.queuedBehind).toBe(
+      null
+    );
+
+    mocks.db.workflowRun.findFirst.mockResolvedValue(
+      runRow({
+        status: WorkflowRunStatus.Planning,
+        agentConfig: { sameItem: WorkflowSameItem.Queue },
+      })
+    );
+    expect((await workflowRunService.get(IDS.org, IDS.run))?.queuedBehind).toBe(
+      null
+    );
+    expect(mocks.db.workflowRun.findMany).not.toHaveBeenCalled();
+  });
+
+  it("shows how a carried session started", async () => {
+    mocks.db.workflowRun.findFirst.mockResolvedValue(
+      runRow({ agentConfig: { sameItem: WorkflowSameItem.QueueResume } })
+    );
+    mocks.listRunLoops.mockResolvedValue([
+      { loopId: "loop-1", command: LoopCommand.Step },
+      { loopId: "loop-2", command: LoopCommand.Step },
+    ]);
+    const carried = (
+      attempt: WorkflowSessionCarryAttempt,
+      reason: string | null
+    ) => ({
+      workflowRunId: IDS.run,
+      carriedSession: { fromRunId: "run-earlier", attempt, depth: 1, reason },
+    });
+    mocks.db.loop.findMany.mockResolvedValue([
+      {
+        id: "loop-1",
+        createdAt: new Date("2026-10-01T10:00:00.000Z"),
+        metadata: carried(WorkflowSessionCarryAttempt.Resume, null),
+      },
+      {
+        id: "loop-2",
+        createdAt: new Date("2026-10-01T11:00:00.000Z"),
+        metadata: carried(
+          WorkflowSessionCarryAttempt.Fork,
+          WorkflowSessionCarryReason.ResumeSessionNotFound
+        ),
+      },
+    ]);
+
+    const detail = await workflowRunService.get(IDS.org, IDS.run);
+
+    expect(detail?.sessionCarry).toEqual({
+      fromRunId: "run-earlier",
+      attempt: WorkflowSessionCarryAttempt.Fork,
+      reason: WorkflowSessionCarryReason.ResumeSessionNotFound,
+    });
+  });
+
+  it("has no sessionCarry without carried metadata", async () => {
+    mocks.db.workflowRun.findFirst.mockResolvedValue(
+      runRow({ agentConfig: { sameItem: WorkflowSameItem.QueueResume } })
+    );
+    mocks.listRunLoops.mockResolvedValue([
+      { loopId: "loop-1", command: LoopCommand.Step },
+    ]);
+    mocks.db.loop.findMany.mockResolvedValue([
+      { id: "loop-1", createdAt: new Date(), metadata: {} },
+    ]);
+
+    expect((await workflowRunService.get(IDS.org, IDS.run))?.sessionCarry).toBe(
+      null
+    );
+  });
+
+  it("runs no loop metadata query without queue_resume", async () => {
+    mocks.db.workflowRun.findFirst.mockResolvedValue(
+      runRow({ agentConfig: { sameItem: WorkflowSameItem.Queue } })
+    );
+    mocks.listRunLoops.mockResolvedValue([
+      { loopId: "loop-1", command: LoopCommand.Step },
+    ]);
+
+    const detail = await workflowRunService.get(IDS.org, IDS.run);
+
+    expect(detail?.sessionCarry).toBeNull();
+    expect(mocks.db.loop.findMany).not.toHaveBeenCalled();
   });
 
   it("returns null for a malformed id without querying", async () => {

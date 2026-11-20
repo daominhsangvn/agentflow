@@ -168,6 +168,7 @@ import {
   readStepOutputs,
   recordStepSessionId,
 } from "./loop-step.js";
+import { isResumeSessionMissing } from "./loop-step-resume-miss.js";
 import {
   closeLoopWorkspace,
   loopWorkspaceDirFor,
@@ -5281,6 +5282,10 @@ export async function handleProcessCompletion(
       });
     }
 
+    // Only a STEP loop that set step.reportResumeMiss is checked.
+    const resumeSessionMissing =
+      !wasCancelled && isResumeSessionMissing(body, diagnostics, claudeWorkDir);
+
     if (!wasCancelled) {
       if (trustedUserVisibleFailure) {
         loopError(
@@ -5328,6 +5333,17 @@ export async function handleProcessCompletion(
           ...failureEventBase,
           code: LoopErrorCode.AuthChallenge,
           message: authMsg,
+        });
+      } else if (resumeSessionMissing) {
+        loopError(loopId, "Resume session not found on this runner");
+        gatewayLog.error(
+          "loop-harness",
+          `${command} could not resume its session, loopId=${loopId}`
+        );
+        await postFailureLoopEvent({
+          ...failureEventBase,
+          code: LoopErrorCode.ResumeSessionNotFound,
+          message: "The agent session to continue was not found on this runner",
         });
       } else {
         loopError(loopId, `Process failed with exit code ${exitCode}`);

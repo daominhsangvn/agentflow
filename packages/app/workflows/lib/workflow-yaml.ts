@@ -323,6 +323,7 @@ function resolveWorkflow(
     agent: {
       mode: workflow.agent.mode,
       stopOnOpenQuestions: workflow.agent.stopOnOpenQuestions,
+      ...(workflow.agent.sameItem ? { sameItem: workflow.agent.sameItem } : {}),
       computeTargetId: runner.id,
       runners,
       repository: workflow.agent.repository ?? null,

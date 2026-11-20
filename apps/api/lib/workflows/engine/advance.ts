@@ -11,6 +11,7 @@ import {
   WorkflowRunRetryMode,
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 import { Prisma, withDb } from "@repo/database";
 import { AfAttribute, AfOutcome } from "@repo/observability/af-attributes";
 import { parseError } from "@repo/observability/error";
@@ -29,6 +30,12 @@ import { stepStartedEvents } from "./agent-step";
 import { resumeFailedStep } from "./agent-step-resume";
 import { cancelRunLoops } from "./cancel";
 import { runError } from "./errors";
+import {
+  itemRetryGuard,
+  loadItemRunKey,
+  nextQueuedItemRun,
+  readSameItem,
+} from "./item-queue";
 import { enterStep, loadRunContext, runPhaseStep } from "./phases";
 import { resolveRunProcess } from "./process";
 import {
@@ -209,6 +216,10 @@ export const RetryRunFailure = {
   /** The step could not be started; `error` says why. The run stays failed. */
   StartFailed: "start_failed",
   Busy: "busy",
+  /** agent.sameItem: another run of the same item is open. */
+  ItemBusy: "item_busy",
+  /** agent.sameItem queue_resume: a later run of the item continued its session and folder. */
+  ItemMovedOn: "item_moved_on",
 } as const;
 export type RetryRunFailure =
   (typeof RetryRunFailure)[keyof typeof RetryRunFailure];
@@ -262,6 +273,10 @@ async function retryRunLocked(
   const lease: RunLease = { runId, until: leaseUntil };
   try {
     const run = await loadEngineRun(runId);
+    const blocked = run ? await retryBlockedByItem(run) : null;
+    if (blocked) {
+      return Result.err({ failure: blocked });
+    }
     const error = await withDb((db) =>
       db.workflowRun.findUnique({
         where: { id: runId },
@@ -428,7 +443,12 @@ async function applyTransition(
   });
   if (applied) {
     logTransition(run, outcome);
-    if (hasPostEvents(outcome.events)) {
+    if (
+      isFinal(outcome.status) &&
+      readSameItem(run.agentConfig) !== WorkflowSameItem.Ignore
+    ) {
+      waitUntil(() => finishItemRun(run.id, run.organizationId));
+    } else if (hasPostEvents(outcome.events)) {
       waitUntil(drainActionRuns({ runId: run.id }));
     }
   }
@@ -451,6 +471,15 @@ async function scheduleStepRetry(
       data: { stepAttempts: run.stepAttempts + 1, nextStepAt },
     })
   );
+  if (outcome.error.code === WorkflowRunErrorCode.ItemQueued) {
+    log.debug("workflow.run.queued_wait", {
+      workflowRunId: run.id,
+      organizationId: run.organizationId,
+      attempt: run.stepAttempts + 1,
+      nextStepAt,
+    });
+    return;
+  }
   log.warn(`${LOG_PREFIX} Run step failed temporarily; retrying later`, {
     runId: run.id,
     organizationId: run.organizationId,
@@ -696,4 +725,36 @@ async function readRunSpanContext(runId: string): Promise<{
     });
     return null;
   }
+}
+
+/**
+ * A run of an item with agent.sameItem ended: sends its reply, then starts the
+ * next queued run of the item at once (item-queue.ts).
+ */
+async function finishItemRun(
+  runId: string,
+  organizationId: string
+): Promise<void> {
+  await drainActionRuns({ runId });
+  const next = await nextQueuedItemRun(runId, organizationId);
+  if (next) {
+    await advanceRun(next);
+  }
+}
+
+/** agent.sameItem: why a run of a busy or moved-on item cannot be retried (no query without the setting). */
+async function retryBlockedByItem(
+  run: Pick<EngineRun, "id" | "organizationId" | "agentConfig">
+): Promise<RetryRunFailure | null> {
+  if (readSameItem(run.agentConfig) === WorkflowSameItem.Ignore) {
+    return null;
+  }
+  const key = await loadItemRunKey(run.id, run.organizationId);
+  const guard = key
+    ? await itemRetryGuard({ ...key, agentConfig: run.agentConfig })
+    : null;
+  if (guard === "busy") {
+    return RetryRunFailure.ItemBusy;
+  }
+  return guard === "moved_on" ? RetryRunFailure.ItemMovedOn : null;
 }

@@ -23,6 +23,7 @@ import {
   WORKFLOW_RUNNER_CONDITION_MAX,
   WORKFLOW_RUNNER_RULES_MAX,
 } from "@repo/api/src/types/workflow-runner-rules";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 import { z } from "zod";
 import type { WorkflowComputeTargetOption } from "./workflow-editor-options";
 import { WORKFLOW_RUN_EVENT_ORDER } from "./workflow-labels";
@@ -104,6 +105,7 @@ export const WORKFLOW_YAML_KEYS = {
     "runners",
     "mode",
     "stopOnOpenQuestions",
+    "sameItem",
     "repository",
     "prd",
     "titleTemplate",
@@ -339,6 +341,11 @@ const agentYamlSchema = z
         .transform((rules) => rules ?? []),
       mode: workflowAgentModeSchema.default(WorkflowAgentMode.PlanAndExecute),
       stopOnOpenQuestions: z.boolean().default(true),
+      sameItem: z
+        .enum(WorkflowSameItem, {
+          error: "sameItem is ignore, queue or queue_resume",
+        })
+        .nullish(),
       repository: z
         .object({
           fullName: requiredText(
@@ -363,6 +370,18 @@ const agentYamlSchema = z
     { error: "Add the agent: mapping (runner, mode, …)" }
   )
   .superRefine((agent, context) => {
+    if (
+      agent.mode === WorkflowAgentMode.Orchestrated &&
+      agent.sameItem &&
+      agent.sameItem !== WorkflowSameItem.Ignore
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["sameItem"],
+        message:
+          "sameItem: an orchestrated workflow takes a thread's messages through agent.orchestrator.concurrency; remove sameItem",
+      });
+    }
     const grants = agent.orchestrator?.connections ?? {};
     if (
       agent.mode !== WorkflowAgentMode.Orchestrated &&

@@ -3,6 +3,7 @@ import {
   IntegrationDeliverySource,
 } from "@repo/api/src/types/integration";
 import type { ToolCallDecision } from "@repo/api/src/types/integration-tools";
+import { LoopCommand } from "@repo/api/src/types/loop";
 import { Result, Status, type StatusCode } from "@repo/api/src/types/result";
 import {
   type StartWorkflowRunInput,
@@ -24,6 +25,7 @@ import {
   workflowInstructionRunDetailSchema,
   workflowRunEventSchema,
 } from "@repo/api/src/types/workflow";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 import { type Prisma, withDb } from "@repo/database";
 import { AfAttribute } from "@repo/observability/af-attributes";
 import { withSpan } from "@repo/observability/span";
@@ -41,6 +43,7 @@ import {
   projectScopeKeys,
 } from "@/lib/integrations/project-connections";
 import { findTriggerDefinition } from "@/lib/integrations/registry";
+import { readCarriedSessionMetadata } from "@/lib/loops/carried-session-metadata";
 import { waitUntil } from "@/lib/wait-until";
 import { drainActionRuns } from "./engine/actions";
 import {
@@ -55,6 +58,7 @@ import {
   ingestEvents,
   toDeliveryPayload,
 } from "./engine/ingest";
+import { findItemQueueHolder, readSameItem } from "./engine/item-queue";
 import { findRetryableStep, toRetryStep } from "./engine/retry-step";
 import {
   readRunError,
@@ -62,7 +66,7 @@ import {
   readRunSource,
   readRunStatus,
 } from "./engine/run-data";
-import { listRunLoops } from "./engine/run-loops";
+import { listRunLoops, type RunLoopState } from "./engine/run-loops";
 import { buildRunProcessView } from "./engine/run-process-view";
 import { toSourceClassificationView } from "./engine/source-classification-record";
 import { toSourceDocumentType } from "./engine/source-document";
@@ -176,22 +180,24 @@ export const workflowRunService = {
       return null;
     }
     const loops = await listRunLoops(run.id);
-    const [sessions, actionRuns, documents, toolCalls] = await Promise.all([
-      listRunSessions(organizationId, loops),
-      withDb((db) =>
-        db.workflowActionRun.findMany({
-          where: { runId: run.id, organizationId },
-          include: { action: { select: { position: true } } },
-          orderBy: { createdAt: "asc" },
-        })
-      ),
-      listRunDocuments({
-        id: run.id,
-        organizationId,
-        featureDocumentId: run.featureDocument?.id ?? null,
-      }),
-      integrationToolCallService.listForRun(organizationId, run.id),
-    ]);
+    const [sessions, actionRuns, documents, toolCalls, sessionCarry] =
+      await Promise.all([
+        listRunSessions(organizationId, loops),
+        withDb((db) =>
+          db.workflowActionRun.findMany({
+            where: { runId: run.id, organizationId },
+            include: { action: { select: { position: true } } },
+            orderBy: { createdAt: "asc" },
+          })
+        ),
+        listRunDocuments({
+          id: run.id,
+          organizationId,
+          featureDocumentId: run.featureDocument?.id ?? null,
+        }),
+        integrationToolCallService.listForRun(organizationId, run.id),
+        readSessionCarry(organizationId, run.agentConfig, loops),
+      ]);
     return {
       ...toRunSummary(run),
       feature: toSourceDocumentRef(run.featureDocument),
@@ -218,6 +224,8 @@ export const workflowRunService = {
       process: buildRunProcessView(run, loops),
       toolCalls,
       retryStep: await toRetryStep(run.id, findRetryableStep(run)),
+      queuedBehind: await findQueuedBehind(run, organizationId),
+      sessionCarry,
     };
   },
 
@@ -405,6 +413,7 @@ const RUN_SUMMARY_SELECT = {
 
 const RUN_DETAIL_SELECT = {
   ...RUN_SUMMARY_SELECT,
+  agentConfig: true,
   process: true,
   stepId: true,
   stepState: true,
@@ -782,6 +791,18 @@ function retryFailure(failure: {
         message:
           "The step has no agent session to resume. Restart the step instead.",
       };
+    case RetryRunFailure.ItemBusy:
+      return {
+        status: Status.Conflict,
+        message:
+          "Another run of the same item is not finished. Retry this run after it ends, or mention the bot again.",
+      };
+    case RetryRunFailure.ItemMovedOn:
+      return {
+        status: Status.Conflict,
+        message:
+          "A later run of the same item already continued this run's agent session. Mention the bot again instead of retrying.",
+      };
     case RetryRunFailure.StartFailed:
       return {
         status: Status.Conflict,
@@ -889,4 +910,68 @@ function foldRunSummary(
     }
   }
   return summary;
+}
+
+/**
+ * A queued run (agent.sameItem, still received): the run of its item it waits
+ * for and that run's status.
+ */
+async function findQueuedBehind(
+  run: Pick<
+    Prisma.WorkflowRunGetPayload<{ select: typeof RUN_DETAIL_SELECT }>,
+    "id" | "status" | "agentConfig" | "workflowId" | "sourceKey" | "createdAt"
+  >,
+  organizationId: string
+): Promise<WorkflowRunDetail["queuedBehind"]> {
+  if (
+    run.status !== WorkflowRunStatus.Received ||
+    readSameItem(run.agentConfig) === WorkflowSameItem.Ignore
+  ) {
+    return null;
+  }
+  const holder = await findItemQueueHolder({ ...run, organizationId });
+  return holder ? { runId: holder.id, status: holder.status } : null;
+}
+
+/**
+ * How the first agent step of a run that continues the item's session started
+ * (agent.sameItem queue_resume): the run's latest attempt loop. No query for
+ * any other setting.
+ */
+async function readSessionCarry(
+  organizationId: string,
+  agentConfig: unknown,
+  loops: readonly RunLoopState[]
+): Promise<WorkflowRunDetail["sessionCarry"]> {
+  if (readSameItem(agentConfig) !== WorkflowSameItem.QueueResume) {
+    return null;
+  }
+  const ids = loops
+    .filter((loop) => loop.command === LoopCommand.Step)
+    .map((loop) => loop.loopId);
+  if (ids.length === 0) {
+    return null;
+  }
+  const rows = await withDb((db) =>
+    db.loop.findMany({
+      where: { id: { in: ids }, organizationId },
+      select: { id: true, metadata: true, createdAt: true },
+    })
+  );
+  const attempts = rows
+    .map((row) => ({
+      createdAt: row.createdAt,
+      carried: readCarriedSessionMetadata(row.metadata),
+    }))
+    .sort(
+      (left, right) => right.createdAt.getTime() - left.createdAt.getTime()
+    );
+  const latest = attempts.find((attempt) => attempt.carried !== null)?.carried;
+  return latest
+    ? {
+        fromRunId: latest.fromRunId,
+        attempt: latest.attempt,
+        reason: latest.reason,
+      }
+    : null;
 }
