@@ -169,6 +169,7 @@ agent:
     debounceSeconds: 20                # quiet time before a turn, 0-600
     turnTimeoutMinutes: 10             # one turn's limit
   stopOnOpenQuestions: true
+  sameItem: ignore                     # ignore | queue | queue_resume, see "Item queue"
   repository:                          # optional override from the team pool
     fullName: acme/web
     branch: main
@@ -556,6 +557,10 @@ apps/api/lib/workflows/
     cancel.ts              cancels a run's active loops
     run-process-view.ts    the run's process as its detail page shows it
     run-data.ts            zod readers/writers for workflow_runs JSON columns
+    ingest-run.ts          run creation of the ingest decision, with the agent.sameItem branch
+    item-queue.ts          the item queue: who waits for whom, retry delays, retry guard
+    carried-session.ts     which earlier agent session a run continues; the short prompt and new-messages.md
+    run-comments.ts        ids of the comments a run posted on its source item
     step-retry.ts          step retry backoff (stepAttempts / nextStepAt)
     launch.ts              programmatic PLAN/EXECUTE launcher (no HTTP)
     documents.ts           PRD or Issue + plan document creation / refresh
@@ -717,7 +722,19 @@ returned to the caller right away as a 400; nothing is retried.
        (`"applied": true` in plan.json), so EXECUTE does not process them
        again (prompt.md phases 1.2/1.2a). A PLAN outside a workflow run
        always plans from scratch;
-     - any other active status → nothing (`detail: "run already active"`);
+     - any other active status → nothing (`detail: "run already active"`),
+       unless the workflow sets `agent.sameItem` (below);
+   - with `agent.sameItem` set to `queue` or `queue_resume` (never for an
+     orchestrated workflow, which always reads it as `ignore`), the active
+     run does not stop the event (`engine/ingest-run.ts`
+     `decideQueuedLocked`, inside the ingest advisory lock): a `needs_input` run
+     of the item is resumed first, as above; otherwise a new run is created
+     with a `createdAt` after the item's latest run
+     (`max(now, latest createdAt + 1 ms)`), so the order of the runs is the
+     order of the decisions. The result is `created` when no other run of the
+     item is active and `queued` when one is (`workflow.run.queued` is logged
+     with `behindRunId`). The run's `source` carries the event's `message`
+     (id, text) next to `occurredAt`, which the carried session uses;
    - else create a run: status `received`, `agentConfig` snapshot of the
      workflow, `runAsUserId` of the workflow, `source = {item, inlineItem?,
      actor, attributes, extras, occurredAt}`. The unique
@@ -726,8 +743,8 @@ returned to the caller right away as a 400; nothing is retried.
 4. Update the delivery: outcome `accepted` with `runCount`, or `ignored` with
    the reason; `lastDeliveryAt` on the connection.
 5. Record the events: per event and workflow, one `workflow_events` row with
-   result `created | resumed | duplicate | active | signaled | replied |
-   case_message | filtered` (one `createMany` after the delivery update; a
+   result `created | queued | resumed | duplicate | active | signaled |
+   replied | case_message | filtered` (one `createMany` after the delivery update; a
    failure is logged and never fails ingest). `filtered` means a trigger of
    that type exists but its config or `matches` rejected the event; a workflow
    with no trigger of that type gets no row. Replies, signals and orchestrator
@@ -1170,6 +1187,141 @@ Failures are values, not exceptions: every step maps its error to
 `dispatch_failed`, `plan_failed`, `execute_failed`, `plan_state_unavailable`,
 `phase_timeout`, `cancelled`, ...). Messages are trimmed to 1000 characters
 and never contain secrets.
+
+### Item queue
+
+`agent.sameItem` (`ignore` default, `queue`, `queue_resume`; not for
+orchestrated workflows: the editor and the save API refuse it, and a stored
+value is read as `ignore`) decides what a new event on an item with an active
+run does. `ignore`: nothing, except that a `needs_input` run takes the event as
+its answer. `queue` and `queue_resume`: the event creates its own run (ingest,
+above), and the runs of one item execute one after another, in the order of
+`createdAt` then id (`engine/item-queue.ts`). Different items (in Teams, other
+threads) run in parallel. Each run fires its own actions, so two mentions in a
+thread get two replies, in order, each mentioning its own requester.
+
+A queued run stays `received` and `stepReceived` asks `itemQueueWait` before it
+moves to `ingesting`. It starts only when all three hold:
+
+1. no other run of the item is past `received` and not final (`ingesting`,
+   `running`, `needs_input` and `needs_approval` all hold the item; the last two
+   without a time limit; a cancelled run does not hold it);
+2. no other `received` run of the item is earlier;
+3. the previous run's reply is final: its post actions of the final event
+   (`succeeded` or `failed`, same cycle) are no longer `pending`, `running` or
+   `waiting`. A failed or skipped row does not hold the queue; one still open
+   15 minutes after the previous run ended (`ITEM_QUEUE_ACTIONS_WAIT_MS`) is
+   overtaken and the new run starts with a `workflow.run.item_queue_actions_timeout`
+   warning. An `agent-instruction` action that takes longer than that is
+   therefore overtaken too. A cancelled run has no final-event rows, so
+   it never delays the next one.
+
+While it waits, the step retries with the error code `item_queued`: after 60 s
+(`ITEM_QUEUE_RETRY_MS`) while another run is open, after 15 s
+(`ITEM_QUEUE_ACTIONS_RETRY_MS`) while the reply is open. The retry runs at the
+next scheduler tick after its time, so the 15 s wait is at least one tick
+(`WORKFLOW_TICK_SECONDS`, 10 s). At most 50 other runs of the item are looked
+at. The run page shows "Waiting for an earlier run of this item (<status>)"
+(`queuedBehind` of the run detail).
+
+**Drain, then advance.** When a run of an item with the setting reaches a final
+status, `finishItemRun` drains its action runs (its reply is sent), then
+`nextQueuedItemRun` clears the `nextStepAt` of the item's first waiting run and
+advances it at once, so the next run does not wait for the 60 s retry. It does
+so only when no other run of the item is past `received`. Runs without the
+setting take the old path: no extra query.
+
+**Retry refusals.** For a run of an item with the setting, `POST
+/workflow-runs/{id}/retry` answers 409 `item_busy`
+while another run of the item is not final, and with `queue_resume` also
+`item_moved_on` once a later run of the item exists (a later run has continued
+the session and may have rewritten the work files; mention the bot again
+instead).
+
+**Session carry-over (`queue_resume`).** The run's first agent step continues
+the agent session of the item's previous run instead of starting a new one
+(`engine/carried-session.ts` `findCarriedSession`, `launchFirstStepCarried` in
+`agent-step.ts`). It continues only when all of these hold; otherwise it starts
+a fresh session on the runner resolved the normal way (rules, project Agents)
+and records why. Reasons are `WorkflowSessionCarryReason`
+(`@repo/api/src/types/workflow-same-item`):
+
+| Condition | Reason when it fails |
+|---|---|
+| the workflow is `queue_resume` | `same_item_not_resume` |
+| the run is in cycle 1 (not a resume or retry) | `not_first_cycle` |
+| the item has an earlier run | `no_previous_run` |
+| that run has a STEP loop of this step with a session id and a computer (any attempt; the newest) | `no_previous_session` |
+| fewer than 20 runs are chained (`MAX_CARRIED_SESSION_DEPTH`; a fresh attempt resets the count) | `session_depth_limit` |
+| the previous run's runner still exists in the organization and is the runner the project's rules resolve for this run and the run-as user (`resolveProjectComputeTarget`: online, in the project's Agents) | `previous_runner_unavailable` |
+| that runner reports `loopStepResumeMiss` (see docs/runner.md) | `runner_cannot_report_resume_miss` |
+| on an auto runner: the step does not push (`finish: push`) | `pushing_step_on_auto_runner` |
+| on an auto runner: every artifact path of the step is inside `.agentflow-ai/work/`, the folder that is reset | `artifacts_outside_work_dir` |
+| on an auto runner: the earlier run's folder is known (`carriedWorkspace` of the session loop, else the slug of its own Issue or plan document) | `previous_workspace_unknown` |
+
+The previous runner wins over the runner rules when it is usable. Both runner
+kinds resume: a personal runner runs Claude in the project folder, and an auto
+runner reuses the earlier run's `loops/<slug>` folder (below).
+
+*Attempts.* The attempt of the first loop is recorded on the loop metadata
+(`carriedSession {fromRunId, attempt, depth, reason}`; attempt `resume`, `fork`
+or `fresh`) and shown on the run page. (1) Plain `--resume` of the previous
+session, `parentLoopId` = the earlier loop, with `step.reportResumeMiss`. (2)
+If the runner answers `RESUME_SESSION_NOT_FOUND` (Claude Code no longer has the
+session) and it can fork (`loopStepForkSession`), one more loop with
+`--resume --fork-session` (reason `resume_session_not_found`). (3) A fork that
+misses too (`fork_session_not_found`), a runner that cannot fork, or a loop that
+never started (`LAUNCH_FAILED`, reason `carried_launch_failed`) go to a fresh
+session with the full thread. Only `RESUME_SESSION_NOT_FOUND` and `LAUNCH_FAILED`
+of the attempt loop lead to the next attempt; any other failure of the resumed
+loop (branch setup, authentication, spawn, the agent failing) takes the step's
+normal failure and auto-retry path, and a case task loop keeps its error codes.
+A launch error of the carried attempt (`compute_target_unavailable`,
+`agent_not_in_project`, `signing_required`, `dispatch_failed`,
+`plan_state_unavailable`) starts the fresh session at once; a busy runner waits
+like any launch; other launch errors fail the step as they do today.
+
+*Workspace on auto runners.* The loop carries the earlier run's folder slug
+(`carriedWorkspace {slug, fromRunId}` in the loop metadata) and the API sends it
+as the loop's `artifactSlug`, so the loop runs in the same `loops/<slug>`
+directory where Claude finds the session. Every loop of the carried run uses it
+(attempt loop, answers resume, repair, auto-retry, Restart, later steps),
+derived from the run's latest attempt loop; after a fresh fallback the run's own
+folder is used. The attempt loop starts from a clean work directory
+(`fresh`): files such as `answer.md` of the earlier run are removed before the
+agent starts. A personal runner needs none of this: each run keeps its own work
+directory while Claude runs in the project folder.
+
+*What the agent is told.* The sessions grow, so the resumed prompt is short
+(not the whole thread: the command line is limited, notably on Windows): the
+instruction's leading slash command if it has one, a pointer to
+`inputs/new-messages.md` in the loop's work directory (`CARRIED_MESSAGES_FILE`), the step's instruction, a pointer to
+`issue.md` ("only if those messages are not enough"), and a reminder that this
+request has its own output files. `new-messages.md` holds the messages written
+on the item since the previous run's request (after its `occurredAt`, before
+this run's), oldest first, and the new request (at most 8,000 characters).
+Left out: the messages that started the two runs, the bot's own posts (Teams:
+`fromBot`; Jira: the comments the earlier run posted, from
+`readRunCommentIds`), and anything after this run's mention (the next run's).
+Over 40,000 characters (`CARRIED_DELTA_MAX`) the oldest messages are dropped and a line says how
+many. Limits: only creation times are compared, so edits and deletions are not
+seen; a message without a creation time is left out; when the previous run's
+time is unknown the file says so and points to `issue.md`. The runner clears the loop's `inputs/` folder at the start of every step loop, so a later loop of the run that brings no inputs of its own (auto-retry, Resume, Restart, answers, questions repair) is launched with the inputs of the run's latest resume or fork attempt (`launch-step.ts` `runCarry`); after a fresh fallback none are carried. A fresh fallback gets the full thread in `issue.md`
+and can contain mentions later than its own (the whole thread is current). So
+every fresh first-step launch under `queue` or `queue_resume` (the first launch
+of a plain `queue` run, and each fresh fallback) appends the run's own request
+to the prompt after the instruction (`carried-request.ts`): the triggering
+message and its author, untrusted-wrapped, with the rule that later messages
+belong to later runs. A request over 3 000 characters goes to
+`inputs/request.md` instead (capped at 8 000). A
+session is carried through at most 20 runs; within that, a session that grows
+long is compacted by Claude Code itself.
+
+*Usage.* On a headless runner each loop reports its own numbers and gets its
+own session row, even when two loops share a Claude session id. The Electron
+desktop app may count a resumed session twice, as it already does for answers
+resumes. Whether a resumed invocation reports per-invocation or cumulative
+tokens is not confirmed (see docs/e2e.md "Item queue and session carry-over").
 
 ### Editor and save checks for runner fit
 
@@ -2137,8 +2289,9 @@ Trigger `microsoft_teams.bot_mentioned` — a `message` activity in a channel
 of the bot's tenant that @mentions the bot (new post or thread reply; group
 and personal chats, other tenants and the bot's own messages are ignored).
 Filter: `channels` (empty = all of the project connection). The item is the
-**thread**: key `teams-{hash(channel, root)}` (one run per thread; another
-mention resumes a `needs_input` run), externalId
+**thread**: key `teams-{hash(channel, root)}` (one active run per thread; another
+mention resumes a `needs_input` run, and starts a queued run of its own when
+the workflow sets `agent.sameItem`, see "Item queue"), externalId
 `{teamGroupId}|{channelId}|{rootId}|{messageId}`, dedupKey
 `{conversationId}:mention:{messageId}`. Extras (`run.sourceExtras`):
 `teamsServiceUrl`, `teamsConversationId`, `teamsRequesterId`,
@@ -2149,6 +2302,9 @@ Source: `fetchItem` reads the root post and up to 500 replies through Graph
 message that mentioned the bot, without the mention (the request);
 section **Teams thread** = the whole thread oldest first (oldest replies
 dropped above 60 000 characters); reporter = who mentioned the bot.
+With `agent.sameItem` the source item also carries `thread`, the thread's
+messages with their creation time and whether the bot wrote them, which the
+carried session reads for `new-messages.md`.
 Anyone in the channel can ask; thread text is untrusted input like ticket
 text.
 

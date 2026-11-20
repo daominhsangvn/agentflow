@@ -138,6 +138,7 @@ AgentFlow: human-governed, AI-centric software delivery platform. AI produces ar
 
 ### Code Organization
 - **[convention]**: Better Auth endpoint policy (invitation token, role assignment, grantable statements) lives in `apps/api/lib/auth/auth-endpoint-guards.ts` as plugin `hooks.before`; `organizationHooks` do not get the caller for `update-member-role`. Test it against `better-auth/test` `getTestInstance`, not mocks.
+- **[pattern]**: `agent.sameItem` (`queue` / `queue_resume`, process-mode workflows only; docs/workflows.md "Item queue") queues runs of one source item and carries the agent session to the next run: `apps/api/lib/workflows/engine/item-queue.ts`, `carried-session.ts`, `carried-request.ts`. Orchestrator cases never go through it; keep new behavior there behind the setting (no extra query when it is absent). `e2e/workflow-item-queue.spec.ts` covers it.
 - **[pattern]**: Check `@repo/github` (`packages/github/index.ts`) before implementing new GitHub API functions.
 - **[convention]**: Domain-specific parsers → domain package (`packages/github/`), not `apps/api/lib/`. Import via subpath.
 - **[convention]**: New parser/utility modules in domain packages must include unit tests.
