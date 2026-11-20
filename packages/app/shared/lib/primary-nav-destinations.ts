@@ -32,6 +32,7 @@ import {
   HomeIcon,
   InboxIcon,
   type LucideIcon,
+  PlayIcon,
   PlugIcon,
   ZapIcon,
 } from "lucide-react";
@@ -111,6 +112,12 @@ export const PRIMARY_NAV_DESTINATIONS: readonly PrimaryNavDestination[] = [
     group: PrimaryNavGroup.Work,
   },
   {
+    title: "Runs",
+    path: RUNS_NAV_PATH,
+    icon: PlayIcon,
+    group: PrimaryNavGroup.Work,
+  },
+  {
     title: "Sessions",
     path: SESSIONS_NAV_PATH,
     icon: HistoryIcon,
@@ -134,7 +141,7 @@ export const PRIMARY_NAV_DESTINATIONS: readonly PrimaryNavDestination[] = [
     icon: PlugIcon,
     group: PrimaryNavGroup.Setup,
   },
-  // My Tasks, Documents, Issues, Routines, Inbox, Branches and Runs (hidden
+  // My Tasks, Documents, Issues, Routines, Inbox and Branches (hidden
   // while the orchestrator is the focus) routes still exist for direct links;
   // they are not in the menu.
 ] as const;

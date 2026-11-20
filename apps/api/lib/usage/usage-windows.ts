@@ -47,37 +47,12 @@ export async function loadWindowedUsage(
   const since30 = new Date(now.getTime() - 30 * DAY_MS);
   const since7 = new Date(now.getTime() - 7 * DAY_MS);
   const { computeTargetId } = options;
-  const sessionTarget = computeTargetId
-    ? Prisma.sql`AND sd.compute_target_id = ${computeTargetId}::uuid`
-    : Prisma.empty;
-  const loopTarget = computeTargetId
-    ? Prisma.sql`AND l.compute_target_id = ${computeTargetId}::uuid`
-    : Prisma.empty;
-  // The SQL mirrors `sessionActiveMs`/`resolveLoopUsage`; change both together.
   const [groups, turns] = await Promise.all([
     withDb((db) =>
       db.$queryRaw<UsageGroupRow[]>(
         Prisma.sql`
           WITH units AS (
-            SELECT sd.compute_target_id, sd.session_started_at AS at,
-                   sd.input_tokens::bigint AS input_tokens, sd.output_tokens::bigint AS output_tokens,
-                   sd.estimated_cost::numeric AS cost,
-                   COALESCE(NULLIF(r.runtime_ms, 0),
-                     GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(sd.session_ended_at, sd.last_activity_at, sd.session_updated_at) - sd.session_started_at)) * 1000))::bigint AS active_ms
-            FROM session_detail sd
-            JOIN artifacts a ON a.id = sd.artifact_id
-            LEFT JOIN agent_session_usage_rollups r ON r.artifact_id = sd.artifact_id
-            WHERE a.organization_id = ${organizationId}::uuid AND sd.session_started_at >= ${since30}
-              ${sessionTarget}
-            UNION ALL
-            SELECT l.compute_target_id, l.created_at, l.tokens_input::bigint, l.tokens_output::bigint, l.estimated_cost::numeric,
-                   CASE WHEN l.started_at IS NULL THEN 0
-                        ELSE GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(l.completed_at, ${now}) - l.started_at)) * 1000) END::bigint
-            FROM loops l
-            WHERE l.organization_id = ${organizationId}::uuid AND l.created_at >= ${since30}
-              ${loopTarget}
-              AND NOT EXISTS (SELECT 1 FROM session_detail s2
-                              WHERE s2.source_loop_id = l.id::text OR s2.artifact_id = l.session_artifact_id)
+            ${usageUnitsSql(organizationId, since30, now, computeTargetId)}
           )
           SELECT compute_target_id, (at >= ${since7}) AS in7d,
                  SUM(input_tokens)::bigint AS input_tokens, SUM(output_tokens)::bigint AS output_tokens,
@@ -147,4 +122,45 @@ export function foldWindowedUsage(
     );
   }
   return { last7d, last30d, byAgent };
+}
+
+/**
+ * The `units` CTE body: one row per synced session plus one per loop without a
+ * synced session, from `since` on. Columns: compute_target_id, at,
+ * input_tokens, output_tokens, cost, active_ms.
+ * The SQL mirrors `sessionActiveMs`/`resolveLoopUsage`; change both together.
+ */
+export function usageUnitsSql(
+  organizationId: string,
+  since: Date,
+  now: Date,
+  computeTargetId?: string
+): Prisma.Sql {
+  const sessionTarget = computeTargetId
+    ? Prisma.sql`AND sd.compute_target_id = ${computeTargetId}::uuid`
+    : Prisma.empty;
+  const loopTarget = computeTargetId
+    ? Prisma.sql`AND l.compute_target_id = ${computeTargetId}::uuid`
+    : Prisma.empty;
+  return Prisma.sql`
+      SELECT sd.compute_target_id, sd.session_started_at AS at,
+             sd.input_tokens::bigint AS input_tokens, sd.output_tokens::bigint AS output_tokens,
+             sd.estimated_cost::numeric AS cost,
+             COALESCE(NULLIF(r.runtime_ms, 0),
+               GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(sd.session_ended_at, sd.last_activity_at, sd.session_updated_at) - sd.session_started_at)) * 1000))::bigint AS active_ms
+      FROM session_detail sd
+      JOIN artifacts a ON a.id = sd.artifact_id
+      LEFT JOIN agent_session_usage_rollups r ON r.artifact_id = sd.artifact_id
+      WHERE a.organization_id = ${organizationId}::uuid AND sd.session_started_at >= ${since}
+        ${sessionTarget}
+      UNION ALL
+      SELECT l.compute_target_id, l.created_at, l.tokens_input::bigint, l.tokens_output::bigint, l.estimated_cost::numeric,
+             CASE WHEN l.started_at IS NULL THEN 0
+                  ELSE GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(l.completed_at, ${now}) - l.started_at)) * 1000) END::bigint
+      FROM loops l
+      WHERE l.organization_id = ${organizationId}::uuid AND l.created_at >= ${since}
+        ${loopTarget}
+        AND NOT EXISTS (SELECT 1 FROM session_detail s2
+                        WHERE s2.source_loop_id = l.id::text OR s2.artifact_id = l.session_artifact_id)
+  `;
 }

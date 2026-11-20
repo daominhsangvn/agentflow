@@ -2,11 +2,14 @@ import type { AgentSessionUsageSummary } from "@repo/api/src/types/agent-session
 import {
   formatCostMetricDetail,
   formatHonestCostMetricDetail,
+  formatTotalCostMetricDetail,
   SESSIONS_COST_HONEST_METRIC_CARD_INFO,
   SESSIONS_COST_HONEST_METRIC_CARD_LABEL,
   SESSIONS_COST_METRIC_CARD_INFO,
   SESSIONS_COST_METRIC_CARD_LABEL,
   SESSIONS_COST_NO_COST_RECORDED_DETAIL,
+  SESSIONS_TOTAL_COST_METRIC_CARD_INFO,
+  SESSIONS_TOTAL_COST_METRIC_CARD_LABEL,
 } from "./cost-metric-card";
 
 /**
@@ -110,9 +113,11 @@ function isReportableCostValue(
  */
 export function resolveCostCardPresentation(
   honestyEnabled: boolean,
-  usage: AgentSessionUsageSummary | undefined
+  usage: AgentSessionUsageSummary | undefined,
+  basis: SessionsCostBasis = SessionsCostBasis.Api
 ): {
   honest: boolean;
+  total: boolean;
   cost: number | undefined;
   label: string;
   info: { what: string; how?: string };
@@ -123,11 +128,21 @@ export function resolveCostCardPresentation(
   // during the load and swap it on arrival — the label flicker reads as the card
   // changing what it measures. Only a SETTLED payload that lacks a usable split
   // falls back.
+  if (basis === SessionsCostBasis.Total) {
+    return {
+      honest: false,
+      total: true,
+      cost: usage?.totalEstimatedCost,
+      label: SESSIONS_TOTAL_COST_METRIC_CARD_LABEL,
+      info: SESSIONS_TOTAL_COST_METRIC_CARD_INFO,
+    };
+  }
   const honest =
     honestyEnabled && (usage === undefined || hasReportableCostSplit(usage));
   if (honest) {
     return {
       honest: true,
+      total: false,
       cost: usage?.meteredEstimatedCost,
       label: SESSIONS_COST_HONEST_METRIC_CARD_LABEL,
       info: SESSIONS_COST_HONEST_METRIC_CARD_INFO,
@@ -135,6 +150,7 @@ export function resolveCostCardPresentation(
   }
   return {
     honest: false,
+    total: false,
     cost: usage?.apiEstimatedCost,
     label: SESSIONS_COST_METRIC_CARD_LABEL,
     info: SESSIONS_COST_METRIC_CARD_INFO,
@@ -408,6 +424,7 @@ export function resolveCostTileSlots({
         showingLocalFallback,
         usage,
         honest: costPresentation.honest,
+        total: costPresentation.total,
         unpriceable,
       });
   const cost = dashed ? null : costPresentation.cost;
@@ -463,6 +480,7 @@ export function resolveCostCardDetail({
   showingLocalFallback,
   usage,
   honest,
+  total = false,
   unpriceable,
 }: {
   loading: boolean;
@@ -479,6 +497,8 @@ export function resolveCostCardDetail({
    * headline computed on the other basis.
    */
   honest: boolean;
+  /** The card reports the subscription-inclusive total (`SessionsCostBasis.Total`). */
+  total?: boolean;
   /**
    * ISS-5401: nothing in the matched cohort could be priced, so the headline
    * dashed. The caption says WHY — an uncaptioned `—` is indistinguishable from
@@ -493,7 +513,7 @@ export function resolveCostCardDetail({
   if (errored) {
     return undefined;
   }
-  const caption = resolveCostCaption({ honest, unpriceable, usage });
+  const caption = resolveCostCaption({ honest, total, unpriceable, usage });
   if (!showingLocalFallback) {
     return caption;
   }
@@ -513,15 +533,20 @@ export function resolveCostCardDetail({
  */
 function resolveCostCaption({
   honest,
+  total,
   unpriceable,
   usage,
 }: {
   honest: boolean;
+  total: boolean;
   unpriceable: boolean;
   usage: AgentSessionUsageSummary | undefined;
 }): string | undefined {
   if (unpriceable) {
     return SESSIONS_COST_NO_COST_RECORDED_DETAIL;
+  }
+  if (total) {
+    return formatTotalCostMetricDetail(usage?.subscriptionEstimatedCost);
   }
   if (honest) {
     return formatHonestCostMetricDetail(
@@ -531,3 +556,8 @@ function resolveCostCaption({
   }
   return formatCostMetricDetail(usage?.subscriptionEstimatedCost);
 }
+
+/** Which figure the Sessions Cost card headlines: API-billed or the inclusive total. */
+export const SessionsCostBasis = { Api: "api", Total: "total" } as const;
+export type SessionsCostBasis =
+  (typeof SessionsCostBasis)[keyof typeof SessionsCostBasis];

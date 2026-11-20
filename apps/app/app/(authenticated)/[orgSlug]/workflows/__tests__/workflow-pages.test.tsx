@@ -1,6 +1,7 @@
 import { OrgInviteRole } from "@repo/api/src/types/onboarding";
 import { OrgPermission } from "@repo/api/src/types/org-permissions";
 import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import WorkflowDetailPage from "../[workflowId]/page";
 import WorkflowRunPage from "../[workflowId]/runs/[runId]/page";
@@ -23,14 +24,26 @@ const mocks = vi.hoisted(() => ({
   detailHeader: vi.fn(),
   runHeader: vi.fn(),
   runView: vi.fn(),
+  redirect: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+
+vi.mock("@repo/navigation/link", () => ({
+  Link: ({ children, href }: { children: ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
 }));
 
 vi.mock("@repo/auth/server", () => ({ auth: mocks.auth }));
 
 vi.mock("../../../components/header", () => ({
-  Header: (props: { breadcrumbs: { label: string; href?: string }[] }) => {
-    mocks.header(props);
-    return <div data-testid="header" />;
+  Header: (props: {
+    breadcrumbs: { label: string; href?: string }[];
+    children?: ReactNode;
+  }) => {
+    mocks.header({ breadcrumbs: props.breadcrumbs });
+    return <div data-testid="header">{props.children}</div>;
   },
 }));
 
@@ -119,13 +132,38 @@ describe("resolveWorkflowAdmin", () => {
 describe("workflow routes", () => {
   it("renders the index with the Workflows breadcrumb and the admin capability", async () => {
     signInAs(OrgInviteRole.Admin);
-    render(await WorkflowsPage());
+    render(await WorkflowsPage(workflowsPageProps()));
 
     expect(screen.getByTestId("index-view")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "New workflow" })).toHaveAttribute(
+      "href",
+      `/${ORG_SLUG}/workflows/new`
+    );
     expect(mocks.header).toHaveBeenCalledWith({
       breadcrumbs: [{ label: "Workflows" }],
     });
     expect(mocks.indexView).toHaveBeenCalledWith({ isAdmin: true });
+  });
+
+  it("shows members no New workflow button", async () => {
+    signInAs(OrgInviteRole.Member);
+    render(await WorkflowsPage(workflowsPageProps()));
+
+    expect(
+      screen.queryByRole("link", { name: "New workflow" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("redirects the old runs tab to the Runs page", async () => {
+    signInAs(OrgInviteRole.Admin);
+    mocks.redirect.mockImplementation(() => {
+      throw new Error("NEXT_REDIRECT");
+    });
+
+    await expect(WorkflowsPage(workflowsPageProps("runs"))).rejects.toThrow(
+      "NEXT_REDIRECT"
+    );
+    expect(mocks.redirect).toHaveBeenCalledWith(`/${ORG_SLUG}/runs`);
   });
 
   it("passes the member capability to the new-workflow view", async () => {
@@ -184,3 +222,10 @@ describe("workflow routes", () => {
     });
   });
 });
+
+function workflowsPageProps(tab?: string) {
+  return {
+    params: Promise.resolve({ orgSlug: ORG_SLUG }),
+    searchParams: Promise.resolve({ tab }),
+  };
+}

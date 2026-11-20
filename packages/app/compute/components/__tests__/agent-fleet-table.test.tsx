@@ -181,13 +181,10 @@ describe("AgentFleetTable", () => {
     loaded([]);
     render(<AgentFleetTable />);
 
+    expect(screen.getByText("No agents yet")).toBeInTheDocument();
     expect(
-      screen.getByText("No agents yet.", { exact: false })
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link")).toHaveAttribute(
-      "href",
-      "/acme/settings?tab=api-keys"
-    );
+      screen.getByRole("link", { name: "Create an API key" })
+    ).toHaveAttribute("href", "/acme/settings?tab=api-keys");
   });
 
   it("shows the error with a retry", () => {

@@ -3,8 +3,13 @@
 import { SummaryCardRow } from "@repo/app/shared/components/summary-card-row";
 import { MetricCard } from "@repo/design-system/components/ui/primitives/metric-card";
 import { Skeleton } from "@repo/design-system/components/ui/skeleton";
-import { SESSIONS_COST_METRIC_CARD_LABEL } from "./cost-metric-card";
+import { SessionsCostBasis } from "./cost-card-presentation";
 import {
+  SESSIONS_COST_METRIC_CARD_LABEL,
+  SESSIONS_TOTAL_COST_METRIC_CARD_LABEL,
+} from "./cost-metric-card";
+import {
+  AVG_COST_PER_SESSION_METRIC_CARD_LABEL,
   PRS_SHIPPED_METRIC_CARD_LABEL,
   SESSIONS_METRIC_CARD_LABEL,
   TOTAL_TOKENS_METRIC_CARD_LABEL,
@@ -41,7 +46,13 @@ export function SessionsSummaryCardsLoading({
   locPerDollarLabel,
   reservesDeltaSlot,
   wrapBelow = false,
+  costBasis = SessionsCostBasis.Api,
+  showDeliveryCards = true,
 }: {
+  /** Picks the Cost shell's label so it matches the settled card. */
+  costBasis?: SessionsCostBasis;
+  /** `false` shows the `Avg cost / session` shell instead of the delivery pair. */
+  showDeliveryCards?: boolean;
   className?: string;
   /** Per-card sizing, resolved by the caller from its layout mode. */
   cardClassName: string;
@@ -70,9 +81,12 @@ export function SessionsSummaryCardsLoading({
       {[
         SESSIONS_METRIC_CARD_LABEL,
         TOTAL_TOKENS_METRIC_CARD_LABEL,
-        SESSIONS_COST_METRIC_CARD_LABEL,
-        PRS_SHIPPED_METRIC_CARD_LABEL,
-        locPerDollarLabel,
+        costBasis === SessionsCostBasis.Total
+          ? SESSIONS_TOTAL_COST_METRIC_CARD_LABEL
+          : SESSIONS_COST_METRIC_CARD_LABEL,
+        ...(showDeliveryCards
+          ? [PRS_SHIPPED_METRIC_CARD_LABEL, locPerDollarLabel]
+          : [AVG_COST_PER_SESSION_METRIC_CARD_LABEL]),
       ].map((label) => (
         <MetricCard
           className={cardClassName}

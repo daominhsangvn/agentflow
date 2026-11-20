@@ -6,6 +6,7 @@ import {
   type OrchestratorCaseDetail,
   type OrchestratorCaseListItem,
   type OrchestratorCaseListQuery,
+  type OrchestratorCaseListSummary,
   type OrchestratorCaseLoops,
   type OrchestratorCaseMessagePosted,
   OrchestratorCaseStatus,
@@ -36,6 +37,8 @@ export const orchestratorCaseKeys = {
     [...orchestratorCaseKeys.all, "workflow", workflowId] as const,
   org: (query: OrchestratorCaseListQuery) =>
     [...orchestratorCaseKeys.all, "org", query] as const,
+  orgSummary: (query: OrchestratorCaseListQuery) =>
+    [...orchestratorCaseKeys.all, "org-summary", query] as const,
   agentMap: (workflowId: string) =>
     [...orchestratorCaseKeys.all, "agent-map", workflowId] as const,
   detail: (caseId: string) =>
@@ -248,6 +251,24 @@ export function useOrgOrchestratorCases(query: OrchestratorCaseListQuery) {
         ? CASE_POLL_INTERVAL_MS
         : false;
     },
+  });
+}
+
+/** Counts for the cases page stats row; polls only while `poll` is true and not errored. */
+export function useOrgOrchestratorCasesSummary(
+  query: OrchestratorCaseListQuery,
+  { poll = false }: { poll?: boolean } = {}
+) {
+  const apiClient = useApiClient();
+
+  return useQuery({
+    queryKey: orchestratorCaseKeys.orgSummary(query),
+    queryFn: () =>
+      apiClient.get<OrchestratorCaseListSummary>(
+        `/orchestrator/cases/summary${buildOrgCaseQuery(query)}`
+      ),
+    refetchInterval: (state) =>
+      poll && state.state.status !== "error" ? CASE_POLL_INTERVAL_MS : false,
   });
 }
 

@@ -1,28 +1,12 @@
-import {
-  type Workflow,
-  WorkflowRunErrorCode,
-  WorkflowRunStatus,
-  type WorkflowRunSummary,
-} from "@repo/api/src/types/workflow";
-import { render, screen, within } from "@testing-library/react";
+import type { Workflow } from "@repo/api/src/types/workflow";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PROVIDERS } from "../../../integrations/__tests__/integration-fixtures";
-import {
-  makeRunSummary,
-  makeWorkflow,
-  WORKFLOW_ID,
-} from "../../__tests__/workflow-fixtures";
-import { WORKFLOW_RUN_ERROR_MESSAGES } from "../../lib/workflow-error-messages";
-import {
-  WORKFLOW_RUN_STATUS_LABELS,
-  WORKFLOW_SOURCE_SYSTEMS_NOTICE,
-} from "../../lib/workflow-labels";
+import { makeWorkflow, WORKFLOW_ID } from "../../__tests__/workflow-fixtures";
+import { WORKFLOW_SOURCE_SYSTEMS_NOTICE } from "../../lib/workflow-labels";
 import { WorkflowsIndexView } from "../workflows-index-view";
-
-const PRE_ACTION_ERROR_MESSAGE =
-  "Pre action Transition the issue failed: Jira returned 403";
 
 const mocks = vi.hoisted(() => ({
   workflows: {
@@ -33,10 +17,6 @@ const mocks = vi.hoisted(() => ({
   },
   setEnabledMutate: vi.fn(),
   updateMutate: vi.fn(),
-  fetchNextPage: vi.fn(),
-  runs: [] as WorkflowRunSummary[],
-  searchParams: new URLSearchParams(),
-  replace: vi.fn(),
 }));
 
 vi.mock("../../hooks/use-workflows", async () => {
@@ -53,18 +33,6 @@ vi.mock("../../hooks/use-workflows", async () => {
       mutate: mocks.updateMutate,
       isPending: false,
     }),
-    useOrgWorkflowRuns: () => ({
-      data: {
-        pages: [{ runs: mocks.runs, nextCursor: "next" }],
-        pageParams: [null],
-      },
-      isLoading: false,
-      error: null,
-      hasNextPage: true,
-      isFetchingNextPage: false,
-      fetchNextPage: mocks.fetchNextPage,
-      refetch: vi.fn(),
-    }),
   };
 });
 
@@ -76,23 +44,6 @@ vi.mock("@repo/navigation/use-org-path", () => ({
   useOrgPath: () => (path: string) => `/acme${path}`,
 }));
 
-vi.mock("@repo/navigation/use-path", () => ({
-  usePath: () => "/acme/workflows",
-}));
-
-vi.mock("@repo/navigation/use-search-params-value", () => ({
-  useSearchParamsValue: () => mocks.searchParams,
-}));
-
-vi.mock("@repo/navigation/use-navigation", () => ({
-  useNavigation: () => ({
-    navigate: vi.fn(),
-    replace: mocks.replace,
-    back: vi.fn(),
-    refresh: vi.fn(),
-  }),
-}));
-
 vi.mock("@repo/navigation/link", () => ({
   Link: ({ children, href }: { children: ReactNode; href: string }) => (
     <a href={href}>{children}</a>
@@ -101,11 +52,9 @@ vi.mock("@repo/navigation/link", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.searchParams = new URLSearchParams();
   mocks.workflows.data = [makeWorkflow()];
   mocks.workflows.isLoading = false;
   mocks.workflows.error = null;
-  mocks.runs = [makeRunSummary()];
 });
 
 describe("WorkflowsIndexView", () => {
@@ -120,10 +69,6 @@ describe("WorkflowsIndexView", () => {
     expect(screen.getByText("1 active")).toBeInTheDocument();
     expect(screen.getByText("2 succeeded")).toBeInTheDocument();
     expect(screen.getByText("1 failed")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "New workflow" })).toHaveAttribute(
-      "href",
-      "/acme/workflows/new"
-    );
     expect(
       screen.getByText(WORKFLOW_SOURCE_SYSTEMS_NOTICE)
     ).toBeInTheDocument();
@@ -212,91 +157,11 @@ describe("WorkflowsIndexView", () => {
     expect(screen.getByText("Couldn't load workflows")).toBeInTheDocument();
   });
 
-  it("switches to the org-wide runs tab through the URL", async () => {
-    const user = userEvent.setup();
+  it("has no tabs and no create action of its own", () => {
     render(<WorkflowsIndexView isAdmin />);
 
-    await user.click(screen.getByRole("tab", { name: "Runs" }));
-    expect(mocks.replace).toHaveBeenCalledWith("/acme/workflows?tab=runs", {
-      scroll: false,
-    });
-  });
-
-  it("renders the org-wide run history with paging when deep-linked", async () => {
-    const user = userEvent.setup();
-    mocks.searchParams = new URLSearchParams("tab=runs");
-    render(<WorkflowsIndexView isAdmin />);
-
-    const table = screen.getByRole("table");
-    expect(within(table).getByText("PROJ-7")).toBeInTheDocument();
-    expect(
-      within(table).getByRole("link", { name: "Implement Jira requirements" })
-    ).toHaveAttribute("href", `/acme/workflows/${WORKFLOW_ID}`);
-    await user.click(screen.getByRole("button", { name: "Load more" }));
-    expect(mocks.fetchNextPage).toHaveBeenCalled();
-  });
-
-  it("shows pre action progress and readable failure reasons in the run history", () => {
-    mocks.searchParams = new URLSearchParams("tab=runs");
-    mocks.runs = [
-      makeRunSummary({ id: "run-1", status: WorkflowRunStatus.PreActions }),
-      makeRunSummary({
-        id: "run-2",
-        status: WorkflowRunStatus.Failed,
-        error: {
-          code: WorkflowRunErrorCode.PreActionFailed,
-          message: PRE_ACTION_ERROR_MESSAGE,
-        },
-      }),
-    ];
-    render(<WorkflowsIndexView isAdmin />);
-
-    const table = screen.getByRole("table");
-    expect(
-      within(table).getByText(
-        WORKFLOW_RUN_STATUS_LABELS[WorkflowRunStatus.PreActions]
-      )
-    ).toBeInTheDocument();
-    const reason = within(table).getByText(
-      WORKFLOW_RUN_ERROR_MESSAGES[WorkflowRunErrorCode.PreActionFailed]
-    );
-    expect(reason).toHaveAttribute("title", PRE_ACTION_ERROR_MESSAGE);
-    expect(reason).toHaveTextContent(PRE_ACTION_ERROR_MESSAGE);
-  });
-
-  it("lists the pull request of every repository a run changed", () => {
-    mocks.searchParams = new URLSearchParams("tab=runs");
-    mocks.runs = [
-      makeRunSummary({
-        status: WorkflowRunStatus.Succeeded,
-        pullRequests: [
-          {
-            url: "https://github.com/acme/web/pull/12",
-            number: 12,
-            repository: "acme/web",
-            branch: "feat/proj-7",
-          },
-          {
-            url: "https://github.com/acme/api/pull/4",
-            number: 4,
-            repository: "acme/api",
-            branch: "feat/proj-7",
-          },
-        ],
-      }),
-    ];
-    render(<WorkflowsIndexView isAdmin />);
-
-    const table = screen.getByRole("table");
-    expect(
-      within(table).getByRole("columnheader", { name: "Pull requests" })
-    ).toBeInTheDocument();
-    expect(
-      within(table).getByRole("link", { name: "web #12" })
-    ).toHaveAttribute("href", "https://github.com/acme/web/pull/12");
-    expect(within(table).getByRole("link", { name: "api #4" })).toHaveAttribute(
-      "href",
-      "https://github.com/acme/api/pull/4"
-    );
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Runs" })).not.toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
   });
 });

@@ -38,6 +38,8 @@ export const AgentSessionComparisonMetric = {
   Tokens: "tokens",
   MeteredCost: "meteredCost",
   ApiCost: "apiCost",
+  /** Subscription-inclusive estimated cost (subscription-covered plus API-billed). */
+  TotalCost: "totalCost",
   PrsShipped: "prsShipped",
 } as const;
 export type AgentSessionComparisonMetric =

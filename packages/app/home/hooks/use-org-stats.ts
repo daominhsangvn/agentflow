@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type OrgActivityStats,
   type OrgAttentionStats,
   type OrgCaseStats,
   type OrgProjectStats,
@@ -46,6 +47,10 @@ export function useOrgUsageStats() {
 
 export function useOrgAttentionStats() {
   return useOrgStats<OrgAttentionStats>(OrgStatsPath.Attention);
+}
+
+export function useOrgActivityStats() {
+  return useOrgStats<OrgActivityStats>(OrgStatsPath.Activity);
 }
 
 function useOrgStats<TStats>(path: OrgStatsPath) {

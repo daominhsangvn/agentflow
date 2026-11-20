@@ -2,6 +2,7 @@
 import { costFilterIncludesUnknown } from "@repo/api/src/agent-session-filters";
 import type { SessionLinkedArtifact } from "@repo/api/src/types/agent-session";
 import { AgentSessionComparisonMode } from "@repo/api/src/types/agent-session-usage-comparison";
+import { SessionsCostBasis } from "@repo/app/agents/components/sessions/cost-card-presentation";
 import { SessionsEmptyState } from "@repo/app/agents/components/sessions/sessions-empty-state";
 import { SessionsRecoveryAction } from "@repo/app/agents/components/sessions/sessions-recovery-action";
 import { SessionsSummaryCards } from "@repo/app/agents/components/sessions/sessions-summary-cards";
@@ -49,7 +50,6 @@ import {
   SESSIONS_BRANCHES_TAB_TITLES_FEATURE_FLAG_KEY,
   SESSIONS_GRID_FOLD_LEGIBILITY_FEATURE_FLAG_KEY,
   SESSIONS_OWNER_SCOPE_CHIP_FEATURE_FLAG_KEY,
-  SESSIONS_PROJECT_FACET_FEATURE_FLAG_KEY,
 } from "@repo/app/shared/lib/feature-flags";
 import {
   type DateRange,
@@ -137,9 +137,6 @@ export default function SessionsPage() {
   const gridTableV2Enabled = useFeatureFlagEnabled(
     GRID_TABLE_V2_FEATURE_FLAG_KEY
   );
-  const projectFacetEnabled = useFeatureFlagEnabled(
-    SESSIONS_PROJECT_FACET_FEATURE_FLAG_KEY
-  );
   // FEA-4210: the same resolver the session-detail linked-artifacts row uses, so
   // a `FEA-654` chip in the list and the identical chip on the detail page cannot
   // route two different ways. Null (an unrouteable or slug-less artifact) renders
@@ -201,17 +198,6 @@ export default function SessionsPage() {
   );
   const dateRange = urlDateRange ?? savedDateRange;
 
-  // ISS-5355 (ISS-4779 closed-by-default): with the Project facet flag off the
-  // Project dimension does not exist on this surface, so an inbound `project=`
-  // param must not narrow the list. Dropping it here rather than at the parse
-  // means the URL keeps the value (a viewer with the flag ON who is handed the
-  // same link still gets the filter) while nothing narrows a list behind a facet
-  // and chip this viewer cannot see or remove.
-  const effectiveFacetFilters = useMemo(
-    () => applyProjectFacetGate(facetFilters, projectFacetEnabled),
-    [facetFilters, projectFacetEnabled]
-  );
-
   // UTC-day quantization keeps the query identity stable across remounts. The
   // next render after a UTC rollover advances it; no timer forces a render.
   const { startDate, endDate } = getStableUtcDateWindowForRange(dateRange);
@@ -250,9 +236,9 @@ export default function SessionsPage() {
         costBuckets: facetFilters.costBuckets,
         changePresence: facetFilters.changePresence,
         prAssociation: facetFilters.prAssociation,
-        projectIds: effectiveFacetFilters.projectIds,
+        projectIds: facetFilters.projectIds,
       }),
-    [startDate, endDate, facetFilters, effectiveFacetFilters, selectedUserId]
+    [startDate, endDate, facetFilters, selectedUserId]
   );
 
   // The paginated list query. `sortBy` is sent only once a header is clicked, so
@@ -270,7 +256,7 @@ export default function SessionsPage() {
       costBuckets: facetFilters.costBuckets,
       changePresence: facetFilters.changePresence,
       prAssociation: facetFilters.prAssociation,
-      projectIds: effectiveFacetFilters.projectIds,
+      projectIds: facetFilters.projectIds,
       userId: selectedUserId ?? undefined,
       ...(sortKey ? { sortBy: sortKey, sortDir } : {}),
       limit: pageSize,
@@ -280,7 +266,6 @@ export default function SessionsPage() {
       startDate,
       endDate,
       facetFilters,
-      effectiveFacetFilters,
       selectedUserId,
       sortKey,
       sortDir,
@@ -442,7 +427,7 @@ export default function SessionsPage() {
   // (measured against the shared Sessions defaults, not a hardcoded literal).
   const hasActiveSessionFilters =
     dateRange !== DEFAULT_SESSIONS_DATE_RANGE ||
-    hasAnyActiveSessionFacet(effectiveFacetFilters) ||
+    hasAnyActiveSessionFacet(facetFilters) ||
     Boolean(selectedUserId);
   // PRD-536 §5: only probe "has any agent ever connected?" when the list has
   // resolved to zero rows — a populated list never pays for the extra request,
@@ -560,18 +545,15 @@ export default function SessionsPage() {
         <div className="border-b px-4 py-3">
           <SessionsToolbar
             dateRange={dateRange}
-            filters={effectiveFacetFilters}
+            filters={facetFilters}
             groupBy={groupBy}
-            // ISS-5355 (ISS-4779 closed-by-default): the Project facet ships
-            // behind its own flag, default off. Web-only, so no Labs twin — a
-            // session's project comes from its cloud artifact, which the
-            // desktop local producer cannot resolve. OFF ⇒ no facet, no chip,
-            // and `projectIds` stays empty so no filter is applied.
+            // The Project facet is always on. Web-only: a session's project comes
+            // from its cloud artifact, which the desktop local producer cannot resolve.
             // FEA-4209 / FEA-4210: this surface renders the linked-entity
             // columns, so their View-menu entries belong in this menu. The
             // shared `grid-table-v2` key still gates them inside the toolbar.
             includeLinkedEntityColumns
-            includeProjectFilter={projectFacetEnabled}
+            includeProjectFilter
             onClearFilters={handleClearFilters}
             onDateRangeChange={handleDateRangeChange}
             onFiltersChange={handleFiltersChange}
@@ -636,6 +618,7 @@ export default function SessionsPage() {
             ) : null}
 
             <SessionsSummaryCards
+              costBasis={SessionsCostBasis.Total}
               // ISS-4481: when the active Cost facet is Unknown, every row shows
               // "—", so the Cost tile drops to its honest-empty state instead of
               // summing the all-unknown cohort to a fabricated "$0" (stage review).
@@ -660,6 +643,7 @@ export default function SessionsPage() {
                 summaryUsageQuery.isLoading ||
                 summaryUsageQuery.isPlaceholderData
               }
+              showDeliveryCards={false}
               usage={summaryUsageQuery.data}
               wrapBelow
             />
@@ -771,17 +755,4 @@ function buildSessionsPaginationFooter({
     );
   }
   return null;
-}
-
-function applyProjectFacetGate(
-  filters: SessionFacetFilters,
-  projectFacetEnabled: boolean
-): SessionFacetFilters {
-  if (projectFacetEnabled) {
-    return filters;
-  }
-  return {
-    ...filters,
-    projectIds: DEFAULT_SESSION_FACET_FILTERS.projectIds,
-  };
 }

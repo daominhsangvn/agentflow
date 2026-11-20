@@ -624,6 +624,14 @@ export type OrchestratorCaseListQuery = z.infer<
   typeof orchestratorCaseListQuerySchema
 >;
 
+/** Case counts for the org-wide case list filters (not capped like the list). */
+export type OrchestratorCaseListSummary = {
+  total: number;
+  open: number;
+  needsPerson: number;
+  closed: number;
+};
+
 /** A message written on the case page in AgentFlow, or a reply shown there. */
 export const OrchestratorMessageVia = {
   AgentFlow: "agentflow",

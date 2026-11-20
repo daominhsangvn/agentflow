@@ -13,6 +13,8 @@ import {
 import { QueryErrorMessage } from "@repo/app/integrations/components/query-error-message";
 import { formatRelativeTime } from "@repo/app/shared/lib/date-utils";
 import { Badge } from "@repo/design-system/components/ui/badge";
+import { Button } from "@repo/design-system/components/ui/button";
+import { EmptyState } from "@repo/design-system/components/ui/empty-state";
 import { Skeleton } from "@repo/design-system/components/ui/skeleton";
 import {
   Table,
@@ -24,6 +26,7 @@ import {
 } from "@repo/design-system/components/ui/table";
 import { Link } from "@repo/navigation/link";
 import { useOrgPath } from "@repo/navigation/use-org-path";
+import { BotIcon } from "lucide-react";
 
 const KIND_LABELS: Record<AgentKind, string> = {
   [AgentKind.Automatic]: "Automatic",
@@ -62,27 +65,29 @@ export function AgentFleetTable() {
   return (
     <div className="flex flex-col gap-4" data-testid="agent-fleet">
       <FleetSummary agents={agents} />
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Agent</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Health</TableHead>
-            <TableHead>Claude Code</TableHead>
-            <TableHead>Commands</TableHead>
-            <TableHead>Projects</TableHead>
-            <TableHead className="text-right">
-              Used by enabled workflows
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {agents.map((agent) => (
-            <AgentRow agent={agent} key={agent.id} />
-          ))}
-        </TableBody>
-      </Table>
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Agent</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Health</TableHead>
+              <TableHead>Claude Code</TableHead>
+              <TableHead>Commands</TableHead>
+              <TableHead>Projects</TableHead>
+              <TableHead className="text-right">
+                Used by enabled workflows
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {agents.map((agent) => (
+              <AgentRow agent={agent} key={agent.id} />
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }
@@ -90,16 +95,18 @@ export function AgentFleetTable() {
 function EmptyFleet() {
   const buildOrgPath = useOrgPath();
   return (
-    <p className="text-muted-foreground text-sm">
-      No agents yet. Start an automatic agent or a personal agent with an API
-      key.{" "}
-      <Link
-        className="underline underline-offset-2"
-        href={buildOrgPath("/settings?tab=api-keys")}
-      >
-        Create an API key
-      </Link>
-    </p>
+    <EmptyState
+      action={
+        <Button asChild size="sm" variant="outline">
+          <Link href={buildOrgPath("/settings?tab=api-keys")}>
+            Create an API key
+          </Link>
+        </Button>
+      }
+      description="Start an automatic agent or a personal agent with an API key."
+      icon={BotIcon}
+      title="No agents yet"
+    />
   );
 }
 
@@ -127,7 +134,7 @@ function AgentRow({ agent }: Readonly<{ agent: AgentFleetEntry }>) {
       <TableCell>
         <div className="flex flex-col gap-0.5">
           <Link
-            className="font-medium underline-offset-2 hover:underline"
+            className="font-medium hover:underline"
             href={buildOrgPath(`/agents/${agent.id}`)}
           >
             {name}

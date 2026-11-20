@@ -110,10 +110,6 @@ vi.mock("../components/google-integration-card", () => ({
   GoogleIntegrationCard: () => null,
 }));
 
-vi.mock("../components/integration-connections-section", () => ({
-  IntegrationConnectionsSection: () => null,
-}));
-
 function renderSettings(initialTab: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },

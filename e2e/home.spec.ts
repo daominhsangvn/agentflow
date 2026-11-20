@@ -12,6 +12,7 @@ import {
   ClaudeCodeVersionStatus,
 } from "@repo/api/src/types/agent-fleet";
 import {
+  type OrgActivityStats,
   OrgAttentionKind,
   type OrgAttentionStats,
   type OrgCaseStats,
@@ -21,6 +22,7 @@ import {
   type OrgUsageStats,
   type OrgWorkflowStats,
 } from "@repo/api/src/types/org-stats";
+import { stubApiFailure, stubApiGet } from "./helpers/api-stubs";
 import { getApiBaseUrl } from "./helpers/api-url";
 import { requireOrgClaims } from "./helpers/better-auth";
 import { E2ETag } from "./helpers/tags";
@@ -32,6 +34,9 @@ const MEDIAN_ACTIVE_MS = 5_400_000;
 const ATTENTION_TITLE = "PRO-12 needs a decision";
 const OPEN_CASES = 7;
 const RETRY_RE = /retry/i;
+const ACTIVITY_DAYS = 30;
+const DAY_MS = 86_400_000;
+const ACTIVITY_COST_TOTAL_RE = /Total cost: $/;
 
 test.describe("home", { tag: E2ETag.Smoke }, () => {
   test("shows the statistics widgets and links attention items to the case", async ({
@@ -59,6 +64,14 @@ test.describe("home", { tag: E2ETag.Smoke }, () => {
     const usage = page.getByTestId("home-widget-usage");
     await expect(usage.getByText("Last 7 days")).toBeVisible();
     await expect(usage.getByText("$0.00")).toHaveCount(0);
+
+    await expect(page.getByTestId("activity-chart")).toBeVisible({
+      timeout: UI_TIMEOUT_MS,
+    });
+    await page.getByLabel("Cost", { exact: true }).click();
+    await expect(page.getByTestId("activity-total")).toContainText(
+      ACTIVITY_COST_TOTAL_RE
+    );
 
     await page.getByRole("link", { name: ATTENTION_TITLE }).click();
     await expect(page).toHaveURL(
@@ -163,6 +176,24 @@ async function stubHome(page: Page, api: string, options: HomeStubOptions) {
     ],
   };
 
+  const activity: OrgActivityStats = {
+    days: Array.from({ length: ACTIVITY_DAYS }, (_, index) => ({
+      day: new Date(Date.now() - (ACTIVITY_DAYS - 1 - index) * DAY_MS)
+        .toISOString()
+        .slice(0, 10),
+      sessions: index % 3,
+      inputTokens: 1000 * index,
+      outputTokens: 500 * index,
+      costUsd: 0.25 * index,
+      runsSucceeded: index % 2,
+      runsFailed: 0,
+      runsCancelled: 0,
+      casesOpened: 1,
+      casesClosed: 0,
+    })),
+  };
+
+  await stubApiGet(page, api, OrgStatsPath.Activity, activity);
   await stubApiGet(page, api, OrgStatsPath.Projects, projects);
   await stubApiGet(page, api, OrgStatsPath.Workflows, workflows);
   await stubApiGet(page, api, OrgStatsPath.Cases, cases);
@@ -174,35 +205,4 @@ async function stubHome(page: Page, api: string, options: HomeStubOptions) {
   } else {
     await stubApiGet(page, api, OrgStatsPath.Usage, usage);
   }
-}
-
-/** Answers GETs of the API's `path` (any query) with `data`, in the API's envelope. */
-async function stubApiGet(
-  page: Page,
-  api: string,
-  path: string,
-  data: unknown
-) {
-  const target = new URL(`${api}${path}`);
-  await page.route(
-    (url) => url.origin === target.origin && url.pathname === target.pathname,
-    (route) =>
-      route.request().method() === "GET"
-        ? route.fulfill({ json: { success: true, data } })
-        : route.fallback()
-  );
-}
-
-async function stubApiFailure(page: Page, api: string, path: string) {
-  const target = new URL(`${api}${path}`);
-  await page.route(
-    (url) => url.origin === target.origin && url.pathname === target.pathname,
-    (route) =>
-      route.request().method() === "GET"
-        ? route.fulfill({
-            status: 500,
-            json: { success: false, error: "Internal error" },
-          })
-        : route.fallback()
-  );
 }

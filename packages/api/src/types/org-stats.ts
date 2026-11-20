@@ -82,5 +82,26 @@ export const OrgStatsPath = {
   Sessions: "/org-stats/sessions",
   Usage: "/org-stats/usage",
   Attention: "/org-stats/attention",
+  Activity: "/org-stats/activity",
 } as const;
 export type OrgStatsPath = (typeof OrgStatsPath)[keyof typeof OrgStatsPath];
+
+/** Days the Home activity chart covers, today included. */
+export const ORG_ACTIVITY_DAYS = 30;
+
+export type OrgActivityDay = {
+  /** UTC calendar day, YYYY-MM-DD. */
+  day: string;
+  sessions: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Null when the day had usage but none of it was priced (unknown is not zero). */
+  costUsd: number | null;
+  runsSucceeded: number;
+  runsFailed: number;
+  runsCancelled: number;
+  casesOpened: number;
+  casesClosed: number;
+};
+
+export type OrgActivityStats = { days: OrgActivityDay[] };

@@ -1,5 +1,6 @@
 "use client";
 
+import { ActivityWidget } from "./home-activity-widget";
 import { AttentionWidget } from "./home-attention-widget";
 import {
   AgentsWidget,
@@ -15,6 +16,9 @@ export function HomeDashboard() {
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       <div className="md:col-span-2">
         <AttentionWidget />
+      </div>
+      <div className="md:col-span-2 xl:col-span-3">
+        <ActivityWidget />
       </div>
       <CasesWidget />
       <AgentsWidget />

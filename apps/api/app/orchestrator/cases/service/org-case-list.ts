@@ -64,12 +64,7 @@ export async function loadOrgCaseRows(
   organizationId: string,
   query: OrchestratorCaseListQuery
 ) {
-  const base: Prisma.OrchestratorCaseWhereInput = {
-    organizationId,
-    ...(query.projectId ? { projectId: query.projectId } : {}),
-    ...(query.workflowId ? { workflowId: query.workflowId } : {}),
-    ...(query.status ? { status: query.status } : {}),
-  };
+  const base = orgCaseBaseWhere(organizationId, query);
   const [needsPersonRows, recentRows] = await withDb((db) =>
     Promise.all([
       db.orchestratorCase.findMany({
@@ -379,4 +374,17 @@ function applyLatestTask(
   if (agent.latestTaskStatus === OrchestratorTaskStatus.Queued) {
     agent.latestTaskWaiting = row.waiting;
   }
+}
+
+/** The org-scoped filter shared by the case list and the case summary. */
+export function orgCaseBaseWhere(
+  organizationId: string,
+  query: OrchestratorCaseListQuery
+): Prisma.OrchestratorCaseWhereInput {
+  return {
+    organizationId,
+    ...(query.projectId ? { projectId: query.projectId } : {}),
+    ...(query.workflowId ? { workflowId: query.workflowId } : {}),
+    ...(query.status ? { status: query.status } : {}),
+  };
 }

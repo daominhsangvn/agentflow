@@ -528,25 +528,6 @@ export const MY_TASKS_ASSIGNED_ARTIFACT_TREE_FEATURE_FLAG_KEY =
   "my-tasks-own-work-tree" as const;
 
 /**
- * ISS-5355 — the project-scoped Sessions surfaces: the Sessions Project filter
- * facet, and the project-detail "active sessions" strip that replaces the
- * "N loops running" strip and links into that facet.
- *
- * Off by default (ISS-4779 closed-by-default). With the flag off the Project
- * facet is not offered, no `project=` chip is derived, and the project-detail
- * page renders the pre-existing loops strip — so no filter can narrow the list
- * without a control to name and remove it, and neither surface half can ship
- * without the other.
- *
- * Web-only, so there is no Labs twin. A session's project comes from its cloud
- * artifact, and the desktop local producer "cannot resolve cloud projects"
- * (`shared-agent-sessions-api.ts`), so the desktop never mounts either surface —
- * gating it there would gate nothing.
- */
-export const SESSIONS_PROJECT_FACET_FEATURE_FLAG_KEY =
-  "sessions-project-facet" as const;
-
-/**
  * ISS-5307: gates pagination of the project detail page's artifact tabs — the
  * bounded tree read, the shared paginated footer, the rows-per-page control,
  * and the true-total readout above them.

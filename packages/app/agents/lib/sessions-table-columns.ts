@@ -270,7 +270,7 @@ export const SESSIONS_PROJECTS_COLUMN_ID = "projects";
  * Header for the linked-projects column.
  *
  * "Owning project", not "Projects" (wongk review). The bare noun read as the
- * same dimension the `sessions-project-facet` filter narrows on, and the two are
+ * same dimension the project filter narrows on, and the two are
  * NOT the same dimension:
  *
  * - This cell reads `AgentSessionListItem.project`, which the API resolves from
@@ -505,7 +505,7 @@ export const SESSIONS_COLUMN_SPECS = [
   // the slot the prototype gives `projects`. It answers who/what this run
   // belongs to rather than what the run did.
   //
-  // It is NOT the dimension the `sessions-project-facet` filter narrows on, and
+  // It is NOT the dimension the project filter narrows on, and
   // an earlier revision of this comment claimed it was: the facet matches
   // sessions that LINK to a document in a project, this column names the project
   // the session is PARENTED to. See SESSIONS_PROJECTS_COLUMN_LABEL for why the

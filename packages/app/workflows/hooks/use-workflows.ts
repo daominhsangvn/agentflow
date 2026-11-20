@@ -23,6 +23,7 @@ import {
   type WorkflowRunStatus,
   type WorkflowRunSummary,
   type WorkflowRunsResponse,
+  type WorkflowRunsSummary,
   type WorkflowsResponse,
 } from "@repo/api/src/types/workflow";
 import type {
@@ -125,6 +126,32 @@ export function useOrgWorkflowRuns(filters: WorkflowRunListFilters = {}) {
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     refetchInterval: runListRefetchInterval,
+  });
+}
+
+/** Counts of the org's runs by outcome bucket, under the same filters as the list. */
+export function useOrgWorkflowRunsSummary(
+  filters: WorkflowRunListFilters = {}
+) {
+  const apiClient = useApiClient();
+  const normalized = normalizeRunFilters(filters);
+  const { limit: _limit, ...summaryFilters } = normalized;
+
+  return useQuery({
+    queryKey: workflowKeys.orgRunsSummary(summaryFilters),
+    queryFn: () =>
+      apiClient.get<WorkflowRunsSummary>(
+        `/workflow-runs/summary${buildRunListQuery(summaryFilters, null)}`
+      ),
+    refetchInterval: (query) => {
+      if (query.state.status === "error") {
+        return false;
+      }
+      const data = query.state.data;
+      return data && data.active + data.needsYou > 0
+        ? WORKFLOW_RUN_LIST_POLL_INTERVAL_MS
+        : false;
+    },
   });
 }
 
@@ -483,6 +510,12 @@ function normalizeRunFilters(
   const normalized: WorkflowRunListFilters = {
     limit: filters.limit ?? WORKFLOW_RUNS_PAGE_SIZE,
   };
+  if (filters.startDate) {
+    normalized.startDate = filters.startDate;
+  }
+  if (filters.endDate) {
+    normalized.endDate = filters.endDate;
+  }
   if (filters.status) {
     normalized.status = filters.status;
   }
@@ -514,6 +547,12 @@ function buildRunListQuery(
   }
   if (filters.workflowId) {
     params.set("workflowId", filters.workflowId);
+  }
+  if (filters.startDate) {
+    params.set("startDate", filters.startDate);
+  }
+  if (filters.endDate) {
+    params.set("endDate", filters.endDate);
   }
   const query = params.toString();
   return query ? `?${query}` : "";

@@ -252,6 +252,8 @@ export async function buildUsageSummary(
             toNumber(aggregate._sum.outputTokens),
           meteredEstimatedCost: costSplit.meteredEstimatedCost,
           apiEstimatedCost: costSplit.apiEstimatedCost,
+          totalEstimatedCost:
+            costSplit.subscriptionEstimatedCost + costSplit.apiEstimatedCost,
           mergedPrCount: deliveryMetrics.mergedPrCount,
         },
         priorMergedPrCount,

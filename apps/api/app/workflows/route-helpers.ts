@@ -35,8 +35,16 @@ export const orgRunListQuerySchema = runListQuerySchema
   .extend({
     projectId: z.uuid().optional(),
     workflowId: z.uuid().optional(),
+    startDate: z.iso.datetime().optional(),
+    endDate: z.iso.datetime().optional(),
   })
   .strict();
+
+/** /workflow-runs/summary takes the run list filters without paging. */
+export const orgRunSummaryQuerySchema = orgRunListQuerySchema.omit({
+  cursor: true,
+  limit: true,
+});
 
 /** Returns a 403 response when the caller lacks `permission`, or null when permitted. */
 export function denyUnlessWorkflowPermission(

@@ -575,8 +575,8 @@ describe("GlobalSidebar - Work and Setup sections", () => {
     });
   });
 
-  test("renders Cases and Sessions under Work with org-scoped hrefs and no flags", () => {
-    const { getByRole, getByText, queryByRole } = render(
+  test("renders Cases, Runs and Sessions under Work with org-scoped hrefs and no flags", () => {
+    const { getByRole, getByText } = render(
       <GlobalSidebar>
         <div>Content</div>
       </GlobalSidebar>
@@ -587,7 +587,10 @@ describe("GlobalSidebar - Work and Setup sections", () => {
       "href",
       "/test-org/cases"
     );
-    expect(queryByRole("link", { name: "Runs" })).toBeNull();
+    expect(getByRole("link", { name: "Runs" })).toHaveAttribute(
+      "href",
+      "/test-org/runs"
+    );
     expect(getByRole("link", { name: "Sessions" })).toHaveAttribute(
       "href",
       "/test-org/sessions"

@@ -6,12 +6,13 @@ const RE_SESSIONS_URL = /\/sessions(\?|$)/;
 const RE_DASHBOARD_HREF = /\/dashboard$/;
 const SIDEBAR_LINKS = [
   "Cases",
+  "Runs",
   "Sessions",
   "Workflows",
   "Agents",
   "Connections",
 ];
-const REMOVED_SIDEBAR_LABELS = ["Dashboard", "My Tasks", "Documents", "Runs"];
+const REMOVED_SIDEBAR_LABELS = ["Dashboard", "My Tasks", "Documents"];
 const RE_COMPUTE_PICKER = /^(Compute:|Select target)/;
 
 test.describe("navigation", { tag: E2ETag.Smoke }, () => {

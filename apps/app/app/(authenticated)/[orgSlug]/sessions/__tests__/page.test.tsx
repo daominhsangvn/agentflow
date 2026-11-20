@@ -103,6 +103,24 @@ describe("org sessions page wrapper", () => {
     );
   });
 
+  it("applies the Project facet without any feature flag", () => {
+    setSessionsFacetQuery("project", ["project-1"]);
+
+    render(<SessionsPage />);
+
+    expect(useAgentSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ projectIds: ["project-1"] }),
+      expect.anything()
+    );
+  });
+
+  it("hides the delivery cards and shows Avg cost / session", () => {
+    render(<SessionsPage />);
+
+    expect(screen.getByText("Avg cost / session")).toBeInTheDocument();
+    expect(screen.queryByText("PRs Shipped")).toBeNull();
+  });
+
   it("shares one stable UTC window across remounts and compares within that read", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-07T12:00:00.000Z"));

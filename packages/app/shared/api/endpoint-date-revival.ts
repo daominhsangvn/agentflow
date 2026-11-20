@@ -308,6 +308,10 @@ export const ENDPOINT_STRING_ONLY_DATE_KEYS: readonly EndpointStringOnlyDateKeys
       route: "/orchestrator/cases/[id]",
     },
     {
+      keys: [],
+      route: "/orchestrator/cases/summary",
+    },
+    {
       keys: ["createdAt"],
       route: "/projects/[id]/process",
     },

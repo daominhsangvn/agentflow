@@ -112,6 +112,8 @@ export type SessionSummaryDeltas = {
    */
   meteredCost?: SessionSummaryDelta;
   apiCost?: SessionSummaryDelta;
+  /** The subscription-inclusive total cost movement (`SessionsCostBasis.Total`). */
+  totalCost?: SessionSummaryDelta;
   /**
    * FEA-4202: the `PRs Shipped` card's movement — the one delivery metric whose
    * two sides are the same shape of figure.
@@ -270,6 +272,12 @@ export function buildSessionSummaryDeltas({
     MetricPolarity.LowerIsBetter
   );
   assignDelta(result, "apiCost", deltas.apiCost, MetricPolarity.LowerIsBetter);
+  assignDelta(
+    result,
+    "totalCost",
+    deltas.totalCost,
+    MetricPolarity.LowerIsBetter
+  );
   // FEA-4202: shipping more merged PRs is more delivery, so a rise reads as an
   // improvement — the same grading the Sessions count carries. Gated because the
   // chip itself is the perceivable addition; the producer's honesty rules are not
