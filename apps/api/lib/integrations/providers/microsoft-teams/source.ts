@@ -6,6 +6,7 @@ import {
   type SourceItem,
   type SourceItemAttachment,
   type SourceItemRef,
+  type SourceItemThreadMessage,
 } from "../../types";
 import { readBotCredentials, type TeamsProviderContext } from "./connection";
 import { acquireEntraToken, GRAPH_SCOPE } from "./entra-token";
@@ -34,6 +35,8 @@ import {
  *   root post first; the whole conversation is context. When it is too long
  *   the oldest replies are left out (the root post and the request stay).
  * - Reporter: who mentioned the bot.
+ * - `thread`: the same messages, structured (author, time, bot or not), for a
+ *   run that continues an earlier run's agent session; not in the Issue.
  *
  * Temporary Graph failures (429, 5xx, timeouts) throw RetryableSourceError;
  * a missing permission or a deleted thread throws a plain Error.
@@ -171,8 +174,25 @@ function toSourceItem(
       },
     ],
     comments: [],
+    thread: threadMessages(thread, bot.appId),
     attachments: threadAttachments([thread.root, ...thread.replies]),
   };
+}
+
+/** The thread as structured messages, root first, replies oldest first. */
+function threadMessages(
+  thread: Thread,
+  appId: string
+): SourceItemThreadMessage[] {
+  const botId = appId.toLowerCase();
+  return [thread.root, ...thread.replies].map((message) => ({
+    id: message.id,
+    parentId: message.id === thread.root.id ? null : thread.root.id,
+    author: messageAuthor(message),
+    createdAt: message.createdDateTime ?? null,
+    bodyMarkdown: graphMessageMarkdown(message, appId),
+    fromBot: message.from?.application?.id?.toLowerCase() === botId,
+  }));
 }
 
 /**

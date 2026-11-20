@@ -15,6 +15,10 @@ import {
   WorkflowRunSourceClassificationOrigin,
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
+import {
+  WorkflowSessionCarryAttempt,
+  WorkflowSessionCarryReason,
+} from "@repo/api/src/types/workflow-same-item";
 import { ApiError } from "@repo/app/shared/api/api-error";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -40,6 +44,7 @@ import { WORKFLOW_RUN_ERROR_MESSAGES } from "../../lib/workflow-error-messages";
 import {
   WORKFLOW_RUN_EVENT_LABELS,
   WORKFLOW_RUN_STATUS_LABELS,
+  WORKFLOW_SESSION_CARRY_REASON_LABELS,
 } from "../../lib/workflow-labels";
 import { WorkflowRunDetailView } from "../workflow-run-detail-view";
 
@@ -175,6 +180,110 @@ describe("WorkflowRunDetailView", () => {
       "Implementing: not started",
       "Done: not started",
     ]);
+  });
+
+  it("links the earlier run a queued run waits for, with its status", () => {
+    setRun(
+      makeRunDetail({
+        status: WorkflowRunStatus.Received,
+        queuedBehind: {
+          runId: "run-earlier",
+          status: WorkflowRunStatus.NeedsInput,
+        },
+      })
+    );
+
+    render(<WorkflowRunDetailView isAdmin runId={RUN_ID} />);
+
+    expect(
+      screen.getByRole("link", { name: "an earlier run of this item" })
+    ).toHaveAttribute(
+      "href",
+      `/acme/workflows/${WORKFLOW_ID}/runs/run-earlier`
+    );
+    expect(
+      screen.getByText(
+        `(${WORKFLOW_RUN_STATUS_LABELS[WorkflowRunStatus.NeedsInput]}) to finish.`,
+        { exact: false }
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("says a carried session was continued, linking the earlier run", () => {
+    setRun(
+      makeRunDetail({
+        sessionCarry: {
+          fromRunId: "run-earlier",
+          attempt: WorkflowSessionCarryAttempt.Resume,
+          reason: null,
+        },
+      })
+    );
+
+    render(<WorkflowRunDetailView isAdmin runId={RUN_ID} />);
+
+    expect(
+      screen.getByRole("link", { name: "the item's previous run" })
+    ).toHaveAttribute(
+      "href",
+      `/acme/workflows/${WORKFLOW_ID}/runs/run-earlier`
+    );
+    expect(screen.getByTestId("run-session-carry")).toHaveTextContent(
+      "Continued the agent session of the item's previous run"
+    );
+  });
+
+  it("says a forked session ran in a copy", () => {
+    setRun(
+      makeRunDetail({
+        sessionCarry: {
+          fromRunId: "run-earlier",
+          attempt: WorkflowSessionCarryAttempt.Fork,
+          reason: WorkflowSessionCarryReason.ResumeSessionNotFound,
+        },
+      })
+    );
+
+    render(<WorkflowRunDetailView isAdmin runId={RUN_ID} />);
+
+    expect(screen.getByTestId("run-session-carry")).toHaveTextContent(
+      "(in a copy: the runner no longer had the session)"
+    );
+  });
+
+  it("says a new session started, with the reason", () => {
+    setRun(
+      makeRunDetail({
+        sessionCarry: {
+          fromRunId: "run-earlier",
+          attempt: WorkflowSessionCarryAttempt.Fresh,
+          reason: WorkflowSessionCarryReason.RunnerUnavailable,
+        },
+      })
+    );
+
+    render(<WorkflowRunDetailView isAdmin runId={RUN_ID} />);
+
+    expect(screen.getByTestId("run-session-carry")).toHaveTextContent(
+      `Started a new agent session: ${WORKFLOW_SESSION_CARRY_REASON_LABELS[WorkflowSessionCarryReason.RunnerUnavailable]}`
+    );
+    expect(
+      screen.queryByRole("link", { name: "the item's previous run" })
+    ).toBeNull();
+  });
+
+  it("shows no session line without a carried session", () => {
+    render(<WorkflowRunDetailView isAdmin runId={RUN_ID} />);
+
+    expect(screen.queryByTestId("run-session-carry")).not.toBeInTheDocument();
+  });
+
+  it("shows no wait line for a run that is not queued", () => {
+    render(<WorkflowRunDetailView isAdmin runId={RUN_ID} />);
+
+    expect(
+      screen.queryByRole("link", { name: "an earlier run of this item" })
+    ).not.toBeInTheDocument();
   });
 
   it("lists the run's sessions and offers to watch the running one live", () => {

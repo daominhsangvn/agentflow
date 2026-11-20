@@ -291,6 +291,7 @@ export function createIngestDbFake() {
         occurrenceKeys: [],
         sourceKey: `${IntegrationProviderKey.Jira}:PROJ-7`,
         cycle: 1,
+        createdAt: new Date("2026-10-01T00:00:00.000Z"),
         ...overrides,
       };
       runs.push(run);
@@ -387,7 +388,7 @@ function matchesTriggerWhere(
 type RunWhere = {
   workflowId: string;
   sourceKey?: string;
-  status?: { in: string[] };
+  status?: string | { in: string[] };
   OR?: Array<{
     dedupKey?: string;
     sourceKey?: string;
@@ -428,12 +429,27 @@ function findActive(runs: Row[], where: RunWhere) {
       (row) =>
         row.workflowId === where.workflowId &&
         row.sourceKey === where.sourceKey &&
-        (where.status?.in.includes(String(row.status)) ?? true)
+        matchesStatus(row, where.status)
     )
     .at(-1);
   return latest
-    ? { id: latest.id, status: latest.status, cycle: latest.cycle }
+    ? {
+        id: latest.id,
+        status: latest.status,
+        cycle: latest.cycle,
+        createdAt: latest.createdAt,
+      }
     : null;
+}
+
+function matchesStatus(row: Row, status: RunWhere["status"]): boolean {
+  if (status === undefined) {
+    return true;
+  }
+  if (typeof status === "string") {
+    return row.status === status;
+  }
+  return status.in.includes(String(row.status));
 }
 
 function applyUpdate(row: Row, data: Where): void {

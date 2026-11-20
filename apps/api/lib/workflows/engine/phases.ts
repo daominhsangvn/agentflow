@@ -27,7 +27,7 @@ import {
 import {
   answersPrompt,
   autoRetryStep,
-  readRunCommentIds,
+  continueCarriedStep,
   repairStep,
   resumeAgentStep,
   ticketAnswersPrompt,
@@ -43,6 +43,7 @@ import {
   markIssueInReview,
 } from "./documents";
 import { runError } from "./errors";
+import { itemQueueWait } from "./item-queue";
 import { launchWorkflowLoop } from "./launch";
 import {
   enterPreActions,
@@ -61,6 +62,7 @@ import {
 } from "./process";
 import { publishExecuteReleaseNotes } from "./release-notes";
 import { advanceReview } from "./review-round";
+import { readRunCommentIds } from "./run-comments";
 import { readAgentConfig } from "./run-data";
 import {
   findAdoptableLoop,
@@ -106,7 +108,7 @@ export async function runPhaseStep(
   const now = context.now;
   switch (run.status) {
     case WorkflowRunStatus.Received:
-      return stepReceived();
+      return await stepReceived(run, context.now);
     case WorkflowRunStatus.PreActions:
       return await stepPreActions(run, context);
     case WorkflowRunStatus.Ingesting:
@@ -137,9 +139,14 @@ export type RunContext = {
 /**
  * received: import the item first; ingesting runs the workflow.triggered
  * actions once the run's documents exist. A disabled workflow writes nothing
- * anywhere: ingesting fails the run.
+ * anywhere: ingesting fails the run. A run of an item with agent.sameItem
+ * waits here while the item's queue holds it (item-queue.ts).
  */
-function stepReceived(): StepOutcome {
+async function stepReceived(run: EngineRun, now: Date): Promise<StepOutcome> {
+  const queued = await itemQueueWait(run, now);
+  if (queued) {
+    return queued;
+  }
   return transition(WorkflowRunStatus.Ingesting);
 }
 
@@ -257,6 +264,7 @@ async function stepIngesting(run: EngineRun, now: Date): Promise<StepOutcome> {
       documents: documents.value,
       events: startedEvents,
       data: firstStepData,
+      item: source.value.item,
     });
   }
   const planDocumentId = documents.value.planDocumentId;
@@ -415,6 +423,9 @@ async function stepRunning(run: EngineRun, now: Date): Promise<StepOutcome> {
     const context = await loadRunContext(run);
     if (!context.ok) {
       return failRun(context.error);
+    }
+    if (settled.kind === "carryFallback") {
+      return await continueCarriedStep(run, context.value, settled);
     }
     return settled.kind === "autoRetry"
       ? await autoRetryStep(run, context.value, settled)

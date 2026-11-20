@@ -145,6 +145,7 @@ export async function recordWorkflowEvents(input: {
 }
 
 const RESULT_DETAILS: Partial<Record<WorkflowEventResult, string>> = {
+  [WorkflowEventResult.Queued]: "Queued behind an earlier run of the same item",
   [WorkflowEventResult.Duplicate]: "Occurrence already handled",
   [WorkflowEventResult.Active]: "Run already active",
   [WorkflowEventResult.Signaled]: "Taken as a review or approval signal",

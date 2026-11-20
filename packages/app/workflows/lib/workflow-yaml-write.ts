@@ -12,6 +12,7 @@ import {
   workflowInstructionConfigSchema,
 } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 // Cross-slice: a workflow's own process is the project process, nested.
 import { processYamlValue } from "@repo/app/projects/lib/process-yaml";
 import { Document, isMap, isPair, isScalar, isSeq } from "yaml";
@@ -83,6 +84,7 @@ export function workflowToYaml(
         stopOnOpenQuestions: keepsModeKeys
           ? agent.stopOnOpenQuestions
           : undefined,
+        sameItem: sameItemYamlValue(agent.sameItem),
         repository: agent.repository ?? undefined,
         prd: prdYamlValue(agent.prd),
         titleTemplate: agent.titleTemplate,
@@ -124,6 +126,16 @@ export function newWorkflowYaml(catalog: WorkflowYamlCatalog): string {
     actions: [],
   });
   return `${NEW_WORKFLOW_HEADER}${body}`;
+}
+
+/** `sameItem` is written only when it differs from the default (ignore). */
+function sameItemYamlValue(
+  sameItem: WorkflowSameItem | undefined
+): WorkflowSameItem | undefined {
+  if (sameItem && sameItem !== WorkflowSameItem.Ignore) {
+    return sameItem;
+  }
+  return undefined;
 }
 
 const NEW_WORKFLOW_HEADER = `# A workflow: a trigger starts a run and the agent team works on the item.

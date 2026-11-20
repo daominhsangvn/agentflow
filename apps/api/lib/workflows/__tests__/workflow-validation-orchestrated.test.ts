@@ -8,6 +8,7 @@ import {
   saveWorkflowInputSchema,
 } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 import { describe, expect, it, vi } from "vitest";
 import { FAKE_TRIGGER_TYPE } from "@/lib/workflows/__tests__/support/workflow-registry.test-fake";
 import { validateWorkflowInput } from "@/lib/workflows/workflow-validation";
@@ -207,13 +208,47 @@ describe("validateWorkflowInput — orchestrated", () => {
     const result = await validate(WorkflowAgentMode.Plan);
     expect(result.ok).toBe(true);
   });
+
+  it("refuses sameItem queue for an orchestrated workflow", async () => {
+    const result = await validate(
+      WorkflowAgentMode.Orchestrated,
+      null,
+      [],
+      {},
+      WorkflowSameItem.Queue
+    );
+    expect(result.ok ? "" : result.error).toContain("agent.sameItem");
+  });
+
+  it("accepts sameItem ignore for an orchestrated workflow", async () => {
+    const result = await validate(
+      WorkflowAgentMode.Orchestrated,
+      null,
+      [],
+      {},
+      WorkflowSameItem.Ignore
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts sameItem queue_resume on another mode", async () => {
+    const result = await validate(
+      WorkflowAgentMode.Plan,
+      null,
+      [],
+      {},
+      WorkflowSameItem.QueueResume
+    );
+    expect(result.ok).toBe(true);
+  });
 });
 
 function validate(
   mode: WorkflowAgentMode,
   process: unknown = null,
   runners: unknown[] = [],
-  connections: Record<string, string[]> = {}
+  connections: Record<string, string[]> = {},
+  sameItem?: WorkflowSameItem
 ) {
   const input: SaveWorkflowInput = saveWorkflowInputSchema.parse({
     name: "Questions to the orchestrator",
@@ -224,6 +259,7 @@ function validate(
       process,
       runners,
       orchestrator: { connections },
+      sameItem,
     },
     triggers: [{ connectionKey: "jira", type: FAKE_TRIGGER_TYPE }],
     actions: [],

@@ -109,6 +109,10 @@ export const WORKFLOW_YAML_KEY_DOCS: Record<string, WorkflowYamlKeyDoc> = {
     detail: "true (default) | false",
     info: "Plan and implement without a process: wait for a person (input.needed) when the plan has open questions; false implements the plan as it is. A process step's questions: replaces it.",
   },
+  sameItem: {
+    detail: "ignore (default) | queue | queue_resume",
+    info: "What an event on an item that already has an active run does. ignore: nothing (a needs_input run is still resumed). queue: it starts its own run, which starts once the item's earlier runs are finished and the previous run's reply is sent; each run fires its own actions (two mentions in a Teams thread get two replies, in order). queue_resume: as queue, and the run's first agent step continues the agent session of the item's previous run on the runner that ran it, told only what is new; when that is not possible it starts fresh. Not for orchestrated workflows.",
+  },
   repository: {
     detail: "mapping",
     info: "A repository of the project's team pool to use instead of the project's repositories. Left out: every repository of the project.",

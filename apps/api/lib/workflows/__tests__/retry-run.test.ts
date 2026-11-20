@@ -10,6 +10,7 @@ import {
   WorkflowRunEvent,
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   runLoopState as loop,
@@ -40,6 +41,8 @@ const mocks = vi.hoisted(() => ({
   drainActionRuns: vi.fn(),
   hasPostEvents: vi.fn(),
   waitUntil: vi.fn(),
+  itemRetryGuard: vi.fn(),
+  loadItemRunKey: vi.fn(),
 }));
 
 vi.mock("@repo/database", async () => {
@@ -74,6 +77,15 @@ vi.mock("@/lib/workflows/engine/actions", () => ({
   skipUnfinishedPreActionRuns: vi.fn(),
 }));
 vi.mock("@/lib/workflows/engine/cancel", () => ({ cancelRunLoops: vi.fn() }));
+vi.mock("@/lib/workflows/engine/item-queue", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/lib/workflows/engine/item-queue")>();
+  return {
+    ...original,
+    itemRetryGuard: mocks.itemRetryGuard,
+    loadItemRunKey: mocks.loadItemRunKey,
+  };
+});
 vi.mock("@/lib/wait-until", () => ({ waitUntil: mocks.waitUntil }));
 
 const PROCESS = {
@@ -250,6 +262,70 @@ describe("retryRun", () => {
       leaseUntil: null,
     });
     expect(mocks.enqueueRunEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe("retryRun with agent.sameItem", () => {
+  const KEY = {
+    id: RUN_ID,
+    workflowId: "wf-1",
+    sourceKey: "thread-1",
+    createdAt: NOW,
+  };
+
+  function setQueueRun(sameItem: WorkflowSameItem) {
+    setFailedRun(AgentFlowStepId.Execute);
+    run().agentConfig = { ...AGENT_CONFIG, sameItem };
+    mocks.loadItemRunKey.mockResolvedValue(KEY);
+  }
+
+  it("refuses while another run of the item is open and launches nothing", async () => {
+    setQueueRun(WorkflowSameItem.Queue);
+    mocks.itemRetryGuard.mockResolvedValue("busy");
+
+    const result = await retryRun(ORG_ID, RUN_ID);
+
+    expect(result).toEqual(Result.err({ failure: RetryRunFailure.ItemBusy }));
+    expect(mocks.launchWorkflowLoop).not.toHaveBeenCalled();
+    expect(run().status).toBe(WorkflowRunStatus.Failed);
+  });
+
+  it("refuses with queue_resume once a later run exists", async () => {
+    setQueueRun(WorkflowSameItem.QueueResume);
+    mocks.itemRetryGuard.mockResolvedValue("moved_on");
+
+    const result = await retryRun(ORG_ID, RUN_ID);
+
+    expect(result).toEqual(
+      Result.err({ failure: RetryRunFailure.ItemMovedOn })
+    );
+    expect(mocks.launchWorkflowLoop).not.toHaveBeenCalled();
+  });
+
+  it("retries as today when the guard finds nothing open", async () => {
+    setQueueRun(WorkflowSameItem.Queue);
+    mocks.itemRetryGuard.mockResolvedValue(null);
+
+    await expect(retryRun(ORG_ID, RUN_ID)).resolves.toEqual(Result.ok(null));
+
+    expect(mocks.itemRetryGuard).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...KEY,
+        agentConfig: expect.objectContaining({
+          sameItem: WorkflowSameItem.Queue,
+        }),
+      })
+    );
+    expect(mocks.launchWorkflowLoop).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not look at the item without the setting", async () => {
+    setFailedRun(AgentFlowStepId.Execute);
+
+    await expect(retryRun(ORG_ID, RUN_ID)).resolves.toEqual(Result.ok(null));
+
+    expect(mocks.loadItemRunKey).not.toHaveBeenCalled();
+    expect(mocks.itemRetryGuard).not.toHaveBeenCalled();
   });
 });
 

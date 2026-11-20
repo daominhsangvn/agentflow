@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { LoopCommand } from "@agentflow-ai/loops-api/commands";
+import { LoopErrorCode } from "@agentflow-ai/loops-api/error-codes";
 import { JobStore, type LocalJob } from "../src/main/jobs/job-store.js";
 import { LoopTokenStore } from "../src/main/loop/loop-token-store.js";
 import type { NativeLoopObservabilitySession } from "../src/server/operations/observability/native-loop-observability.js";
@@ -600,4 +601,79 @@ test("handleProcessCompletion finalizes native observability as cancelled for CA
   );
 
   assert.deepEqual(nativeFinishes, [{ exitCode: 1, status: "cancelled" }]);
+});
+
+async function completeFailedStepLoop(args: {
+  loopId: string;
+  claudeWorkDir: string;
+  reportResumeMiss: boolean;
+}): Promise<void> {
+  const jobStore = createStore(`symphony-step-${args.loopId}`);
+  jobStore.upsert(createBaseJob(args.loopId, args.claudeWorkDir));
+  await handleProcessCompletion(
+    1,
+    {
+      loopId: args.loopId,
+      command: LoopCommand.Step,
+      agentFlowAuthToken: "token",
+      parentSessionId: "session-1",
+      step: {
+        runId: "run-1",
+        stepId: "step-1",
+        name: "Step",
+        fresh: true,
+        askQuestions: false,
+        artifacts: [],
+        finish: "none",
+        toolkit: null,
+        ...(args.reportResumeMiss ? { reportResumeMiss: true } : {}),
+      },
+    } as unknown as Parameters<typeof handleProcessCompletion>[1],
+    "http://127.0.0.1:12345",
+    null,
+    args.claudeWorkDir,
+    false,
+    null,
+    () => [tempRoot],
+    undefined,
+    jobStore
+  );
+}
+
+async function writeMissingSessionOutput(claudeWorkDir: string) {
+  await fs.mkdir(claudeWorkDir, { recursive: true });
+  await fs.writeFile(
+    path.join(claudeWorkDir, "claude-output.jsonl"),
+    `${JSON.stringify({
+      type: "result",
+      is_error: true,
+      result: "No conversation found with session ID: session-1",
+    })}\n`
+  );
+}
+
+test("handleProcessCompletion posts RESUME_SESSION_NOT_FOUND for a step that asked for it", async () => {
+  const claudeWorkDir = path.join(tempRoot, "repo", "workdir-miss");
+  await writeMissingSessionOutput(claudeWorkDir);
+
+  await completeFailedStepLoop({
+    loopId: "loop-resume-miss",
+    claudeWorkDir,
+    reportResumeMiss: true,
+  });
+
+  assert.equal(getPostedErrorEvent().code, LoopErrorCode.ResumeSessionNotFound);
+});
+
+test("handleProcessCompletion keeps PROCESS_FAILED for the same failure without the flag", async () => {
+  const claudeWorkDir = path.join(tempRoot, "repo", "workdir-no-flag");
+  await writeMissingSessionOutput(claudeWorkDir);
+
+  await completeFailedStepLoop({
+    loopId: "loop-resume-miss-no-flag",
+    claudeWorkDir,
+    reportResumeMiss: false,
+  });
+
+  assert.equal(getPostedErrorEvent().code, LoopErrorCode.ProcessFailed);
 });

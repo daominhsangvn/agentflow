@@ -328,6 +328,14 @@ const loopErrorMessages = {
       "Pick one of the project's repositories and retry.",
     ],
   },
+  [LoopErrorCode.ResumeSessionNotFound]: {
+    title: "Agent session not found",
+    description:
+      "The runner no longer had the agent session this step continues.",
+    remediation: [
+      "The workflow starts a new session on its own; nothing to do.",
+    ],
+  },
 } satisfies Record<LoopErrorCode, FriendlyErrorTemplate>;
 
 const runnerSubcodeMessages = {

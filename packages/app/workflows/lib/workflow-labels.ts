@@ -9,6 +9,7 @@ import {
 } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
 import { WorkflowEventResult } from "@repo/api/src/types/workflow-event";
+import { WorkflowSessionCarryReason } from "@repo/api/src/types/workflow-same-item";
 import { formatRelativeTime } from "@repo/app/shared/lib/date-utils";
 
 /** Badge tones used by the workflows UI (a subset of the design-system Badge variants). */
@@ -220,6 +221,7 @@ export function describeWorkflowCaseActivity(
 export const WORKFLOW_EVENT_RESULT_LABELS: Record<WorkflowEventResult, string> =
   {
     [WorkflowEventResult.Created]: "Run started",
+    [WorkflowEventResult.Queued]: "Run queued",
     [WorkflowEventResult.Resumed]: "Run resumed",
     [WorkflowEventResult.Duplicate]: "Duplicate",
     [WorkflowEventResult.Active]: "Run already active",
@@ -234,6 +236,7 @@ export const WORKFLOW_EVENT_RESULT_TONES: Record<
   WorkflowBadgeTone
 > = {
   [WorkflowEventResult.Created]: "success",
+  [WorkflowEventResult.Queued]: "info",
   [WorkflowEventResult.Resumed]: "success",
   [WorkflowEventResult.CaseMessage]: "success",
   [WorkflowEventResult.Signaled]: "info",
@@ -241,4 +244,34 @@ export const WORKFLOW_EVENT_RESULT_TONES: Record<
   [WorkflowEventResult.Duplicate]: "muted",
   [WorkflowEventResult.Active]: "muted",
   [WorkflowEventResult.Filtered]: "warning",
+};
+
+export const WORKFLOW_SESSION_CARRY_REASON_LABELS: Record<
+  WorkflowSessionCarryReason,
+  string
+> = {
+  [WorkflowSessionCarryReason.NotResume]:
+    "the workflow does not continue sessions",
+  [WorkflowSessionCarryReason.NotFirstCycle]: "the run was resumed or retried",
+  [WorkflowSessionCarryReason.NoPreviousRun]: "no earlier run of this item",
+  [WorkflowSessionCarryReason.NoSession]:
+    "the earlier run has no agent session",
+  [WorkflowSessionCarryReason.DepthLimit]:
+    "20 runs continued one session; a new one starts",
+  [WorkflowSessionCarryReason.RunnerUnavailable]:
+    "the runner of the earlier session is not available",
+  [WorkflowSessionCarryReason.RunnerCannotReportMiss]:
+    "the runner's version cannot continue sessions across runs",
+  [WorkflowSessionCarryReason.PushingStepOnAuto]:
+    "the first step pushes a branch",
+  [WorkflowSessionCarryReason.ArtifactsOutsideWorkDir]:
+    "the step's files are outside .agentflow-ai/work",
+  [WorkflowSessionCarryReason.WorkspaceUnknown]:
+    "the earlier run's folder is unknown",
+  [WorkflowSessionCarryReason.ResumeSessionNotFound]:
+    "the runner no longer had the session",
+  [WorkflowSessionCarryReason.ForkSessionNotFound]:
+    "the runner no longer had the session",
+  [WorkflowSessionCarryReason.CarriedLaunchFailed]:
+    "the earlier session's runner could not start it",
 };

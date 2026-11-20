@@ -3,6 +3,7 @@ import {
   IntegrationDeliverySource,
 } from "@repo/api/src/types/integration";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildEvent,
@@ -111,6 +112,23 @@ describe("ingestEvents — orchestrated workflows", () => {
         workflows: [{ workflowId: WORKFLOW_ID, projectId: PROJECT_ID }],
       })
     );
+  });
+
+  it("ignores a stored agent.sameItem for an orchestrated workflow: no queued run", async () => {
+    fake.addWorkflow({
+      agentConfig: {
+        computeTargetId: "ct-1",
+        mode: WorkflowAgentMode.Orchestrated,
+        sameItem: WorkflowSameItem.Queue,
+      },
+    });
+    mocks.routeToOrchestrator.mockResolvedValue([]);
+
+    const result = await ingestEvents(input());
+
+    expect(result.decisions).toEqual([]);
+    expect(fake.runs).toEqual([]);
+    expect(mocks.advanceRun).not.toHaveBeenCalled();
   });
 
   it("offers every event to the orchestrator, with no workflow when none matched (a reply it may own)", async () => {

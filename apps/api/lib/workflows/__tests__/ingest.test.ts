@@ -8,6 +8,8 @@ import {
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
 import { WorkflowAgentMode } from "@repo/api/src/types/workflow-agent-mode";
+import { WorkflowEventResult } from "@repo/api/src/types/workflow-event";
+import { WorkflowSameItem } from "@repo/api/src/types/workflow-same-item";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildEvent,
@@ -577,3 +579,108 @@ function replyInput(
     ],
   });
 }
+
+describe("ingestEvents with agent.sameItem", () => {
+  function queueWorkflow(agentConfig: Record<string, unknown> = {}) {
+    fake.addWorkflow({
+      agentConfig: {
+        computeTargetId: "ct-1",
+        mode: WorkflowAgentMode.PlanAndExecute,
+        sameItem: WorkflowSameItem.Queue,
+        ...agentConfig,
+      },
+    });
+  }
+
+  it("creates a queued run behind a running run of the item", async () => {
+    queueWorkflow();
+    fake.addRun({ status: WorkflowRunStatus.Running });
+
+    const result = await ingestEvents(
+      input({ events: [buildEvent({ dedupKey: "PROJ-7:assignee:200" })] })
+    );
+
+    expect(result.decisions[0]).toMatchObject({
+      decision: IngestDecision.Queued,
+      runId: "run-2",
+    });
+    expect(result.outcome).toBe(IntegrationDeliveryOutcome.Accepted);
+    expect(result.runCount).toBe(1);
+    expect(result.detail).toBe("1 run queued");
+    expect(fake.runs).toHaveLength(2);
+    expect(fake.runs[1]).toMatchObject({
+      status: WorkflowRunStatus.Received,
+      dedupKey: "PROJ-7:assignee:200",
+    });
+    expect(mocks.advanceRun).toHaveBeenCalledWith("run-2");
+    expect(fake.workflowEvents[0]).toMatchObject({
+      result: WorkflowEventResult.Queued,
+    });
+  });
+
+  it("orders the new run after the latest run of the item even when that is in the future", async () => {
+    queueWorkflow();
+    const future = new Date(Date.now() + 60_000);
+    fake.addRun({ status: WorkflowRunStatus.Running, createdAt: future });
+
+    await ingestEvents(input());
+
+    expect((fake.runs[1].createdAt as Date).getTime()).toBe(
+      future.getTime() + 1
+    );
+  });
+
+  it("creates a plain run when the item has no active run", async () => {
+    queueWorkflow();
+
+    const result = await ingestEvents(input());
+
+    expect(result.decisions[0].decision).toBe(IngestDecision.Created);
+    expect(fake.runs[0].createdAt).toBeInstanceOf(Date);
+  });
+
+  it("reports a redelivered occurrence as duplicate", async () => {
+    queueWorkflow();
+    fake.addRun({ status: WorkflowRunStatus.Running });
+    await ingestEvents(input());
+
+    const again = await ingestEvents(input({ deliveryId: "delivery-2" }));
+
+    expect(again.decisions[0].decision).toBe(IngestDecision.Duplicate);
+    expect(fake.runs).toHaveLength(2);
+  });
+
+  it("answers a needs_input run before queued runs", async () => {
+    queueWorkflow();
+    fake.addRun({ status: WorkflowRunStatus.NeedsInput });
+    fake.addRun({ status: WorkflowRunStatus.Received });
+
+    const result = await ingestEvents(
+      input({ events: [buildEvent({ dedupKey: "PROJ-7:assignee:300" })] })
+    );
+
+    expect(result.decisions[0]).toMatchObject({
+      decision: IngestDecision.Resumed,
+      runId: "run-1",
+    });
+    expect(fake.runs).toHaveLength(2);
+    expect(fake.runs[0]).toMatchObject({ status: WorkflowRunStatus.Ingesting });
+  });
+
+  it("keeps today's behavior without the setting: active, no createdAt on create", async () => {
+    fake.addRun({ status: WorkflowRunStatus.Running });
+    const active = await ingestEvents(input());
+    expect(active.decisions[0].decision).toBe(IngestDecision.Active);
+
+    const other = createIngestDbFake();
+    mocks.fake = other;
+    other.addWorkflow();
+    other.addTrigger();
+    other.addScope("PROJ");
+    await ingestEvents(input({ deliveryId: "delivery-3" }));
+    const created = other.db.workflowRun.create.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(created.data).not.toHaveProperty("createdAt");
+  });
+});

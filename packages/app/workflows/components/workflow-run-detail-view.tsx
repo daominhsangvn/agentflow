@@ -12,6 +12,10 @@ import {
   type WorkflowRunSourceClassification,
   WorkflowRunSourceClassificationOrigin,
 } from "@repo/api/src/types/workflow";
+import {
+  type WorkflowRunSessionCarry,
+  WorkflowSessionCarryAttempt,
+} from "@repo/api/src/types/workflow-same-item";
 // Cross-slice: run documents route through the documents slice, loops render
 // with the loops slice badge, and providers/errors come from integrations.
 import { getDocumentRoute } from "@repo/app/documents/lib/document-navigation";
@@ -73,6 +77,8 @@ import {
   WORKFLOW_ACTION_STAGE_LABELS,
   WORKFLOW_INSTRUCTION_OPERATION_STATUS_LABELS,
   WORKFLOW_RUN_EVENT_LABELS,
+  WORKFLOW_RUN_STATUS_LABELS,
+  WORKFLOW_SESSION_CARRY_REASON_LABELS,
 } from "../lib/workflow-labels";
 import { ExternalOrText, isHttpUrl } from "./external-or-text";
 import { WorkflowRunLoopsCard } from "./workflow-run-loops-card";
@@ -198,6 +204,28 @@ function RunDetailContent({
       </div>
 
       <WorkflowRunTimeline run={run} />
+
+      {run.queuedBehind ? (
+        <p className="text-muted-foreground text-sm">
+          {"Waiting for "}
+          <Link
+            className="text-[var(--link)] hover:underline"
+            href={buildOrgPath(
+              `/workflows/${run.workflowId}/runs/${run.queuedBehind.runId}`
+            )}
+          >
+            an earlier run of this item
+          </Link>
+          {` (${WORKFLOW_RUN_STATUS_LABELS[run.queuedBehind.status]}) to finish.`}
+        </p>
+      ) : null}
+
+      {run.sessionCarry ? (
+        <SessionCarryNote
+          carry={run.sessionCarry}
+          workflowId={run.workflowId}
+        />
+      ) : null}
 
       {run.error ? <RunErrorAlert error={run.error} /> : null}
 
@@ -658,6 +686,52 @@ function SourceClassificationNote({
       data-testid="run-source-classification"
     >
       {lead} {classification.reason}
+    </p>
+  );
+}
+
+/** How the first agent step's session started (agent.sameItem queue_resume). */
+function SessionCarryNote({
+  carry,
+  workflowId,
+}: Readonly<{ carry: WorkflowRunSessionCarry; workflowId: string }>) {
+  const buildOrgPath = useOrgPath();
+  if (carry.attempt === WorkflowSessionCarryAttempt.Fresh) {
+    const reason = carry.reason
+      ? `: ${WORKFLOW_SESSION_CARRY_REASON_LABELS[carry.reason]}`
+      : "";
+    return (
+      <p
+        className="text-muted-foreground text-sm"
+        data-testid="run-session-carry"
+      >
+        {`Started a new agent session${reason}`}
+      </p>
+    );
+  }
+  const suffix =
+    carry.attempt === WorkflowSessionCarryAttempt.Fork
+      ? " (in a copy: the runner no longer had the session)"
+      : "";
+  return (
+    <p
+      className="text-muted-foreground text-sm"
+      data-testid="run-session-carry"
+    >
+      {"Continued the agent session of "}
+      {carry.fromRunId ? (
+        <Link
+          className="text-[var(--link)] hover:underline"
+          href={buildOrgPath(
+            `/workflows/${workflowId}/runs/${carry.fromRunId}`
+          )}
+        >
+          the item's previous run
+        </Link>
+      ) : (
+        "the item's previous run"
+      )}
+      {suffix}
     </p>
   );
 }

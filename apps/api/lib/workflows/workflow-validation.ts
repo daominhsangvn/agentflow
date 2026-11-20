@@ -66,6 +66,7 @@ import {
   workflowAgentRefs,
 } from "./workflow-project-agents";
 import { checkRunnerFit, type FitTarget } from "./workflow-runner-fit-check";
+import { orchestratedSameItemError } from "./workflow-same-item-validation";
 
 /**
  * Validation of a saved workflow (docs/workflows.md "API"): projects and
@@ -957,7 +958,7 @@ function checkOrchestrated(input: SaveWorkflowInput): string | null {
   if (input.agent.runners.length > 0) {
     return "A workflow handled by the orchestrator runs on one runner (agent.runner): remove agent.runners.";
   }
-  return null;
+  return orchestratedSameItemError(input.agent.sameItem);
 }
 
 const ORCHESTRATOR_GRANT_PREFIX = "agent.orchestrator.";

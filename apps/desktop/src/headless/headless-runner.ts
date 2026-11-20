@@ -219,6 +219,7 @@ export async function startHeadlessRunner(
       loopRunnerRefreshSupported: true,
       loopRunnerHeartbeatSupported: true,
       loopStepForkSession: true,
+      loopStepResumeMiss: true,
       toolkitCapabilitiesRefresh: true,
       headlessRunner: true,
       ...(config.personal

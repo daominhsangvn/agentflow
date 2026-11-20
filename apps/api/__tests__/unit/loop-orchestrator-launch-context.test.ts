@@ -2,6 +2,7 @@
  * Tests for resolveLoopLaunchContext() token resolution behavior (via launchLoop).
  */
 
+import type { JsonObject } from "@repo/api/src/types/common";
 import {
   afterEach,
   beforeEach,
@@ -571,5 +572,75 @@ describe("launchLoop — telemetry ids on the loop.launch span", () => {
     expect(mockSetActiveSpanAttributes).toHaveBeenCalledWith({
       [AfAttribute.CaseId]: "case-1",
     });
+  });
+});
+
+describe("resolveLoopLaunchContext — carried workspace slug", () => {
+  const WORKFLOW_RUN_ID = "run-2";
+
+  function stepLoop(metadata: JsonObject) {
+    return buildLoop({
+      status: LoopStatus.Pending,
+      command: LoopCommand.Step,
+      documentId: "doc-2",
+      computeTargetId: "target-1",
+      metadata,
+    });
+  }
+
+  async function dispatchedSlug(metadata: JsonObject): Promise<unknown> {
+    mockWithDb.mockImplementation((callback: (db: unknown) => unknown) =>
+      callback({
+        loop: { findUnique: vi.fn().mockResolvedValue(null) },
+        artifact: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          findUnique: vi
+            .fn()
+            .mockResolvedValue({ slug: "FEA-2", project: null }),
+        },
+        computeTarget: { findUnique: vi.fn().mockResolvedValue(null) },
+      })
+    );
+    mockLoopsService.findById.mockResolvedValue(stepLoop(metadata));
+    const body = await buildDesktopLoopExecutionCredentials({
+      loopId: "loop-1",
+      organizationId: "org-1",
+    });
+    return body.artifactSlug;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.API_BASE_URL = "https://api.test";
+    mockApiKeyService.resolveApiKey.mockResolvedValue("sk-anthropic-key");
+    mockResolveLoopTelemetryIds.mockResolvedValue({});
+    Object.assign(loopsService, {
+      updateMetadata: vi.fn().mockResolvedValue(undefined),
+    });
+  });
+
+  it("dispatches the carried slug of a workflow step loop", async () => {
+    expect(
+      await dispatchedSlug({
+        workflowRunId: WORKFLOW_RUN_ID,
+        carriedWorkspace: { slug: "FEA-1", fromRunId: "run-1" },
+      })
+    ).toBe("FEA-1");
+  });
+
+  it("dispatches the document slug without a carried slug", async () => {
+    expect(await dispatchedSlug({ workflowRunId: WORKFLOW_RUN_ID })).toBe(
+      "FEA-2"
+    );
+  });
+
+  it("ignores a carried slug forged on an orchestrator task loop", async () => {
+    expect(
+      await dispatchedSlug({
+        workflowRunId: WORKFLOW_RUN_ID,
+        orchestratorTaskId: "task-1",
+        carriedWorkspace: { slug: "FEA-1", fromRunId: "run-1" },
+      })
+    ).toBe("FEA-2");
   });
 });

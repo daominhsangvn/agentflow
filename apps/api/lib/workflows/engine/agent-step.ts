@@ -34,18 +34,34 @@ import {
   WorkflowRunEvent,
   WorkflowRunStatus,
 } from "@repo/api/src/types/workflow";
+import {
+  WorkflowSameItem,
+  WorkflowSessionCarryAttempt,
+  WorkflowSessionCarryReason,
+} from "@repo/api/src/types/workflow-same-item";
 import { withDb } from "@repo/database";
 import { parseError } from "@repo/observability/error";
 import { log } from "@repo/observability/log";
 import { documentVersionService } from "@/app/documents/document-version-service";
+import type { SourceItem } from "@/lib/integrations/types";
+import type { CarriedSessionMetadata } from "@/lib/loops/carried-session-metadata";
 import { readStepResult } from "@/lib/loops/loop-commands/step-handler";
 import { renderTemplate } from "@/lib/workflows/template";
+import { freshRequestPrompt } from "./carried-request";
+import {
+  type CarriedSession,
+  carriedSessionInput,
+  findCarriedSession,
+  readLoopCarriedSession,
+} from "./carried-session";
 import { approvePlanDocument, markIssueInReview } from "./documents";
 import { RUNNER_WITHOUT_TOOLS, runError } from "./errors";
+import { readSameItem } from "./item-queue";
 import { launchStepLoop } from "./launch-step";
 import { stepLaunchFailure } from "./personal-runner-queue";
 import { type RunProcess, readRunProcessSnapshot } from "./process";
 import { enterReview } from "./review-step";
+import { readRunCommentIds } from "./run-comments";
 import { readAgentConfig, readRunSource, toJsonObject } from "./run-data";
 import {
   findLatestRunLoop,
@@ -99,6 +115,12 @@ export type AgentStepStart = {
   events: WorkflowRunEvent[];
   /** Columns of that transition (step id, snapshot, an earlier step's branch). */
   data: RunTransitionData | undefined;
+  /**
+   * The run's source item as fetched when the run started: a workflow that
+   * continues the item's earlier session (agent.sameItem queue_resume) reads
+   * the messages written since from it.
+   */
+  item?: SourceItem;
 };
 
 /** What a finished agent step leads to. */
@@ -138,6 +160,18 @@ export type AgentStepSettlement =
       loop: RunLoopState;
       /** Automatic retries including this one. */
       attempts: number;
+    }
+  | {
+      /**
+       * A first-step attempt that continued an earlier run's session failed
+       * because the runner no longer had it (or could not start it): the next
+       * attempt (a copy of the session, then a fresh one) is launched.
+       */
+      kind: "carryFallback";
+      step: AgentProcessStep;
+      /** The failed attempt loop. */
+      loop: RunLoopState;
+      carried: CarriedSessionMetadata;
     }
   | {
       /** A plan step ended without its plan: resume it to write the plan. */
@@ -192,6 +226,28 @@ export async function startAgentStep(
   }
   // The run's earlier loops hold its workspace: the step continues there.
   const earlierLoops = await listRunLoops(run.id);
+  if (
+    input.item &&
+    readSameItem(run.agentConfig) === WorkflowSameItem.QueueResume &&
+    !earlierLoops.some((loop) => loop.sessionId !== null)
+  ) {
+    return await launchFirstStepCarried(
+      { ...input, item: input.item },
+      earlierLoops,
+      started,
+      data
+    );
+  }
+  const instruction = await renderStepInstruction(
+    run,
+    step,
+    input.documents.featureDocumentId
+  );
+  // Only the first launch of a queued run names its request; no query.
+  const request =
+    earlierLoops.length === 0
+      ? freshRequestPrompt(run, instruction)
+      : { prompt: instruction };
   const launch = await launchStepLoop({
     runId: run.id,
     organizationId: run.organizationId,
@@ -201,17 +257,16 @@ export async function startAgentStep(
       input.documents.planDocumentId ?? input.documents.featureDocumentId,
     sourceDocumentId: input.documents.featureDocumentId,
     agent: input.agent,
-    step: toLoopStepConfig({
-      runId: run.id,
-      step,
-      toolkit: input.runProcess.process.toolkit,
-      fresh: earlierLoops.length === 0,
-    }),
-    prompt: await renderStepInstruction(
-      run,
-      step,
-      input.documents.featureDocumentId
-    ),
+    step: {
+      ...toLoopStepConfig({
+        runId: run.id,
+        step,
+        toolkit: input.runProcess.process.toolkit,
+        fresh: earlierLoops.length === 0,
+      }),
+      ...(request.inputs ? { inputs: request.inputs } : {}),
+    },
+    prompt: request.prompt,
     computeTargetId: earlierLoops.at(-1)?.computeTargetId ?? null,
   });
   if (!launch.ok) {
@@ -266,7 +321,8 @@ export async function settleAgentStep(
   }
   const loopError = await settledLoopError(step, loop);
   if (loopError) {
-    return autoRetryOrFail(run, step, loop, loopError);
+    const fallback = await carryFallbackFor(run, step, loop);
+    return fallback ?? autoRetryOrFail(run, step, loop, loopError);
   }
 
   return await settleStepOutputs({
@@ -770,4 +826,248 @@ function autoRetryOrFail(
     return outcome({ kind: "retry", delayMs, error });
   }
   return { kind: "autoRetry", step, loop, attempts: used + 1 };
+}
+
+/** Launch errors on a carried attempt that start a fresh session instead (the earlier runner could not take it). */
+const CARRY_FALLBACK_LAUNCH_ERRORS: ReadonlySet<string> = new Set<string>([
+  WorkflowRunErrorCode.ComputeTargetUnavailable,
+  WorkflowRunErrorCode.AgentNotInProject,
+  WorkflowRunErrorCode.SigningRequired,
+  WorkflowRunErrorCode.DispatchFailed,
+  WorkflowRunErrorCode.PlanStateUnavailable,
+]);
+
+/** Loop error codes of a carried attempt that go on to the next attempt. */
+const CARRY_FALLBACK_LOOP_ERRORS: ReadonlySet<string> = new Set<string>([
+  LoopErrorCode.ResumeSessionNotFound,
+  LoopErrorCode.LaunchFailed,
+]);
+
+/** What launching a fresh session for a run needs. */
+export type CarriedFreshInput = {
+  run: EngineRun;
+  agent: WorkflowAgentConfig;
+  projectId: string;
+  runAsUser: { id: string; clerkId: string };
+  step: AgentProcessStep;
+  toolkit: ProcessToolkit | null;
+  documents: { featureDocumentId: string; planDocumentId: string | null };
+};
+
+/**
+ * A failed attempt loop of a carried session that the next attempt follows
+ * (agent.sameItem queue_resume): null for every other failure, which takes the
+ * step's normal failure path. No query unless the workflow continues sessions.
+ */
+async function carryFallbackFor(
+  run: EngineRun,
+  step: AgentProcessStep,
+  loop: RunLoopState
+): Promise<AgentStepSettlement | null> {
+  if (
+    readSameItem(run.agentConfig) !== WorkflowSameItem.QueueResume ||
+    !loop.error ||
+    !CARRY_FALLBACK_LOOP_ERRORS.has(loop.error.code)
+  ) {
+    return null;
+  }
+  const carried = await readLoopCarriedSession(loop.loopId, run.organizationId);
+  if (!carried || carried.attempt === WorkflowSessionCarryAttempt.Fresh) {
+    return null;
+  }
+  return { kind: "carryFallback", step, loop, carried };
+}
+
+/**
+ * The first step of a run whose workflow continues the item's session: resume
+ * the earlier run's session when it can be, else start a fresh one with the
+ * reason recorded on the loop.
+ */
+async function launchFirstStepCarried(
+  input: AgentStepStart & { item: SourceItem },
+  earlierLoops: RunLoopState[],
+  started: WorkflowRunEvent[],
+  data: RunTransitionData
+): Promise<StepOutcome> {
+  const { run, step, events } = input;
+  const freshInput = carriedFreshInput(input);
+  const done = (launch: Awaited<ReturnType<typeof launchStepLoop>>) =>
+    launch.ok
+      ? transition(WorkflowRunStatus.Running, started, data)
+      : stepLaunchFailure(launch.error, events);
+
+  const latest = earlierLoops.at(-1);
+  if (latest) {
+    return done(await relaunchFresh(freshInput, latest));
+  }
+
+  const stepConfig = toLoopStepConfig({
+    runId: run.id,
+    step,
+    toolkit: input.runProcess.process.toolkit,
+    fresh: true,
+  });
+  const found = await findCarriedSession({
+    run,
+    stepId: step.id,
+    runAsUserId: input.runAsUser.id,
+    documentId:
+      input.documents.planDocumentId ?? input.documents.featureDocumentId,
+    pushes: agentStepFinish(step) === ProcessStepFinish.Push,
+    artifacts: stepConfig.artifacts,
+  });
+  if (!found.ok) {
+    return done(await launchCarriedFresh(freshInput, found.error));
+  }
+  const carried = found.value;
+  const built = await carriedStepInputs(input, carried);
+  const resumed = await launchStepLoop({
+    ...carriedLaunchBase(freshInput),
+    step: { ...stepConfig, inputs: built.inputs, reportResumeMiss: true },
+    prompt: built.prompt,
+    computeTargetId: carried.loop.computeTargetId,
+    resumeLoopId: carried.loop.loopId,
+    carried: {
+      fromRunId: carried.fromRunId,
+      attempt: WorkflowSessionCarryAttempt.Resume,
+      depth: carried.depth,
+      reason: null,
+    },
+    workspace: carried.workspace,
+  });
+  if (resumed.ok || !CARRY_FALLBACK_LAUNCH_ERRORS.has(resumed.error.code)) {
+    return done(resumed);
+  }
+  log.info("workflow.run.session_carry_fallback", {
+    workflowRunId: run.id,
+    fromRunId: carried.fromRunId,
+    reason: WorkflowSessionCarryReason.CarriedLaunchFailed,
+    error: resumed.error,
+  });
+  return done(
+    await launchCarriedFresh(freshInput, {
+      fromRunId: carried.fromRunId,
+      reason: WorkflowSessionCarryReason.CarriedLaunchFailed,
+    })
+  );
+}
+
+/**
+ * A fresh launch when the run already has a loop but no session (the earlier
+ * launch hit a busy runner or a dispatch failure): the attempt that loop
+ * belonged to says why.
+ */
+async function relaunchFresh(input: CarriedFreshInput, latest: RunLoopState) {
+  const before = await readLoopCarriedSession(
+    latest.loopId,
+    input.run.organizationId
+  );
+  const resumedBefore =
+    before !== null && before.attempt !== WorkflowSessionCarryAttempt.Fresh;
+  return await launchCarriedFresh(input, {
+    fromRunId: before?.fromRunId ?? null,
+    reason:
+      resumedBefore || !before?.reason
+        ? WorkflowSessionCarryReason.CarriedLaunchFailed
+        : before.reason,
+  });
+}
+
+function carriedFreshInput(input: AgentStepStart): CarriedFreshInput {
+  return {
+    run: input.run,
+    agent: input.agent,
+    projectId: input.projectId,
+    runAsUser: input.runAsUser,
+    step: input.step,
+    toolkit: input.runProcess.process.toolkit,
+    documents: input.documents,
+  };
+}
+
+/** The launch fields every attempt shares. */
+function carriedLaunchBase(input: CarriedFreshInput) {
+  return {
+    runId: input.run.id,
+    organizationId: input.run.organizationId,
+    projectId: input.projectId,
+    runAsUser: input.runAsUser,
+    documentId:
+      input.documents.planDocumentId ?? input.documents.featureDocumentId,
+    sourceDocumentId: input.documents.featureDocumentId,
+    agent: input.agent,
+  };
+}
+
+/**
+ * The short prompt and the messages file of a resumed attempt: what was
+ * written on the item between the earlier run's request and this one.
+ */
+async function carriedStepInputs(
+  input: AgentStepStart & { item: SourceItem },
+  carried: CarriedSession
+) {
+  const { run, step } = input;
+  const source = readRunSource(run.source);
+  return carriedSessionInput({
+    instruction: await renderStepInstruction(
+      run,
+      step,
+      input.documents.featureDocumentId
+    ),
+    item: input.item,
+    previous: {
+      occurredAt: carried.previousSource?.occurredAt ?? null,
+      messageId: carried.previousSource?.message?.id ?? null,
+    },
+    current: {
+      occurredAt: source?.occurredAt ?? new Date().toISOString(),
+      messageId: source?.message?.id ?? null,
+      text: source?.message?.text ?? null,
+    },
+    ownCommentIds: await readRunCommentIds({
+      id: carried.fromRunId,
+      organizationId: run.organizationId,
+    }),
+  });
+}
+
+/**
+ * A new session with the full thread, on the normally resolved runner: the
+ * fallback of a carried session. The attempt and its reason are recorded on
+ * the loop, which also ends the run's carried folder.
+ */
+export async function launchCarriedFresh(
+  input: CarriedFreshInput,
+  why: { fromRunId: string | null; reason: WorkflowSessionCarryReason }
+) {
+  const request = freshRequestPrompt(
+    input.run,
+    await renderStepInstruction(
+      input.run,
+      input.step,
+      input.documents.featureDocumentId
+    )
+  );
+  return await launchStepLoop({
+    ...carriedLaunchBase(input),
+    step: {
+      ...toLoopStepConfig({
+        runId: input.run.id,
+        step: input.step,
+        toolkit: input.toolkit,
+        fresh: true,
+      }),
+      ...(request.inputs ? { inputs: request.inputs } : {}),
+    },
+    prompt: request.prompt,
+    computeTargetId: null,
+    carried: {
+      fromRunId: why.fromRunId,
+      attempt: WorkflowSessionCarryAttempt.Fresh,
+      depth: 0,
+      reason: why.reason,
+    },
+    workspace: null,
+  });
 }

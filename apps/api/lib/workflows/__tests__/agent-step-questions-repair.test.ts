@@ -41,6 +41,13 @@ vi.mock("@repo/database", () => {
 vi.mock("@/lib/workflows/engine/launch-step", () => ({
   launchStepLoop: mocks.launchStepLoop,
 }));
+// The carried session lookup (agent.sameItem) reaches the runner choice; these steps never use it.
+vi.mock("@/lib/workflows/engine/carried-session", () => ({
+  carriedSessionInput: vi.fn(),
+  findCarriedSession: vi.fn(),
+  readCarriedLoop: vi.fn(),
+  readLoopCarriedSession: vi.fn(),
+}));
 vi.mock("@/lib/workflows/engine/run-loops", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("@/lib/workflows/engine/run-loops")

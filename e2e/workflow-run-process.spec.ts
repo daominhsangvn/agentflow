@@ -230,6 +230,8 @@ function runDetail(
     feature: null,
     plan: null,
     branchName: null,
+    queuedBehind: null,
+    sessionCarry: null,
     loops: [
       {
         loopId,

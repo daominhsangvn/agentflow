@@ -160,6 +160,11 @@ export type SourceItemComment = {
   bodyMarkdown: string;
 };
 
+export type SourceItemThreadMessage = SourceItemComment & {
+  /** Posted by the connection's own bot. */
+  fromBot: boolean;
+};
+
 export type SourceItemLink = { url: string; title: string | null };
 
 /** Another item this one is linked to by a blocking relation. */
@@ -197,6 +202,12 @@ export type SourceItem = SourceItemRef & {
   /** Extra labelled sections, e.g. Acceptance Criteria, Repro Steps. */
   sections: Array<{ title: string; markdown: string }>;
   comments: SourceItemComment[];
+  /**
+   * The item's conversation oldest first, where the provider is a thread
+   * (Teams); not rendered into the Issue: a run that continues an earlier
+   * run's session reads the messages written since.
+   */
+  thread?: SourceItemThreadMessage[];
   attachments: SourceItemAttachment[];
   /**
    * Web links on the item (Jira remote links, Azure DevOps Hyperlink

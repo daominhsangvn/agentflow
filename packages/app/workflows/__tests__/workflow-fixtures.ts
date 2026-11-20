@@ -233,6 +233,8 @@ export function makeRunDetail(
     process: null,
     toolCalls: [],
     retryStep: null,
+    queuedBehind: null,
+    sessionCarry: null,
     ...overrides,
   };
 }

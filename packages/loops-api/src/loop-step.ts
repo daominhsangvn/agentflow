@@ -141,6 +141,12 @@ export const LoopStepConfigSchema = z.object({
    */
   forkSession: z.boolean().optional(),
   /**
+   * Report a `--resume` whose session is not found as RESUME_SESSION_NOT_FOUND
+   * (a workflow step continuing an earlier run's session); absent: today's
+   * codes.
+   */
+  reportResumeMiss: z.boolean().optional(),
+  /**
    * The agent reads and answers: editing files, committing and pushing are
    * denied (an orchestrator task whose command is a read). It may still
    * write its answer file.

@@ -22,6 +22,10 @@ import {
   WORKFLOW_EMAIL_CONFIG_FIELDS,
 } from "@repo/api/src/types/workflow-email";
 import {
+  WORKFLOW_SAME_ITEM_DESCRIPTIONS,
+  WorkflowSameItem,
+} from "@repo/api/src/types/workflow-same-item";
+import {
   grantKeyCompletions,
   grantValueCompletions,
 } from "@repo/app/integrations/lib/connection-grant-completions";
@@ -307,6 +311,10 @@ function agentValueCandidates(
           ...value(mode, WORKFLOW_AGENT_MODE_DESCRIPTIONS[mode]),
           detail: WORKFLOW_AGENT_MODE_LABELS[mode],
         }));
+      case "sameItem":
+        return Object.values(WorkflowSameItem).map((policy) =>
+          value(policy, WORKFLOW_SAME_ITEM_DESCRIPTIONS[policy])
+        );
       case "titleTemplate":
         return [
           value(
