@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentFlow · explainer animatic (draft)</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div id="viewport"><div id="stage"></div></div>
+    <div id="controls">
+      <button id="play">▶ Play</button>
+      <span id="time">0:00 / 0:00</span>
+      <input id="scrub" type="range" min="0" max="1000" step="1" value="0" />
+      <button id="vo-btn" title="Scratch voice-over (Windows TTS, English)">VO</button>
+      <button id="cc-btn" title="Captions">CC</button>
+      <button id="lang-btn" title="Switch on-screen text and captions">EN → VI</button>
+      <div id="scenes"></div>
+    </div>
+    <audio id="vo" preload="auto"></audio>
+    <script src="js/timeline.js"></script>
+    <script src="js/engine.js"></script>
+    <script src="js/scenes.js"></script>
+    <script src="js/player.js"></script>
+  </body>
+</html>

@@ -1,0 +1,109 @@
+{
+  "voice": "Microsoft Zira Desktop",
+  "rate": 0,
+  "gapAfter": 0.45,
+  "note": "v4 has no voice-over. en/vi are the on-screen headlines; tts is read only to time the animation (word anchors in js/scenes.js), and audio/vo-en.wav is not played.",
+  "scenes": [
+    {
+      "id": "C1",
+      "title": "The problem",
+      "planned": 7.5,
+      "en": "AI agents can write requirements, code and tests. But people still carry the work between them.",
+      "vi": "AI agent viết được yêu cầu, code và test. Nhưng con người vẫn phải chuyển việc qua lại giữa chúng.",
+      "tts": "A.I. agents can write requirements, code and tests. But people still carry the work between them."
+    },
+    {
+      "id": "C2",
+      "title": "AgentFlow",
+      "planned": 7.5,
+      "en": "AgentFlow takes over: it connects your tools and coordinates your agents, on your own machines.",
+      "vi": "AgentFlow đảm nhận việc đó: kết nối công cụ và điều phối các agent, ngay trên máy của bạn.",
+      "tts": "Agent Flow takes over that job. It connects your tools, and coordinates your agents, on your own machines."
+    },
+    {
+      "id": "U1",
+      "title": "Connections (app)",
+      "planned": 5.6,
+      "clip": "connections",
+      "en": "Connect the tools your team already uses",
+      "vi": "Kết nối các công cụ team đang dùng",
+      "tts": "Connect the tools your team already uses."
+    },
+    {
+      "id": "U2",
+      "title": "Workflows (app)",
+      "planned": 5.6,
+      "clip": "workflows",
+      "en": "Work starts on its own: a ticket moves, someone mentions the bot",
+      "vi": "Việc tự bắt đầu: ticket đổi trạng thái, ai đó nhắc tới bot",
+      "tts": "Work starts on its own."
+    },
+    {
+      "id": "C3",
+      "title": "The right agent",
+      "planned": 5.5,
+      "en": "Your rules pick the right agent and the right command",
+      "vi": "Quy tắc của bạn chọn đúng agent, đúng command",
+      "tts": "A ticket comes in. Agent Flow checks your rules, and calls the right agent."
+    },
+    {
+      "id": "C4",
+      "title": "Ask the right person",
+      "planned": 11,
+      "en": "Questions go to the right person, in Jira or chat. AgentFlow records the answer.",
+      "vi": "Câu hỏi đến đúng người, trên Jira hoặc chat. AgentFlow ghi nhận câu trả lời.",
+      "tts": "The agent has questions. Agent Flow asks the right person, in Jira, or your team chat. They answer and confirm, and Agent Flow records it."
+    },
+    {
+      "id": "U3",
+      "title": "Agents (app)",
+      "planned": 5.6,
+      "clip": "agents",
+      "en": "Your agents run on your own machines, in parallel",
+      "vi": "Agent chạy trên máy của bạn, song song",
+      "tts": "Your agents run on your own machines."
+    },
+    {
+      "id": "U4",
+      "title": "Runs (app)",
+      "planned": 5.6,
+      "clip": "runs",
+      "en": "Every run, every result, every pull request",
+      "vi": "Mọi lần chạy, mọi kết quả, mọi pull request",
+      "tts": "Every run, every result."
+    },
+    {
+      "id": "C7",
+      "title": "People decide",
+      "planned": 3.8,
+      "en": "Agents never merge. People do.",
+      "vi": "Agent không tự merge. Con người merge."
+    },
+    {
+      "id": "C8",
+      "title": "Many projects, day and night",
+      "planned": 11.5,
+      "en": "Many projects, day and night, started by a ticket, an email or a schedule",
+      "vi": "Nhiều project, cả ngày lẫn đêm, bắt đầu từ ticket, email hay theo lịch",
+      "tts": "Agent Flow runs many projects at once, day and night. Work starts from a ticket, an email, or a schedule. And you see what needs a person."
+    },
+    {
+      "id": "U5",
+      "title": "Home (app)",
+      "planned": 5.6,
+      "clip": "home",
+      "en": "See what needs you, at a glance",
+      "vi": "Thấy ngay việc nào cần bạn",
+      "tts": "See what needs you."
+    },
+    {
+      "id": "C9",
+      "title": "Logo + line",
+      "planned": 6.5,
+      "voOffset": 0.8,
+      "en": "",
+      "vi": "",
+      "tts": "Agents do the work. Agent Flow coordinates. People decide."
+    }
+  ]
+}

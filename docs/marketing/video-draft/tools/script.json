@@ -1,0 +1,148 @@
+{
+  "voice": "Microsoft Zira Desktop",
+  "rate": 0,
+  "gapAfter": 0.5,
+  "scenes": [
+    {
+      "id": "C1",
+      "title": "Agents are good",
+      "planned": 5,
+      "en": "AI agents can now write requirements, code, and tests.",
+      "vi": "AI agent giờ đã viết được yêu cầu, code và cả test."
+    },
+    {
+      "id": "C2",
+      "title": "The person in the middle",
+      "planned": 8,
+      "en": "But someone still tells each one what to do — and copies the work between them and your tools.",
+      "vi": "Nhưng vẫn cần một người giao việc cho từng agent, rồi chép qua chép lại giữa chúng và công cụ của team.",
+      "tts": "But someone still tells each one what to do, and copies the work between them and your tools."
+    },
+    {
+      "id": "C3",
+      "title": "Lost track",
+      "planned": 8,
+      "en": "Your team becomes the messenger. Who approved what? What did it cost? No one knows.",
+      "vi": "Cả team thành người đưa thư. Ai đã duyệt gì? Tốn bao nhiêu? Không ai nắm được."
+    },
+    {
+      "id": "C4",
+      "title": "AgentFlow takes the middle",
+      "planned": 7,
+      "voOffset": 0.5,
+      "en": "AgentFlow takes over that job. It doesn't do the work — it coordinates the agents that do.",
+      "vi": "AgentFlow nhận lấy việc đó. Nó không tự làm — nó điều phối những agent làm việc.",
+      "tts": "Agent Flow takes over that job. It doesn't do the work. It coordinates the agents that do."
+    },
+    {
+      "id": "C5",
+      "title": "Three agents, three machines",
+      "planned": 10,
+      "en": "An agent is a computer you own, running Claude Code. This team has three: BA for requirements, Engineering for code, and QC for testing.",
+      "vi": "Mỗi agent là một máy tính của bạn chạy Claude Code. Team này có ba agent: BA lo yêu cầu, Engineering viết code, QC kiểm thử.",
+      "tts": "An agent is a computer you own, running Claude Code. This team has three: B.A. for requirements, Engineering for code, and Q.C. for testing."
+    },
+    {
+      "id": "C6",
+      "title": "Connect",
+      "planned": 6,
+      "en": "AgentFlow holds the keys to your tools. Agents work through it.",
+      "vi": "AgentFlow giữ kết nối tới các công cụ của bạn. Agent làm việc thông qua nó.",
+      "tts": "Agent Flow holds the keys to your tools. Agents work through it."
+    },
+    {
+      "id": "C7",
+      "title": "Skill cards",
+      "planned": 8,
+      "en": "Each agent publishes a skill card: its commands, what each one needs, and what it makes.",
+      "vi": "Mỗi agent công bố một thẻ kỹ năng: các command của nó, mỗi command cần gì và tạo ra gì."
+    },
+    {
+      "id": "C8",
+      "title": "Rules become the flow",
+      "planned": 8,
+      "en": "Your rules say what happens at each step, and which role does it — in plain words.",
+      "vi": "Quy tắc của bạn nói mỗi bước làm gì, vai trò nào làm — bằng lời thường.",
+      "tts": "Your rules say what happens at each step, and which role does it, in plain words."
+    },
+    {
+      "id": "C9",
+      "title": "A ticket comes in",
+      "planned": 5,
+      "en": "A ticket comes in: \"Show me who on my team is off.\"",
+      "vi": "Một ticket đến: \"Cho tôi xem lịch nghỉ của team.\"",
+      "tts": "A ticket comes in: Show me who on my team is off."
+    },
+    {
+      "id": "C10",
+      "title": "Rules pick the BA agent",
+      "planned": 10,
+      "en": "AgentFlow reads the rules, the skill cards, and the ticket's history — and hands the job to the BA agent.",
+      "vi": "AgentFlow đọc quy tắc, các thẻ kỹ năng và lịch sử ticket — rồi giao việc cho agent BA.",
+      "tts": "Agent Flow reads the rules, the skill cards, and the ticket's history, and hands the job to the B.A. agent."
+    },
+    {
+      "id": "C11",
+      "title": "BA writes, people approve",
+      "planned": 8,
+      "en": "The BA agent drafts the requirements and asks eight questions. People answer, edit the page, and approve.",
+      "vi": "Agent BA soạn bản yêu cầu và hỏi tám câu. Con người trả lời, sửa trang tài liệu, rồi duyệt.",
+      "tts": "The B.A. agent drafts the requirements and asks eight questions. People answer, edit the page, and approve."
+    },
+    {
+      "id": "C12",
+      "title": "Engineering and QC at once",
+      "planned": 8,
+      "en": "At planning, Engineering and QC start at once — both need the requirements, and now they exist.",
+      "vi": "Đến bước lập kế hoạch, Engineering và QC cùng bắt đầu — cả hai cần bản yêu cầu, và giờ nó đã có.",
+      "tts": "At planning, Engineering and Q.C. start at once. Both need the requirements, and now they exist."
+    },
+    {
+      "id": "C13",
+      "title": "Guard",
+      "planned": 8,
+      "en": "Whatever the AI decides, a command that isn't on a card, or is missing its inputs, is refused.",
+      "vi": "Dù AI quyết định thế nào, command không có trên thẻ hoặc thiếu đầu vào đều bị chặn.",
+      "tts": "Whatever the A.I. decides, a command that isn't on a card, or is missing its inputs, is refused."
+    },
+    {
+      "id": "C14",
+      "title": "Engineering writes the code",
+      "planned": 7,
+      "en": "The Engineering agent, on a developer's laptop, writes the code and opens a pull request.",
+      "vi": "Agent Engineering, trên laptop của một developer, viết code và mở pull request."
+    },
+    {
+      "id": "C15",
+      "title": "QC tests, fix goes back",
+      "planned": 13,
+      "en": "The QC agent tests the code: one of 33 tests fails. Someone writes \"fix D-1\", and AgentFlow sends it back to the agent that wrote the code — Engineering.",
+      "vi": "Agent QC kiểm thử code: một trong 33 test thất bại. Có người viết \"fix D-1\", và AgentFlow gửi việc sửa về đúng agent đã viết code — Engineering.",
+      "tts": "The Q.C. agent tests the code: one of thirty-three tests fails. Someone writes, fix D 1, and Agent Flow sends it back to the agent that wrote the code: Engineering."
+    },
+    {
+      "id": "C16",
+      "title": "Done",
+      "planned": 5,
+      "en": "Agents never merge. People review, merge, and close the ticket.",
+      "vi": "Agent không tự merge. Con người review, merge và đóng ticket."
+    },
+    {
+      "id": "C17",
+      "title": "See it all",
+      "planned": 8,
+      "en": "You see which agent is working, what needs a person, and what it cost — all on your own servers.",
+      "vi": "Bạn thấy agent nào đang làm, việc gì cần người, tốn bao nhiêu — tất cả trên máy chủ của chính bạn.",
+      "tts": "You see which agent is working, what needs a person, and what it cost, all on your own servers."
+    },
+    {
+      "id": "C18",
+      "title": "Agents work. AgentFlow coordinates. People decide.",
+      "planned": 8,
+      "voOffset": 1.2,
+      "en": "Agents do the work. AgentFlow coordinates. People decide.",
+      "vi": "Agent làm việc. AgentFlow điều phối. Con người quyết định.",
+      "tts": "Agents do the work. Agent Flow coordinates. People decide."
+    }
+  ]
+}

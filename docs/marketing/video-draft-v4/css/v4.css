@@ -1,0 +1,68 @@
+/* v4: app screens in a browser frame, and on-screen headlines in place of the voice-over. */
+
+.ui-scene {
+  background:
+    radial-gradient(1200px 700px at 50% 45%, rgba(1, 184, 252, 0.1), transparent 70%),
+    linear-gradient(180deg, #0d1117 0%, #090b10 100%);
+}
+.ui-frame {
+  position: absolute;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #111318;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(1, 184, 252, 0.08);
+  transform-origin: 50% 50%;
+}
+.ui-bar {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  background: #1a1d24;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ui-bar i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #3a3f4b;
+}
+.ui-bar span {
+  margin-left: 14px;
+  padding: 3px 14px;
+  border-radius: 7px;
+  background: #0f1116;
+  font: 500 14px var(--mono);
+  color: #8b93a3;
+}
+.ui-view {
+  height: calc(100% - 38px);
+  overflow: hidden;
+  background: #111318;
+}
+.ui-frame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* Headlines: the line of each scene, large, in place of the voice-over. */
+.caption span {
+  max-width: 1500px;
+  padding: 14px 30px;
+  border-radius: 14px;
+  background: rgba(8, 10, 14, 0.78);
+  font-size: 38px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: #f6f7fa;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}

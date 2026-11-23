@@ -1,0 +1,5 @@
+# Generated review stills, rendered videos, per-line TTS takes and the music (tools/make-music.mjs)
+shots/
+out/
+audio/lines/
+audio/music.wav

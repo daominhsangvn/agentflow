@@ -1,0 +1,4 @@
+# Generated review stills, rendered videos and per-line TTS takes
+shots/
+out/
+audio/lines/

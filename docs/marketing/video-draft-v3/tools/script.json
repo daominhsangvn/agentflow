@@ -1,0 +1,79 @@
+{
+  "voice": "Microsoft Zira Desktop",
+  "rate": 0,
+  "gapAfter": 0.45,
+  "scenes": [
+    {
+      "id": "C1",
+      "title": "People in the middle",
+      "planned": 7.5,
+      "en": "AI agents can write requirements, code and tests. But people still carry the work between them.",
+      "vi": "AI agent viết được yêu cầu, code và test. Nhưng con người vẫn phải chuyển việc qua lại giữa chúng.",
+      "tts": "A.I. agents can write requirements, code and tests. But people still carry the work between them."
+    },
+    {
+      "id": "C2",
+      "title": "AgentFlow in the middle",
+      "planned": 7.5,
+      "en": "AgentFlow takes over that job. It connects your tools and coordinates your agents, on your own machines.",
+      "vi": "AgentFlow nhận việc đó. Nó kết nối công cụ và điều phối các agent, ngay trên máy của bạn.",
+      "tts": "Agent Flow takes over that job. It connects your tools, and coordinates your agents, on your own machines."
+    },
+    {
+      "id": "C3",
+      "title": "A ticket comes in",
+      "planned": 5.5,
+      "en": "A ticket comes in. AgentFlow checks your rules and calls the right agent.",
+      "vi": "Một ticket đến. AgentFlow xem quy tắc của bạn và gọi đúng agent.",
+      "tts": "A ticket comes in. Agent Flow checks your rules, and calls the right agent."
+    },
+    {
+      "id": "C4",
+      "title": "Ask people where they talk",
+      "planned": 11,
+      "en": "The agent has questions. AgentFlow asks the right person, in Jira or your team chat. They answer and confirm, and AgentFlow records it.",
+      "vi": "Agent có câu hỏi. AgentFlow hỏi đúng người, trên Jira hoặc chat của team. Họ trả lời, xác nhận, và AgentFlow ghi nhận.",
+      "tts": "The agent has questions. Agent Flow asks the right person, in Jira, or your team chat. They answer and confirm, and Agent Flow records it."
+    },
+    {
+      "id": "C5",
+      "title": "Plan and build",
+      "planned": 6,
+      "en": "Engineering and QC plan in parallel. Then Engineering writes the code.",
+      "vi": "Engineering và QC lập kế hoạch song song. Rồi Engineering viết code.",
+      "tts": "Engineering and Q.C. plan in parallel. Then Engineering writes the code."
+    },
+    {
+      "id": "C6",
+      "title": "Test and fix",
+      "planned": 5,
+      "en": "QC tests it. If a test fails, the fix goes back to Engineering.",
+      "vi": "QC kiểm thử. Test nào lỗi thì việc sửa quay về Engineering.",
+      "tts": "Q.C. tests it. If a test fails, the fix goes back to Engineering."
+    },
+    {
+      "id": "C7",
+      "title": "People merge",
+      "planned": 3.8,
+      "en": "Agents never merge. People do.",
+      "vi": "Agent không tự merge. Con người merge."
+    },
+    {
+      "id": "C8",
+      "title": "Many projects, day and night",
+      "planned": 11.5,
+      "en": "AgentFlow runs many projects at once, day and night. Work starts from a ticket, an email or a schedule. And you see what needs a person.",
+      "vi": "AgentFlow chạy nhiều project cùng lúc, cả ngày lẫn đêm. Việc bắt đầu từ một ticket, một email hay theo lịch. Và bạn thấy ngay việc nào cần người.",
+      "tts": "Agent Flow runs many projects at once, day and night. Work starts from a ticket, an email, or a schedule. And you see what needs a person."
+    },
+    {
+      "id": "C9",
+      "title": "Logo + line",
+      "planned": 6.5,
+      "voOffset": 0.8,
+      "en": "Agents do the work. AgentFlow coordinates. People decide.",
+      "vi": "Agent làm việc. AgentFlow điều phối. Con người quyết định.",
+      "tts": "Agents do the work. Agent Flow coordinates. People decide."
+    }
+  ]
+}
